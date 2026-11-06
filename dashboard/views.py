@@ -4,6 +4,7 @@ import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
 from django.utils import timezone
 from datetime import timedelta
 from django.db import models
@@ -5182,8 +5183,79 @@ def toggle_watchlist(request, symbol):
 def signal_rail_partial(request):
     """The signal rail's cards alone. Fetched by the dashboard WebSocket
     listener when a new signal fires, so the card slides into the rail
-    without a reload. Context processors supply panel_recent_signals."""
+    without a reload. Context processors supply panel_recent_signals.
+
+    (2026-11-06) Every signal that can be acted on now, not five, and
+    LEFT THE RAIL with each departure's reason (dashboard.signal_rail). It
+    takes NO filter parameter: the filters run in the browser on the facts
+    each row carries, so one render serves every operator's view. It also
+    carries the meta block that paints the counts outside the rail and the
+    <template> of the headband popup's rows, so one fetch updates both
+    lists. Answers 423 while PIN-locked (core.idle_lock, /partials/)."""
     return render(request, "_partials/signal_rail_items.html")
+
+
+@login_required
+@require_POST
+def signal_rail_pass(request):
+    """POST /api/signal-rail/pass/ — the operator's own PASS, on the server
+    (2026-11-06).
+
+    Body {"signal_id": int, "undo": bool}. Without undo it records the
+    departure for this operator alone (dashboard.RailDeparture, user set):
+    TAKEN when the book shows their own exact hand position on the signal
+    (the ticket's success path retires the card through this same call),
+    PASSED otherwise — so a pass made on one browser holds on every other,
+    and LEFT THE RAIL says it in words. With undo it deletes that row and
+    the card comes back. 400 on a bad body, 404 on an unknown signal; under
+    /api/ a locked session answers 423 (core.idle_lock).
+
+    DISPLAY ONLY: the Signal row is untouched — still active, still voting,
+    still takeable — and nothing the engine, the bots, the alerts or the
+    take-trade path read is written.
+    """
+    import json
+
+    from django.http import JsonResponse
+    from django.utils import timezone as _tz
+
+    from dashboard.models import RailDeparture
+    from dashboard.signal_rail import pass_words
+    from signals.models import Signal
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except (TypeError, ValueError):
+        body = None
+    if not isinstance(body, dict):
+        return JsonResponse({"ok": False, "error": "a JSON object is expected"},
+                            status=400)
+    try:
+        signal_id = int(body.get("signal_id"))
+    except (TypeError, ValueError):
+        signal_id = 0
+    if signal_id <= 0:
+        return JsonResponse({"ok": False, "error": "signal_id is required"},
+                            status=400)
+    signal = (Signal.objects.select_related("instrument")
+              .filter(pk=signal_id).first())
+    if signal is None:
+        return JsonResponse({"ok": False, "error": "no such signal"},
+                            status=404)
+    if body.get("undo"):
+        RailDeparture.objects.filter(signal=signal, user=request.user).delete()
+        return JsonResponse({"ok": True, "undone": True})
+    now = _tz.now()
+    reason, words = pass_words(signal, now)
+    row, created = RailDeparture.objects.get_or_create(
+        signal=signal, user=request.user,
+        defaults={"reason": reason, "words": words[:300], "departed_at": now})
+    if not created and row.reason == "passed" and reason == "taken":
+        # The ticket's success path reaches here after a pass: the book now
+        # shows the operator's own position, and the rail says so.
+        row.reason, row.words, row.departed_at = reason, words[:300], now
+        row.save(update_fields=["reason", "words", "departed_at"])
+    return JsonResponse({"ok": True, "reason": row.reason})
 
 
 @login_required

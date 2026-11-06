@@ -110,6 +110,8 @@
     {# THE COUNCIL BAND (2026-10-22): Sauron's voices on the right edge, staff only. After the Horde, whose right edge an open band pushes; before the phone tier, whose rail line hides it. #}
     <link rel="stylesheet" href="{% static 'css/sv-council-band.css' %}">
     <script src="{% static 'js/sv-council-band.js' %}" defer></script>
+    {# THE SIGNAL RAIL (2026-11-06): every signal, LEFT THE RAIL, the facet counts; its filters hide and order rows by the facts each row carries. After the council band, before the phone tier, which stays the last shell sheet. #}
+    <link rel="stylesheet" href="{% static 'css/sv-rail.css' %}">
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
@@ -1157,27 +1159,30 @@
                 </a>
                 <a href="{% url 'signals_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">SIGNALS</span>
-                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{{ panel_signals|default:"0" }}</span>
-                    <span class="ip-sub" data-sv-live="hb-signals-sub">{{ panel_bullish|default:"0" }} bull · {{ panel_bearish|default:"0" }} bear</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">ACTIVE SIGNALS</div>
+                    {% comment %}
+                    THE RAIL'S COUNT (2026-11-06): the signals on the rail,
+                    not every active row — the cell and the rail head say the
+                    same number, and the dropdown's grid says the rest. The
+                    rows are the rail's own list (rail.rows), in a container
+                    that is NOT a live region: the rail refresh paints it from
+                    the same fetch as the rail, and the 60s sweep never
+                    writes it. The counts here are written by both the sweep
+                    and the rail refresh, from the same function.
+                    {% endcomment %}
+                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{{ rail.n|default:"0" }}</span>
+                    <span class="ip-sub" data-sv-live="hb-signals-sub">{{ rail.long_n|default:"0" }} long · {{ rail.short_n|default:"0" }} short</span>
+                    <div class="ip-dropdown" id="hbSignalsDD" data-sv-fhost="signals">
+                        <div class="ip-dd-head">SIGNALS ON THE RAIL</div>
                         <div data-sv-live="hb-signals-detail">
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">BULLISH</span><span class="dv">{{ panel_bullish|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">BEARISH</span><span class="dv red">{{ panel_bearish|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">{{ panel_signals|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">24H NEW</span><span class="dv">{{ panel_signals_24h|default:"0" }}</span></div>
+                        <div class="ip-dd-grid" title="{{ rail.title }}">
+                            <div class="ip-dd-cell"><span class="dk">ON THE RAIL</span><span class="dv" data-sv-rail-n="n">{{ rail.n|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ACTIVE (ENGINE)</span><span class="dv" data-sv-rail-n="active">{{ rail.active_n|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LEFT 24H</span><span class="dv" data-sv-rail-n="gone">{{ rail.gone_n|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">NEW 24H</span><span class="dv" data-sv-rail-n="new24">{{ rail.new24|default:"0" }}</span></div>
                         </div>
-                        {% comment %} The counts said how many. They never said which. {% endcomment %}
-                        {% for sig in panel_top_signals %}
-                        <div class="ip-dd-row">
-                            <span class="ipr-sym">{{ sig.symbol }}</span>
-                            <span class="ipr-side ipr-side--{{ sig.direction }}">{{ sig.direction|upper|slice:":4" }}</span>
-                            <span class="ipr-meter"><span class="ipr-meter-fill" style="width:{{ sig.score_pct }}%;"></span></span>
-                            <span class="ipr-score">{{ sig.score_pct }}</span>
-                            <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}">{{ sig.created_at|timesince }} ago</span>
                         </div>
-                        {% endfor %}
+                        <div class="sv-sig-rows" id="hbSignalRows" data-sv-list="signals">
+                        {% if not sv_sweep %}{% include "_partials/signal_rows_compact.html" %}{% endif %}
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Signals</div>
                     </div>
@@ -1474,15 +1479,31 @@
 
 <!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->
 <div class="signals-rail" id="signalsRail">
-    <div class="rail-section sig-section" id="railSignals">
+    {% comment %}
+    THE SIGNAL RAIL (2026-11-06): every signal that can be acted on now,
+    newest first, scrolling inside the body (dashboard.signal_rail). The
+    head counts the cards and its title says the rest; "↻ N new" (railHeld)
+    says what a refresh is holding while a card is read, and applies it on
+    a click. The facet strip counts the rail per asset class (a class at 0
+    hides by CSS, so a refresh can light it up) and its LEFT chip shows or
+    hides LEFT THE RAIL. Both sit OUTSIDE the body, which every refresh
+    replaces, so the state they carry survives it. The sweep (sv_sweep)
+    renders no card: the body is not a region.
+    {% endcomment %}
+    <div class="rail-section sig-section" id="railSignals" data-sv-fhost="signals" data-f-gone="0">
         <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railSignals').classList.toggle('collapsed');localStorage.setItem('sauron_rail_sig',document.getElementById('railSignals').classList.contains('collapsed')?'1':'0');})()">
             <span class="rh-icon">&#x25C8;</span>
             <span class="rh-label">SIGNALS</span>
-            <span class="rh-count">{{ panel_signals|default:"0" }}</span>
+            <button type="button" class="rh-held" id="railHeld" hidden title="A refresh is waiting while you read a card. Click to show it now."></button>
+            <span class="rh-count" id="railSigCount" title="{{ rail.title }}">{{ rail.n|default:"0" }}</span>
             <span class="rh-chev">▼</span>
         </div>
+        <div class="rail-facets" id="railSigFacets" aria-label="Signals on the rail by asset class">
+            {% for key, label, n in rail.classes %}<span class="rf-chip" data-n="{{ n }}" title="{{ label }} signals on the rail">{{ label }} <b data-sv-fc="{{ key }}">{{ n }}</b></span>{% endfor %}
+            <button type="button" class="rf-chip rf-gone" data-sv-gone-toggle aria-pressed="false" title="Show or hide the signals that left the rail in the last 24 hours, and why">LEFT <b data-sv-gone-n>{{ rail.gone_n|default:"0" }}</b></button>
+        </div>
         <div class="rail-body" id="railSignalsBody">
-            {% include "_partials/signal_rail_items.html" %}
+            {% if not sv_sweep %}{% include "_partials/signal_rail_items.html" with rail_initial=True %}{% endif %}
         </div>
     </div>
 
@@ -1703,6 +1724,9 @@
        other engines' scroll handlers know a scroll came from inside a card
        the operator is reading rather than from a stale anchor. */
     if (window.SV && SV.popup) SV.popup.closed(pop);
+    /* (2026-11-06) A rail refresh that waited for this card lands now,
+       unless the hand is still on the rail (UPGRADE-3, svRailRelease). */
+    if (window.svRailRelease) window.svRailRelease();
   }
   function bind() {
     document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
@@ -1780,9 +1804,22 @@
 
 /* ── Phase 64.4 — signal dismiss / star (localStorage-backed) ───
    PASS button: hides the rail item locally + remembers the dismissal
-   so it stays hidden across reloads. Pure client-side, no backend. */
+   so it stays hidden across reloads.
+
+   A PASS LIVES ON THE SERVER (2026-11-06): it is posted to
+   /api/signal-rail/pass/ (dashboard.RailDeparture), so it holds on every
+   browser and LEFT THE RAIL can say it in words and bring it back. The
+   local set is an OUTBOX: it hides the card at once and keeps it hidden
+   until the server's render stops carrying it (a lost POST is re-sent
+   once per page load); only after a render that read the rail
+   ([data-sv-rail-ok]) are the ids no longer on screen pruned. A pass made
+   before the server kept them reaches it the first time its card renders.
+   The ticket's success path still calls dismissSignal, and the server
+   reads the book to say TAKEN rather than PASSED. Display only: the
+   engine still sees the signal. */
 (function(){
   var DISM_KEY = 'sauron_dismissed_signals';
+  var sentThisLoad = {};
   function loadSet() {
     try {
       var raw = localStorage.getItem(DISM_KEY) || '[]';
@@ -1794,20 +1831,56 @@
     try { localStorage.setItem(DISM_KEY, JSON.stringify(Array.from(set))); }
     catch (e) { /* quota — ignore */ }
   }
-  function applyDismissals() {
-    var set = loadSet();
-    if (!set.size) return;
-    document.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(function(wrap) {
-      if (set.has(String(wrap.dataset.signalId))) {
-        wrap.style.display = 'none';
-      }
+  function csrf() {
+    var m = String(document.cookie || '').match(/csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function sendPass(sid, undo) {
+    sentThisLoad[sid] = true;
+    return fetch('/api/signal-rail/pass/', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+      body: JSON.stringify({ signal_id: parseInt(sid, 10), undo: !!undo })
+    }).then(function (r) {
+      if (r.status === 423 && window.svIdleLock) window.svIdleLock.engage(false);
+      return !!r.ok;
+    }).catch(function () { return false; });
+  }
+  /* The headband popup's row for the same signal hides with the card. */
+  function hideRows(sid) {
+    document.querySelectorAll('.sv-sig-row[data-signal-id="' + sid + '"]').forEach(function (row) {
+      row.style.display = 'none';
     });
   }
-  window.dismissSignal = function(id) {
-    var sid = String(id);
+  function outbox(sid) {
     var set = loadSet();
     set.add(sid);
     saveSet(set);
+    hideRows(sid);
+    sendPass(sid, false);
+  }
+  function applyDismissals() {
+    var set = loadSet();
+    if (!set.size) return;
+    var onScreen = {};
+    document.querySelectorAll('.sr-signal-wrap[data-signal-id], .sv-sig-row[data-signal-id]').forEach(function(el) {
+      var sid = String(el.getAttribute('data-signal-id'));
+      if (!set.has(sid)) return;
+      onScreen[sid] = true;
+      el.style.display = 'none';
+      if (!sentThisLoad[sid]) sendPass(sid, false);
+    });
+    var body = document.getElementById('railSignalsBody');
+    if (!body || !body.querySelector('[data-sv-rail-ok]')) return;
+    var pruned = false;
+    Array.from(set).forEach(function (sid) {
+      if (!onScreen[sid]) { set.delete(sid); pruned = true; }
+    });
+    if (pruned) saveSet(set);
+  }
+  window.dismissSignal = function(id) {
+    var sid = String(id);
+    outbox(sid);
     /* Hide any open popup for this wrap then collapse + remove. */
     var wrap = document.querySelector('.sr-signal-wrap[data-signal-id="' + sid + '"]');
     if (!wrap) return;
@@ -1838,6 +1911,47 @@
     localStorage.removeItem(DISM_KEY);
     document.querySelectorAll('.sr-signal-wrap').forEach(function(w) { w.style.display = ''; });
   };
+  /* ↺ BRING BACK (2026-11-06): your own pass or take, undone on the
+     server, and the rail asks again at once. */
+  window.svRailUnpass = function (id) {
+    var sid = String(id);
+    var set = loadSet();
+    if (set.has(sid)) { set.delete(sid); saveSet(set); }
+    sendPass(sid, true).then(function () {
+      if (window.svRailSoon) window.svRailSoon();
+    });
+  };
+  /* LEFT THE RAIL is shown or hidden by an attribute on the rail section
+     (data-f-gone), which no refresh replaces; this browser remembers the
+     choice. */
+  var GONE_KEY = 'sauron_rail_gone';
+  function showGone(host, on) {
+    host.setAttribute('data-f-gone', on ? '1' : '0');
+    var chip = host.querySelector('[data-sv-gone-toggle]');
+    if (chip) chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  var railHost = document.getElementById('railSignals');
+  if (railHost) {
+    try { showGone(railHost, localStorage.getItem(GONE_KEY) === '1'); } catch (e) {}
+    railHost.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target : null;
+      if (!t) return;
+      var chip = t.closest('[data-sv-gone-toggle]');
+      if (chip) {
+        var on = railHost.getAttribute('data-f-gone') !== '1';
+        showGone(railHost, on);
+        try { localStorage.setItem(GONE_KEY, on ? '1' : '0'); } catch (err) {}
+        return;
+      }
+      var back = t.closest('[data-sv-unpass]');
+      if (back) {
+        e.preventDefault();
+        e.stopPropagation();
+        back.disabled = true;
+        window.svRailUnpass(back.getAttribute('data-sv-unpass'));
+      }
+    });
+  }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', applyDismissals);
   } else {
@@ -4316,52 +4430,160 @@ window.svWheelMarquee = function (frame, track) {
      state to reapply. Two arrivals get marked here, not two states:
      a card whose id is NEW slides in; a card that was already on screen and
      has just GAINED the mark pulses once, because a silent repaint of a
-     card the eye has already passed over is a change nobody sees. */
-  let railRefreshing = false;
-  function refreshSignalRail() {
+     card the eye has already passed over is a change nobody sees.
+
+     A BURST IS NEVER DROPPED, AND NOTHING SWAPS UNDER THE READER
+     (2026-11-06). The rail lists every actionable signal now, so a burst
+     is the case to get right: a socket announcement debounces 400ms
+     (railSoon), and a call made while a fetch is in flight no longer
+     vanishes — it sets railAgain, and exactly one more fetch runs when the
+     first settles. The fetching never waits; the SWAP does, while the
+     operator reads (a card shown, the headband SIGNALS dropdown pinned,
+     or the hand on the rail): the newest answer is held, "↻ N new" in the
+     rail head says so and applies it on a click, and it lands when the
+     reading stops. One answer paints both lists — the rail and, from the
+     <template> it carries, the headband popup's rows — and every count
+     outside them, from its meta block. */
+  let railInFlight = false, railAgain = false, railHeld = null;
+  let railSoonT = null, railLeaveT = null;
+  function railReading() {
     const body = document.getElementById('railSignalsBody');
-    if (!body || railRefreshing) return;
-    railRefreshing = true;
+    if (!body) return false;
+    if (body.querySelector('.sr-popup.show')) return true;
+    const dd = document.getElementById('hbSignalsDD');
+    if (dd && dd.classList.contains('sv-pinned')) return true;
+    return !!(body.matches && body.matches(':hover'));
+  }
+  /* The counts outside the replaced body, from the answer's own meta:
+     the rail head and its title, the facet strip, the headband cell, its
+     sub-line and its grid. The 60s headband sweep renders the same values
+     from the same function, so the two writers agree. */
+  function paintRailMeta(m) {
+    if (!m || !m.ok) return;
+    const say = (el, v) => {
+      const t = String(v === undefined || v === null ? '' : v);
+      if (el && el.textContent !== t) el.textContent = t;
+    };
+    const head = document.getElementById('railSigCount');
+    if (head) { say(head, m.n); if (m.title) head.setAttribute('title', m.title); }
+    const per = {};
+    (m.classes || []).forEach(c => { per[c[0]] = c[1]; });
+    document.querySelectorAll('[data-sv-fc]').forEach(el => {
+      const n = per[el.getAttribute('data-sv-fc')] || 0;
+      say(el, n);
+      const chip = el.closest('[data-n]');
+      if (chip) chip.setAttribute('data-n', String(n));
+    });
+    document.querySelectorAll('[data-sv-gone-n]').forEach(el => say(el, m.gone));
+    document.querySelectorAll('[data-sv-rail-n]').forEach(el => say(el, m[el.getAttribute('data-sv-rail-n')]));
+    say(document.querySelector('[data-sv-live="hb-signals"]'), m.n);
+    say(document.querySelector('[data-sv-live="hb-signals-sub"]'),
+        m.long + ' long · ' + m.short + ' short');
+  }
+  /* "↻ N new": the cards a held answer would add. */
+  function paintHeld() {
+    const chip = document.getElementById('railHeld');
+    if (!chip) return;
+    if (!railHeld) { chip.setAttribute('hidden', ''); chip.textContent = ''; return; }
+    const on = {};
+    document.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-signal-id]')
+      .forEach(w => { on[w.getAttribute('data-signal-id')] = 1; });
+    const box = document.createElement('div');
+    box.innerHTML = railHeld;
+    let fresh = 0;
+    box.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
+      if (!on[w.getAttribute('data-signal-id')]) fresh += 1;
+    });
+    chip.textContent = fresh ? '↻ ' + fresh + ' new' : '↻ update';
+    chip.removeAttribute('hidden');
+  }
+  function railApply(html) {
+    const body = document.getElementById('railSignalsBody');
+    if (!body) return;
     const before = new Map(
       Array.from(body.querySelectorAll('.sr-signal-wrap[data-signal-id]'))
         .map(w => [w.dataset.signalId, w.dataset.acted || '']));
-    fetch('/partials/signal-rail/', { credentials: 'same-origin' })
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(html => {
-        body.innerHTML = html;
-        body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
-          const was = before.get(w.dataset.signalId);
-          if (was === undefined) {
-            w.classList.add('sr-slide-in');
-            /* The entrance ends, the class leaves with it — a hover
-               DURING the half-second slide would still position the
-               fixed popup against the transforming wrap otherwise. */
-            w.addEventListener('animationend', function () {
-              w.classList.remove('sr-slide-in');
-            }, { once: true });
-          }
-          else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
-        });
-        /* Named, for the same reason the bell rows name theirs: a signal
-           landing in the rail is not a reason to close a headband popup
-           three hundred pixels away. */
-        document.dispatchEvent(new CustomEvent('htmx:afterSwap',
-                                               { detail: { svRegion: body } }));
-      })
-      .catch(() => {})
-      .finally(() => { railRefreshing = false; });
+    body.innerHTML = html;
+    const tpl = body.querySelector('[data-sv-mirror]');
+    if (tpl) {
+      const rows = document.getElementById(tpl.getAttribute('data-sv-mirror'));
+      if (rows) rows.innerHTML = tpl.innerHTML;
+      tpl.remove();
+    }
+    const meta = body.querySelector('[data-sv-rail-meta]');
+    if (meta) { try { paintRailMeta(JSON.parse(meta.textContent)); } catch (e) {} }
+    body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
+      const was = before.get(w.dataset.signalId);
+      if (was === undefined) {
+        w.classList.add('sr-slide-in');
+        /* The entrance ends, the class leaves with it — a hover
+           DURING the half-second slide would still position the
+           fixed popup against the transforming wrap otherwise. */
+        w.addEventListener('animationend', function () {
+          w.classList.remove('sr-slide-in');
+        }, { once: true });
+      }
+      else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
+    });
+    railHeld = null;
+    paintHeld();
+    /* Named, for the same reason the bell rows name theirs: a signal
+       landing in the rail is not a reason to close a headband popup
+       three hundred pixels away. */
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap',
+                                           { detail: { svRegion: body } }));
   }
+  /* The held answer lands when the reading stops; `force` (the chip) lands
+     it at once. */
+  window.svRailRelease = function (force) {
+    if (railHeld && (force || !railReading())) railApply(railHeld);
+  };
+  function refreshSignalRail() {
+    const body = document.getElementById('railSignalsBody');
+    if (!body) return;
+    if (railInFlight) { railAgain = true; return; }
+    railInFlight = true;
+    fetch('/partials/signal-rail/', { credentials: 'same-origin' })
+      .then(r => { if (!r.ok || r.redirected) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(html => { if (railReading()) { railHeld = html; paintHeld(); } else railApply(html); })
+      .catch(() => {})
+      .finally(() => { railInFlight = false;
+        if (railAgain) { railAgain = false; refreshSignalRail(); } });
+  }
+  function railSoon() {
+    if (railSoonT) clearTimeout(railSoonT);
+    railSoonT = setTimeout(() => { railSoonT = null; refreshSignalRail(); }, 400);
+  }
+  window.svRailSoon = railSoon;
 
-  /* The rail's own slow sweep, for the same reason the ticker has one:
-     a Signal written by a path that does not reach the post_save push
-     (a bulk create, a replay, a migration) would otherwise sit unseen
-     until a reload. */
-  setInterval(function () {
-    if (!document.hidden) refreshSignalRail();
-  }, 300000);
+  /* The rail's own sweep, for the same reason the ticker has one: a
+     Signal written by a path that does not reach the post_save push (a
+     bulk create, a replay, a migration) would otherwise sit unseen until
+     a reload — and a price or an age departure has no push at all, so it
+     reaches the rail within the minute, the cadence the headband sweep
+     keeps. Never while the tab is hidden; at once when it comes back. */
+  setInterval(function () { if (!document.hidden) refreshSignalRail(); }, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshSignalRail();
+  });
   document.addEventListener('sv:pin-unlocked', function () {
     refreshSignalRail();
   });
+  (function () {
+    const body = document.getElementById('railSignalsBody');
+    if (body) body.addEventListener('mouseleave', function () {
+      if (railLeaveT) clearTimeout(railLeaveT);
+      railLeaveT = setTimeout(() => { railLeaveT = null; window.svRailRelease(); }, 300);
+    });
+    const chip = document.getElementById('railHeld');
+    /* A button in the rail head, whose own click collapses the section:
+       the chip's click stops here. */
+    if (chip) chip.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.svRailRelease(true);
+    });
+  })();
 
   /* Exposed for the /ws/eye/ listener. A fill is the ONLY announcement a
      bot-taken signal ever produces — no new Signal row is written, so the
@@ -4630,7 +4852,7 @@ window.svWheelMarquee = function (frame, track) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
-        else if (msg.type === 'signal') refreshSignalRail();
+        else if (msg.type === 'signal') railSoon();
         else if (msg.type === 'news') refreshTicker();
         else if (msg.type === 'watchlist') applyWatchlistCount(msg.data);
       } catch(e) {}

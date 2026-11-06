@@ -1,0 +1,225 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   THE SIGNAL RAIL (2026-11-06)
+   Every signal that can be acted on now, newest first, scrolling inside
+   the rail; the facet strip's counts per asset class; LEFT THE RAIL, each
+   departure in words. The rows carry their facts as data-* attributes and
+   the state sits on the hosts no refresh replaces, so these rules — and
+   no script — decide what shows. Linked after sv-council-band.css and
+   before the phone tier (templates/base.html).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── the rail head: "↻ N new" while a refresh waits for the reader ───── */
+.rail-head .rh-held {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border: 1px solid var(--accent-dim);
+    border-radius: 9px;
+    background: rgba(0, 232, 104, 0.08);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.rail-head .rh-held:hover { background: var(--accent-dim); }
+.rail-head .rh-held[hidden] { display: none; }
+.signals-rail:not(.open) .rh-held { display: none; }
+
+/* ── the facet strip: one count per asset class, and the LEFT chip ───── */
+.rail-facets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+    flex-shrink: 0;
+}
+.rf-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+.rf-chip b { color: var(--text-secondary); font-weight: 700; }
+/* A class with nothing on the rail is drawn and hidden, so a refresh can
+   light it up without new markup. The LEFT chip always shows. */
+.rf-chip[data-n="0"]:not(.rf-gone) { display: none; }
+button.rf-chip { cursor: pointer; }
+button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-glow); }
+.rf-chip[aria-pressed="true"] {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: var(--accent);
+}
+.rf-chip[aria-pressed="true"] b { color: var(--accent); }
+.signals-rail:not(.open) .rail-facets { display: none; }
+.rail-section.collapsed .rail-facets { display: none; }
+
+/* ── the list ────────────────────────────────────────────────────────── */
+.sr-list { display: flex; flex-direction: column; }
+.sr-list > * { flex-shrink: 0; }
+.sr-signal .sr-row3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.sr-signal .sr-row3 .sr-rule {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.sr-stage {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 7.5px;
+    letter-spacing: .8px;
+    color: var(--text-muted);
+}
+.sr-stage-bearish { color: var(--accent-red); border-color: rgba(255, 94, 94, 0.45); }
+.sr-stage-high { color: var(--accent-gold-ink, #e8a33d); border-color: rgba(232, 163, 61, 0.45); }
+.sr-stage-medium { color: var(--text-secondary); }
+.sr-contra {
+    margin-top: 3px;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: .5px;
+    color: var(--accent-gold-ink, #e8a33d);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sr-pop-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: -4px 0 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.sr-pop-fact .sr-pop-k { margin-right: 4px; }
+.sr-pop-one {
+    flex: 1 1 auto;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent-gold-ink, #e8a33d);
+    border: 1px dashed rgba(232, 163, 61, 0.45);
+    border-radius: 2px;
+    text-align: center;
+}
+.sr-rail-note {
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+    border-bottom: 1px dashed var(--border);
+}
+.sr-rail-error { color: var(--accent-red); }
+
+/* ── LEFT THE RAIL: hidden unless the rail section says so ───────────── */
+[data-sv-fhost="signals"]:not([data-f-gone="1"]) [data-sv-gone] { display: none; }
+.sr-gone {
+    border-bottom: 1px solid var(--border-glow);
+    background: rgba(0, 0, 0, 0.18);
+}
+.sr-gone-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+}
+.sr-gone-tags {
+    padding: 0 12px 6px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-secondary);
+}
+.sr-gone-row {
+    padding: 7px 12px;
+    border-top: 1px dashed rgba(19, 48, 32, 0.6);
+    opacity: .82;
+}
+.sr-gone-row:hover { opacity: 1; background: var(--bg-card-hover); }
+.sr-gone-l1 { display: flex; align-items: center; gap: 6px; }
+.sr-gone-l1 .sr-sym {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.sr-gone-l1 .sr-badge { font-size: 8px; padding: 0 4px; border-radius: 2px; }
+.sr-gone-l1 .sr-badge-bullish { color: var(--accent); background: rgba(0, 232, 104, 0.12); }
+.sr-gone-l1 .sr-badge-bearish { color: var(--accent-red); background: rgba(255, 94, 94, 0.12); }
+.sr-gone-tag {
+    padding: 0 5px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+.sr-gone-tag-stop_crossed, .sr-gone-tag-closed_stop,
+.sr-gone-tag-rule_losing, .sr-gone-tag-rule_losing_live { color: var(--accent-red); border-color: rgba(255, 94, 94, 0.45); }
+.sr-gone-tag-target_reached, .sr-gone-tag-closed_target,
+.sr-gone-tag-taken { color: var(--accent); border-color: rgba(0, 232, 104, 0.45); }
+.sr-gone-tag-chased, .sr-gone-tag-rule_paused,
+.sr-gone-tag-rule_demoted { color: var(--accent-gold-ink, #e8a33d); border-color: rgba(232, 163, 61, 0.45); }
+.sr-gone-at {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.sr-gone-words, .sr-gone-pos {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+}
+.sr-gone-pos { color: var(--accent-gold-ink, #e8a33d); font-family: var(--font-mono); font-size: 9px; }
+.sr-gone-acts { display: flex; gap: 4px; margin-top: 5px; }
+.sr-gone-btn {
+    padding: 3px 8px;
+    border: 1px solid rgba(0, 232, 104, 0.3);
+    border-radius: 2px;
+    background: rgba(0, 232, 104, 0.06);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    cursor: pointer;
+}
+.sr-gone-btn:hover { background: rgba(0, 232, 104, 0.16); border-color: var(--accent); }
+.sr-gone-btn:disabled { opacity: .5; cursor: default; }
+.sr-gone-empty {
+    padding: 8px 12px 10px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+.signals-rail:not(.open) .sr-gone { display: none; }
+
+/* ── the headband SIGNALS popup: the rail's own rows ─────────────────── */
+.sv-sig-rows { display: flex; flex-direction: column; }
+.sv-sig-rows > * { flex-shrink: 0; }

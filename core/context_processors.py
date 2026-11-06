@@ -956,25 +956,12 @@ def _panel_detail(user):
     except Exception as e:
         logger.debug(f"Panel realised P&L unavailable: {e}")
 
-    # ── The signals themselves, not just how many ────────────────────────
-    try:
-        from signals.models import Signal
-        # SAME set and order as the signal rail (panel_recent_signals:
-        # newest five active). This cell used to show the top four BY
-        # SCORE, so the headband popup and the rail disagreed about what
-        # "the current signals" were — two truths on one screen.
-        out["panel_top_signals"] = [{
-            "symbol": s.instrument.symbol,
-            "direction": s.direction,
-            "score_pct": int(round((s.score or 0) * 100)),
-            "rule": s.rule_name or s.signal_type or "",
-            "created_at": s.created_at,
-            "entry": s.suggested_entry,
-            "stop": s.suggested_stop,
-        } for s in Signal.objects.filter(is_active=True)
-            .select_related("instrument").order_by("-created_at")[:5]]
-    except Exception as e:
-        logger.debug(f"Panel signal detail unavailable: {e}")
+    # ── The signals themselves ───────────────────────────────────────────
+    # (2026-11-06) No longer built here. panel_top_signals is the signal
+    # rail's own list (dashboard.signal_rail), derived per request in
+    # sauron_context from the same snapshot as the rail: this payload is
+    # cached on a book fingerprint that ignores signals, so a list built
+    # here could lag the rail it claims to be.
 
     # ── Watchlist with prices, so the cell is a watchlist and not a count ─
     try:
@@ -1132,6 +1119,12 @@ def sauron_context(request):
     # already has a whole test module about.
     ctx = {
         "user_timezone": user_tz,
+        # (2026-11-06) The live-region sweep says it is one
+        # (_partials/live_region.html sends X-SV-Sweep): it keeps only the
+        # regions, so base.html renders no rail card and no headband row
+        # for it — neither is a region, and the sweep threw them away.
+        "sv_sweep": request.headers.get("X-SV-Sweep") == "1"
+                    if hasattr(request, "headers") else False,
         "pin_locked": pin_locked,
         "idle_lock": idle_lock,
         "exchanges_open_count": exchange_data["open_count"],
@@ -1240,6 +1233,8 @@ def sauron_context(request):
         "panel_vix": None,
         "panel_watchlist": 0,
         "panel_recent_signals": [],
+        "panel_top_signals": [],
+        "rail": None,
         "panel_recent_positions": [],
         "panel_recent_news": [],
         "panel_recent_strategies": [],
@@ -1386,12 +1381,23 @@ def sauron_context(request):
     try:
         from signals.models import Signal
         from scraping.models import NewsArticle
-        # "-created_at", not "-score": this list is named RECENT and feeds the
-        # signals rail top-down — ranking by score parked a strong old signal
-        # at the top while new arrivals appeared buried mid-list. The score is
-        # already visible on every card (gauge + number); the rail's job is
-        # what just happened.
-        ctx["panel_recent_signals"] = list(Signal.objects.filter(is_active=True).select_related("instrument").order_by("-created_at")[:5])
+        # THE SIGNAL RAIL (2026-11-06): every signal that can be acted on
+        # now, newest first ("-created_at", never "-score": ranking by score
+        # parked a strong old signal at the top while new arrivals appeared
+        # buried mid-list), and why each one left — dashboard.signal_rail.
+        # The `[:5]` that used to sit here was a hidden cap: a burst pushed
+        # earlier signals out before the operator could act on them. The
+        # headband SIGNALS popup (panel_top_signals) is the same list from
+        # the same snapshot. Lazy and memoised on the request, so a render
+        # that never draws the rail (the ticker, the bell rows) pays nothing.
+        from django.utils.functional import SimpleLazyObject
+
+        from dashboard.signal_rail import rail_snapshot
+        ctx["rail"] = SimpleLazyObject(lambda: rail_snapshot(request))
+        ctx["panel_recent_signals"] = SimpleLazyObject(
+            lambda: rail_snapshot(request)["cards"])
+        ctx["panel_top_signals"] = SimpleLazyObject(
+            lambda: rail_snapshot(request)["rows"])
         ctx["panel_recent_news"] = list(NewsArticle.objects.order_by("-published_at")[:5])
         ctx["panel_news_sentiment"] = _news_sentiment_24h(NewsArticle)
         # Matching the count above filter for filter: the rules the engine
