@@ -388,7 +388,7 @@ COMMANDS = [
     {
         "name": "etoro_budget",
         "title": "eToro request budget",
-        "purpose": "The eToro request budget per key hash and family, for this minute and the one before: the takes by priority (P0 closes to P5 candles), the refusals with their reasons, the overruns of P0 and P1 (never refused) and whether the shared 429 pause holds for each world and until when. Read-only, asks no broker; no key and no account figure.",
+        "purpose": "The eToro request budget per key hash and family, for this minute and the one before: the takes by priority (P0 closes to P5 candles), the refusals with their reasons, the overruns of P0 and P1 (never refused) and whether the shared 429 pause holds for each world and until when; and the 30 s beat of eToro's own quotes, its last pass and its day, the writes a higher-ranked feed refused named. Read-only, asks no broker; no key and no account figure.",
         "usage": [
             "python manage.py etoro_budget",
         ],

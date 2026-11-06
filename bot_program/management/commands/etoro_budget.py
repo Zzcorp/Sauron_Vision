@@ -17,6 +17,12 @@ key: a key is named by its short hash only (etoro_budget.key_hash), the
 same twelve characters every budget log line carries. A key appears once
 a process has counted one of its requests within two days.
 
+And the 30 s beat of eToro's own quotes (bot_program/etoro_quotes.py,
+2026-11-06, the eToro feed spec's P-c.1), whose reads the budget counts at
+P3: its last pass (asked, written, and the writes a higher-ranked feed's
+hold refused, with the feed that held each row) and the UTC day's counts
+(etoro_quotes.report). Counts and feed names only.
+
     python manage.py etoro_budget
 """
 from datetime import datetime, timezone as dt_tz
@@ -40,11 +46,28 @@ def _minute(win, window_s) -> str:
         return "?"
 
 
+def _quote_counts(counts, *, today=False) -> str:
+    """"N asked, N written, N refused" and, when a write was refused, the
+    feed that held each row."""
+    text = (f"{int(counts.get('asked') or 0)} asked, "
+            f"{int(counts.get('written') or 0)} written, "
+            f"{int(counts.get('refused') or 0)} refused")
+    if int(counts.get("refused") or 0):
+        held = ", ".join(f"{s}: {src}" for s, src
+                         in sorted((counts.get("held_by") or {}).items()))
+        text += (" for a higher-ranked feed" if today
+                 else ": a higher-ranked feed holds the row")
+        text += f" ({held})" if held else ""
+    return text
+
+
 class Command(BaseCommand):
     help = ("Print the eToro request budget per key hash and family: this "
             "minute's and the last minute's takes by priority, refusals "
-            "with their reasons, overruns, and the shared 429 pause. "
-            "Read-only; no key, no account figure.")
+            "with their reasons, overruns, and the shared 429 pause; and "
+            "the quotes beat's last pass and day, the writes a "
+            "higher-ranked feed refused named. Read-only; no key, no "
+            "account figure.")
 
     def handle(self, *args, **opts):
         from bot_program.engine import etoro_budget as eb
@@ -62,6 +85,7 @@ class Command(BaseCommand):
                       for p in (eb.P2, eb.P3, eb.P4, eb.P5)))
         out.write("P0 and P1 are never refused: they are counted once sent, "
                   "and a family they take past its rate is an overrun.")
+        self._quotes(out)
         if rep["unbudgeted_here"]:
             out.write("This process sent requests unbudgeted (the cache "
                       "unreachable): " + ", ".join(
@@ -124,3 +148,27 @@ class Command(BaseCommand):
                     for p, words in sorted(row["last"].items()):
                         out.write(f"             last refusal at P{p}: "
                                   f"{words}")
+
+    @staticmethod
+    def _quotes(out) -> None:
+        """The quotes beat's lines (2026-11-06, P-c.1): its last pass and
+        the UTC day's counts, kept by bot_program/etoro_quotes.py."""
+        from bot_program import etoro_quotes as eq
+        rep = eq.report()
+        head = f"eToro's own quotes (every {eq.BEAT_S} s):"
+        last = rep.get("last")
+        if not last:
+            out.write(f"{head} no pass recorded in the last two days")
+            return
+        when = _at(last.get("at"))
+        if last.get("skipped"):
+            out.write(f"{head} the last pass at {when} — skipped: "
+                      f"{last['skipped']}")
+        else:
+            line = f"{head} the last pass at {when} — {_quote_counts(last)}"
+            if last.get("stopped"):
+                line += f" · stopped: {last['stopped']}"
+            out.write(line)
+        today = rep.get("today")
+        if today:
+            out.write(f"  today (UTC): {_quote_counts(today, today=True)}")

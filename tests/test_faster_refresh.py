@@ -41,6 +41,7 @@ Run with:  python manage.py test tests.test_faster_refresh
 """
 from datetime import timedelta
 from decimal import Decimal
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -48,6 +49,7 @@ from celery.schedules import crontab
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
@@ -560,6 +562,24 @@ class TheBudgetTests(_QuotesCase):
         self.assertEqual(self.wire.rates(), ["11", "11"])
         self.assertIn("stopped", out)
 
+    def test_the_batch_and_the_rows_it_left_out_are_p3_too(self):
+        """2026-11-06, the feed spec's P-c.3: the batch, once proven, and
+        the single read of a row it left out are taken at P3, never P1."""
+        for name, value in (("CACHE", True), ("MEASURED_FIRST", True)):
+            p = mock.patch.object(er, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        er.prove("demo", "keys ['rates']")
+        _held(self.cfg, "AAA")
+        _held(self.cfg, "BBB")
+        self.wire.alone_only = {22}
+        _refresh()
+        eb.flush()
+        win = eb.window()
+        self.assertEqual(self.wire.rates(), ["11,22", "22"])
+        self.assertEqual(cache.get(eb._p_key(KH, eb.MARKET, win, eb.P3)), 2)
+        self.assertIsNone(cache.get(eb._p_key(KH, eb.MARKET, win, eb.P1)))
+
     def test_never_while_etoro_is_sick(self):
         _held(self.cfg, "AAA")
         for _ in range(vh.SICK_BURST):
@@ -587,6 +607,236 @@ class TheShutMarketTests(_ShutOn, TestCase):
         with self._at(SAT), mock.patch(CLIENT_SEAM, return_value=_trader(w)):
             _refresh()
         self.assertEqual(w.rates(), ["22"])
+
+
+# ── the feed spec's asks to this beat (2026-11-06, P-c) ──────────────────
+
+class TheRefusedWritesTests(_QuotesCase):
+    """THE FEED SPEC'S P-c.1: where a higher-ranked feed holds the row (a
+    stream, OANDA's, Binance's or Finnhub's, or IBKR's), write_quote's
+    precedence refuses eToro's write for PRIORITY_HOLD_SECONDS after each
+    of its ticks (should_write False), and the beat did nothing there,
+    silently. Each such refusal is now counted, the feed that held the row
+    named, the last pass and today's counts kept, and manage.py
+    etoro_budget says them."""
+
+    def _stream_holds(self, symbol, source="oanda_stream"):
+        from market_data.quotes import write_quote
+        self.assertTrue(write_quote(symbol, last="9.99", source=source))
+
+    def test_a_write_a_stream_holds_is_counted_and_its_feed_named(self):
+        _held(self.cfg, "AAA")
+        _held(self.cfg, "BBB")
+        self._stream_holds("AAA")
+        with self.assertLogs("bot_program.etoro_quotes", level="INFO") as said:
+            out = _refresh()
+        self.assertEqual(sorted(self.wire.rates()), ["11", "22"])
+        self.assertEqual((out["written"], out["refused"]), (1, 1))
+        self.assertEqual(out["held_by"], {"AAA": "oanda_stream"})
+        self.assertEqual(_quote("AAA").source, "oanda_stream",
+                         "the stream keeps its row")
+        self.assertEqual(_quote("BBB").source, "etoro")
+        self.assertTrue(any("1 write refused" in line
+                            and "AAA: oanda_stream" in line
+                            for line in said.output), said.output)
+
+    def test_a_zero_answer_is_no_refusal(self):
+        """eToro's "0" is no price: write_quote refuses it for that, not
+        for precedence, and it is counted as neither."""
+        self.wire.prices[11] = 0
+        _held(self.cfg, "AAA")
+        self._stream_holds("AAA")
+        out = _refresh()
+        self.assertEqual((out["written"], out["refused"]), (0, 0))
+        self.assertNotIn("held_by", out)
+
+    def test_once_the_hold_ends_the_write_goes(self):
+        from market_data.quotes import PRIORITY_HOLD_SECONDS
+        _held(self.cfg, "AAA")
+        self._stream_holds("AAA")
+        later = timezone.now() + timedelta(seconds=PRIORITY_HOLD_SECONDS + 1)
+        with mock.patch("django.utils.timezone.now", return_value=later):
+            out = _refresh()
+        self.assertEqual((out["written"], out["refused"]), (1, 0))
+        self.assertEqual(_quote("AAA").source, "etoro")
+
+    def test_the_last_pass_and_todays_counts_are_kept(self):
+        from bot_program import etoro_quotes
+        _held(self.cfg, "AAA")
+        _held(self.cfg, "BBB")
+        self._stream_holds("AAA")
+        clock = _Clock(1_800_000_000.0)
+        with mock.patch.object(etoro_quotes, "_now", clock):
+            _refresh()
+            clock.t += 30
+            _refresh()
+            kept = etoro_quotes.report()
+        last = kept["last"]
+        self.assertEqual((last["asked"], last["written"], last["refused"]),
+                         (2, 1, 1))
+        self.assertEqual(last["held_by"], {"AAA": "oanda_stream"})
+        self.assertEqual(last["at"], clock.t)
+        today = kept["today"]
+        self.assertEqual((today["asked"], today["written"],
+                          today["refused"]), (4, 2, 2))
+        self.assertEqual(today["held_by"], {"AAA": "oanda_stream"})
+
+    def test_the_budget_command_says_them(self):
+        _held(self.cfg, "AAA")
+        _held(self.cfg, "BBB")
+        self._stream_holds("AAA")
+        _refresh()
+        out = StringIO()
+        call_command("etoro_budget", stdout=out)
+        text = out.getvalue()
+        self.assertIn("eToro's own quotes (every 30 s): the last pass at",
+                      text)
+        self.assertIn("2 asked, 1 written, 1 refused: a higher-ranked feed "
+                      "holds the row (AAA: oanda_stream)", text)
+        self.assertIn("today (UTC): 2 asked, 1 written, 1 refused for a "
+                      "higher-ranked feed (AAA: oanda_stream)", text)
+
+    def test_a_skipped_pass_and_no_pass_are_said(self):
+        out = StringIO()
+        call_command("etoro_budget", stdout=out)
+        self.assertIn("eToro's own quotes (every 30 s): no pass recorded in "
+                      "the last two days", out.getvalue())
+        _refresh()
+        out = StringIO()
+        call_command("etoro_budget", stdout=out)
+        self.assertIn("skipped: no open real eToro row", out.getvalue())
+
+
+class ThePushedTickSaysItsSourceTests(TestCase):
+    """THE FEED SPEC'S P-c.2 (its harm 24): push_quote_update carried no
+    source, so after every pushed tick the headband card's source read
+    "—", and a row's switch back from eToro's quote to Yahoo's once the
+    position closed (the beat stops, the 300 s hold ends) showed on no
+    pushed tick. Each pushed tick now says its source; the browser already
+    paints a tick's `source` (templates/base.html, dhSync)."""
+
+    def test_the_pushed_tick_carries_its_source(self):
+        from dashboard import consumers
+        sent = []
+
+        class _Layer:
+            async def group_send(self, group, message):
+                sent.append((group, message))
+        with mock.patch("channels.layers.get_channel_layer",
+                        return_value=_Layer()):
+            consumers.push_quote_update("AAPL", Decimal("191.0"),
+                                        Decimal("0.5"), source="yfinance")
+            consumers.push_quote_update("AAPL", Decimal("191.0"),
+                                        Decimal("0.5"))
+        self.assertEqual(sent[0], ("dashboard_live", {
+            "type": "quote_update",
+            "data": {"symbol": "AAPL", "price": "191.0",
+                     "change_pct": "0.5", "source": "yfinance"}}))
+        self.assertEqual(sent[1][1]["data"],
+                         {"symbol": "AAPL", "price": "191.0",
+                          "change_pct": "0.5"},
+                         "a caller that names none pushes what it pushed")
+
+    def test_the_switch_back_from_etoro_is_labelled_on_the_pushed_tick(self):
+        from market_data.quotes import PRIORITY_HOLD_SECONDS, write_quote
+        from market_data.tasks import fetch_live_quotes
+        aapl = _instrument("AAPL", "stock")
+        self.assertTrue(write_quote("AAPL", last="190.5", source="etoro",
+                                    bid="190.4", ask="190.6",
+                                    instrument=aapl))
+        pushed = []
+        fn = fetch_live_quotes
+        while hasattr(fn, "__wrapped__"):
+            fn = fn.__wrapped__
+        with mock.patch("core.market_calendar.is_us_market_open",
+                        return_value=True), \
+                mock.patch("signals.universe.quote_targets",
+                           return_value=[aapl]), \
+                mock.patch("market_data.adapters.yfinance_adapter"
+                           ".fetch_quote",
+                           return_value={"last": 191.0, "change_pct": 0.5,
+                                         "volume": 100}), \
+                mock.patch("dashboard.consumers.push_quote_update",
+                           side_effect=lambda *a, **k: pushed.append(k)):
+            fn(None)
+            self.assertEqual(pushed, [], "eToro's quote holds the row")
+            later = timezone.now() + timedelta(
+                seconds=PRIORITY_HOLD_SECONDS + 1)
+            with mock.patch("django.utils.timezone.now",
+                            return_value=later):
+                fn(None)
+        self.assertEqual(pushed, [{"source": "yfinance"}])
+        self.assertEqual(_quote("AAPL").source, "yfinance")
+
+    def test_the_browser_paints_the_source_of_a_quote_message(self):
+        base = (Path(settings.BASE_DIR) / "templates" / "base.html"
+                ).read_text(encoding="utf-8")
+        self.assertIn("if (msg.type === 'quote_stream' || msg.type === "
+                      "'quote') applyTick(msg.data);", base)
+        self.assertIn("put('src', d.source || '');", base)
+
+
+class TheTwelveAMinuteTests(_QuotesCase):
+    """THE FEED SPEC'S P-c.3: the beat's reads stay at P3 (TheBudgetTests)
+    and inside its twelve a minute, SINGLE_READS_PER_PASS at the 30 s beat,
+    the room the feed's budget leaves it. Verified: a proven batch that
+    left rows out was followed by six single reads (seven requests a
+    pass), and a run started late (up to its 25 s expiry) beside the next
+    beat's run put three passes in a minute. A pass now sends at most six
+    requests in all, and a key no more than twelve in any rolling
+    minute."""
+
+    def _instruments(self, n):
+        ids = {f"S{i}": 100 + i for i in range(1, n + 1)}
+        for s, i in ids.items():
+            _instrument(s, "stock")
+            self.client._ids[s] = i
+            self.wire.prices[i] = float(i)
+            _held(self.cfg, s)
+        return ids
+
+    def test_twelve_a_minute_at_the_beat(self):
+        from bot_program import etoro_quotes
+        self.assertEqual(etoro_quotes.READS_PER_MINUTE, 12)
+        self.assertEqual(etoro_quotes.READS_PER_MINUTE,
+                         etoro_quotes.SINGLE_READS_PER_PASS * 60
+                         // etoro_quotes.BEAT_S)
+        self.assertEqual(_beat("refresh-etoro-quotes")["schedule"],
+                         etoro_quotes.BEAT_S)
+
+    def test_three_passes_in_a_minute_never_send_more_than_twelve(self):
+        from bot_program import etoro_quotes
+        self._instruments(8)
+        clock = _Clock(1_000_000.0)
+        sent = []
+        with mock.patch.object(etoro_quotes, "_now", clock):
+            for step in (0, 25, 5, 31):
+                clock.t += step
+                before = len(self.wire.rates())
+                out = _refresh()
+                sent.append(len(self.wire.rates()) - before)
+                if step == 5:
+                    third = out
+        self.assertEqual(sent, [6, 6, 0, 6])
+        self.assertIn("12 reads a minute", third["stopped"])
+
+    def test_a_batch_and_its_single_reads_are_six_a_pass_at_most(self):
+        """A proven batch that left rows out: the batch is one of the six,
+        the rows it left out are read alone with the five left."""
+        from bot_program import etoro_quotes
+        for name, value in (("CACHE", True), ("MEASURED_FIRST", True)):
+            p = mock.patch.object(er, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        er.prove("demo", "keys ['rates']")
+        ids = self._instruments(8)
+        self.wire.alone_only = set(ids.values()) - {101}
+        out = _refresh()
+        sent = self.wire.rates()
+        self.assertEqual(len(sent), etoro_quotes.SINGLE_READS_PER_PASS)
+        self.assertEqual(len(sent[0].split(",")), 8,
+                         "one batch carried the eight")
+        self.assertEqual(out["written"], 6, "the batched row, five alone")
 
 
 # ── the sync every minute ─────────────────────────────────────────────────

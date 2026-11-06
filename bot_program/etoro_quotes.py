@@ -63,21 +63,58 @@ UNDER THE SYNC'S SWITCHES (platform_master, broker_account_sync), read
 inline as tasks.refresh_etoro_cells does: the component row is the sync's
 verdict, and a beat every 30 s must not overwrite it. One pass at a time
 (LOCK_KEY). No account figure, key or host in any line.
+
+THE FEED SPEC'S ASKS (2026-11-06, its P-c; this beat is the interim
+writer the eToro feed retires at the end of its F11, and none of these
+extends what it writes):
+  * A WRITE A HIGHER-RANKED FEED HOLDS IS COUNTED, NOT SILENT. Where a
+    stream (OANDA's, Binance's, Finnhub's) or IBKR wrote the row within
+    PRIORITY_HOLD_SECONDS, write_quote's precedence refuses eToro's
+    (market_data.quotes.should_write False) and this beat did nothing
+    there, silently. Each such refusal is counted ("refused"), the feed
+    that held the row named ("held_by"), a pass with one says so in one
+    INFO line, and the last pass and each UTC day's counts are kept
+    (report) for manage.py etoro_budget, which prints them.
+  * ITS TWELVE A MINUTE ARE A CAP. At most SINGLE_READS_PER_PASS requests
+    a pass, a batch and the single reads after it together (a proven
+    batch that left rows out was followed by six single reads: seven),
+    and none past READS_PER_MINUTE in any rolling minute of a key (a run
+    started late, up to its 25 s expiry, beside the next beat's run made
+    three passes in a minute). Every read is still taken at P3.
+  * The tick pushed to the browsers names its source
+    (dashboard.consumers.push_quote_update), so a row's switch back to
+    Yahoo's quote, once its position closed and the hold ended, shows.
 """
 from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone as dt_tz
 
 logger = logging.getLogger(__name__)
 
 #: The beat (config/celery.py "refresh-etoro-quotes").
 BEAT_S = 30
-#: The most single reads (one instrument a request) one pass sends: at
-#: most 12 a minute, a fifth of the market family's start rate
-#: (etoro_budget.RATE_MARKET_PER_MIN, 60). A batch is one request for up
-#: to twenty instruments and counts as one.
+#: The most requests one pass sends (2026-11-06, the feed spec's P-c.3:
+#: a batch and the single reads after it together; the single reads alone
+#: before): 12 a minute at the beat, a fifth of the market family's start
+#: rate (etoro_budget.RATE_MARKET_PER_MIN, 60). A batch is one request for
+#: up to twenty instruments and counts as one; a retry or a cold /search
+#: counts as the request it is.
 SINGLE_READS_PER_PASS = 6
+#: THE BEAT'S OWN CAP (2026-11-06, P-c.3): no more requests than this in
+#: any rolling minute (SENT_WINDOW_S) of one key, whatever the passes:
+#: SINGLE_READS_PER_PASS at BEAT_S. The feed's request budget counts on it.
+READS_PER_MINUTE = SINGLE_READS_PER_PASS * 60 // BEAT_S
+#: Each key's requests of the last minute, [instant, ...] (the cap).
+SENT_KEY = "etoro_quotes:sent:{kh}"
+SENT_WINDOW_S = 60
+#: The last pass, and each UTC day's counts (2026-11-06, P-c.1): what
+#: manage.py etoro_budget prints, kept two days. Counts and the names of
+#: the feeds that held a row: no price, no account figure.
+LAST_KEY = "etoro_quotes:last"
+DAY_KEY = "etoro_quotes:day:{day}"
+RECORD_TTL_S = 2 * 86400
 #: A pass starts no read past this many seconds, so it never runs into the
 #: next beat (a read at P3 gives up after about 9 s with its retry).
 PASS_BUDGET_S = 20.0
@@ -95,7 +132,8 @@ OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 
 
 def _now() -> float:
-    """The rotation's clock (a seam: tests move it)."""
+    """The rotation's, the cap's and the records' clock (a seam: tests
+    move it)."""
     return time.time()
 
 
@@ -211,6 +249,44 @@ def _note_asked(kh, symbols) -> None:
         pass
 
 
+def _sent_lately(kh) -> int:
+    """The requests this beat sent for key hash `kh` in the last
+    SENT_WINDOW_S (the cap, P-c.3). Never raises: unread, 0 (a pass whose
+    cache cannot be read takes no lock either)."""
+    try:
+        held = _cache().get(SENT_KEY.format(kh=kh))
+        now = _now()
+        return sum(1 for at in (held if isinstance(held, list) else [])
+                   if now - float(at) < SENT_WINDOW_S)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _note_sent(kh, n) -> None:
+    """Stamp `n` requests sent now for `kh` (the cap). Never raises."""
+    if n <= 0:
+        return
+    try:
+        c = _cache()
+        key = SENT_KEY.format(kh=kh)
+        now = _now()
+        held = c.get(key)
+        kept = [float(at) for at in (held if isinstance(held, list) else [])
+                if now - float(at) < SENT_WINDOW_S]
+        c.set(key, kept + [now] * int(n), 2 * SENT_WINDOW_S)
+    except Exception:  # noqa: BLE001 — the budget still counts every read
+        pass
+
+
+def _wire(client) -> int:
+    """The requests `client` has sent (EtoroTrader.wire_reads: every
+    attempt, a retry and a cold /search included). Never raises."""
+    try:
+        return int(getattr(client, "wire_reads", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _venue_failed(e) -> bool:
     """Does `e` end the pass? A budget refusal and the venue's failure (a
     429, a 5xx, a transport failure, a refused redirect) do; an answer
@@ -238,69 +314,121 @@ def _side(value):
         return None
 
 
-def _write(symbol, tick) -> bool:
-    """Write one answer of eToro's to LiveQuote. True when written."""
+def _holder(inst, last) -> str:
+    """The source that held `inst`'s LiveQuote row when write_quote refused
+    eToro's priced answer FOR PRECEDENCE (market_data.quotes.should_write
+    False: a higher-ranked feed wrote it within PRIORITY_HOLD_SECONDS),
+    read right after the refusal by the rule write_quote applied; "" for
+    any other refusal (no price, no instrument). Never raises."""
+    try:
+        if inst is None or not float(last or 0) > 0:
+            return ""
+        from market_data.models import LiveQuote
+        from market_data.quotes import should_write
+        existing = LiveQuote.objects.filter(instrument=inst).first()
+        if existing is not None and not should_write(existing, SOURCE):
+            return str(existing.source or "?")[:40]
+    except Exception:  # noqa: BLE001 — unread: not counted
+        pass
+    return ""
+
+
+def _write(symbol, tick, out) -> None:
+    """Write one answer of eToro's to LiveQuote, counted in `out`:
+    "written", or "refused" with the feed that held the row ("held_by")
+    when write_quote's precedence refused it (P-c.1)."""
     from instruments.models import Instrument
     from market_data.quotes import write_quote
     if not isinstance(tick, dict):
-        return False
-    return write_quote(symbol, last=tick.get("lastPrice"), source=SOURCE,
-                       bid=_side(tick.get("bid")), ask=_side(tick.get("ask")),
-                       instrument=Instrument.objects.filter(
-                           symbol=symbol).first())
+        return
+    inst = Instrument.objects.filter(symbol=symbol).first()
+    if write_quote(symbol, last=tick.get("lastPrice"), source=SOURCE,
+                   bid=_side(tick.get("bid")), ask=_side(tick.get("ask")),
+                   instrument=inst):
+        out["written"] += 1
+        return
+    held = _holder(inst, tick.get("lastPrice"))
+    if held:
+        out["refused"] += 1
+        out.setdefault("held_by", {})[symbol] = held
 
 
 def _read_account(client, symbols, out, started) -> str:
     """Ask eToro for `symbols` (already sorted) and write each answer: the
-    batch when proven, else one read each, at most SINGLE_READS_PER_PASS.
-    Returns why the pass must stop ("" to go on). Inside the caller's P3
-    scope."""
+    batch when proven, else one read each. At most SINGLE_READS_PER_PASS
+    requests in all, a batch and the single reads after it together, and
+    none past READS_PER_MINUTE in the key's rolling minute (2026-11-06,
+    P-c.3): what each call put on the wire is counted (EtoroTrader
+    .wire_reads). Returns why the pass must stop ("" to go on). Inside the
+    caller's P3 scope."""
     from bot_program.engine import etoro_rates
     kh = client._bkey()
+    left = min(SINGLE_READS_PER_PASS, READS_PER_MINUTE - _sent_lately(kh))
+    if left <= 0:
+        return (f"the beat's {READS_PER_MINUTE} reads a minute are spent "
+                f"(its own cap)")
     singles = list(symbols)
     if etoro_rates.CACHE and not etoro_rates.batch_waits() \
             and not etoro_rates.unproven():
-        carried = symbols[:SINGLE_READS_PER_PASS * etoro_rates.BATCH_MAX_IDS]
+        carried = symbols[:left * etoro_rates.BATCH_MAX_IDS]
         _note_asked(kh, carried)
+        before = _wire(client)
         answers = client.tickers(carried)
+        sent = max(0, _wire(client) - before)
+        _note_sent(kh, sent)
+        left -= sent
         out["asked"] += -(-len(carried) // etoro_rates.BATCH_MAX_IDS)
         singles = []
         for symbol in carried:
             answer = answers.get(symbol)
             if isinstance(answer, dict):
-                out["written"] += int(_write(symbol, answer))
+                _write(symbol, answer, out)
             elif answer is not None and etoro_rates.final(answer):
                 return str(getattr(answer, "why", "") or answer)
             else:
                 singles.append(symbol)
-    for symbol in singles[:SINGLE_READS_PER_PASS]:
+    for symbol in singles:
+        if left <= 0:
+            break
         if time.monotonic() - started > PASS_BUDGET_S:
             return f"the pass reached its {PASS_BUDGET_S:.0f} s"
         _note_asked(kh, [symbol])
         out["asked"] += 1
+        before = _wire(client)
         try:
             tick = client.ticker(symbol)
         except Exception as e:  # noqa: BLE001 — sorted below
+            sent = max(0, _wire(client) - before)
+            _note_sent(kh, sent)
+            left -= sent
             if _venue_failed(e):
                 return str(getattr(e, "why", "") or e)[:160]
             logger.debug("eToro quotes: %s not read (%s)", symbol,
                          str(e)[:120])
             continue
-        out["written"] += int(_write(symbol, tick))
+        sent = max(0, _wire(client) - before)
+        _note_sent(kh, sent)
+        left -= sent
+        _write(symbol, tick, out)
     return ""
 
 
 def refresh() -> dict:
     """ONE PASS (the module docstring): {"accounts", "symbols", "asked"
-    (requests sent), "written"}, with "skipped" (why nothing was asked) or
-    "stopped" (why the pass ended early) in words. Never raises."""
-    out = {"accounts": 0, "symbols": 0, "asked": 0, "written": 0}
+    (requests sent), "written", "refused" (writes a higher-ranked feed's
+    hold refused, P-c.1)}, with "held_by" ({symbol: that feed}) when one
+    was, and "skipped" (why nothing was asked) or "stopped" (why the pass
+    ended early) in words. The pass is kept for manage.py etoro_budget
+    (_record). Never raises."""
+    out = {"accounts": 0, "symbols": 0, "asked": 0, "written": 0,
+           "refused": 0}
     try:
         off = _switched_off()
     except Exception as e:  # noqa: BLE001 — an unread switch is off
         off = f"the switches could not be read ({type(e).__name__})"
     if off:
         out["skipped"] = off
+        _record(out, counted=False)
         return out
     c = _cache()
     try:
@@ -319,10 +447,65 @@ def refresh() -> dict:
         out["stopped"] = f"the pass failed ({type(e).__name__})"
         return out
     finally:
+        _record(out, counted=True)
         try:
             c.delete(LOCK_KEY)
         except Exception:  # noqa: BLE001 — it expires on its own
             pass
+
+
+def _day(at) -> str:
+    return datetime.fromtimestamp(float(at), tz=dt_tz.utc).strftime(
+        "%Y-%m-%d")
+
+
+def _record(out, *, counted) -> None:
+    """Keep this pass for manage.py etoro_budget (P-c.1): the last pass as
+    it ended, with its instant, and, for a pass that ran under the lock
+    (`counted`), its counts added to the UTC day's. One INFO line when a
+    write was refused. Never raises."""
+    refused = int(out.get("refused") or 0)
+    if refused:
+        held = ", ".join(f"{s}: {src}" for s, src
+                         in sorted((out.get("held_by") or {}).items()))
+        logger.info("eToro quotes: %d write%s refused, a higher-ranked feed "
+                    "holds the row (%s)", refused, "" if refused == 1 else "s",
+                    held)
+    try:
+        c = _cache()
+        now = _now()
+        c.set(LAST_KEY, dict(out, at=now), RECORD_TTL_S)
+        if not counted:
+            return
+        key = DAY_KEY.format(day=_day(now))
+        day = c.get(key)
+        day = dict(day) if isinstance(day, dict) else {}
+        for name in ("asked", "written", "refused"):
+            day[name] = int(day.get(name) or 0) + int(out.get(name) or 0)
+        day["held_by"] = dict(day.get("held_by") or {},
+                              **(out.get("held_by") or {}))
+        c.set(key, day, RECORD_TTL_S)
+    except Exception as e:  # noqa: BLE001 — a record is a courtesy
+        logger.debug("eToro quotes: the pass was not kept (%s)",
+                     type(e).__name__)
+
+
+def report(now=None) -> dict:
+    """What manage.py etoro_budget prints of this beat (P-c.1): {"last":
+    the last pass's counts and words with its "at", or None, "today": the
+    UTC day's {"asked", "written", "refused", "held_by"}, or None, "day"}.
+    Counts, words and feed names only. Never raises."""
+    now = _now() if now is None else float(now)
+    out = {"last": None, "today": None, "day": _day(now)}
+    try:
+        c = _cache()
+        last = c.get(LAST_KEY)
+        out["last"] = dict(last) if isinstance(last, dict) else None
+        today = c.get(DAY_KEY.format(day=out["day"]))
+        out["today"] = dict(today) if isinstance(today, dict) else None
+    except Exception:  # noqa: BLE001 — unread: nothing to say
+        pass
+    return out
 
 
 def _pass(out, started) -> dict:
