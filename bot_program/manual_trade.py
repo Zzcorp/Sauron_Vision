@@ -810,7 +810,7 @@ def _ceil_to_step(qty: float, step: float) -> float:
 
 
 def _venue_min_qty(client, symbol: str, price: float, vpu: float,
-                   step: float) -> tuple:
+                   step: float, raw: dict | None = None) -> tuple:
     """(units, why): the venue's OWN minimum for this order, rounded UP to
     this platform's step, or (None, why) when the venue states none.
 
@@ -822,6 +822,12 @@ def _venue_min_qty(client, symbol: str, price: float, vpu: float,
     The bot lane already asks this (AssetBot._venue_size_floor, the same
     cached eligibility read); this lane now asks it too. Unmeasured is
     None, never 0: an unknown minimum refuses nothing here, as on the bots.
+
+    `raw` (2026-11-06, review): a dict that receives the venue's own figure
+    in units, BEFORE the step, as raw["floor"] — so the words can tell the
+    venue's minimum from this platform's step when the step rounded it up
+    (eToro's 10 USD on a 150 share is 0.067 of it; this lane sends whole
+    shares on a live stock, so it sends one). Left empty when unread.
     """
     from bot_program.asset_engine.base import AssetBot
     try:
@@ -838,7 +844,21 @@ def _venue_min_qty(client, symbol: str, price: float, vpu: float,
         return None, f"venue minimum {floor!r} is not a number"
     if floor <= 0:
         return None, f"venue minimum {floor:g} is not a measurement"
+    if isinstance(raw, dict):
+        raw["floor"] = floor
     return _ceil_to_step(floor, step), ""
+
+
+def _stepped_floor(vmin, raw: dict) -> float | None:
+    """The venue's own minimum in units when this platform's step rounded
+    it UP to `vmin` (2026-11-06, review), else None: unread, or the
+    venue's figure already a whole step. A rounding of a millionth (a
+    crypto floor carried to 8 decimals) is not a step."""
+    floor = raw.get("floor") if isinstance(raw, dict) else None
+    if vmin is None or floor is None:
+        return None
+    vmin, floor = float(vmin), float(floor)
+    return floor if vmin - floor > max(1e-9, 1e-6 * vmin) else None
 
 
 def _size_words(qty: float) -> str:
@@ -847,7 +867,8 @@ def _size_words(qty: float) -> str:
 
 
 def _smallest_size(cfg, *, qty: float, whom: str, live: bool, entry: float,
-                   stop: float, vpu: float, default_pct: float) -> dict:
+                   stop: float, vpu: float, default_pct: float,
+                   words: str = "") -> dict:
     """THE SMALLEST SIZE (2026-11-06): a manual ticket the risk budget
     sizes to zero, judged at `qty`, the smallest size the venue takes.
 
@@ -868,7 +889,10 @@ def _smallest_size(cfg, *, qty: float, whom: str, live: bool, entry: float,
     venue, for its own minimum or the paper venue; this platform, for one
     step of its own granularity on a live venue whose minimum was not
     read — _qty_step is not a venue minimum and is never called one).
-    `default_pct` is the lane's own risk per ticket, in percent.
+    `default_pct` is the lane's own risk per ticket, in percent. `words`
+    (2026-11-06, review) is `whom` without its aside, for the confirmation
+    and the position page ("the smallest size this platform sends to
+    eToro"); `whom` when none is given.
 
     Asked by the manual lane only, in _preview and again in _judge_ticket
     at the fill and the stop actually sent. The bots never raise a size
@@ -890,11 +914,49 @@ def _smallest_size(cfg, *, qty: float, whom: str, live: bool, entry: float,
             + ("Nothing was sent" if live else "Nothing was booked"))}
     risk_pct = risk / capital * 100.0 if capital > 0 else 0.0
     return {"qty": qty, "risk": risk, "risk_pct": round(risk_pct, 4),
-            "whom": whom,
+            "whom": whom, "words": words or whom,
             "note": (f"Raised to {whom}: {_size_words(qty)}. At this stop it "
                      f"risks {risk:,.2f} {ccy} ({risk_pct:.2f}% of the "
                      f"pool), more than the {float(default_pct):.2f}% a "
                      f"ticket risks by default.")}
+
+
+def _shown_size_error(cfg, *, shown_qty, shown_raised, qty: float,
+                      why: str, risk: float, live: bool) -> str:
+    """THE SIZE THE TICKET SHOWED (2026-11-06, review): why an automatic
+    size the send RAISES above the risk budget — to the smallest size, or
+    to the broker's minimum — may not go out, or "".
+
+    The send re-runs the preview under its lock, and what it raises to can
+    move in between: an eToro minimum the dialog could not read (a 429 is
+    not cached) is read there, a minimum in money is more units a cent
+    lower, a mark that moved away from the stop leaves the budget under
+    one unit. The PIN confirmed the size the ticket SHOWED. The dialog
+    sends it back when the operator left the size alone (`shown_qty`),
+    with whether it was raised (`shown_raised`), and a raised size goes
+    out only when it is that size, shown as raised. Otherwise nothing is
+    sent and the words say what moved. A raise the send does not make (the
+    budget's own size) is not judged here; neither is a typed size, which
+    is the operator's. `shown_qty` None — a caller that says nothing — is
+    the behaviour before this existed."""
+    if shown_qty is None:
+        return ""
+    capital = float(getattr(cfg, "capital", 0) or 0)
+    ccy = str(getattr(cfg, "base_currency", "") or "USD")
+    pct = float(risk) * 100.0 / capital if capital > 0 else 0.0
+    at = f"risking {float(risk):,.2f} {ccy} ({pct:.2f}% of the pool)"
+    end = (("Nothing was sent" if live else "Nothing was booked")
+           + ": open the ticket again to see it before you confirm")
+    if not shown_raised:
+        return (f"The ticket showed {_size_words(shown_qty)} sized by the "
+                f"risk budget; at the send the budget buys less than {why}, "
+                f"so it would go out at {_size_words(qty)}, {at} — more than "
+                f"the budget, and the ticket did not say so. {end}")
+    if abs(float(qty) - float(shown_qty)) > 1e-9 * max(1.0, abs(float(qty))):
+        return (f"The size changed since the ticket was shown: "
+                f"{_size_words(shown_qty)} then, {_size_words(qty)} now — "
+                f"{why} — {at}. {end}")
+    return ""
 
 
 def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
@@ -1801,9 +1863,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     # ticket only. Read before the size is judged since 2026-11-06: the
     # smallest size below starts from it.
     venue_min_qty, venue_min_note = None, ""
+    # The venue's own figure before this platform's step (2026-11-06,
+    # review): the words below say which of the two a size is.
+    _vraw = {}
     if live:
         venue_min_qty, _vwhy = _venue_min_qty(
-            _client, inst.symbol, float(price), vpu, _qty_step(bot, price))
+            _client, inst.symbol, float(price), vpu, _qty_step(bot, price),
+            raw=_vraw)
+    _vstepped = _stepped_floor(venue_min_qty, _vraw)
 
     # THE SMALLEST SIZE (2026-11-06, _smallest_size; the operator:
     # "debride la machine quand il s'agit du manuel"). A risk-based size
@@ -1826,17 +1893,28 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         from bot_program.engine.broker_router import broker_name_for_symbol
         route = broker_name_for_symbol(user, inst.symbol, cfg)
         venue = _VENUE_LABELS.get(route) or route or "the venue"
-        if venue_min_qty is not None:
+        # `words` names the size; `whom` adds what the operator needs to
+        # read it right (review, 2026-11-06): the venue's own minimum
+        # when this platform's step rounded it up, or that it was not read.
+        if venue_min_qty is not None and _vstepped is not None:
             smallest, source = float(venue_min_qty), "venue_minimum"
-            whom = f"the smallest size {venue} takes"
+            words = f"the smallest size this platform sends that {venue} takes"
+            whom = (f"{words} ({venue}'s own minimum is {_vstepped:.4g} "
+                    f"units, about {_vstepped * float(price) * vpu:,.2f} "
+                    f"{cfg.base_currency})")
+        elif venue_min_qty is not None:
+            smallest, source = float(venue_min_qty), "venue_minimum"
+            whom = words = f"the smallest size {venue} takes"
+        elif live:
+            smallest, source = float(_qty_step(bot, price)), "step"
+            words = f"the smallest size this platform sends to {venue}"
+            whom = f"{words} ({venue}'s own minimum was not read)"
         else:
             smallest, source = float(_qty_step(bot, price)), "step"
-            whom = (f"the smallest size this platform sends to {venue} "
-                    f"({venue}'s own minimum was not read)" if live
-                    else f"the smallest size {venue} takes")
+            whom = words = f"the smallest size {venue} takes"
         smallest_rec = _smallest_size(
-            cfg, qty=smallest, whom=whom, live=live, entry=float(price),
-            stop=float(sizing["stop"]), vpu=vpu,
+            cfg, qty=smallest, whom=whom, words=words, live=live,
+            entry=float(price), stop=float(sizing["stop"]), vpu=vpu,
             default_pct=risk_fraction(cfg) * 100.0)
         if smallest_rec.get("error"):
             return {"error": smallest_rec["error"]}
@@ -1873,12 +1951,21 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                     f"{_risk:,.2f}, past the {_cap:,.2f} a ticket may risk "
                     f"from this {float(cfg.capital):,.2f} pool — widen the "
                     f"pool or tighten the stop. Nothing was sent")}
+            # The broker's own figure when this platform's step rounded it
+            # up (2026-11-06, review): the dialog prints this note now.
+            _under = (
+                f"{_vstepped:.4g} units (about "
+                f"{_vstepped * float(price) * vpu:,.0f} {cfg.base_currency})"
+                f", and {venue_min_qty:g} is the smallest size this "
+                f"platform sends above that"
+                if _vstepped is not None else
+                f"{venue_min_qty:g} (about {_money:,.0f} "
+                f"{cfg.base_currency})")
             venue_min_note = (
                 f"Raised from {qty:g} to {venue_min_qty:g} units: the "
-                f"broker refuses a {inst.symbol} order under "
-                f"{venue_min_qty:g} (about {_money:,.0f} "
-                f"{cfg.base_currency}). It risks {_risk:,.2f} at the stop "
-                f"instead of {float(sizing['risk_dollars']):,.2f}.")
+                f"broker refuses a {inst.symbol} order under {_under}. It "
+                f"risks {_risk:,.2f} at the stop instead of "
+                f"{float(sizing['risk_dollars']):,.2f}.")
             qty = venue_min_qty
             sizing = {**sizing, "qty": qty, "risk_dollars": _risk,
                       "notional_fraction": (
@@ -2264,8 +2351,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # THE SMALLEST SIZE (2026-11-06, _smallest_size): None, or — when
         # the risk budget sized this ticket to zero — the size it was
         # raised to {qty, source ("venue_minimum" | "step"), risk,
-        # risk_pct, whom, note}. The dialog prints `note` before the PIN
-        # and keeps `qty` when the stop moves; _judge_ticket sends it.
+        # risk_pct, whom, words, note}. The dialog prints `note` before the
+        # PIN, keeps `qty` when the stop moves and says what it risks
+        # there; _judge_ticket sends it — the size the dialog showed, or
+        # nothing (shown_qty, review).
         "smallest_size": smallest_rec,
         "max_risk_dollars": round(capital * MAX_RISK_FRACTION, 2),
         "max_notional": max_notional,
@@ -2421,7 +2510,8 @@ def preview_asset_trade(user, inst, side, leverage=None) -> dict:
 def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
                   qty_override=None, stop_override=None,
                   target_override=None, available, dup_seen=None,
-                  log_size=True) -> dict:
+                  log_size=True, shown_qty=None,
+                  shown_raised=None) -> dict:
     """EVERY CHECK THAT CAN STILL REFUSE A TICKET THE PREVIEW PASSED, in
     one place (2026-10-31): the pool's sufficiency for an automatic size,
     the operator's stop, target and levels against the fill, the size (the
@@ -2433,8 +2523,16 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
     overridden, qty, dist, risk_dollars, notional, notional_fraction,
     capital_use, dup (duplicate_state's answer, 2026-11-01), and
     size_source with smallest_size (2026-11-06: "smallest_size" and the
-    preview's _smallest_size dict when the ticket goes at the smallest
-    size the preview proposed; "operator" or "risk_budget" and None).
+    smallest size judged at the fill and the stop actually sent — qty,
+    source, whom, words, risk, risk_pct, note — when the ticket goes at
+    the smallest size the preview proposed; "operator" or "risk_budget"
+    and None).
+
+    `shown_qty` and `shown_raised` (2026-11-06, review) are the size the
+    dialog showed when the operator left it alone, and whether it was
+    raised above the risk budget: an automatic size this send raises goes
+    out only when it is that size, shown as raised (_shown_size_error).
+    None says nothing, as before they existed.
 
     `_execute` asks it TWICE: before any funding close, against the pool
     the selection will leave (`available` + what the selected closes
@@ -2536,8 +2634,12 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
     smallest = (preview.get("smallest_size")
                 if isinstance(preview.get("smallest_size"), dict) else None)
     size_source = "operator" if overridden else "risk_budget"
+    # The smallest size as judged at the fill and the stop actually sent
+    # (2026-11-06, review): what the ledger records.
+    sent_smallest = None
     if not overridden:
         at_smallest = False
+        vmin_raised = False
         if dist <= 0:
             # No usable rate (ForexBot's 0.0 sentinel, below): no size at
             # all, the smallest one included.
@@ -2550,12 +2652,37 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
             qty, at_smallest = float(preview["qty"]), True
         else:
             qty = bot._round_qty(preview["risk_dollars"] / dist, fill)
-            if qty <= 0 and smallest is not None:
+            if smallest is not None and qty < float(smallest["qty"]) - 1e-9:
                 # A stop the operator moved, where the budget still buys
-                # nothing: the smallest size again, as the dialog shows it.
+                # less than the smallest size — nothing, or less than the
+                # venue's minimum: the smallest size again, as the dialog
+                # shows it, and said so in the ledger (review, 2026-11-06).
                 qty, at_smallest = float(smallest["qty"]), True
         if qty <= 0:
             return {"error": "Sized to zero at the adjusted fill price"}
+        if not at_smallest and vmin and qty < float(vmin) - 1e-9:
+            # The broker's minimum (2026-10-01): the budget's size lifted.
+            qty, vmin_raised = float(vmin), True
+        # THE SIZE THE TICKET SHOWED (2026-11-06, review,
+        # _shown_size_error). Raised above the budget here: the smallest
+        # size, the broker's minimum lifted just above, or — the stop
+        # untouched — the preview's own raise to it (venue_min_note: its
+        # risk_dollars is the minimum's, so the size re-derived from it
+        # is the minimum without a lift). Judged before any cap: a size
+        # the PIN never confirmed is the first answer, whatever it risks.
+        raised = (at_smallest or vmin_raised
+                  or (stop_override is None
+                      and bool(preview.get("venue_min_note"))))
+        if raised:
+            moved = _shown_size_error(
+                cfg, shown_qty=shown_qty, shown_raised=shown_raised,
+                qty=qty, risk=qty * dist, live=live,
+                why=(str(smallest.get("whom")
+                         or "the smallest size the venue takes")
+                     if at_smallest
+                     else f"the broker's minimum for {inst.symbol}"))
+            if moved:
+                return {"error": moved}
         if at_smallest:
             # The 7% hard cap in the smallest size's own words, at the
             # fill and the stop actually sent; then every cap judge_qty
@@ -2565,6 +2692,7 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
                 cfg, qty=qty, live=live, entry=fill, stop=stop, vpu=vpu,
                 whom=str(smallest.get("whom")
                          or "the smallest size the venue takes"),
+                words=str(smallest.get("words") or ""),
                 default_pct=risk_fraction(cfg) * 100.0)
             if again.get("error"):
                 return {"error": again["error"]}
@@ -2577,8 +2705,9 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
                 return {"error": why}
             floor_raised = True
             size_source = "smallest_size"
-        elif vmin and qty < float(vmin) - 1e-9:
-            qty = float(vmin)
+            sent_smallest = {**again,
+                             "source": str(smallest.get("source") or "")}
+        elif vmin_raised:
             floor_raised = True
             why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
                             stop=stop, value_per_unit=vpu,
@@ -2691,10 +2820,10 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
             "notional": notional, "notional_fraction": notional_fraction,
             "capital_use": capital_use, "dup": dup,
             # Which size this is (2026-11-06): the operator's, the risk
-            # budget's, or the smallest size the preview proposed.
+            # budget's, or the smallest size the preview proposed — judged
+            # at the fill and the stop actually sent (review).
             "size_source": size_source,
-            "smallest_size": (smallest if size_source == "smallest_size"
-                           else None)}
+            "smallest_size": sent_smallest}
 
 
 def _realised_closes(rows) -> list:
@@ -2717,9 +2846,16 @@ def _realised_closes(rows) -> list:
 def _execute(user, inst, side, close_ids=None, signal=None,
              qty_override=None, stop_override=None,
              target_override=None, pin_ok=False, leverage=None,
-             dup_seen=None) -> dict:
+             dup_seen=None, shown_qty=None, shown_raised=None) -> dict:
     """Close the funding positions (if any), then open the trade. Paper is
     synchronous, so the whole chain settles before this returns.
+
+    `shown_qty` and `shown_raised` (2026-11-06, review) are the size the
+    dialog showed when the operator left it alone, and whether it was
+    raised above the risk budget: an automatic size the send raises goes
+    out only when it is that size, shown as raised — before anything
+    irreversible and again under the lock (_judge_ticket). None says
+    nothing, as before they existed.
 
     `dup_seen` is the holders of this bet the dialog showed (its preview's
     duplicate.holder_ids; None when the caller says nothing). Another
@@ -2951,7 +3087,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             qty_override=qty_override, stop_override=stop_override,
             target_override=target_override,
             available=round(float(preview["available"]) + freed, 2),
-            dup_seen=dup_seen, log_size=False)
+            dup_seen=dup_seen, log_size=False, shown_qty=shown_qty,
+            shown_raised=shown_raised)
         if early.get("error"):
             return {"error": early["error"], "closed": []}
         priced = []
@@ -3042,7 +3179,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                                stop_override=stop_override,
                                target_override=target_override,
                                available=preview["available"],
-                               dup_seen=dup_seen)
+                               dup_seen=dup_seen, shown_qty=shown_qty,
+                               shown_raised=shown_raised)
         if judged.get("error"):
             return _refused({"error": judged["error"]})
         bot, ticket_l = judged["bot"], judged["ticket_l"]
@@ -3144,12 +3282,17 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         }
         _smallest = judged.get("smallest_size")
         if isinstance(_smallest, dict):
-            # And the raise to the smallest size (2026-11-06), as the
-            # dialog said it before the PIN. Only when it happened: an
-            # ordinary ticket keeps its shape.
+            # And the raise to the smallest size (2026-11-06), at the fill
+            # and the stop actually sent (review: the preview's note was
+            # its planned stop's) — which smallest size, in `words`, and
+            # what it risked there. Only when it happened: an ordinary
+            # ticket keeps its shape.
             meta["smallest_size"] = {
                 "qty": float(qty),
                 "source": str(_smallest.get("source") or ""),
+                "words": str(_smallest.get("words") or "")[:200],
+                "risk": float(_smallest.get("risk") or 0.0),
+                "risk_pct": float(_smallest.get("risk_pct") or 0.0),
                 "note": str(_smallest.get("note") or "")[:600]}
         if not dup["ok"]:
             # And who else held this bet when it was taken (2026-10-31).
@@ -3670,6 +3813,12 @@ def _execute(user, inst, side, close_ids=None, signal=None,
            "risk_dollars": risk_dollars,
            # "operator", "risk_budget", or "smallest_size" (2026-11-06)
            "sized_by": size_source,
+           # Which smallest size, in words, for the confirmation (review,
+           # 2026-11-06): "the smallest size eToro takes" is not one step
+           # of this platform's on a venue whose minimum was not read. ""
+           # on any other ticket.
+           "size_words": str(((trade.metadata or {}).get("smallest_size")
+                              or {}).get("words") or ""),
            # What the operator moved, so the confirmation can name it back
            # to them rather than claiming the platform's own defaults.
            "overrides": (["qty"] if overridden else []) + level_overrides,
@@ -3739,7 +3888,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
 
 def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
                        target=None, pin_ok=False, leverage=None,
-                       dup_seen=None) -> dict:
+                       dup_seen=None, shown_qty=None,
+                       shown_raised=None) -> dict:
     """Execute a signal's TAKE TRADE.
 
     Every keyword None is "the platform's answer": the risk-derived size,
@@ -3747,7 +3897,8 @@ def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
     stop with an automatic size is the ordinary case, not an exotic one.
     `pin_ok` is the view's verdict on the trading PIN, demanded only when
     the manual config is LIVE. `dup_seen` is the holders the dialog
-    showed (_execute).
+    showed; `shown_qty` and `shown_raised` the size it showed and whether
+    it was raised above the risk budget (_execute).
     """
     if signal.direction not in ("bullish", "bearish"):
         return {"error": f"'{signal.direction}' signals carry no trade "
@@ -3757,18 +3908,21 @@ def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
     return _execute(user, signal.instrument, side, close_ids=close_ids,
                     signal=signal, qty_override=qty, stop_override=stop,
                     target_override=target, pin_ok=pin_ok, leverage=leverage,
-                    dup_seen=dup_seen)
+                    dup_seen=dup_seen, shown_qty=shown_qty,
+                    shown_raised=shown_raised)
 
 
 def execute_asset_trade(user, inst, side, close_ids=None, qty=None, stop=None,
                         target=None, pin_ok=False, leverage=None,
-                        dup_seen=None) -> dict:
+                        dup_seen=None, shown_qty=None,
+                        shown_raised=None) -> dict:
     """Execute a signal-less LONG/SHORT from an instrument popup."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
     return _execute(user, inst, side, close_ids=close_ids, qty_override=qty,
                     stop_override=stop, target_override=target,
-                    pin_ok=pin_ok, leverage=leverage, dup_seen=dup_seen)
+                    pin_ok=pin_ok, leverage=leverage, dup_seen=dup_seen,
+                    shown_qty=shown_qty, shown_raised=shown_raised)
 
 
 # ── Arming — the moment a chart button can move real funds ──────────────

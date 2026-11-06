@@ -2378,10 +2378,20 @@ def _mission(trade, hand, signal, pcls, now):
         if meta.get("size_source"):
             # "smallest_size" (2026-11-06, manual_trade._smallest_size):
             # the budget sized the ticket to zero and it went at the
-            # smallest size the venue takes.
+            # smallest size — which one, in the send's own words (review:
+            # one step of this platform's on a live venue whose minimum
+            # was not read is not "the smallest size the venue takes").
+            smallest = meta.get("smallest_size")
+            smallest = smallest if isinstance(smallest, dict) else {}
+            words = str(smallest.get("words") or "")
+            if not words:
+                words = ("the smallest size this platform sends"
+                         if smallest.get("source") == "step"
+                         and not getattr(trade, "paper", True)
+                         else "the smallest size the venue takes")
             lines.append({"label": "Size", "ok": True,
                           "t": "yours" if meta["size_source"] == "operator"
-                          else "the smallest size the venue takes"
+                          else words
                           if meta["size_source"] == "smallest_size"
                           else "the risk budget"})
         out["at_entry"] = lines
