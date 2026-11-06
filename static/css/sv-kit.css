@@ -1,0 +1,905 @@
+/* Sauron Vision: the kit (UI plan §7, S1a, 2026-11-06).
+
+   The components on the tokens of sv-tokens.css. Loaded by base.html after
+   every shell sheet it restyles by class (sauron.css, the overlay, the
+   tour, motion, the activity drawer, the Horde, the Council band) and
+   before the phone tier, so a rule here meets the rule it replaces at the
+   same weight and wins by order. It changes how things look, never what
+   they are: no word, no step, no hook a script reads (tests/
+   test_live_hooks_inventory.py), and no money control changes meaning
+   (tests/test_money_controls_look.py). Nothing here is under 11 px.
+
+   /design/kit/ (staff only) shows every component on synthetic content. */
+
+
+/* ══ §8 Motion: nothing moves on a work page unless a value moved ════════
+   ══ or the operator acted ══════════════════════════════════════════════
+
+   Two loops are allowed, both meaningful: the live heartbeat dot (.sv-live
+   -dot, a value's source alive) and the armed pill's beat (real money is
+   armed, sauron.css). Both stop under reduced motion. Every other infinite
+   animation of the shell stops here: the brand eye's float and glow, the
+   news and quote marquees (the wheel over them still moves them, and every
+   quote is in the watchlist and the rail too), the idle Eye's ripples and
+   clouds, Gollum's idle face, the unseen-section dot, the restore tab, the
+   loading dots, the alarm pulses (their state keeps its colour and its
+   words). The Eye still works visibly while Sauron answers (.working):
+   the operator asked. The lock's atmosphere is the lock's. */
+
+@keyframes sv-heartbeat {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .55; }
+}
+.sv-live-dot {
+    display: inline-block; flex: none;
+    width: 6px; height: 6px; border-radius: var(--sv-radius-round);
+    background: var(--sv-eye);
+    animation: sv-heartbeat 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .sv-live-dot { animation: none; }
+}
+
+/* The sidebar's mark: still, and no halo behind it. */
+.brand-eye-wrap::before { animation: none; opacity: 0; }
+.sidebar-brand .brand-eye { animation: none; filter: none; }
+
+/* The marquees stand still; the wheel driver (svWheelMarquee) still moves
+   a strip while the pointer is on it. */
+.ticker-track, .dh-track { animation: none; }
+
+/* The idle Eye (Ask Sauron) and its send button: still until asked. An
+   unread answer keeps its ring, settled once, without the breathing. */
+.se-eye-fab:not(.working),
+.se-eye-fab:not(.working) .se-fab-eye *,
+.se-chat-send .se-send-ripple-1,
+.se-chat-send .se-send-ripple-2,
+.se-chat-send .se-send-play,
+.se-eye-fab.answered-settled .se-fab-unread-ring { animation: none; }
+.se-fab-unread-ring { animation: seUnreadSettle .7s cubic-bezier(.2, .7, .3, 1) backwards; }
+
+/* Gollum's idle face is still; his one-off fidget, when something changed
+   while the operator looked away, stays (.is-fidget). */
+.gollum-fab, .gollum-fab .gl-pupils, .gollum-fab .gl-lids,
+.gollum-fab:hover .gl-ring, .gollum-fab.has-unseen .gl-ring,
+.gollum-dialog .gl-dot { animation: none; }
+
+/* State without a pulse: the colour and the words carry it. */
+.nav-dot,
+.badge-critical,
+.ip-cat .hb-state--red,
+.hb-restore-tab,
+.sv-activity-dot.live,
+.cb-dot.live,
+.hd-light--alarm .hd-light-glyph,
+.sv-loading::after { animation: none; }
+/* The chart's loading dots are inline styles; the words say it loads. */
+.sv-chart-loading-overlay span { animation: none !important; }
+
+
+/* ══ §3.5 Whose money: the world markers ═════════════════════════════════
+   REAL is the only solid red fill on the platform (white on --sv-real,
+   4.94:1, sauron.css paints it), DEMO a gold outline, PAPER a grey one.
+   One chip: Inter 11 px 600, uppercase, .06em, 2 px corners. */
+
+.sv-world {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    line-height: 16px;
+    padding: 0 6px;
+    border-radius: var(--sv-radius-chip);
+}
+.sv-world--demo { color: var(--sv-demo); border-color: var(--sv-demo); }
+.sv-world--paper { color: var(--sv-paper); border-color: var(--sv-paper); }
+
+/* The LIVE label in dense cells is the REAL chip in small. */
+.sv-venue--live {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: var(--sv-radius-chip);
+    line-height: 1.35;
+}
+.ip-cat .ip-pnl .sv-venue {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+
+/* The armed pill: the REAL chip's face; its beat stays (sauron.css). */
+.sv-armed-pill {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+
+/* The ticket's REAL chip (UI plan §10): the chip, at 11 px. */
+.tk-venue {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+    padding: 0 5px;
+}
+
+
+/* ══ §4 Type in the shell: nothing under 11 px ═══════════════════════════
+   Every shell rule that set a size under 11 px (sidebar, topbar and its
+   exchange list, the ticker, the quote band and its cards, the bottom band
+   and its dropdowns, the notifications, the rail, the live-status pill,
+   the user menu, Ask Sauron's panel, Gollum, the banners, the idle lock,
+   the Horde, the Council band, the activity drawer, the tour, the overlay
+   anatomy) meets the micro size here, at its own selector, so it wins by
+   order and keeps the rest of its rule. 39-56 % of the text at 1280 px
+   was under 11 px. A page's own rules are S2's, the ticket and its dialog
+   S2.1's, the close dialog S2.2's, the charts S4's. */
+
+/* the shell sheet: sidebar, topbar, bands, info panel and its dropdowns, rail, popovers, chat, Gollum, banners, idle lock (sauron.css): 112 rules */
+.sidebar-brand .subtitle,
+.nav-section,
+thead th,
+.badge,
+.theme-toggle-btn:hover::after,
+.kbd-section-title,
+.exchange-dropdown-header,
+.ex-flag,
+.ex-state,
+.ex-until,
+.ticker-item .t-badge,
+.ip-restore-pill,
+.ip-cat .ip-label,
+.ip-cat .ip-sub,
+.ip-cat .ip-pnl,
+.ip-cat .ip-pnl-apart,
+.ip-cat .ip-pnl .ip-pnl-note,
+.ip-dd-head,
+.ip-dd-cell,
+.ip-dd-cell .dk,
+.ip-dd-empty,
+.ip-dd-head .sv-live-chip,
+.notif-badge,
+.notif-header,
+.nh-link,
+.nh-link--accent,
+.notif-item .ni-kind,
+.notif-item .ni-time,
+.notif-foot,
+.signals-rail-toggle .sr-label,
+.signals-rail-toggle .sr-count,
+.sr-signal .sr-badge,
+.sr-signal .sr-age,
+.sr-signal .sr-score-num,
+.sr-signal .sr-urg,
+.sr-signal .sr-row3,
+.sr-signal .sr-dir,
+.sr-signal .sr-score,
+.sr-pop-dir,
+.sr-pop-k,
+.sr-pop-btn,
+.dh-pop-cta,
+.tnp-source,
+.tnp-time,
+.tnp-sent,
+.tnp-urgency,
+.tnp-implication,
+.tnp-section,
+.tnp-chip,
+.tnp-keyword,
+.tnp-cta,
+.rail-head .rh-label,
+.rail-head .rh-count,
+.rail-head .rh-chev,
+.wl-spark-empty,
+.wl-chg,
+.wl-name,
+.wl-class,
+.signals-rail:not(.open) .wl-sym,
+.nf-pop-meta,
+.nf-pop-fact,
+.nf-pop-cta,
+.nf-pop-item .nfi-detail,
+.pos-pop-sub,
+.pos-pop-r-cap,
+.pos-pop-money-cap,
+.pos-pop-ledger-cap,
+.pos-pop-mrow .ml,
+.pos-pop-mrow .mn,
+.pos-pop-rung .rl,
+.pos-pop-rung .rn,
+.pos-pop-track-legend,
+.pos-pop-kv .k,
+.pos-pop-why-cap,
+.ticker-news-meta,
+.ticker-news-sent,
+.lsp-head,
+.lsp-age,
+.lsp-empty code,
+.user-menu-trigger .um-caret,
+.um-head .um-role,
+.se-eye-fab::before,
+.se-chat-header,
+.se-chat-header-btn,
+.se-suggest,
+.sv-perf-table thead th,
+.tp-chip,
+.tp-level .lbl,
+.tp-cta,
+.sv-banner-kind,
+.sv-banner-btn,
+.il-standby,
+.il-sub,
+.il-disconnect,
+.il-forgot,
+.sr-taken,
+.sr-pop-taken,
+.sr-pop-taken-head,
+.se-answer .se-md-h2,
+.se-answer .se-md-h3,
+.se-answer .se-md-ul > .se-md-li::before,
+.se-answer .se-md-ol > .se-md-li::before,
+.se-answer .se-md-lang,
+.se-answer .se-md-table th,
+.nf-pop-chip,
+.gollum-count,
+.gollum-dialog .gl-sub,
+.gollum-dialog .gl-whisper,
+.gollum-dialog .gl-kind,
+.gollum-dialog .gl-foot,
+.hb-news-sent-k,
+.hb-news-sent-v small { font-size: var(--sv-fs-micro); }
+
+/* the overlay anatomy: popover rows, chips, ages, info-panel rows, dialog facts (sv-overlay.css): 14 rules */
+.sv-pop-row .lbl,
+.sv-pop-level .lbl,
+.sv-chip,
+.sv-age,
+.ipr-side,
+.ip-dropdown .ip-pos .ipr-pct,
+.ip-dropdown .ip-pos .ipr-qty,
+.ip-dropdown .ip-pos-close,
+.ipr-kind,
+.ip-dd-note,
+.se-bubble-tool,
+.sv-dialog-fact .lbl,
+.se-ctx-k,
+.ask-sauron { font-size: var(--sv-fs-micro); }
+
+/* the tour (sv-tour.css): 2 rules */
+.sv-tour-step,
+.sv-tour-skip { font-size: var(--sv-fs-micro); }
+
+/* the activity drawer (sv-activity.css): 7 rules */
+.sv-activity-tab,
+.sv-activity-badge,
+.sv-activity-title,
+.sv-activity-stamp,
+.sv-activity-chip,
+.sv-act-meta,
+.sv-act-detail { font-size: var(--sv-fs-micro); }
+
+/* the Horde (sv-horde.css): 30 rules */
+.sv-horde-tab,
+.hd-sub,
+.hd-count,
+.hd-lens-btn,
+.hd-chip-btn,
+.hd-stamp,
+.hd-link,
+.hd-sum,
+.hd-sum-btn,
+.hd-cell,
+.hd-chip,
+.hd-failed,
+.hd-note,
+.hd-class-note,
+.hd-captain,
+.hd-expander,
+.hd-today,
+.hd-line,
+.hd-bet,
+.hd-seat,
+.hd-inst-chip,
+.hd-light-glyph,
+.hd-no-venue,
+.hd-straggler,
+.hd-unseated,
+.hd-dossier,
+.hd-dos-sec h4,
+.hd-cmd-cap,
+.hd-btn,
+.hd-phone-cmds .hd-copy { font-size: var(--sv-fs-micro); }
+
+/* the Council band (sv-council-band.css): 25 rules */
+.sv-council-band-tab,
+.sv-council-band-badge,
+.cb-chip,
+.cb-stamp,
+.cb-back,
+.cb-link,
+.cb-tabbtn,
+.cb-label,
+.cb-inline,
+.cb-sub,
+.cb-mono,
+.cb-ring,
+.cb-triad-title,
+.cb-triad-sub,
+.cb-token,
+.cb-voice-meta,
+.cb-card-title,
+.cb-card-line,
+.cb-matrix th,
+.cb-table .cb-seat-mono,
+.cb-table .cb-chair-word,
+.cb-filter,
+.cb-sitting-head,
+.cb-reasons summary,
+.cb-wtable { font-size: var(--sv-fs-micro); }
+
+/* A few shell spans carry their size inline in base.html's markup (a
+   strategy's status in the bottom band's list, the news list, the empty
+   watchlist, the instrument preview's "Loading..."). Only !important
+   reaches an inline style; the markup itself is S1b's to clean. */
+:is(.sidebar, .topbar, .data-headband, .ticker-bar, .info-panel-wrap, .ip-dropdown,
+    .signals-rail, .instrument-preview, .notif-dropdown, .user-menu-dropdown)
+    :is([style*="font-size:8px"], [style*="font-size:8.5px"], [style*="font-size:9px"],
+        [style*="font-size:9.5px"], [style*="font-size:10px"], [style*="font-size:10.5px"],
+        [style*="font-size: 8px"], [style*="font-size: 9px"], [style*="font-size: 10px"]) {
+    font-size: var(--sv-fs-micro) !important;
+}
+
+
+
+/* ══ The shell, calm and opaque (§3.1, §7 Shell) ═════════════════════════
+   The sidebar, the bars and the rail on opaque surfaces with hairlines: no
+   gradient, no blur, no glow behind a number. Words in Inter, numbers in
+   JetBrains Mono; labels in Inter 600 capitals at .06em in ink-3; values
+   in ink-1 (the Eye is never a number). Colours apply in the dark theme;
+   light mode keeps today's (plan §15), and takes the sizes and faces. */
+
+body:not(.light-mode) .sidebar { background: var(--sv-bg-1); border-right-color: var(--sv-line-1); }
+body:not(.light-mode) .sidebar-brand { border-bottom-color: var(--sv-line-1); }
+body:not(.light-mode) .sidebar-brand h1 { text-shadow: none; }
+.sidebar-brand .subtitle,
+.nav-section {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+.nav-link { font-size: var(--sv-fs-base); letter-spacing: 0; border-left-width: 2px; }
+body:not(.light-mode) .nav-link { color: var(--sv-ink-2); }
+body:not(.light-mode) .nav-link:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-line-3); }
+body:not(.light-mode) .nav-link.active { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-eye); }
+/* The unseen-section dot (nav-activity): amber, still. */
+body:not(.light-mode) .nav-dot { background: var(--sv-warn); }
+
+body:not(.light-mode) .topbar {
+    background: var(--sv-bg-1);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    border-bottom-color: var(--sv-line-1);
+}
+body:not(.light-mode) .data-headband {
+    background: var(--sv-bg-1);
+    border-top-color: var(--sv-line-1); border-bottom-color: var(--sv-line-2);
+    box-shadow: none;
+}
+body:not(.light-mode) .ticker-bar {
+    background: var(--sv-bg-1);
+    border-top-color: var(--sv-line-1); border-bottom-color: var(--sv-line-2);
+    box-shadow: none;
+}
+body:not(.light-mode) .info-panel-wrap { background: var(--sv-bg-2); border-top-color: var(--sv-line-2); }
+body:not(.light-mode) .signals-rail { background: var(--sv-bg-1); border-left-color: var(--sv-line-1); }
+body:not(.light-mode) .signals-rail-toggle { background: var(--sv-bg-1); }
+
+/* The quote band: the symbol in Inter 12/600 ink-2, the price in mono ink-1,
+   the change in mono with its sign, up or down. */
+.dh-sym { font-family: var(--sv-font-sans); letter-spacing: .02em; text-shadow: none; }
+body:not(.light-mode) .dh-sym { color: var(--sv-ink-2); }
+.dh-val { font-family: var(--sv-font-mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.dh-chg { font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+body:not(.light-mode) .dh-dot.up,
+body:not(.light-mode) .dh-dot.down { box-shadow: none; }
+body:not(.light-mode) .dh-item { border-right-color: var(--sv-line-1); }
+body:not(.light-mode) a.dh-item:hover { background: var(--sv-bg-3); }
+
+/* The news ticker: words in Inter, the figures in mono, white is ink-1. */
+.ticker-item { font-family: var(--sv-font-sans); }
+.ticker-item .t-price, .ticker-item .t-change { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+body:not(.light-mode) .ticker-item,
+body:not(.light-mode) .ticker-item .t-sym,
+body:not(.light-mode) .ticker-item .t-price { color: var(--sv-ink-1); }
+body:not(.light-mode) .ticker-item { border-right-width: 1px; border-right-color: var(--sv-line-1); }
+.ticker-item .t-badge { font-family: var(--sv-font-sans); border-radius: var(--sv-radius-chip); letter-spacing: var(--sv-track-label); font-weight: 600; }
+/* A kind of item is a neutral chip: blue is no longer a status (§3.6). */
+body:not(.light-mode) .ticker-item .t-badge { background: transparent; color: var(--sv-ink-2); border: 1px solid var(--sv-line-3); }
+
+/* The bottom band: label, value, sub-text (§7 status cell). */
+.ip-cat .ip-label {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+body:not(.light-mode) .ip-cat .ip-label { color: var(--sv-ink-3); }
+/* The band keeps its 60 px: the cell's lines sit tight at 11 px (S1b turns
+   it into the 32 px status bar of single-line cells). */
+.ip-cat { gap: 1px; padding-top: 2px; padding-bottom: 2px; }
+.ip-cat .ip-label, .ip-cat .ip-sub, .ip-cat .ip-pnl, .ip-cat .ip-pnl .sv-venue { line-height: 1.15; }
+body:not(.light-mode) .ip-cat .ip-sub { color: var(--sv-ink-3); }
+body:not(.light-mode) .ip-cat { border-right-color: var(--sv-line-1); }
+body:not(.light-mode) .ip-cat:hover { background: var(--sv-bg-3); }
+.ip-dd-cell .dk { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+.ip-dd-cell .dv { font-family: var(--sv-font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+body:not(.light-mode) .ip-dd-cell .dk { color: var(--sv-ink-3); }
+body:not(.light-mode) .ip-dd-cell .dv { color: var(--sv-ink-1); }
+.ip-dd-head { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+body:not(.light-mode) .ip-dd-head { color: var(--sv-ink-3); border-bottom-color: var(--sv-line-1); }
+
+/* The rail: heads as labels, counts as bubbles. */
+.rail-head .rh-label { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+body:not(.light-mode) .rail-head .rh-label { color: var(--sv-ink-3); }
+body:not(.light-mode) .rail-head .rh-count { background: var(--sv-bg-3); color: var(--sv-ink-1); }
+.wl-sym { font-family: var(--sv-font-mono); font-weight: 500; letter-spacing: 0; }
+body:not(.light-mode) .wl-item { border-bottom-color: var(--sv-line-1); }
+body:not(.light-mode) .wl-item:hover { background: var(--sv-bg-3); transform: none; }
+.sr-signal .sr-sym, .sr-pop-sym { font-family: var(--sv-font-mono); font-weight: 600; letter-spacing: 0; }
+body:not(.light-mode) .sr-signal .sr-sym, body:not(.light-mode) .sr-pop-sym { color: var(--sv-ink-1); }
+/* The quote card's symbol: mono ink-1, not the Eye (a symbol is not live). */
+.dh-pop-title { font-family: var(--sv-font-mono); font-weight: 600; text-shadow: none; }
+body:not(.light-mode) .dh-pop-title { color: var(--sv-ink-1); }
+/* The card's facts: a label and its value never touch. */
+.sr-pop-grid > div { gap: 8px; min-width: 0; }
+.sr-pop-v { min-width: 0; overflow-wrap: anywhere; }
+body:not(.light-mode) .sr-pop-grid > div { border-bottom-color: var(--sv-line-1); }
+/* The watchlist's sparkline: jade when the day is up (coral down stays). */
+.wl-spark svg path { stroke: var(--sv-up); }
+.sr-pop-k, .sr-signal .sr-age {
+    font-family: var(--sv-font-sans); letter-spacing: var(--sv-track-label);
+}
+body:not(.light-mode) .sr-pop-k, body:not(.light-mode) .sr-signal .sr-age { color: var(--sv-ink-3); }
+.sr-pop-v { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+
+/* The user's initials: legible, not green on green. */
+body:not(.light-mode) .um-avatar { background: var(--sv-bg-4); color: var(--sv-ink-1); }
+
+/* A value nobody measured is the em-dash in ink-3, at full strength: dimmed
+   to 65 % it fell under 4.5:1 on the cards. */
+.sv-unknown { opacity: 1; }
+
+
+/* ══ §7 Overlays: one family ═════════════════════════════════════════════
+   Popovers (rail cards, quote cards, the bottom band's dropdowns, menus,
+   hover cards, the notifications, the user menu, the live-status list):
+   bg-2, a line-2 border, 6 px corners, the popover shadow, no glow. Their
+   placement, pinning and dismissal are their scripts', untouched. */
+
+body:not(.light-mode) {
+    --pop-bg: var(--sv-bg-2);
+    --pop-bg-2: var(--sv-bg-3);
+    --pop-border: var(--sv-line-2);
+    --pop-shadow: var(--sv-shadow-pop);
+}
+:root { --pop-radius: var(--sv-radius-card); }
+
+body:not(.light-mode) .sr-popup,
+body:not(.light-mode) .dh-pop,
+body:not(.light-mode) .ip-dropdown,
+body:not(.light-mode) .notif-dropdown,
+body:not(.light-mode) .user-menu-dropdown,
+body:not(.light-mode) .lsp-dropdown,
+body:not(.light-mode) .exchange-dropdown,
+body:not(.light-mode) .ticker-popup,
+body:not(.light-mode) .nf-pop,
+body:not(.light-mode) .pos-pop {
+    background: var(--sv-bg-2);
+    border: 1px solid var(--sv-line-2);
+    box-shadow: var(--sv-shadow-pop);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.sr-popup, .dh-pop, .notif-dropdown, .user-menu-dropdown, .lsp-dropdown,
+.exchange-dropdown, .ticker-popup, .nf-pop, .pos-pop { border-radius: var(--sv-radius-card); }
+.ip-dropdown { border-radius: var(--sv-radius-card) var(--sv-radius-card) 0 0; }
+
+/* The dialog: bg-2, the dialog shadow; its head carries the subject. A REAL
+   or funding dialog (.sv-dialog--danger) carries the REAL red as a 3 px top
+   edge; its title stays ink-1, because coral is a loss, not real money. */
+body:not(.light-mode) .sv-dialog { box-shadow: var(--sv-shadow-dialog); }
+.sv-dialog.sv-dialog--danger { border-top: 3px solid var(--sv-real); }
+body:not(.light-mode) .sv-dialog--danger .sv-dialog-title { color: var(--sv-ink-1); }
+.sv-dialog-title { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+.sv-dialog-fact { font-family: var(--sv-font-mono); }
+.sv-dialog-fact .lbl { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+
+/* The dialog's buttons: Cancel neutral; the confirm neutral-strong (an ink
+   outline), so a SELL is never confirmed in green: the side's colours come
+   with the dialog's own markup (S2.1). A funding confirm keeps coral words. */
+.sv-dialog-btn {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-small);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+    min-height: var(--sv-ctl-md);
+    padding: 0 14px;
+    border-radius: var(--sv-radius-ctl);
+}
+/* :where() keeps these at a class's weight, so the confirm's look below wins. */
+:where(body:not(.light-mode)) .sv-dialog-btn { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .sv-dialog-btn:hover { border-color: var(--sv-line-3); background: var(--sv-bg-4); }
+.sv-dialog-btn.sv-dialog-btn--go {
+    background: transparent;
+    color: var(--sv-ink-1);
+    border: 1.5px solid var(--sv-ink-1);
+}
+.sv-dialog-btn.sv-dialog-btn--go:hover { background: var(--sv-bg-3); }
+.sv-dialog-btn.sv-dialog-btn--go.is-danger { color: var(--sv-down); border-color: var(--sv-down); background: transparent; }
+.sv-dialog-btn.sv-dialog-btn--go.is-danger:hover { background: var(--sv-down-wash); }
+
+/* The menu: 32 px items on bg-2. */
+.sv-menu-item { min-height: var(--sv-row); font-size: var(--sv-fs-base); }
+body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
+
+
+/* ══ §7 Buttons on cards and popovers (the money ones, §10) ══════════════
+   The rail's signal card, the quote cards (bands and watchlist): outlines
+   with the side's colour, never a gradient slab. TAKE TRADE and ADD wear
+   their signal's side (a bearish signal is a SELL); LONG is the BUY look,
+   SHORT the SELL one; PASS is a neutral ghost, since it only dismisses. */
+
+.sr-pop-btn {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+    border-radius: var(--sv-radius-ctl);
+    min-height: var(--sv-ctl-sm);
+}
+/* The plain card button, at a class's weight (:where), so the side looks win. */
+:where(body:not(.light-mode)) .sr-pop-btn { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .sr-pop-btn:hover { background: var(--sv-bg-4); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+.sr-pop-btn.sr-pop-btn-act {
+    background: transparent;
+    color: var(--sv-up);
+    border: 1.5px solid var(--sv-up);
+    border-color: var(--sv-up);
+    box-shadow: none;
+    font-size: var(--sv-fs-small);
+}
+.sr-pop-btn.sr-pop-btn-act:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); box-shadow: none; }
+.sr-pop-btn.sr-pop-btn-short {
+    background: transparent;
+    color: var(--sv-down);
+    border: 1.5px solid var(--sv-down);
+    border-color: var(--sv-down);
+    box-shadow: none;
+    font-size: var(--sv-fs-small);
+}
+.sr-pop-btn.sr-pop-btn-short:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); box-shadow: none; }
+.sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act {
+    color: var(--sv-down);
+    border-color: var(--sv-down);
+}
+.sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+/* ADD TO POSITION: the same side, the words say it is an addition. */
+.sr-pop-btn.sr-pop-btn-act.sr-pop-btn-add { background: transparent; }
+.sr-pop-btn.sr-pop-btn-pass {
+    background: transparent;
+    color: var(--sv-ink-2);
+    border-color: transparent;
+    font-size: var(--sv-fs-small);
+}
+.sr-pop-btn.sr-pop-btn-pass:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); border-color: transparent; }
+
+
+/* ══ §7 Buttons: the kit's variants (on .btn, sauron.css) ════════════════ */
+
+.btn.btn-secondary { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+/* BUY / SELL: only on the actions that open or add to a position. */
+.btn.btn-buy { background: transparent; color: var(--sv-up); border: 1.5px solid var(--sv-up); }
+.btn.btn-buy:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); }
+.btn.btn-sell { background: transparent; color: var(--sv-down); border: 1.5px solid var(--sv-down); }
+.btn.btn-sell:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+/* STOP: the protective actions (CLOSE ALL, all off, the brakes). */
+.btn.btn-stop { background: transparent; color: var(--sv-ink-1); border: 1.5px solid var(--sv-ink-1); }
+.btn.btn-stop::before { content: "■"; position: static; line-height: 1; }
+.btn.btn-stop:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); border-color: var(--sv-ink-1); }
+.btn.btn-icon { width: var(--sv-ctl-sm); min-height: var(--sv-ctl-sm); height: var(--sv-ctl-sm); padding: 0; }
+
+
+/* ══ §7 Chips: five styles instead of ten ════════════════════════════════
+   .sv-chip neutral outline; .sv-world whose money (above); .sv-side up or
+   down text on a 12 % wash, never filled; .sv-state a dot and a word;
+   .sv-count a bubble. Plus .sv-fresh (a price's source and age, §3.7) and
+   .sv-ai (a model). The older chips take the nearest of the five. */
+
+.sv-chip, .sv-side, .sv-state, .sv-ai, .sv-est {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 20px; padding: 0 7px;
+    border-radius: var(--sv-radius-chip);
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1;
+}
+.sv-chip { border: 1px solid var(--sv-line-3); color: var(--sv-ink-2); background: transparent; }
+.sv-chip--bullish, .sv-side--up { color: var(--sv-up); background: color-mix(in srgb, var(--sv-up) 12%, transparent); border-color: transparent; }
+.sv-chip--bearish, .sv-side--down { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); border-color: transparent; }
+.sv-chip--warn { color: var(--sv-warn); border-color: color-mix(in srgb, var(--sv-warn) 55%, transparent); background: transparent; }
+.sv-chip--muted { color: var(--sv-ink-3); border-color: var(--sv-line-2); }
+.sv-state { padding: 0; height: auto; color: var(--sv-ink-1); }
+.sv-state::before {
+    content: ""; width: 8px; height: 8px; border-radius: var(--sv-radius-round);
+    background: currentColor; flex: none;
+}
+.sv-state--on::before { background: var(--sv-eye); }
+.sv-state--off { color: var(--sv-ink-3); }
+.sv-state--off::before { background: transparent; border: 1.5px solid var(--sv-ink-3); box-sizing: border-box; }
+.sv-state--error { color: var(--sv-down); }
+.sv-state--stale, .sv-state--pending { color: var(--sv-warn); }
+.sv-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 6px;
+    border-radius: var(--sv-radius-round);
+    background: var(--sv-bg-3); color: var(--sv-ink-1);
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); font-weight: 500;
+}
+.sv-ai { padding: 0; height: auto; color: var(--sv-ai); text-transform: none; letter-spacing: 0; }
+.sv-ai::before { content: ""; width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ai); }
+.sv-est { border: 1px solid var(--sv-ink-4); color: var(--sv-ink-3); text-transform: none; letter-spacing: 0; height: 18px; }
+
+/* §3.7 Where a price comes from, and how old it is: a 6 px dot, the source
+   in words (Inter 11, ink-2), a middle dot, the age (mono 11, ink-3). */
+.sv-fresh {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2);
+    white-space: nowrap;
+}
+.sv-fresh::before { content: ""; width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ink-2); flex: none; }
+/* A live price's dot is the Eye, still: one heartbeat per page (.sv-live-dot), not one per row. */
+.sv-fresh--live::before { background: var(--sv-eye); }
+.sv-fresh--stale::before { background: var(--sv-warn); }
+.sv-fresh--closed::before { background: transparent; border: 1px solid var(--sv-ink-3); box-sizing: border-box; }
+.sv-fresh--ref::before { border-radius: 0; background: transparent; border: 1px solid var(--sv-ink-3); box-sizing: border-box; }
+.sv-fresh .sv-age, .sv-fresh-age { font-family: var(--sv-font-mono); color: var(--sv-ink-3); }
+.sv-fresh-stale-word { color: var(--sv-warn); }
+.sv-src { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+
+/* The older chips, onto the five. */
+.badge {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+body:not(.light-mode) .badge-bullish { color: var(--sv-up); background: color-mix(in srgb, var(--sv-up) 12%, transparent); }
+body:not(.light-mode) .badge-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); }
+.sr-signal .sr-badge, .sr-pop-dir, .wl-class, .sr-urg, .ipr-side, .tp-chip, .tnp-chip, .tnp-keyword, .nf-pop-chip {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+body:not(.light-mode) .sr-signal .sr-badge-bullish,
+body:not(.light-mode) .sr-pop-dir.sr-pop-dir-bullish { border-color: transparent; }
+body:not(.light-mode) .sr-signal .sr-badge-bearish,
+body:not(.light-mode) .sr-pop-dir.sr-pop-dir-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); border-color: transparent; }
+/* An asset class is a neutral outline (COMMODITY is not red). */
+body:not(.light-mode) .wl-class { color: var(--sv-ink-2); background: transparent; border: 1px solid var(--sv-line-3); }
+/* Counts are bubbles, not alarms: the bell's and the drawer's numbers. */
+body:not(.light-mode) .notif-badge,
+body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: var(--sv-ink-1); font-family: var(--sv-font-mono); }
+
+
+/* ══ §7 Data ═════════════════════════════════════════════════════════════
+   Table heads, number columns, the kit's tables, tiles, key-value grids,
+   P&L cells, meters and sparklines. */
+
+thead th {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    text-transform: uppercase;
+}
+body:not(.light-mode) thead th { color: var(--sv-ink-3); }
+
+/* The platform's shared table (.sv-perf-table, 52 templates) takes the
+   kit's head (Inter 600, uppercase, .06em, ink-3 on bg-2) in place of its
+   own mono head at 1.2 px tracking, and the kit's 8 px cell sides (the
+   spacing scale's 8) in place of 12 (9 on phones): with the head at the
+   11 px floor (9.5 before), the small cards' tables keep their columns
+   whole (/positions/' asset-class table at 1280 px with the rail open,
+   S0's measured guard, with Inter or with a fallback face). (2026-11-06) */
+.sv-perf-table thead th {
+    font-family: var(--sv-font-sans);
+    letter-spacing: var(--sv-track-label);
+}
+.sv-perf-table thead th,
+.sv-perf-table td { padding-left: var(--sv-sp-3); padding-right: var(--sv-sp-3); }
+body:not(.light-mode) .sv-perf-table thead th { background: var(--sv-bg-2); color: var(--sv-ink-3); }
+
+.sv-table { width: 100%; border-collapse: collapse; font-size: var(--sv-fs-base); }
+.sv-table th {
+    position: sticky; top: 0; height: 28px; padding: 0 var(--sv-sp-3);
+    background: var(--sv-bg-2); color: var(--sv-ink-3);
+    border-bottom: 1px solid var(--sv-line-2);
+    text-align: left; white-space: nowrap; z-index: 1;
+}
+.sv-table td { height: var(--sv-row); padding: 0 var(--sv-sp-3); border-bottom: 1px solid var(--sv-line-1); vertical-align: middle; }
+.sv-table tbody tr:hover td { background: var(--sv-bg-3); }
+.sv-table tbody tr.is-selected td { background: var(--sv-bg-4); }
+.sv-table .num { text-align: right; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+.sv-table .sv-sym { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-1); white-space: nowrap; }
+.sv-table .sv-sym small { display: block; font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 400; color: var(--sv-ink-3); }
+.sv-table--compact td { height: var(--sv-row-compact); }
+.sv-table .sv-row--live > td:first-child { box-shadow: inset var(--sv-edge-world) 0 0 var(--sv-real); }
+
+.sv-panel {
+    background: var(--sv-bg-1);
+    border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card);
+}
+.sv-panel--link:hover { border-color: var(--sv-line-3); }
+.sv-panel-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    height: var(--sv-card-head); padding: 0 var(--sv-card-pad);
+    border-bottom: 1px solid var(--sv-line-2);
+}
+.sv-panel-title {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-2);
+}
+.sv-panel-meta { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sv-panel-body { padding: var(--sv-card-pad); }
+.sv-panel-foot { padding: 10px var(--sv-card-pad); border-top: 1px solid var(--sv-line-2); }
+
+.sv-label {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
+}
+.sv-num { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+
+.sv-kpi {
+    background: var(--sv-bg-1); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); padding: 10px 12px; min-width: 0;
+}
+.sv-kpi-value {
+    margin-top: 4px;
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-figure); font-weight: 500;
+    line-height: var(--sv-lh-figure); letter-spacing: var(--sv-track-figure);
+    font-variant-numeric: tabular-nums; color: var(--sv-ink-1);
+    white-space: nowrap;
+}
+.sv-kpi-value.up, .sv-kv dd.up { color: var(--sv-up); }
+.sv-kpi-value.down, .sv-kv dd.down { color: var(--sv-down); }
+.sv-kpi-sub { margin-top: 2px; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sv-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sv-gutter); }
+
+.sv-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0; }
+.sv-kv--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sv-kv dt { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3); }
+.sv-kv dd { margin: 2px 0 0; font-family: var(--sv-font-mono); font-size: var(--sv-fs-base); color: var(--sv-ink-1); font-variant-numeric: tabular-nums; }
+
+.sv-pnl { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.sv-pnl-value { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; color: var(--sv-ink-2); }
+.sv-pnl-value.up { color: var(--sv-up); }
+.sv-pnl-value.down { color: var(--sv-down); }
+.sv-pnl-src { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
+
+/* The score meter: a 4 px bar on bg-3, filled in ink-2 (sv-overlay.css). */
+.sv-meter-track { height: 4px; background: var(--sv-bg-3); border-radius: var(--sv-radius-chip); }
+.sv-meter-fill { background: var(--sv-ink-2); border-radius: var(--sv-radius-chip); }
+.sv-meter-num { font-family: var(--sv-font-mono); font-size: var(--sv-fs-small); }
+
+/* The sparkline: 1.5 px in up or down by the period's sign, no glow. */
+.sv-spark { display: block; width: 100%; height: 28px; }
+.sv-spark path { fill: none; stroke: var(--sv-ink-2); stroke-width: 1.5; }
+.sv-spark--up path { stroke: var(--sv-up); }
+.sv-spark--down path { stroke: var(--sv-down); }
+body:not(.light-mode) .oc-sparkline path,
+body:not(.light-mode) .pop-spark svg path { filter: none; }
+
+/* Notices: info, warn and danger in one shape, with a title and words. */
+.sv-notice {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 14px; border-radius: var(--sv-radius-ctl);
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    box-shadow: inset 3px 0 0 var(--sv-ink-3);
+    color: var(--sv-ink-1); font-size: var(--sv-fs-base);
+}
+.sv-notice-title { font-weight: 600; }
+.sv-notice-icon { flex: none; font-weight: 600; color: var(--sv-ink-2); }
+.sv-notice--warn { box-shadow: inset 3px 0 0 var(--sv-warn); background: color-mix(in srgb, var(--sv-warn) 8%, var(--sv-bg-2)); }
+.sv-notice--warn .sv-notice-icon, .sv-notice--warn .sv-notice-title { color: var(--sv-warn); }
+.sv-notice--danger { box-shadow: inset 3px 0 0 var(--sv-down); background: color-mix(in srgb, var(--sv-down) 7%, var(--sv-bg-2)); }
+.sv-notice--danger .sv-notice-icon, .sv-notice--danger .sv-notice-title { color: var(--sv-down); }
+
+/* The empty state: the faint Eye, one sentence, one action. */
+.sv-empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 16px; text-align: center; color: var(--sv-ink-2); }
+.sv-empty-state svg { width: 48px; height: 48px; color: var(--sv-eye); opacity: .06; }
+.sv-empty-state p { max-width: var(--sv-measure); }
+
+
+/* ══ §7 Controls ═════════════════════════════════════════════════════════ */
+
+.sv-input {
+    height: var(--sv-ctl-md); padding: 0 10px; width: 100%;
+    background: var(--sv-bg-0); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: var(--sv-fs-base);
+}
+.sv-input--num { font-family: var(--sv-font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.sv-input::placeholder { color: var(--sv-ink-4); font-style: normal; }
+.sv-input:focus { outline: 2px solid var(--sv-eye); outline-offset: 2px; border-color: var(--sv-line-3); box-shadow: none; }
+.sv-unit { margin-left: 6px; font-size: var(--sv-fs-small); color: var(--sv-ink-3); }
+/* The PIN field: a password in mono at .3em; its label says what it unlocks. */
+.sv-pin-field { font-family: var(--sv-font-mono); letter-spacing: .3em; text-align: left; }
+
+/* Fields across the shell: the well, the line, the Eye's ring on focus. */
+body:not(.light-mode) :is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select) {
+    background-color: var(--sv-bg-0); border-color: var(--sv-line-2); color: var(--sv-ink-1);
+}
+:is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select):focus {
+    border-color: var(--sv-line-3);
+    box-shadow: 0 0 0 2px var(--sv-bg-0), 0 0 0 4px var(--sv-eye);
+}
+:is(.form-input, .input, input, textarea)::placeholder { color: var(--sv-ink-4); font-style: normal; }
+
+/* The focus ring: 2 px of the Eye at 2 px, on everything that takes focus. */
+:is(a, button, [tabindex], summary, .btn):focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+
+/* Check and radio: 16 px; checked takes the Eye. */
+input[type=checkbox], input[type=radio] { accent-color: var(--sv-eye); }
+
+.sv-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--sv-fs-base); color: var(--sv-ink-2); }
+.sv-toggle-track { position: relative; width: 28px; height: 16px; border-radius: var(--sv-radius-round); background: var(--sv-bg-4); border: 1px solid var(--sv-line-3); transition: background var(--sv-dur-hover) var(--sv-ease); }
+.sv-toggle-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: var(--sv-radius-round); background: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
+.sv-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sv-toggle input:checked + .sv-toggle-track { background: color-mix(in srgb, var(--sv-eye) 22%, var(--sv-bg-3)); border-color: var(--sv-eye); }
+.sv-toggle input:checked + .sv-toggle-track::after { transform: translateX(12px); background: var(--sv-eye); }
+.sv-toggle input:focus-visible + .sv-toggle-track { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+
+.sv-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--sv-line-2); }
+.sv-tab {
+    height: var(--sv-ctl-md); padding: 0 12px; background: transparent; border: 0;
+    color: var(--sv-ink-2); font-family: var(--sv-font-sans); font-size: var(--sv-fs-base); font-weight: 500;
+    box-shadow: inset 0 -2px 0 transparent; cursor: pointer;
+}
+.sv-tab:hover { color: var(--sv-ink-1); }
+.sv-tab.is-active, .sv-tab[aria-selected="true"] { color: var(--sv-ink-1); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+
+.sv-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--sv-bg-0); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl); }
+.sv-seg-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 10px; border: 0; border-radius: 3px; background: transparent;
+    color: var(--sv-ink-2); font-family: var(--sv-font-mono); font-size: var(--sv-fs-small); cursor: pointer;
+}
+.sv-seg-btn.is-active, .sv-seg-btn[aria-pressed="true"] { background: var(--sv-bg-3); color: var(--sv-ink-1); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+
+.sv-popover {
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+    width: 360px; max-width: 100%; display: flex; flex-direction: column;
+}
+.sv-popover--sm { width: 320px; }
+.sv-popover--lg { width: 420px; }
+.sv-popover-head { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--sv-line-2); font-weight: 600; }
+.sv-popover-body { padding: 12px; overflow-y: auto; }
+.sv-popover-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--sv-line-2); }
+
+
+/* ══ §8 The price flash: a background wash, 600 ms, never the text ══════ */
+
+.sv-flash { animation-duration: 600ms; }
+@keyframes sv-flash-up {
+    0%   { background-color: var(--sv-up-wash); }
+    100% { background-color: transparent; }
+}
+@keyframes sv-flash-down {
+    0%   { background-color: var(--sv-down-wash); }
+    100% { background-color: transparent; }
+}
+@keyframes sv-flash-same {
+    0%   { background-color: color-mix(in srgb, var(--sv-ink-2) 14%, transparent); }
+    100% { background-color: transparent; }
+}

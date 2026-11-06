@@ -1,0 +1,208 @@
+/* Sauron Vision: the design tokens (UI plan S1a, 2026-11-06).
+
+   One sheet for the palette, the faces, the type scale and its desktop
+   tiers, spacing, shape and motion. The operator approved the look on
+   2026-11-06 from the preview ("Magnifique, attaque"): Bloomberg's
+   discipline and TradingView's calm, in Sauron's identity, dark, desktop
+   first. Loaded by base.html before sauron.css, whose old names
+   (--bg-void, --text-muted, --accent-red, --font-mono…) now read these.
+   The components that use them live in sv-kit.css.
+
+   Rules the palette keeps (plan §2.2, §3.9):
+     - surfaces are opaque; hierarchy is brightness, not colour;
+     - the Eye's green marks what is live and selected, and nothing else:
+       never a number, a button fill, body or link text;
+     - jade is up, gain, long, buy; coral is down, loss, short, sell (and
+       errors, with an icon and words); zero is ink-2, unknown the em-dash;
+     - --sv-real is the only solid red fill on the platform (REAL money);
+       DEMO is a gold outline, PAPER a grey one;
+     - colour never works alone: a sign and an arrow, a word, a title;
+     - every text role meets 4.5:1 on every surface (tests/test_design_tokens).
+
+   Light mode is frozen at today's colours (plan §15, decision 3): the
+   block at the end maps every colour token onto today's light palette,
+   so a kit component under body.light-mode draws in it. */
+
+:root {
+    /* ── §3.1 Surfaces and lines (all opaque) ── */
+    --sv-bg-0: #070A09;      /* the void: page, chart canvas, input wells */
+    --sv-bg-1: #0C1110;      /* cards, panels, sidebar, rail, table body */
+    --sv-bg-2: #121918;      /* raised: popovers, dialogs, sticky heads, toolbars */
+    --sv-bg-3: #182120;      /* controls, row hover */
+    --sv-bg-4: #1F2A28;      /* selected row, pressed control */
+    --sv-line-1: #1B2422;    /* hairlines between rows */
+    --sv-line-2: #26322F;    /* card and input borders */
+    --sv-line-3: #36443F;    /* strong borders, hover borders */
+
+    /* ── §3.2 Ink: brightness, not colour, for hierarchy ── */
+    --sv-ink-1: #E9EFED;     /* values, primary text */
+    --sv-ink-2: #B4C0BC;     /* secondary text; zero and unchanged */
+    --sv-ink-3: #8A9894;     /* labels, captions, axis text (6.3:1 on bg-1) */
+    --sv-ink-4: #59655F;     /* disabled and placeholder only; never information */
+
+    /* ── §3.3 The Eye: live, selected, focused, Sauron's mark ── */
+    --sv-eye: #00E868;
+
+    /* ── §3.4 Market polarity ── */
+    --sv-up: #24B582;        /* jade: gains, LONG/BUY text and outlines */
+    --sv-down: #FF6B6E;      /* coral: losses, SHORT/SELL text and outlines */
+    --sv-up-fill: #1FA374;   /* up candles, bars, volume (at 35 %) */
+    --sv-down-fill: #E5484D; /* down candles, bars, volume (at 35 %) */
+    --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
+    --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+
+    /* ── §3.5 Whose money (the approved convention of 2026-09-30) ── */
+    --sv-real: #CC3A40;      /* the only solid red fill: REAL chip, armed pill, row edge */
+    --sv-real-ink: #FFFFFF;  /* white on it: 4.94:1 */
+    --sv-demo: #D6BC5E;      /* gold outline: a broker's demo account */
+    --sv-paper: var(--sv-ink-3); /* grey outline: Sauron's simulator */
+
+    /* ── §3.6 Status ── */
+    --sv-warn: #F29B38;      /* warning, stale: a box with ⚠ and a title, or a dot with words */
+    --sv-danger: var(--sv-down);
+    --sv-ai: #A48BFF;        /* a model wrote it or spends it */
+
+    /* ── §3.8 Charts: categorical slots (never up/down meaning) and chrome ── */
+    --sv-cat-1: #3987E5;
+    --sv-cat-2: #D95926;
+    --sv-cat-3: #9085E9;
+    --sv-cat-4: #C98500;
+    --sv-cat-5: #D55181;
+    --sv-grid: color-mix(in srgb, var(--sv-ink-1) 5%, transparent);
+
+    /* ── §4.1 Faces (Google Fonts only; base.html links them) ── */
+    --sv-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --sv-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sv-font-brand: "Orbitron", "Inter", sans-serif;   /* the wordmark only (a subset) */
+
+    /* ── §4.3 Type scale, desktop tier D1/D2 (1280-1679 px) ── */
+    --sv-fs-micro: 11px;     /* uppercase labels, axis, ages */
+    --sv-fs-small: 12px;     /* secondary, chips, table heads */
+    --sv-fs-base: 13px;      /* body, cells, controls */
+    --sv-fs-lead: 15px;      /* card values, dialog text */
+    --sv-fs-title: 18px;     /* page and section titles */
+    --sv-fs-figure: 20px;    /* KPI tile values */
+    --sv-fs-hero: 28px;      /* portfolio value, instrument price */
+    --sv-body-weight: 400;
+    --sv-figure-weight: 500;   /* data figures: KPI values, hero, big numbers */
+    --sv-lh-text: 1.45;
+    --sv-lh-cell: 1.25;
+    --sv-lh-title: 1.2;
+    --sv-lh-figure: 1.1;
+    --sv-track-label: .06em;   /* labels, table heads, card titles: Inter 600, uppercase */
+    --sv-track-button: .04em;  /* buttons: Inter 600, uppercase */
+    --sv-track-figure: -.01em; /* hero figures */
+    --sv-measure: 72ch;        /* prose stops here; data surfaces do not */
+
+    /* ── §5 Density, spacing, shape ── */
+    --sv-sp-0: 2px;
+    --sv-sp-1: 4px;
+    --sv-sp-2: 6px;
+    --sv-sp-3: 8px;
+    --sv-sp-4: 12px;
+    --sv-sp-5: 16px;
+    --sv-sp-6: 20px;
+    --sv-sp-7: 24px;
+    --sv-sp-8: 32px;
+    --sv-sp-9: 40px;
+    --sv-sp-10: 48px;
+    --sv-row-compact: 28px;
+    --sv-row: 32px;
+    --sv-row-2: 44px;
+    --sv-row-touch: 44px;
+    --sv-ctl-sm: 28px;
+    --sv-ctl-md: 32px;
+    --sv-ctl-lg: 40px;
+    --sv-ctl-touch: 44px;
+    --sv-card-pad: 16px;
+    --sv-card-pad-compact: 12px;
+    --sv-card-head: 40px;
+    --sv-gutter: 12px;
+    --sv-radius-chip: 2px;
+    --sv-radius-ctl: 4px;
+    --sv-radius-card: 6px;
+    --sv-radius-round: 999px;  /* dots and count bubbles only */
+    --sv-edge-world: 3px;      /* the REAL edge on a row */
+    --sv-shadow-pop: 0 8px 24px rgba(0, 0, 0, .45);
+    --sv-shadow-dialog: 0 24px 64px rgba(0, 0, 0, .6);
+
+    /* ── §8 Motion ── */
+    --sv-dur-press: 80ms;
+    --sv-dur-hover: 140ms;
+    --sv-dur-drawer: 200ms;
+    --sv-ease: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* ── §4.3 The desktop tiers: every component scales with no page work ── */
+@media (min-width: 1680px) {
+    :root {
+        --sv-fs-micro: 11px;
+        --sv-fs-small: 12px;
+        --sv-fs-base: 14px;
+        --sv-fs-lead: 16px;
+        --sv-fs-title: 19px;
+        --sv-fs-figure: 22px;
+        --sv-fs-hero: 32px;
+        --sv-gutter: 16px;
+    }
+}
+@media (min-width: 2200px) {
+    :root {
+        --sv-fs-micro: 12px;
+        --sv-fs-small: 13px;
+        --sv-fs-base: 15px;
+        --sv-fs-lead: 17px;
+        --sv-fs-title: 20px;
+        --sv-fs-figure: 24px;
+        --sv-fs-hero: 36px;
+        --sv-gutter: 20px;
+    }
+}
+/* Phones: inputs stay at 16 px (sauron.css, the iOS focus zoom). */
+@media (max-width: 768px) {
+    :root {
+        --sv-fs-micro: 11px;
+        --sv-fs-small: 12px;
+        --sv-fs-base: 14px;
+        --sv-fs-lead: 15px;
+        --sv-fs-title: 17px;
+        --sv-fs-figure: 20px;
+        --sv-fs-hero: 26px;
+        --sv-gutter: 12px;
+    }
+}
+
+/* ── Light mode, frozen at today's colours (2026-11-06) ──
+   Every colour token takes the light palette as sauron.css's light block
+   has it today, so what the kit draws under body.light-mode stays in that
+   palette: .up is today's light accent, the REAL fill today's red. Light
+   mode gets no polish here (plan §15); a light kit would be its own stage. */
+body.light-mode {
+    --sv-bg-0: #f0f2f0;
+    --sv-bg-1: #ffffff;
+    --sv-bg-2: #e8ece8;
+    --sv-bg-3: #f5f8f5;
+    --sv-bg-4: #dfe5df;
+    --sv-line-1: #c0d0c0;
+    --sv-line-2: #c0d0c0;
+    --sv-line-3: #a0c0a0;
+    --sv-ink-1: #1a2a1a;
+    --sv-ink-2: #4a6a4a;
+    --sv-ink-3: #8aaa8a;
+    --sv-ink-4: #8aaa8a;
+    --sv-eye: #00994d;
+    --sv-up: #00994d;
+    --sv-down: #e83030;
+    --sv-up-fill: #00994d;
+    --sv-down-fill: #e83030;
+    --sv-real: #e83030;
+    --sv-real-ink: #ffffff;
+    --sv-demo: #8a6a00;
+    --sv-warn: #d89020;
+    --sv-ai: #8840d0;
+    --sv-cat-1: #1f6fb2;
+    --sv-cat-2: #b8501e;
+    --sv-cat-3: #6a5cc8;
+    --sv-cat-4: #8a6a00;
+    --sv-cat-5: #b03a68;
+}

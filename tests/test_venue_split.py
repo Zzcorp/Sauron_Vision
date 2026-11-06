@@ -161,8 +161,14 @@ class TheVenueColourIsSaidOnceTests(SimpleTestCase):
                 ).read_text(encoding="utf-8")
 
     def test_red_is_live_and_paper_is_muted(self):
+        # Updated deliberately (2026-11-06, UI plan S1a §3.5 and §10): LIVE
+        # is still the red marker, now the REAL red (--sv-real) as the small
+        # REAL chip, white on it; --accent-red is the loss coral. Paper is
+        # still muted.
         css = self._css()
-        self.assertIn(".sv-venue--live { color: var(--accent-red); }", css)
+        live = css[css.index(".sv-venue--live {"):]
+        live = live[:live.index("}")]
+        self.assertIn("var(--sv-real", live)
         self.assertIn(".sv-venue--paper { color: var(--text-muted); }", css)
 
     def test_the_marker_does_not_fill_a_background(self):
@@ -170,9 +176,19 @@ class TheVenueColourIsSaidOnceTests(SimpleTestCase):
         a row tinted by venue shouts across the whole card, which is the
         'paper position dressed as an alert' the original comment warns
         against."""
+        # Updated deliberately (2026-11-06, UI plan S1a §3.5): the marker
+        # itself and the paper and demo labels still fill nothing, and no
+        # row is tinted; the LIVE label alone is filled, and only in the
+        # REAL red, the platform's one solid red, as the world chip is.
         css = self._css()
         block = css[css.index(".sv-venue {"):css.index(".sv-venue--paper") + 120]
-        self.assertNotIn("background", block)
+        live = block[block.index(".sv-venue--live {"):]
+        live = live[:live.index("}") + 1]
+        rest = block.replace(live, "")
+        rest = re.sub(r"/\*.*?\*/", "", rest, flags=re.S)
+        self.assertNotIn("background", rest)
+        fills = re.findall(r"background[^;]*;", live)
+        self.assertEqual(fills, ["background: var(--sv-real, transparent);"])
 
     def test_the_convention_it_extends_is_still_there(self):
         """If the rule this was promoted FROM is ever deleted, the promotion

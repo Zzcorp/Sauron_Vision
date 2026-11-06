@@ -859,7 +859,9 @@ class ThePhoneToolbarMeasuredTests(TestCase):
     widths (2026-11-01): the page the test client renders, its stylesheets
     read from static/, its scripts dropped and no web font, so the labels
     are drawn in the fallback monospace, wider than Share Tech Mono (the
-    harder case: about 0.6 em a character against 0.54).
+    harder case: about 0.6 em a character against 0.54). The number face
+    is JetBrains Mono since the UI plan's S1a (2026-11-06), 0.6 em a
+    character: the width measured here, so the expectation is unchanged.
 
     The ten candle sizes and their name keep one row from a 360 px phone
     up, and nothing runs past the screen. With 5 px of air in each button

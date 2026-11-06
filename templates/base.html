@@ -58,7 +58,9 @@
     <meta name="twitter:image" content="{% static_abs 'logo/og-card.png' %}">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    {# The faces (UI plan §4.1, S1a, 2026-11-06): Inter for words, JetBrains Mono for numbers, and Orbitron for the wordmark only, as a subset of its own letters. Google Fonts only. #}
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&amp;family=JetBrains+Mono:wght@400..700&amp;display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&amp;text=SAURON%20VISION&amp;display=swap" rel="stylesheet">
 
 
 
@@ -77,6 +79,8 @@
     gesture from arriving.
     {% endcomment %}
     <script>window.SV_HOVER_BEAT_MS = 450;</script>
+    {# The design tokens (UI plan S1a, 2026-11-06), before sauron.css, whose old names read them. #}
+    <link rel="stylesheet" href="{% static 'css/sv-tokens.css' %}">
     <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
     {% comment %} The overlay system loads after sauron.css: it re-points the older
        hand-picked z-indexes onto one ladder, and that has to win. {% endcomment %}
@@ -110,6 +114,8 @@
     {# THE COUNCIL BAND (2026-10-22): Sauron's voices on the right edge, staff only. After the Horde, whose right edge an open band pushes; before the phone tier, whose rail line hides it. #}
     <link rel="stylesheet" href="{% static 'css/sv-council-band.css' %}">
     <script src="{% static 'js/sv-council-band.js' %}" defer></script>
+    {# The kit (UI plan S1a, 2026-11-06): the components on the tokens, and the calm of a work page. After every shell sheet it restyles by class, before the phone tier. #}
+    <link rel="stylesheet" href="{% static 'css/sv-kit.css' %}">
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
@@ -3472,24 +3478,24 @@
     function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
     resize(); window.addEventListener('resize', resize);
 
-    /* ── Ticker data pool for particle labels ─────────────────── */
-    var TICKERS = [
-        {sym:'BTC',base:67500},{sym:'ETH',base:3420},{sym:'SOL',base:178},
-        {sym:'AAPL',base:192},{sym:'TSLA',base:248},{sym:'NVDA',base:880},
-        {sym:'MSFT',base:425},{sym:'GOOG',base:176},{sym:'AMZN',base:185},
-        {sym:'META',base:510},{sym:'XAU',base:2340},{sym:'EUR/USD',base:1.085},
-        {sym:'GBP/USD',base:1.268},{sym:'JPY',base:154.2},{sym:'SPX',base:5210},
-        {sym:'NAS100',base:18350},{sym:'BNB',base:605},{sym:'XRP',base:0.62},
-        {sym:'DOGE',base:0.165},{sym:'ADA',base:0.48},{sym:'DOT',base:7.8},
-        {sym:'CL',base:78.5},{sym:'NG',base:2.15},{sym:'SI',base:28.4}
-    ];
-    function tickerPrice(t, time) {
-        var swing = t.base * 0.03;
-        return t.base + Math.sin(time * 0.0007 + t.base) * swing
-            + Math.cos(time * 0.0013 + t.sym.length) * swing * 0.5;
+    /* THE AMBIENT LOOPS START ONLY WHERE THEY ARE SEEN (UI plan S1a,
+       2026-11-06). On a work page sauron.css does not display the embers,
+       the globe-eye, the circuits or their glow, and a loop that paints
+       what nobody sees still costs a frame every 16 ms. So each loop runs
+       only when its layer is displayed and the browser was not asked to
+       reduce motion; otherwise it returns before scheduling a frame. The
+       clock at the end of this script runs either way. */
+    function ambientShown(el) {
+        if (!el) return false;
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+        return getComputedStyle(el).display !== 'none';
     }
+    var embersOn = ambientShown(canvas);
 
-    /* ── Embers & Ash particle system ─────────────────────────── */
+    /* ── Embers & Ash particle system ─────────────────────────────
+       The embers no longer carry ticker labels and made-up prices (UI
+       plan S1a, 2026-11-06): a moving fake price has no place on a
+       trading screen, even behind glass. */
     var PARTICLE_COUNT = 240;
     var ASH_COUNT = 50;
     var particles = [];
@@ -3510,12 +3516,6 @@
             this.hasTail = this.size > 1.0 && Math.random() < 0.4;
             this.trail = [];
             this.trailMax = this.hasTail ? (8 + Math.floor(Math.random() * 10)) : 0;
-            /* Ticker label — ~30% of particles get one */
-            this.ticker = null;
-            if (this.size > 1.4 && Math.random() < 0.35) {
-                this.ticker = TICKERS[Math.floor(Math.random() * TICKERS.length)];
-                this.pricePhase = Math.random() * 10000;
-            }
         }
         update() {
             if (this.hasTail) {
@@ -3530,7 +3530,7 @@
                 this.spawn();
             }
         }
-        draw(now) {
+        draw() {
             var a = this.alpha * (0.6 + 0.4 * Math.sin(this.pulse));
             /* Fading tail — oldest = faintest */
             if (this.hasTail && this.trail.length > 1) {
@@ -3557,18 +3557,6 @@
             /* Core */
             ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(0,232,104,' + a.toFixed(4) + ')'; ctx.fill();
-            /* Ticker label */
-            if (this.ticker) {
-                var price = tickerPrice(this.ticker, now + this.pricePhase);
-                var decimals = this.ticker.base >= 100 ? 1 : this.ticker.base >= 1 ? 2 : 4;
-                var labelA = a * 0.7;
-                ctx.font = '600 9px "Share Tech Mono", monospace';
-                ctx.fillStyle = 'rgba(0,232,104,' + labelA.toFixed(4) + ')';
-                ctx.fillText(this.ticker.sym, this.x + this.size + 4, this.y - 3);
-                ctx.font = '8px "Share Tech Mono", monospace';
-                ctx.fillStyle = 'rgba(218,240,230,' + (labelA * 0.8).toFixed(4) + ')';
-                ctx.fillText(price.toFixed(decimals), this.x + this.size + 4, this.y + 8);
-            }
         }
     }
 
@@ -3615,10 +3603,10 @@
     }
 
     function animate() {
-        var now = performance.now();
+        if (!embersOn) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ashes.forEach(function(a) { a.update(); a.draw(); });
-        particles.forEach(function(p) { p.update(); p.draw(now); });
+        particles.forEach(function(p) { p.update(); p.draw(); });
         requestAnimationFrame(animate);
     }
     animate();
@@ -3634,6 +3622,7 @@
        striations, and the traces detached from the lid. The two layers have to
        travel together or they must not share coordinates at all. */
     var circuits = document.querySelector('.globe-circuits-bg');
+    var parallaxOn = ambientShown(globe) || ambientShown(circuits) || ambientShown(eyeShadow);
     /* Smoothed (lerped) target so the eye eases toward the cursor instead
        of jittering frame-to-frame */
     var pTargetX = 0, pTargetY = 0, pCurX = 0, pCurY = 0;
@@ -3644,6 +3633,7 @@
         pTargetY = (e.clientY / h - 0.5) * 2;
     });
     (function loop() {
+        if (!parallaxOn) return;
         pCurX += (pTargetX - pCurX) * 0.08;
         pCurY += (pTargetY - pCurY) * 0.08;
         if (globe || circuits) {
@@ -3681,6 +3671,10 @@
 (function(){
     var c = document.getElementById('caustics-canvas');
     if (!c) return;
+    /* Not displayed on a work page, or reduced motion asked: no loop
+       (UI plan S1a, 2026-11-06; the same guard as the embers'). */
+    if ((window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+        || getComputedStyle(c).display === 'none') return;
     var gl = c.getContext('2d');
     function resize(){ c.width = window.innerWidth; c.height = window.innerHeight; }
     resize(); window.addEventListener('resize', resize);

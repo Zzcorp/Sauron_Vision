@@ -240,18 +240,36 @@ class TheTelegramTests(TestCase):
 class TheStyleTests(SimpleTestCase):
 
     def test_real_money_is_the_one_solid_red_fill(self):
+        # Updated deliberately (2026-11-06, UI plan S1a §3.5 and §3.10): the
+        # REAL family reads --sv-real by name, #CC3A40 (white on it 4.94:1;
+        # today's #E83030 gave 4.29, under 4.5 for an 11 px chip), because
+        # --accent-red is the loss coral now. Still the one solid red fill,
+        # demo and paper still unfilled outlines, the row edge still a 3 px
+        # inset stripe; the fallback is the old red, for a page without the
+        # token sheet. tests/test_design_tokens.py pins that no other rule
+        # paints --sv-real.
         css = (BASE / "static" / "css" / "sauron.css").read_text(encoding="utf-8")
         live = css[css.index(".sv-world--live {"):]
         live = live[:live.index("}")]
-        self.assertIn("background: var(--accent-red)", live)
+        self.assertIn("background: var(--sv-real, var(--accent-red))", live)
         for key in (".sv-world--demo {", ".sv-world--paper {"):
             rule = css[css.index(key):]
             self.assertIn("background: transparent", rule[:rule.index("}")])
-        self.assertIn("inset 3px 0 0 var(--accent-red)", css)
+        self.assertIn("inset 3px 0 0 var(--sv-real, var(--accent-red))", css)
+        tokens = (BASE / "static" / "css" / "sv-tokens.css").read_text(encoding="utf-8")
+        self.assertIn("--sv-real: #CC3A40;", tokens)
+        self.assertIn("--sv-real-ink: #FFFFFF;", tokens)
 
     def test_the_old_label_is_untouched(self):
+        # Updated deliberately (2026-11-06, UI plan S1a §3.5 and §10): the
+        # LIVE label is the REAL chip in small, white on --sv-real. The red
+        # word it was would be coral now, the colour of a loss, and the REAL
+        # red as text is 3.85:1, under 4.5. The paper label is untouched.
         css = (BASE / "static" / "css" / "sauron.css").read_text(encoding="utf-8")
-        self.assertIn(".sv-venue--live { color: var(--accent-red); }", css)
+        live = css[css.index(".sv-venue--live {"):]
+        live = live[:live.index("}")]
+        self.assertIn("color: var(--sv-real-ink, var(--accent-red));", live)
+        self.assertIn("background: var(--sv-real, transparent);", live)
         self.assertIn(".sv-venue--paper { color: var(--text-muted); }", css)
 
     def test_the_armed_pill_respects_reduced_motion(self):
