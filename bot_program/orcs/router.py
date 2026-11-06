@@ -38,7 +38,9 @@ that states no money world, route as paper (§4 Q6).
               a stormy day): h0, and the boundary probe when `score` is
               within BAND_HYSTERESIS of 30, 55 or 75, on the rung across
               that boundary after the map, dropped when it is the wake's
-              own answering rung. Each {kind, rung, would_rung, boundary}
+              own answering rung. Each {kind, rung, would_rung, boundary}.
+              probes.due sends a boundary probe only beside a wake this
+              route's own rung answered (2026-11-06, completing O2b)
   twin        r5 answers, so its r4 blind twin runs beside it (B.10)
 
 The Fable gate (B.9) holds when every clause does. `gate` is the caller's

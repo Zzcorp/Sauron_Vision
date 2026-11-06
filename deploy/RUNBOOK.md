@@ -2015,7 +2015,11 @@ Which, beside paper and demo wakes only: h0 on calm and eventful days
 (none on a stormy day), and the rung across a band boundary when the
 wake's score sits within 5 of 30, 55 or 75 (for example r1 beside an r0
 wake at 27), one effort per model until the smoke's PASS, as for a wake.
-A probe sends no fallback: a refused answer is kept as invalid.
+A boundary pair compares the two rungs on either side of its boundary, so
+a boundary probe goes only beside a wake answered on its own route's rung:
+while the router's switch is OFF, r0 answers every wake, and only a wake
+whose route answers on r0 too (a routine wake near 30, for example) gets
+one. A probe sends no fallback: a refused answer is kept as invalid.
 
 When: `worker-orc` sends them after its wakes, last of all: while a
 real-money wake waits for its call, none is sent. A probe goes within 15

@@ -20,7 +20,11 @@ none. Nothing here turns a switch on for the operator.
   none (read again at the reservation and at the gateway)
 - which: a paper wake on a calm day at score 27 calls h0 and r1 (Sonnet's
   PASS recorded); the same wake on a stormy day calls neither; a
-  real-money wake calls none; the weather's `probes` binds (B.8a)
+  real-money wake calls none; the weather's `probes` binds (B.8a); a
+  boundary pair compares the two rungs its boundary parts (2026-11-06,
+  completing O2b): a boundary probe goes only beside a wake its route's
+  own rung answered, so with the router's switch OFF wakes routed r1, r3
+  or r4 get h0 alone
 - nowhere but OrcTierGrade and the ledger: no slot key, no PS block of the
   next wake, no journal entry, plan, intent, note, card line or counter
 - the caps: the 7th boundary probe of a user in a day is refused, h0's cap
@@ -380,6 +384,70 @@ class WhichProbesTests(_Probed):
         self.assert_one_call()
         self.assertEqual(self.requests[-1].kwargs["model"], self.model("h0"))
 
+    def test_a_boundary_pair_compares_the_rungs_its_boundary_parts(self):
+        """B.11, B.12 (2026-11-06, completing O2b): a boundary probe goes
+        only beside a wake its route's own rung answered, so a pair kept
+        under a boundary always sets that boundary's two rungs side by
+        side. With both PASSes and the router's switch ON, a paper wake at
+        52 answers on r1 and its probe across 55 on r3: the pair is r1 vs
+        r3. With the switch OFF, as it ships, r0 answers every wake: beside
+        paper wakes at 52, 58, 72 and 78 (routed r1, r3, r3, r4) a probe
+        across 55 or 75 would set r0 against another band's rung, so only
+        h0 is due, only h0 is sent, and boundary 55 keeps its one pair."""
+        from bot_program.orcs.models import OrcTierGrade
+        probes = _probes_mod()
+        _verdicts(sonnet="pass", opus="pass")
+        self.probes_switch()
+        self.router()
+        w = self.routed([_urgent(1)], score=NEAR_55)
+        self.assertEqual((w.band, w.components["rung"],
+                          w.components["route"]["rung"]),
+                         ("material", "r1", "r1"))
+        got = self.serve(script=fake_answer(answer()))
+        self.assertEqual(got["wake"].pk, w.pk)
+        self.assert_one_call()
+        self.assertEqual(self.requests[-1].kwargs["model"], self.model("r1"))
+        self.assertEqual(self.due(w), [("h0", "h0", None),
+                                       ("boundary", "r3", 55)])
+        for kind in ("h0", "boundary"):
+            self.assertTrue(self.send(w, kind)["sent"])
+            self.assert_one_call()
+        g = OrcTierGrade.objects.get(wake=w, kind="boundary")
+        self.assertEqual((g.boundary, g.world, g.routed_rung, g.probe_rung),
+                         (55, "paper", "r1", "r3"))
+        self.router(False)
+        for n, score, routed, edge in ((2, NEAR_55, "r1", 55),
+                                       (3, 58.0, "r3", 55),
+                                       (4, 72.0, "r3", 75),
+                                       (5, 78.0, "r4", 75)):
+            with self.subTest(score=score):
+                v = self.routed([_urgent(n)], orc=self.orcs(1)[0],
+                                score=score)
+                route = v.components["route"]
+                self.assertEqual((v.components["rung"], route["rung"]),
+                                 ("r0", routed))
+                self.assertEqual([p["boundary"] for p in route["probes"]
+                                  if p["kind"] == "boundary"], [edge],
+                                 "the route still lists it")
+                got = self.serve(script=fake_answer(answer()))
+                self.assertEqual(got["wake"].pk, v.pk)
+                self.assert_one_call()
+                self.assertEqual(self.due(v), [("h0", "h0", None)])
+                out = probes.run()
+                self.assertEqual((out["probed"], out["code"]), (1, ""))
+                self.assert_one_call()
+                self.assertEqual(self.requests[-1].kwargs["model"],
+                                 self.model("h0"))
+                self.assertEqual(self.due(v), [])
+        self.assertEqual(list(OrcTierGrade.objects.filter(kind="boundary")
+                              .values_list("wake_id", "routed_rung",
+                                           "probe_rung")),
+                         [(w.pk, "r1", "r3")])
+        states = {(s["boundary"], s["world"]): s["pairs"]
+                  for s in probes.boundary_states()}
+        self.assertEqual((states[(55, "paper")], states[(75, "paper")]),
+                         (1, 0))
+
     def test_the_same_wake_on_a_stormy_day_calls_neither(self):
         """The control: the calm day's wake at 27 and its two probes, each
         one request. On a stormy day the same wake lists no probe and
@@ -635,15 +703,20 @@ class TheAllowanceTests(_Probed):
     def test_an_r3_probe_late_in_the_utc_day_still_fits_its_own_allowance(
             self):
         """The line booked under 70% less the probe's bound (the day's
-        late hours): the r3 probe of a paper wake at 52, Opus's PASS
-        recorded, is sent, one request, its bound the primary's alone."""
+        late hours): the r3 probe of a paper wake at 52 the router answered
+        on r1, Opus's PASS recorded, is sent, one request, its bound the
+        primary's alone. (Changed on purpose, 2026-11-06, completing O2b:
+        the router's switch ON, since a probe across 55 goes only beside a
+        wake its route's own rung answered.)"""
         from bot_program.orcs import mind, mind_gateway
         _verdicts(sonnet="pass", opus="pass")
         self.probes_switch()
+        self.router()
         w = self.routed([_urgent(1)], score=NEAR_55)
         got = self.serve(script=fake_answer(answer()))
         self.assertEqual(got["wake"].pk, w.pk)
         self.assert_one_call()
+        self.assertEqual(self.fresh(w).components["rung"], "r1")
         self.assertIn(("boundary", "r3", 55), self.due(w))
         bound = mind_gateway.bound("r3", mind.ticket_tokens(w, "r3"))
         self.assertLessEqual(bound, ALLOWANCE)
@@ -787,7 +860,10 @@ class TheRefusedProbeTests(_Probed):
         asked for the primary's bound alone (no fallback's), the ticket
         released once the ledger row is found, the item billed; the row on
         the Orcs line under agent orc, source_ref
-        Orc:<pk>:Wake:<w>:probe:r3."""
+        Orc:<pk>:Wake:<w>:probe:r3. (Changed on purpose, 2026-11-06,
+        completing O2b: the router's switch ON, the wake answered on r1,
+        since a probe across 55 goes only beside a wake its route's own
+        rung answered.)"""
         from ai_agents import spend
         from ai_agents.models import AgentTask
 
@@ -795,6 +871,7 @@ class TheRefusedProbeTests(_Probed):
         from bot_program.orcs.models import OrcSetting
         _verdicts(sonnet="pass", opus="pass")
         self.probes_switch()
+        self.router()
         w = self.routed([_urgent(1)], score=NEAR_55)
         got = self.serve(script=fake_answer(answer()))
         self.assertEqual(got["wake"].pk, w.pk)
@@ -816,6 +893,8 @@ class TheRefusedProbeTests(_Probed):
                                float(task.cost_usd), places=6)
         self.assertEqual(Decimal(str(got["grade"].probe_cost_usd)),
                          task.cost_usd)
+        self.assertEqual((got["grade"].routed_rung, got["grade"].probe_rung),
+                         ("r1", "r3"))
         self.assertEqual(self.tickets(), {}, "released")
         items = OrcSetting.get("minds_tickets")["items"]
         self.assertEqual(items[f"probe:{w.pk}:boundary"]["state"], "billed")
@@ -995,11 +1074,16 @@ class TheProbeRungsTests(_Probed):
         self.assert_no_call()
 
     def test_without_opuss_pass_an_r3_probe_answers_as_r2(self):
-        """B.5: Sonnet's PASS only; a paper wake at 52 probes across 55:
-        r3 by the table, answered as r2 (Opus at its one effort), on r2's
-        model at medium effort; its row keeps the answering rung."""
+        """B.5: Sonnet's PASS only; a paper wake at 52 the router answered
+        on r1 probes across 55: r3 by the table, answered as r2 (Opus at
+        its one effort), on r2's model at medium effort; its row keeps both
+        answering rungs, r1 vs r2. (Changed on purpose, 2026-11-06,
+        completing O2b: the router's switch ON, since a probe across 55
+        goes only beside a wake its route's own rung answered; the routed
+        side is asserted too.)"""
         _verdicts(sonnet="pass")
         self.probes_switch()
+        self.router()
         w = self.routed([_urgent(1)], score=NEAR_55)
         got = self.serve(script=fake_answer(answer()))
         self.assertEqual(got["wake"].pk, w.pk)
@@ -1011,7 +1095,8 @@ class TheProbeRungsTests(_Probed):
         sent = self.requests[-1].kwargs
         self.assertEqual((sent["model"], sent["output_config"]["effort"]),
                          (self.model("r2"), "medium"))
-        self.assertEqual(got["grade"].probe_rung, "r2")
+        self.assertEqual((got["grade"].routed_rung, got["grade"].probe_rung),
+                         ("r1", "r2"))
 
 
 # ── OrcTierGrade (B.12) ──────────────────────────────────────────────────
@@ -1238,14 +1323,20 @@ class TheSurfacesTests(_Probed):
         return html.split("The Orcs (read-only)", 1)[1].split(
             "Catalog</span>", 1)[0]
 
-    @staticmethod
-    def pairs(n, *, boundary, world="paper", orc, **kw):
+    #: Each boundary's own two rungs on paper, both PASSes recorded: the
+    #: rung below it, routed, against the rung above it, probed (2026-11-06,
+    #: completing O2b: a pair kept under a boundary compares these alone).
+    RUNGS = {30: ("r0", "r1"), 55: ("r1", "r3"), 75: ("r3", "r4")}
+
+    @classmethod
+    def pairs(cls, n, *, boundary, world="paper", orc, **kw):
         from bot_program.orcs.models import OrcTierGrade
+        routed, probe = cls.RUNGS.get(boundary, ("r0", "h0"))
         for i in range(n):
             OrcTierGrade.objects.create(
                 orc=orc, kind="boundary" if boundary else "h0",
-                boundary=boundary, world=world, routed_rung="r0",
-                probe_rung="r1", block=i // 20, **kw)
+                boundary=boundary, world=world, routed_rung=routed,
+                probe_rung=probe, block=i // 20, **kw)
 
     def test_two_completed_blocks_read_validated_on_ai_models(self):
         self.pairs(40, boundary=55, orc=self.orc)
@@ -1346,8 +1437,13 @@ class NoAccountFigureInAProbeRequestTests(_Probed):
     """K-B10 (N6): the walk over every request the probes send."""
 
     def test_no_account_figure_in_any_probe_request(self):
+        """Changed on purpose (2026-11-06, completing O2b): the router's
+        switch ON, so the wake at 52 is answered on r1 and its probe
+        across 55 is due (a boundary probe goes only beside a wake its
+        route's own rung answered)."""
         _verdicts(sonnet="pass", opus="pass")
         self.probes_switch()
+        self.router()
         for n, score, kinds in ((1, NEAR_30, ("h0", "boundary")),
                                 (2, NEAR_55, ("boundary",))):
             w = self.routed([_urgent(n)], score=score)
@@ -1378,7 +1474,13 @@ class TheProbesRunbookTests(MindTestCase):
                       "40 h0 probes", "C − R", "no fallback", "15 minutes",
                       "/orcs/seats/", "/ai-models/", "validated",
                       "two completed blocks", "about $0.48 a day",
-                      "nothing it decides is applied"):
+                      "nothing it decides is applied",
+                      # 2026-11-06, completing O2b: what a boundary pair
+                      # measures, and while the router's switch is OFF
+                      "a boundary probe goes only beside a wake answered "
+                      "on its own route's rung",
+                      "while the router's switch is OFF, r0 answers every "
+                      "wake, and only a wake whose route answers on r0 too"):
             self.assertIn(words, section)
         self.assertNotIn("component on orcs_probes", text)
 

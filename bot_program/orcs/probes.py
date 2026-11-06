@@ -9,7 +9,11 @@ of 30, 55 or 75) reads the wake's OWN stored dossier again, blind to the
 routed answer, on its answering rung (B.5's map, read when it is sent, as
 a ticket's is; never the wake's own rung). Real money gets none (§4 Q13),
 and the weather's caps say on which days any is sent (weather.caps_for's
-`probes`, binding from O2b, B.8a).
+`probes`, binding from O2b, B.8a). A boundary probe goes only beside a
+wake answered on its route's own rung (2026-11-06, completing O2b), so a
+boundary pair always compares the two rungs its boundary parts: while the
+router's switch is OFF, r0 answers every wake, and only a wake whose route
+answers on r0 too gets one.
 
   due            the probes due now, oldest routed answer first: reads only
   run            from the worker (tasks.orc_think, after its claims, with no
@@ -149,8 +153,15 @@ def due(now) -> list:
     probe its route lists, its rung mapped now (B.5: one effort per model
     until the smoke's PASS), never the wake's own answering rung, with no
     pair stored for it and its ticket item neither closed, in flight nor
-    capped for the day. A routed answer older than the window is dropped
-    by code: its probe is never sent. Database reads only."""
+    capped for the day. A boundary probe only beside a wake answered on
+    its route's own rung (components["rung"] the route's `rung`;
+    2026-11-06, completing O2b): a boundary pair (B.12) compares the two
+    rungs its boundary parts, and while the router's switch is OFF r0
+    answers every wake, so a probe across 55 or 75 beside a wake routed
+    r1, r3 or r4 would set r0 against another band's rung and count it
+    toward that boundary's blocks. h0 stands beside whatever answered. A
+    routed answer older than the window is dropped by code: its probe is
+    never sent. Database reads only."""
     from bot_program.orcs import mind, router, scheduler, weather
     from bot_program.orcs.models import OrcSetting, OrcTierGrade, OrcWake
     wakes = list(OrcWake.objects.filter(
@@ -180,10 +191,15 @@ def due(now) -> list:
         if scheduler.is_real(w.orc):
             continue
         answering = str(comps.get("rung") or O2A_RUNG)
+        # a boundary pair compares its boundary's two rungs: only beside a
+        # wake its route's own rung answered (2026-11-06, completing O2b)
+        on_route = answering == str(route.get("rung") or "")
         for p in listed:
             kind = str(p.get("kind") or "")
             would = str(p.get("would_rung") or p.get("rung") or "")
             if kind not in PROBE_KINDS or (w.pk, kind) in stored:
+                continue
+            if kind == "boundary" and not on_route:
                 continue
             rung = router.answering(would, emap)
             if rung == answering or _skip_item(items.get(item_key(w, kind))):
