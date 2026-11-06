@@ -657,15 +657,20 @@ class ThePagesWordsTests(_Words):
                             .split("</div>\n</div>", 1)[0].split())
         # changed on purpose (2026-11-06, completing O2a): true with the
         # minds switch OFF and the line at 0, as they ship (code answers
-        # every wake), and with both ON; no router exists before O2b
+        # every wake), and with both ON. Changed on purpose again
+        # (2026-11-06, O2b B.16a): the router exists, so the sentence
+        # reads its switch, OFF as it ships (r0 answers; its choice only
+        # recorded); tests/orcs/test_orc_o2b_routed.py pins it ON
         said = ("read by the Orcs from O2; tier settings never move it. "
                 "Their calls bill the Orcs' own budget line "
                 "(ORC_DAILY_BUDGET_USD, off at 0). Once the minds switch and "
                 "the Orcs line are on, every wake a model reads is answered "
-                "on r0; a router comes with O2b.")
+                "on r0: the router's switch (orcs_router) is off, and its "
+                "choice is only recorded.")
         text = card()
         self.assertIn(said, text)
         self.assertNotIn("O2a answers every wake", text)
+        self.assertNotIn("a router comes with O2b", text)
         self.assertNotIn("No Orc runs today", text)
         self.assertIn("Orc calls today, from the ledger: 0.", text)
         AgentTask.objects.create(agent="orc", provider="claude", model="m",

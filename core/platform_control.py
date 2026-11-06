@@ -121,6 +121,7 @@ LIVE_MONEY_SWITCHES = (
 #: commit that ships what it gates.
 ORC_MIND_SWITCHES = (
     "orcs_minds",                   # a model reads an Orc's wakes, in shadow
+    "orcs_router",                  # the routed rung (Opus among them) answers
 )
 
 #: Every switch whose ON takes the trading PIN, at every door
@@ -362,6 +363,18 @@ DEFAULT_COMPONENTS = [
     # 300.
     {"key": "orcs_minds", "name": "Orc Minds (models in shadow)",
      "description": "Off (default). With orcs on and the Orcs' budget line set (ORC_DAILY_BUDGET_USD above 0), a model reads an Orc's wakes in shadow, within its day caps, and writes plans and proposals that are graded. Nothing it decides sends an order or moves a stop. Turning it on takes the PIN.",
+     "category": "system"},
+    # THE ORCS' ROUTER (2026-11-06, the Orcs' O2 spec B.2b, N2): every
+    # rendered wake records the rung a pure router chooses from its band
+    # and money world. While this is OFF, r0 answers every wake a model
+    # reads and the choice is only recorded; ON, with the minds on, the
+    # rung the router chose answers (Opus on r2-r4), one effort per model
+    # until the smoke's PASS. OFF on arrival (no is_enabled key), exempt
+    # from "all on" and turned on only with the trading PIN at /ops/
+    # (ORC_MIND_SWITCHES); OFF takes no PIN, and the next claim answers on
+    # r0. Description measured below 300.
+    {"key": "orcs_router", "name": "Orc Router (routed rungs in shadow)",
+     "description": "Off (default). While off, every Orc wake a model reads is answered on r0 and the router's choice is only recorded. On, with the minds on, the rung the router chose answers, one effort per model until the smoke's PASS. Nothing it decides sends an order. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.

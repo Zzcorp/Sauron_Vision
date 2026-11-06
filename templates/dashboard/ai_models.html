@@ -150,29 +150,42 @@
 <div class="card fade-in-up" style="margin-bottom:24px;">
     <div class="card-header"><span class="card-title">The Orcs (read-only)</span></div>
     <p style="padding:0 16px; color:var(--text-muted); font-size:13px;">
-        The ladder the Orcs' router will pin, one rung per model and effort:
+        The ladder the Orcs' router reads, one rung per model and effort:
         an unvalidated prior, read by the Orcs from O2; tier settings never
         move it. Their calls bill the Orcs' own budget line
-        (ORC_DAILY_BUDGET_USD, off at 0). Once the minds switch and the
-        Orcs line are on, every wake a model reads is answered on r0; a
-        router comes with O2b.
+        (ORC_DAILY_BUDGET_USD, off at 0).
+        {% if orc_router_on %}Once the minds switch and the Orcs line are
+        on, every wake a model reads is answered on the rung the router
+        chose: its switch (orcs_router) is on, one effort per model until
+        the smoke's PASS for the model's family.{% else %}Once the minds
+        switch and the Orcs line are on, every wake a model reads is
+        answered on r0: the router's switch (orcs_router) is off, and its
+        choice is only recorded.{% endif %}
         Orc calls today, from the ledger: {{ orc_calls_today }}.
     </p>
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Rung</th><th>Model</th><th>Effort</th><th>Used for</th></tr></thead>
+        <thead><tr><th>Rung</th><th>Model</th><th>Effort</th><th>Used for</th><th>Calls today</th><th>Would route today</th></tr></thead>
         <tbody>
         {% for r in orc_ladder %}
-        <tr>
+        <tr data-rung="{{ r.rung }}">
             <td><strong>{{ r.rung }}</strong></td>
             <td>{{ r.label }}<div style="color:var(--text-muted); font-size:11px;">{{ r.model }}</div></td>
             <td>{{ r.effort }}</td>
             <td style="color:var(--text-muted); font-size:12px;">{{ r.note }}</td>
+            <td data-label="Calls today">{{ r.calls_today }}</td>
+            <td data-label="Would route today">{{ r.would_today }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
+    <p style="padding:8px 16px 0; color:var(--text-muted); font-size:12px;">
+        Calls today: the Orcs line's ledger rows since 00:00 UTC, by the rung
+        that answered. Would route today: the wakes rendered since 00:00 UTC,
+        by the router's own choice, recorded whatever its switch says (a
+        quiet or merged wake aside).
+    </p>
     <p style="padding:8px 16px 0; color:var(--text-muted); font-size:12px;">
         Agent names on the Orcs' line (no override is read for them):
         {% for key, label in orc_agent_keys %}<code title="{{ label }}">{{ key }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.

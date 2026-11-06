@@ -47,8 +47,10 @@ render): "" when they pass, else the failing clause in words; anything
 else reads closed. The router adds its own two: real money, and a
 frontier quota left today.
 
-O2b's first commit (2026-11-06) records the route in shadow: r0 answers
-every wake a model reads; the caller hands the gate closed with no
+O2b's first commit (2026-11-06) records the route in shadow; its second
+lets the route's rung answer behind the router's switch (orcs_router, OFF
+as it ships: r0 answers every wake a model reads), which the scheduler
+reads, never this module. The caller hands the gate closed with no
 frontier quota (B.9 is a later commit's), and no probe is sent.
 
 B.1's signature has neither `score` nor `raw_band`: B.11's boundary

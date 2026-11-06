@@ -75,7 +75,9 @@ O2_CODE = {
     # O2a's mind (2026-11-05)
     "switches": ("_component_on", "gate_code", "minds_on",
                  # O2a's queue (2026-11-05)
-                 "minds_switch_on"),
+                 "minds_switch_on",
+                 # O2b's routed rung (2026-11-06): the router's switch
+                 "router_on"),
     "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
@@ -395,6 +397,11 @@ NAMED_BY_THE_SPEC = {
     # O2a's light (2026-11-05, the O2 spec A.62): the band's sentence under
     # THE TRADERS counts the living Orcs (switches, constants, models)
     "dashboard/council_band.py",
+    # O2b's routed rung (2026-11-06, the O2 spec §1.2.3, B.16a): the
+    # /ai-models/ card reads the router's switch and counts, per rung,
+    # today's would-routes (switches, models); it reads no model's words,
+    # so it is no surface (test items f and g still bind it)
+    "dashboard/views_ai_models.py",
 }
 
 #: The surfaces that show what a model wrote (N1.6, test items f and g).

@@ -31,7 +31,9 @@ here calls a model.
 THE ROUTE (O2b, 2026-11-06, the O2 spec B.16c). Beside the rung a model
 was sent, each wake's Rung column shows the rung a pure router chose for
 it, recorded in shadow ("would route: r2 (deep tier, medium effort)"),
-while that is another rung: r0 answers every wake a model reads.
+while that is another rung: r0 answers every wake a model reads while the
+router's switch (orcs_router) is OFF, and with it ON the rung sent may
+still differ (one effort per model until the smoke's PASS).
 """
 from __future__ import annotations
 
@@ -162,9 +164,10 @@ def _route_t(w, comps, sent) -> str:
     """The router's choice for wake `w` in tier words (the O2 spec B.16c;
     O2b, 2026-11-06), from components["route"]: "would route: r2 (deep
     tier, medium effort)", while it is not the rung that was sent (r0
-    answers every wake a model reads). "" for a quiet wake (code reads it
-    whatever the route), a wake rendered before the router, or words that
-    are not the router's own tier words."""
+    while the router's switch is OFF; with it ON, the rung B.5's map
+    answers it on). "" for a quiet wake (code reads it whatever the
+    route), a wake rendered before the router, or words that are not the
+    router's own tier words."""
     route = comps.get("route") if isinstance(comps.get("route"),
                                              dict) else {}
     words = str(route.get("words") or "")

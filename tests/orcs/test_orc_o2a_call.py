@@ -539,8 +539,10 @@ class TheGatesTests(MindFixture):
         self.assert_no_call(code="authority", got=out["code"])
 
     def test_a_rung_outside_the_callers_list_raises_with_no_request(self):
-        """N4, P35: CALLER_RUNGS = wake r0, smoke r0 and h0; any other
-        rung raises before anything is sent."""
+        """N4, P35: CALLER_RUNGS = wake r0-r4, smoke h0 and r0-r4 (changed
+        on purpose, 2026-11-06, O2b B.15a: O2a's were wake r0, smoke r0
+        and h0; r5 is the Fable gate's, C4's); any other rung raises
+        before anything is sent."""
         from bot_program.orcs import mind, mind_gateway
         w = self.rendered()
         request = mind.build_request(w, "r0")
@@ -549,9 +551,10 @@ class TheGatesTests(MindFixture):
                           source_ref=ref, bound_usd=0.2)
         self.assert_one_call()
         self.assertEqual(mind_gateway.CALLER_RUNGS,
-                         {"wake": ("r0",), "smoke": ("r0", "h0")})
-        refused = [("wake", r) for r in ("h0", "r1", "r2", "r3", "r4", "r5")]
-        refused += [("smoke", r) for r in ("r1", "r2", "r3", "r4", "r5")]
+                         {"wake": ("r0", "r1", "r2", "r3", "r4"),
+                          "smoke": ("h0", "r0", "r1", "r2", "r3", "r4")})
+        refused = [("wake", r) for r in ("h0", "r5", "x9")]
+        refused += [("smoke", r) for r in ("r5", "x9")]
         refused += [("captain", "r0"), ("", "r0")]
         for caller, rung in refused:
             with self.subTest(caller=caller, rung=rung), \

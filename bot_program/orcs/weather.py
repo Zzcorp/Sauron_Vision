@@ -6,7 +6,8 @@ changed since it was computed, never lowered within the trading day.
 The weather routes nothing. Its day class is one input of the pure router
 (bot_program/orcs/router.py, O2b, 2026-11-06), which lists a paper or
 demo wake's probes on calm and eventful days only; its choice is recorded
-in shadow while r0 answers every wake a model reads. The weather is
+in shadow, and answers only behind the router's switch (orcs_router,
+OFF as it ships: r0 answers every wake a model reads). The weather is
 journaled on
 every detected wake and shown on the card and the Horde's class band
 (O1d). From O2a (2026-11-05, the O2 spec A.12, §4 Q4) its model-wake cap

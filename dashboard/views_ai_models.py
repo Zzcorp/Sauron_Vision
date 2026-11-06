@@ -90,12 +90,13 @@ KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 # SHOWN on the page and never writable: the Orcs read their own pinned
 # ladder (catalog.ORC_LADDER_V1, through bot_program/orcs/mind_gateway.py:
 # with the minds switch and the Orcs line on, every wake a model reads is
-# answered on r0; no router before O2b), never resolve_agent, so an
-# override row here would persist and be read by nothing — exactly what
-# KNOWN_AGENT_KEYS exists to refuse. Their spend is the Orcs' budget line
-# (ai_agents/spend.py), off at 0 until the operator sets it; a model is
-# asked only once he has also turned the minds switch on with his PIN
-# (2026-11-05).
+# answered on r0 while the router's switch, orcs_router, is off, as it
+# ships, and on the rung the router chose once he turns it on with his
+# PIN, 2026-11-06), never resolve_agent, so an override row here would
+# persist and be read by nothing — exactly what KNOWN_AGENT_KEYS exists to
+# refuse. Their spend is the Orcs' budget line (ai_agents/spend.py), off
+# at 0 until the operator sets it; a model is asked only once he has also
+# turned the minds switch on with his PIN (2026-11-05).
 ORC_AGENT_KEYS = (
     ("orc", "The Orc (one per open position)"),
     ("orc_confirm", "The Orc's confirm wake"),
@@ -119,6 +120,55 @@ def _orc_calls_today() -> int:
                                    microsecond=0)
     return AgentTask.objects.filter(created_at__gte=start).filter(
         orc_line_q()).count()
+
+
+def _orc_rungs_today() -> dict:
+    """{rung: {calls, would}} for the card's ladder (the Orcs' O2 spec
+    B.16a; O2b, 2026-11-06), the day since 00:00 UTC, as the line's:
+
+      calls  the Orcs line's ledger rows (spend.orc_line_q), by the rung
+             their source_ref ends with: the rung that ANSWERED (B.2b), a
+             wake's, a smoke's or, later, a probe's
+      would  the wakes rendered, by the router's own choice
+             (components["route"]["would_rung"]), recorded whatever its
+             switch says; a quiet or a merged wake aside, since no model
+             would read it
+
+    Two queries, the route read by its key alone, never a wake's whole
+    components. A count, never money: the dollars are the TODAY cell's."""
+    from collections import Counter
+
+    from django.utils import timezone
+
+    from ai_agents.catalog import ORC_LADDER_V1
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import ORC_SOURCE_PREFIXES, orc_line_q
+    from bot_program.orcs.constants import (WAKE_STATUS_MERGED,
+                                            WAKE_STATUS_QUIET)
+    from bot_program.orcs.models import OrcWake
+    start = timezone.now().replace(hour=0, minute=0, second=0,
+                                   microsecond=0)
+    calls = Counter()
+    for ref in (AgentTask.objects.filter(created_at__gte=start)
+                .filter(orc_line_q())
+                .values_list("structured_output__source_ref", flat=True)):
+        ref = str(ref or "")
+        if ref.startswith(ORC_SOURCE_PREFIXES):
+            calls[ref.rsplit(":", 1)[-1]] += 1
+    would = Counter(str(r or "") for r in (
+        OrcWake.objects.filter(created_at__gte=start)
+        .exclude(status__in=(WAKE_STATUS_QUIET, WAKE_STATUS_MERGED))
+        .values_list("components__route__would_rung", flat=True)))
+    return {step["rung"]: {"calls": calls.get(step["rung"], 0),
+                           "would": would.get(step["rung"], 0)}
+            for step in ORC_LADDER_V1}
+
+
+def _orc_router_on() -> bool:
+    """The Orcs router's switch (orcs_router), OFF when unreadable: the
+    card's sentence says which rung answers (B.16a)."""
+    from bot_program.orcs.switches import router_on
+    return router_on()
 
 
 def agent_choice(name: str, tier: str) -> tuple:
@@ -235,6 +285,7 @@ def ai_models_dashboard(request):
                                    PRICES_READ_ON, PRICING_SOURCE)
     from ai_agents.spend import (daily_budget, lines_summary, remaining_today,
                                  spent_today)
+    rungs_today = _orc_rungs_today()
 
     return render(request, "dashboard/ai_models.html", {
         "page_id": "ai_models",
@@ -248,9 +299,15 @@ def ai_models_dashboard(request):
         # The day's Orc calls, from the ledger (O2a, U-A1): a count of the
         # rows on the Orcs line since 00:00 UTC, the line's own day
         "orc_calls_today": _orc_calls_today(),
+        # O2b (2026-11-06, B.16a): which rung answers (the router's
+        # switch), and per rung the day's calls and would-counts
+        "orc_router_on": _orc_router_on(),
         "orc_ladder": [
             {**rung, "label": MODELS.get(rung["model"], {}).get(
-                "label", rung["model"])} for rung in ORC_LADDER_V1],
+                "label", rung["model"]),
+             "calls_today": rungs_today[rung["rung"]]["calls"],
+             "would_today": rungs_today[rung["rung"]]["would"]}
+            for rung in ORC_LADDER_V1],
         "orc_agent_keys": ORC_AGENT_KEYS,
         "prices_source": PRICING_SOURCE,
         "cache_source": CACHE_SOURCE,

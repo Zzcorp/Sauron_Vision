@@ -9,10 +9,16 @@ inside its functions.
                     limits (constants.RUNG_LIMITS, WALL_S). No model id is
                     written here or anywhere in the package.
   CALLER_RUNGS      the rungs each caller may use (§1.0.9). A rung outside
-                    the caller's list raises before anything is sent.
+                    the caller's list raises before anything is sent. From
+                    O2b (2026-11-06, B.15a) the wake's are r0-r4 (r5 only
+                    through the Fable gate, C4's) and the smoke's h0, r0-r4
   bound             A.21: every prompt token at the model's 1h cache write
                     on 1.35 x the estimate of the exact text sent, plus the
-                    rung's max_tokens of output. O2a sends no fallback.
+                    rung's max_tokens of output; plus the fallback's own,
+                    where one is sent (B.14)
+  fallback_list     B.14 (O2b, 2026-11-06): the list form the gateway
+                    builds for a real-money wake on r2-r5, the fallback's
+                    id read from the catalog; none for any other call
   ask_line          A.20: the Orcs line asked for this call's bound PLUS the
                     money of the OTHER calls in flight (the running wakes'
                     est_usd and the holds in OrcSetting "minds_inflight"),
@@ -41,6 +47,7 @@ from bot_program.orcs.constants import (BOUND_HEADROOM, CODE_AUTHORITY,
                                         CODE_BILLED_FAILURE, CODE_DEEP_SHARE,
                                         CODE_LINE, CODE_LINE_OFF, CODE_TOTAL,
                                         CODE_UNBILLED, CODE_UNSENT,
+                                        FALLBACK_MAX_TOKENS, FALLBACK_RUNGS,
                                         MINDS_INFLIGHT_KEY, REPLY_ANSWER,
                                         REPLY_BILLED, REPLY_CLOSED,
                                         REPLY_UNBILLED, REPLY_UNSENT,
@@ -55,11 +62,15 @@ ORC_AGENT = "orc"
 ORC_LINE = "orcs"
 SOURCE_PREFIX = "Orc:"
 #: §1.0.9: each caller and the rungs it may use. Later commits extend it;
-#: r5 is reachable only through O2b's Fable gate.
-CALLER_RUNGS = {"wake": ("r0",), "smoke": ("r0", "h0")}
-#: The keywords a caller's request may carry; the gateway sets the rest.
+#: r5 is reachable only through O2b's Fable gate (C4's). O2b's routed rung
+#: (2026-11-06, B.15a): a wake answers on the rung the router chose, r0-r4,
+#: and the smoke takes the wake's rungs beside h0.
+CALLER_RUNGS = {"wake": ("r0", "r1", "r2", "r3", "r4"),
+                "smoke": ("h0", "r0", "r1", "r2", "r3", "r4")}
+#: The keywords a caller's request may carry; the gateway sets the rest,
+#: the fallbacks among them (B.14: the gateway builds the list form).
 REQUEST_KEYS = ("system_blocks", "shared_user_blocks", "private_user_blocks",
-                "turn_effort", "effort", "output_schema", "fallbacks")
+                "turn_effort", "effort", "output_schema")
 
 
 # ── the rungs ────────────────────────────────────────────────────────────
@@ -97,19 +108,44 @@ def check_rung(caller, name) -> None:
                          f"(its rungs: {', '.join(allowed)})")
 
 
-def bound(name, est_tokens) -> float:
+def bound(name, est_tokens, *, fallback=False) -> float:
     """A.21: what one call on rung `name` can cost at most, for a request
     estimated at `est_tokens`: every prompt token written to the 1h cache
     (the dearest input price) on ceil(est x 1.35), plus max_tokens of
-    output. No fallback is sent in O2a."""
-    from ai_agents.catalog import cost_usd
+    output. With `fallback` (B.14; O2b, 2026-11-06: a real-money wake on
+    r2-r5), plus the fallback model's own bound: the same prompt written
+    at its 1h price, and its own max_tokens of output."""
+    from ai_agents.catalog import ORC_FALLBACK_V1, cost_usd
     step = rung(name)
     est = max(0, int(est_tokens or 0))
     headroom = int(round(BOUND_HEADROOM * 100))
     written = -(-est * headroom // 100)
-    return float(cost_usd(step["model"], input_tokens=0,
-                          output_tokens=step["max_tokens"],
-                          cache_write_1h=written))
+    out = float(cost_usd(step["model"], input_tokens=0,
+                         output_tokens=step["max_tokens"],
+                         cache_write_1h=written))
+    if fallback:
+        out += float(cost_usd(ORC_FALLBACK_V1, input_tokens=0,
+                              output_tokens=FALLBACK_MAX_TOKENS,
+                              cache_write_1h=written))
+    return out
+
+
+def sends_fallback(caller, name, real_money) -> bool:
+    """B.14 (O2b, 2026-11-06): only a real-money wake on r2-r5 names a
+    fallback. Paper and demo wakes, and every ticket (the smoke; later the
+    probes, the twin, Captains and the rest), send none: their bounds stay
+    the primary's alone, and a refusal is a billed failure, as on r0."""
+    return caller == "wake" and bool(real_money) and name in FALLBACK_RUNGS
+
+
+def fallback_list(caller, name, real_money):
+    """The list form [{"model": ORC_FALLBACK_V1, "max_tokens": 8000}] the
+    gateway sends (B.14), the id read from the catalog by its name; None
+    when sends_fallback says none."""
+    if not sends_fallback(caller, name, real_money):
+        return None
+    from ai_agents.catalog import ORC_FALLBACK_V1
+    return [{"model": ORC_FALLBACK_V1, "max_tokens": FALLBACK_MAX_TOKENS}]
 
 
 def supports_turn_effort(name) -> bool:
@@ -142,6 +178,15 @@ def line_summary() -> dict:
     """Both lines and the total (spend.lines_summary), for the staff."""
     from ai_agents import spend
     return spend.lines_summary()
+
+
+def deep_share() -> float:
+    """DEEP_TIER_SHARE (spend.py): the share of a line the deep and
+    frontier tiers stop at. can_spend weighs only the line's BOOKED spend
+    against it; the scheduler mirrors it on the money in flight and held
+    (B.13; O2b, 2026-11-06), reading the share here."""
+    from ai_agents import spend
+    return float(spend.DEEP_TIER_SHARE)
 
 
 def live_floor() -> float:
@@ -271,11 +316,14 @@ def _error_words(exc) -> str:
 
 
 def call(*, caller, rung_name, request, source_ref, bound_usd,
-         exclude_wake=None, exclude_key=None, real_urgent=False) -> dict:
+         exclude_wake=None, exclude_key=None, real_urgent=False,
+         real_money=False) -> dict:
     """ONE model call for `caller` on rung `rung_name`, or none. `request`
     holds the caller's blocks, schema and efforts (REQUEST_KEYS); this
     function sets the model, the rung's limits, the agent, the line, the
-    source_ref and max_attempts=1. Returns a reply dict:
+    source_ref, max_attempts=1 and the fallback: the list form for a
+    real-money wake (`real_money`) on r2-r5 only (B.14; O2b, 2026-11-06).
+    Returns a reply dict:
 
       closed     nothing sent: a gate is OFF, a seat reads above L0, or
                  the line refused (`code`)
@@ -315,7 +363,9 @@ def call(*, caller, rung_name, request, source_ref, bound_usd,
             agent_name=ORC_AGENT, record=True, source_ref=str(source_ref),
             model=step["model"], line=ORC_LINE, client_refusal_rerun=False,
             max_attempts=1, max_tokens=step["max_tokens"],
-            timeout_s=step["timeout_s"], **dict(request or {}))
+            timeout_s=step["timeout_s"],
+            fallbacks=fallback_list(caller, rung_name, real_money),
+            **dict(request or {}))
     except ValueError as e:
         return _reply(REPLY_UNSENT, sent=False, code=CODE_UNSENT,
                       error=_error_words(e), step=step,

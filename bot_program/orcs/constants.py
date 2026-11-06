@@ -562,7 +562,9 @@ BOUND_HEADROOM = 1.35
 #: holds each rung's measured p90.
 HIGH = {"h0": 0.0025, "r0": 0.0594, "r1": 0.1294, "r2": 0.1789,
         "r3": 0.2989, "r4": 0.5389, "r5": 1.8644}
-#: The rung every O2a wake is answered on (A.21; §4 Q2).
+#: The rung every O2a wake is answered on (A.21; §4 Q2), and from O2b
+#: (2026-11-06, B.2b) every wake while the router's switch is OFF, and a
+#: wake that records no rung of its own.
 O2A_RUNG = "r0"
 
 #: A.28-A.30: the doctrine's and the schema's versions, S's size cap.
@@ -806,10 +808,36 @@ SMOKE_FAIL_REASONS = ("call_a", "call_b", "cache", "effort")
 
 # ── O2b: the route in shadow (2026-11-06, the O2 spec B.1-B.6, B.16c) ──────
 # The router (bot_program/orcs/router.py) is pure and names rungs only. Its
-# choice is recorded on every rendered wake, minds on or off, while r0
-# answers every wake a model reads: nothing here sends anything.
+# choice is recorded on every rendered wake, minds on or off; while the
+# router's switch is OFF, r0 answers every wake a model reads: nothing
+# here sends anything.
 
 #: The router's choice in tier words (B.16c), as the Orc's page shows it
 #: (mind.rung_words, from the catalog by the rung's name): never a model
 #: id, never a cost.
 ROUTE_WOULD_T = "would route: {rung} ({tier} tier, {effort} effort)"
+
+# ── O2b: the routed rung answers (2026-11-06, the O2 spec B.2b, B.4, B.5,
+# B.13-B.15a, B.16a) ─────────────────────────────────────────────────────
+# Behind `orcs_router`, OFF on arrival and turned on only with the trading
+# PIN (N2): OFF, r0 answers every wake a model reads and the router's
+# choice is only recorded; ON, with the minds on, the rung the router chose
+# answers, one effort per model until the smoke's PASS. Nothing here sends
+# anything.
+
+#: N2: the router's switch (core/platform_control.py ORC_MIND_SWITCHES).
+ROUTER_SWITCH = "orcs_router"
+#: The rungs above r0, which only the router's switch opens to a wake and
+#: to `orcs smoke --rung` (B.15a). h0 is a probe's rung, r0 the default.
+ROUTED_RUNGS = ("r1", "r2", "r3", "r4", "r5")
+#: B.13: the tiers the deep share holds (ai_agents/spend.py: deep and
+#: frontier), mirrored by the scheduler on the money in flight and held;
+#: the share itself is the budget's, read through the gateway.
+DEEP_TIERS = ("deep", "frontier")
+#: B.14: the rungs on which a real-money wake names the server's fallback
+#: (the list form, the catalog's ORC_FALLBACK_V1), and its own max_tokens.
+FALLBACK_RUNGS = ("r2", "r3", "r4", "r5")
+FALLBACK_MAX_TOKENS = 8000
+#: The smoke's words when B.5's map answers a rung on another (orcs.py).
+SMOKE_MAPPED_T = ("rung {asked}, answered as {rung} (one effort per model "
+                  "until the smoke's PASS for the {family} family)")

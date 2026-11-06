@@ -55,16 +55,21 @@ dossier:
      rung the pure router (router.py) chooses, recorded in shadow in
      components["route"] and the `wake` entry, on the budget's money
      world, which render_queued hands on (scheduler.is_real); then ONE
-     dossier, still for the reference family, stored block by block
-     (dossier.py); then the OrcWake's score and hashes and its status:
+     dossier, stored block by block (dossier.py), for the reference
+     family while the router's switch (orcs_router) is OFF, for the
+     family of the answering rung's model while it is ON (B.4), its
+     family kept in components["family"]; then the OrcWake's score and
+     hashes and its status:
      `quiet` under F6 (a code `reading` and Orc.latest_note); `skipped`
      with the code of a gate it reads OFF (minds_off, line_off...); else
      it stays `recorded` for admission. A journal `wake` entry, kept off
      the card's lines, ends in those status words; the card's `intellect`
      (no model's rung: RUNG_NONE; `escalated` when a floor raised the
      band) and `integrity`;
-  3. scheduler.admit (A.11): `pending`, or `skipped` with its code. r0
-     answers every wake a model reads: the route moves no call yet.
+  3. scheduler.admit (A.11): `pending`, or `skipped` with its code, on
+     the answering rung (B.2b): r0 while the router's switch is OFF, as
+     it ships; ON, the rung the router chose when the dossier was
+     rendered for its family.
 
 A pass that admitted a wake sends one orc_think ticket (tasks.py).
 Detection, spacing and the proxy for the last answered facts hash live in
@@ -918,8 +923,9 @@ def render_wake(wake, *, real_money=None):
     The route (O2b, 2026-11-06, B.1-B.4): `real_money` is the budget's
     money world (scheduler.is_real), which render_queued, the only caller,
     reads and hands on; None (unread) routes as paper, is_real's own rule.
-    The effort map (mind.answering_map) is read once here, before the
-    render's transaction, never under a lock (N8)."""
+    The effort map (mind.answering_map) and the router's switch
+    (switches.router_on: the dossier's family, B.4) are read once here,
+    before the render's transaction, never under a lock (N8)."""
     from django.db import transaction
 
     from bot_program.orcs import dossier, mind
@@ -953,11 +959,13 @@ def render_wake(wake, *, real_money=None):
             ctx["journal_as_of"] = upto
         vctx = _evidence(orc, trade, ctx, reasons, now)
     effort = mind.answering_map()
+    from bot_program.orcs.switches import router_on
+    routed = router_on()
     with transaction.atomic():
         return _render(wake, orc, trade, tick, ctx, reasons, now=now,
                        real=real, vctx=vctx, gate=gate,
                        route_world=_route_world(world, real_money),
-                       effort=effort)
+                       effort=effort, routed=routed)
 
 
 def _route(band, raw_band, *, kind, day_class, score, world,
@@ -969,8 +977,10 @@ def _route(band, raw_band, *, kind, day_class, score, world,
     later commit's). {rung (the answering rung after the effort map),
     would_rung (the table's), why, version (ROUTING_VERSION), words (the
     would-route words: tier words, never a model id or a cost),
-    escalated, probes (listed, none sent), twin}. Recorded in shadow: r0
-    answers every wake a model reads (admission's components["rung"])."""
+    escalated, probes (listed, none sent), twin}. Recorded whatever the
+    router's switch says; admission writes the rung that answers
+    (components["rung"]): r0 while the switch is OFF, this route's rung
+    while it is ON (B.2b)."""
     from bot_program.orcs import mind, router
     got = router.route(band, world, kind, day_class, 0, router.GATE_CLOSED,
                        effort, score=score, raw_band=raw_band)
@@ -982,7 +992,7 @@ def _route(band, raw_band, *, kind, day_class, score, world,
 
 
 def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
-            gate="", route_world="", effort=None):
+            gate="", route_world="", effort=None, routed=False):
     """O1's per-wake render, in its own transaction: it takes the Orc's
     lock only at its final journal.append. Its status (A.3; O2a): `quiet`
     under F6; `skipped` with `gate`, the code of a gate read OFF; else
@@ -991,11 +1001,18 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
     O2b (2026-11-06, the O2 spec B.4): the band first (the weather, the
     inputs, the components, the stakes, the score, the floors, the band
     with and without its floor), then the route (_route, on
-    `route_world` and the effort map `effort`), then ONE dossier.render,
-    still for the reference family. The reorder changes nothing the
-    dossier reads: _position_inputs reads no key of `ctx` the render
-    writes (held, integrity, po3), and what reads those keys (F5, the
-    snapshot, the card's integrity) still runs after the render."""
+    `route_world` and the effort map `effort`), then ONE dossier.render.
+    The reorder changes nothing the dossier reads: _position_inputs reads
+    no key of `ctx` the render writes (held, integrity, po3), and what
+    reads those keys (F5, the snapshot, the card's integrity) still runs
+    after the render.
+
+    O2b's routed rung (2026-11-06, B.4): with the router's switch ON
+    (`routed`, read before this transaction), that one render is for the
+    family of the answering rung's model (Sonnet's r0 and r1, Opus's r2
+    to r4), so components.tokens, the bound and the stored S are that
+    family's; OFF, for the reference family, as O2a. Either way the
+    family is kept in components["family"], which admission reads."""
     from bot_program.orcs import complexity, dossier, journal, weather
     price = tick.get("price")
     day = weather.current(orc.user, orc.asset_class, now, real=real)
@@ -1019,7 +1036,10 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
     raw_band = complexity.band(sc, floor=None, **memory)
     route = _route(band, raw_band, kind=kind, day_class=day.day_class,
                    score=sc, world=route_world, effort=effort)
-    rendered = dossier.render(orc, trade, ctx, as_of=now)
+    from bot_program.orcs import mind
+    family = mind.rung_family(route["rung"]) if routed else ""
+    rendered = (dossier.render(orc, trade, ctx, as_of=now, model=family)
+                if family else dossier.render(orc, trade, ctx, as_of=now))
     f5_on, f5_items = complexity.f5(ctx.get("integrity"))
     snapshot = _snapshot(orc, trade, ctx)
     fh = facts_hash(snapshot)
@@ -1045,6 +1065,8 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
                        "price": price,
                        # O2b (B.2): the router's choice, in shadow
                        "route": route,
+                       # O2b (B.4): the family the dossier was written for
+                       "family": rendered.get("model"),
                        **{k: tick[k] for k in ADMISSION_KEEP if k in tick}}
     if vctx is not None:
         # O2a (A.8): what the mind reads, as of this dossier

@@ -8,7 +8,11 @@ Orcs budget line above 0 (read through bot_program/orcs/mind_gateway.py,
 the one module that names the budget). `gate_code` names the first one
 that is OFF, `minds_on` says whether all four are ON. The tick never reads
 them, and nothing here imports the gateway until it is asked: the tick's
-import path never loads it."""
+import path never loads it.
+
+THE ROUTER'S SWITCH (O2b, 2026-11-06): `orcs_router`, read by `router_on`,
+decides which rung answers a wake the four gates let a model read: OFF r0,
+ON the rung the router chose."""
 import logging
 
 logger = logging.getLogger(__name__)
@@ -86,3 +90,14 @@ def minds_switch_on() -> bool:
     wakes while it is off (A.17). (O2a's queue, 2026-11-05.)"""
     from bot_program.orcs.constants import MINDS_SWITCH
     return _component_on(MINDS_SWITCH)
+
+
+def router_on() -> bool:
+    """The router's switch (`orcs_router`; O2b, 2026-11-06, the O2 spec
+    B.2b, N2), OFF when unreadable. Read once per render (the dossier's
+    family, B.4), at admission and at each claim (frictionless off: a wake
+    claimed once it is OFF is answered on r0), and by `orcs smoke` for a
+    rung above r0. It is no fifth gate: OFF, the minds still answer every
+    wake a model reads, on r0. The tick never reads it."""
+    from bot_program.orcs.constants import ROUTER_SWITCH
+    return _component_on(ROUTER_SWITCH)
