@@ -5013,7 +5013,9 @@ def take_trade_execute(request, signal_id):
                              target=body["target"],
                              leverage=body["leverage"],
                              pin_ok=pin_ok,
-                             dup_seen=body["dup_seen"])
+                             dup_seen=body["dup_seen"],
+                             shown_qty=body["shown_qty"],
+                             shown_raised=body["shown_raised"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
     # to the trade AFTER it was taken. It can only follow a trade, never
@@ -5040,7 +5042,8 @@ def _ticket_pin_words(res, pin_ok):
 
 def _parse_trade_body(request):
     """Parse an execute body into
-    {"close_ids": [...], "side": ..., "qty": ..., "stop": ..., "target": ...}.
+    {"close_ids": [...], "side": ..., "qty": ..., "stop": ..., "target": ...,
+     "shown_qty": ..., "shown_raised": ...} (and the keys below).
 
     Strict on shape: a non-object body 500'd (AttributeError on .get), and
     a string close_ids like "12" iterated per character into [1, 2] —
@@ -5132,6 +5135,20 @@ def _parse_trade_body(request):
         return None, "dup_seen must be a list"
     parsed["dup_seen"] = (None if raw_seen is None else
                           [s for s in raw_seen if isinstance(s, str)][:50])
+
+    # THE SIZE THE TICKET SHOWED (2026-11-06, review): the dialog's own
+    # size when the operator left it alone, and whether it was raised above
+    # the risk budget — so the send refuses a raise it did not show, or a
+    # raised size that moved since (manual_trade._shown_size_error).
+    # Absent is None: the caller says nothing.
+    shown, err = _number("shown_qty")
+    if err:
+        return None, err
+    parsed["shown_qty"] = shown
+    raw_raised = body.get("shown_raised")
+    if raw_raised is not None and not isinstance(raw_raised, bool):
+        return None, "shown_raised must be true or false"
+    parsed["shown_raised"] = raw_raised
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
@@ -5452,7 +5469,9 @@ def asset_trade_execute(request, symbol):
                               target=body["target"],
                               leverage=body["leverage"],
                               pin_ok=pin_ok,
-                              dup_seen=body["dup_seen"])
+                              dup_seen=body["dup_seen"],
+                              shown_qty=body["shown_qty"],
+                              shown_raised=body["shown_raised"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): linked after the trade, as above.
     if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
