@@ -32,6 +32,23 @@ def generate_portfolio_report(request):
     # was taken from, which makes a frozen figure in one worse, not better.
     book = live_book_value(request.user, portfolio)
     now = timezone.now()
+    # eToro's OWN P&L on an open eToro row (2026-11-06, the operator's
+    # report: an open eToro forex row read a gain on Sauron and a small loss
+    # in the eToro app): the rows below are display copies
+    # (portfolio.services.shown_open_rows) and the value above them prints
+    # the open P&L inside it at eToro's own figure where its holdings list
+    # the position (shown_book, the review). book.rows and book itself stay
+    # the marks'.
+    from portfolio.services import (ETORO_PNL_MAX_AGE_S, PNL_ETORO,
+                                    SHOWN_VALUE_WORDS, shown_book,
+                                    shown_open_rows)
+    open_positions, venues = shown_open_rows(request.user, book.rows)
+    try:
+        shown = shown_book(request.user, book, venues)
+    except Exception as e:  # noqa: BLE001 — the marks' value stands
+        logger.warning("PDF: the shown book value is unreadable, the marks' "
+                       "stands: %s", e, exc_info=True)
+        shown = book
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm)
@@ -59,8 +76,8 @@ def generate_portfolio_report(request):
     summary_data = [
         ['Metric', 'Value'],
         ['Portfolio Value',
-         DASH if book.value is None
-         else f"{portfolio.currency} {book.value:,.2f}"],
+         DASH if shown.value is None
+         else f"{portfolio.currency} {shown.value:,.2f}"],
         ['Cash Available', f"{portfolio.currency} {portfolio.cash_available:,.2f}"],
         ['Initial Capital', f"{portfolio.currency} {portfolio.initial_capital:,.2f}"],
         ['Open Positions',
@@ -69,10 +86,10 @@ def generate_portfolio_report(request):
 
     # Calculate return
     if portfolio.initial_capital > 0:
-        if book.value is None:
+        if shown.value is None:
             summary_data.append(['Total Return', DASH])
         else:
-            total_return = ((book.value - float(portfolio.initial_capital))
+            total_return = ((shown.value - float(portfolio.initial_capital))
                             / float(portfolio.initial_capital)) * 100
             summary_data.append(['Total Return', f"{total_return:+.2f}%"])
 
@@ -81,7 +98,8 @@ def generate_portfolio_report(request):
     # Paragraph and not a bare string: a plain cell does not wrap, and this
     # sentence is wider than the 3-inch column it sits in.
     summary_data.append(['Valuation Basis',
-                         Paragraph(book.coverage, styles['BodyText'])])
+                         Paragraph(f"{SHOWN_VALUE_WORDS} {book.coverage}",
+                                   styles['BodyText'])])
 
     t = Table(summary_data, colWidths=[3*inch, 3*inch])
     t.setStyle(TableStyle([
@@ -100,20 +118,39 @@ def generate_portfolio_report(request):
     # TRADE was missing from the export; and it formatted current_price with
     # ":.4f", which raises on the None an unquoted row carries, so a single
     # symbol without a quote took the whole PDF down with a TypeError.
-    open_positions = book.rows
+    # (open_positions: display copies, read above with the value.)
     if open_positions:
         elements.append(Paragraph("Open Positions", styles['Heading2']))
-        pos_data = [['Symbol', 'Direction', 'Qty', 'Entry', 'Current', 'P&L %']]
+        # WHOSE P&L each row's percentage is (2026-11-06, the review): a PDF
+        # has no hover, so the Basis column says it — "eToro" for eToro's
+        # own figure, "estimate" where it is not — and the note under the
+        # table names each estimate's price and age. "Current" stays the
+        # mark: it describes the price, which eToro's figure does not read.
+        pos_data = [['Symbol', 'Direction', 'Qty', 'Entry', 'Current',
+                     'P&L %', 'Basis']]
+        estimates, own = [], 0
         for p in open_positions[:20]:
+            venue = (venues.get(getattr(p, "trade_id", None))
+                     if getattr(p, "source", "") == "bot" else None)
+            symbol = getattr(p.instrument, "symbol", "") or DASH
+            basis = ""
+            if venue is not None and venue["source"] == PNL_ETORO:
+                basis, own = "eToro", own + 1
+            elif venue is not None and venue["words"]:
+                basis = "estimate"
+                estimates.append(f"{symbol}: {venue['words']}")
             pos_data.append([
-                getattr(p.instrument, "symbol", "") or DASH,
+                symbol,
                 p.direction, f"{p.quantity}",
                 f"{float(p.entry_price):.4f}" if p.entry_price is not None else DASH,
                 f"{float(p.current_price):.4f}" if p.current_price is not None else DASH,
                 (f"{float(p.unrealized_pnl_pct):+.2f}%"
                  if p.unrealized_pnl_pct is not None else DASH),
+                basis,
             ])
-        t2 = Table(pos_data, colWidths=[1.2*inch, 0.8*inch, 0.8*inch, 1.2*inch, 1.2*inch, 0.8*inch])
+        t2 = Table(pos_data, colWidths=[1.0*inch, 0.75*inch, 0.75*inch,
+                                        1.0*inch, 1.0*inch, 0.7*inch,
+                                        0.8*inch])
         t2.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -123,6 +160,20 @@ def generate_portfolio_report(request):
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#f8f9fa'), colors.white]),
         ]))
         elements.append(t2)
+        notes = []
+        if own:
+            notes.append(f"Basis eToro: eToro's own profit or loss for "
+                         f"the position, from its holdings read in the last "
+                         f"{ETORO_PNL_MAX_AGE_S // 60} minutes; Current is "
+                         f"Sauron's last price, which that figure does not "
+                         f"read.")
+        if estimates:
+            notes.append("Basis estimate: computed here, not eToro's own "
+                         "figure — " + "; ".join(estimates) + ".")
+        from xml.sax.saxutils import escape as _esc
+        for note in notes:
+            # escaped: a Paragraph reads its text as markup
+            elements.append(Paragraph(_esc(note), styles['BodyText']))
         elements.append(Spacer(1, 0.3*inch))
 
     # Active Signals

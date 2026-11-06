@@ -193,6 +193,19 @@ def _reprice_legacy(legacy) -> None:
                                 if entry else None)
 
 
+def _shown_book_or(user, book, venues=None):
+    """portfolio.services.shown_book, fenced (2026-11-06): the book value
+    as the pages print it, or live_book_value's own when it cannot be read
+    — the cell renders either way."""
+    try:
+        from portfolio.services import shown_book
+        return shown_book(user, book, venues)
+    except Exception as e:  # noqa: BLE001 — the marks' value stands
+        logger.warning("Op Center: the shown book value is unreadable, the "
+                       "marks' stands: %s", e, exc_info=True)
+        return book
+
+
 def _tab_bar_metrics(user) -> dict:
     """The small metric under each tab head.
 
@@ -213,10 +226,22 @@ def _tab_bar_metrics(user) -> dict:
     }
 
     # ── LIVE: open positions across both books + unrealized P&L ──────
+    # The LIVE head's eToro answers ride on to the PORTFOLIO head below
+    # (2026-11-06): None until read, so a failed read here is re-read there.
+    live_venues = None
     try:
-        from portfolio.services import get_or_create_default_portfolio
+        from portfolio.services import (get_or_create_default_portfolio,
+                                        shown_open_rows, shown_unrealized)
         portfolio = get_or_create_default_portfolio(user=user)
         rows, n_priced, unrealized, _deployed = _open_book(user, portfolio)
+        # The P&L the rows SHOW (2026-11-06): eToro's own figure on an eToro
+        # row its fresh holdings list (portfolio.services.venue_pnl), summed
+        # over display copies — _open_book itself, which live_book_value
+        # and the gates read, is not touched.
+        shown, venues = shown_open_rows(user, rows)
+        live_venues = venues
+        if venues:
+            unrealized = shown_unrealized(shown)
         n_open = len(rows)
         out["live"]["primary"] = f"{n_open} OPEN"
         if n_open == 0:
@@ -229,7 +254,8 @@ def _tab_bar_metrics(user) -> dict:
             out["live"]["secondary"] = f"{unrealized:+,.2f}"
             out["live"]["tone"] = _tone(unrealized)
             out["live"]["title"] = (
-                f"Unrealized P&L, marked to live quotes. {n_priced} of "
+                f"Unrealized P&L: eToro's own figure for each eToro position "
+                f"its holdings list, live marks otherwise. {n_priced} of "
                 f"{n_open} open positions priced.")
     except Exception as e:
         logger.warning("Op Center LIVE metric unavailable: %s", e, exc_info=True)
@@ -246,9 +272,14 @@ def _tab_bar_metrics(user) -> dict:
         # tab bar's own LIVE head, one cell to the left, was already counting
         # those same trades.
         book = live_book_value(user, portfolio)
+        # PRINTED with eToro's own P&L inside it for an eToro position its
+        # holdings list (2026-11-06, the review), as the LIVE head beside it
+        # prints: a display copy, never handed on.
+        from portfolio.services import SHOWN_VALUE_WORDS
+        shown = _shown_book_or(user, book, live_venues)
         out["portfolio"]["primary"] = (
-            DASH if book.value is None
-            else f"{book.currency_symbol}{book.value:,.0f}")
+            DASH if shown.value is None
+            else f"{book.currency_symbol}{shown.value:,.0f}")
         # A snapshot from last week does not describe today's P&L. The old
         # code took the newest snapshot whatever its date and printed it as
         # "24h", so a stale book reported a day it never had.
@@ -260,11 +291,11 @@ def _tab_bar_metrics(user) -> dict:
             out["portfolio"]["secondary"] = f"{pct:+.2f}%"
             out["portfolio"]["tone"] = _tone(pct)
             out["portfolio"]["title"] = (
-                f"{portfolio.name}: cash plus both books at live marks. "
+                f"{portfolio.name}. {SHOWN_VALUE_WORDS} "
                 f"{book.coverage} Day change from today's snapshot.")
         else:
             out["portfolio"]["title"] = (
-                f"{portfolio.name}: cash plus both books at live marks. "
+                f"{portfolio.name}. {SHOWN_VALUE_WORDS} "
                 f"{book.coverage} No snapshot for {today} yet, so the day "
                 f"change is not measured.")
     except Exception as e:
@@ -361,11 +392,14 @@ def _hero_metrics(user) -> dict:
         # honest admission that the figure was a record of an hourly task
         # rather than of the operator's book. It is now measured on the read.
         book = live_book_value(user, portfolio)
-        out["value"] = DASH if book.value is None else f"{book.value:,.2f}"
+        # As the pages print it (2026-11-06, the review): eToro's own P&L
+        # inside it for an eToro position its holdings list. A display copy.
+        from portfolio.services import SHOWN_VALUE_WORDS
+        shown = _shown_book_or(user, book)
+        out["value"] = DASH if shown.value is None else f"{shown.value:,.2f}"
         out["currency"] = portfolio.currency
         out["value_title"] = (
-            f"{portfolio.name}: cash plus everything open across both books, "
-            f"marked to live quotes. {book.coverage}")
+            f"{portfolio.name}. {SHOWN_VALUE_WORDS} {book.coverage}")
         # "+0.00" was the hardcoded default here, printed under a "· 24h"
         # label on every install that has never taken a snapshot.
         today = timezone.localdate()
@@ -768,6 +802,23 @@ def command_tab_portfolio(request):
     # strip above it. Passing the tuple through is what stops this page
     # paying for the same re-pricing twice and — worse — quoting two of them.
     book = live_book_value(request.user, portfolio, book=union)
+    # THE TABLE AND ITS TOTAL SHOW eToro's OWN P&L on an eToro row
+    # (2026-11-06, the operator's report: an open eToro forex row read a
+    # gain on Sauron and a small loss in the eToro app): display copies
+    # (portfolio.services.ShownRow), never the union's objects, which
+    # live_book_value above has read as the marks priced them. The
+    # allocation and the exposure stay the notional's; the book value is
+    # printed from a display copy below.
+    from portfolio.services import (SHOWN_VALUE_WORDS, shown_open_rows,
+                                    shown_unrealized)
+    shown_positions, shown_venues = shown_open_rows(request.user,
+                                                    open_positions)
+    if shown_venues:
+        total_unrealized = shown_unrealized(shown_positions)
+    # The PORTFOLIO VALUE cell and its shares as the table prints (the
+    # review, 2026-11-06): eToro's own P&L inside the value for an eToro
+    # position its holdings list. A display copy; `book` is not handed on.
+    shown_value = _shown_book_or(request.user, book, shown_venues)
     closed_positions = unified_closed_positions(request.user, portfolio)
 
     # A closed row's P&L is unknown when nothing could price it (an option
@@ -791,9 +842,10 @@ def command_tab_portfolio(request):
     # cannot be measured — floatformat renders None as an empty span but
     # passes an unparseable string straight through, which is the same idiom
     # the LIVE tab uses for its exposure split.
-    cash_pct = DASH if book.cash_pct is None else round(book.cash_pct)
-    exposure_pct = (DASH if book.exposure_pct is None
-                    else round(book.exposure_pct))
+    cash_pct = (DASH if shown_value.cash_pct is None
+                else round(shown_value.cash_pct))
+    exposure_pct = (DASH if shown_value.exposure_pct is None
+                    else round(shown_value.exposure_pct))
 
     latest_snapshot = (PortfolioSnapshot.objects.filter(portfolio=portfolio)
                         .order_by("-date").first())
@@ -853,7 +905,7 @@ def command_tab_portfolio(request):
 
     context = {
         "portfolio": portfolio,
-        "open_positions": open_positions[:20],
+        "open_positions": shown_positions[:20],
         "open_positions_total": len(open_positions),
         "total_unrealized": total_unrealized,
         "cash_pct": cash_pct,
@@ -862,8 +914,9 @@ def command_tab_portfolio(request):
         # and its em-dash, because the template still renders the stored
         # `portfolio.current_value` — the frozen column — and swapping it is a
         # one-line change in a file this slice does not own.
-        "book_value_text": book.value_text or DASH,
+        "book_value_text": shown_value.value_text or DASH,
         "book_coverage": book.coverage,
+        "book_value_title": f"{SHOWN_VALUE_WORDS} {book.coverage}",
         "book_value_partial": book.partial and book.value is not None,
         # None all the way down where there is nothing to measure. These were
         # all zeros before: a 0.0% win rate over zero trades is a claim that
