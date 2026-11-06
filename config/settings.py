@@ -288,18 +288,36 @@ if DEBUG:
 else:
     _redis_available = True
 
+# THE TICKET'S RECORD (2026-11-06, dashboard/ticket_outcome) writes through
+# its own alias: the SAME store as "default", with socket timeouts of half
+# a second. The record is written just before a TAKE TRADE send and just
+# after it, and on the default alias a Redis that stalls (accepts, never
+# answers) held the send for redis-py's default 5 s each way. The default
+# alias itself is left as it was.
+TICKET_RECORD_CACHE = "ticket_outcome"
+
 if _redis_available:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
             "LOCATION": REDIS_URL,
-        }
+        },
+        TICKET_RECORD_CACHE: {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {"socket_timeout": 0.5,
+                        "socket_connect_timeout": 0.5},
+        },
     }
 else:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        }
+        },
+        # no LOCATION, as "default": the same in-memory store
+        TICKET_RECORD_CACHE: {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        },
     }
     if DEBUG:
         import sys
