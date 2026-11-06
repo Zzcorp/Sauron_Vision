@@ -1005,3 +1005,552 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
         funded_marked=round(funded_marked, 2),
         simulated_pnl=round(simulated_pnl, 2),
         allocated=round(allocated, 2))
+
+
+# ── THE VENUE'S OWN P&L (2026-11-06) ────────────────────────────────────
+# The operator's report, 2026-11-06: an open eToro forex row read a gain
+# on Sauron and a small loss in the eToro app. Sauron valued an open eToro
+# long at a quote's LAST price (a public feed, possibly minutes old, through
+# venue_mark.resolve's quote fallback) while eToro values a long at its BID
+# and a short at its ASK, in the account's currency, and prints each
+# position's own net profit on its /portfolio row. The sync already keeps
+# that figure beside the position's id (EtoroAccount.broker_positions:
+# "position_id", "net_profit", EtoroTrader.broker_portfolio), so every
+# surface that SHOWS an open eToro row's P&L asks `venue_pnl` / `venue_pnls`
+# below, and says so in words when the figure is not eToro's own.
+#
+# DISPLAY ONLY. Nothing that decides money reads these: the exits, the
+# stops, the care, the gates, the daily loss, Morgul, the Orcs and their
+# dossiers, grading, the treasury's used figures and every close's booking
+# keep the marks (`_trade_to_position`, `live_book_value`, `_open_book` are
+# not touched). tests/test_venue_pnl.py scans the decision modules.
+
+#: How old eToro's holdings snapshot may be and still give an open row
+#: eToro's own figure. The sync reads the holdings every 300 s
+#: (config/celery.py "sync-etoro-accounts"): 900 s is three passes, the
+#: count after which the stall alert says the sync has stopped answering
+#: (bot_program.tasks.BROKER_MISS_ALERT_AFTER).
+ETORO_PNL_MAX_AGE_S = 900
+#: How old an eToro-written quote may be and still value a row at its
+#: closing side: the bound a venue print must meet to value a real row as
+#: the venue's (bot_program.venue_mark.MAX_AGE_S).
+ETORO_QUOTE_MAX_AGE_S = 900
+
+#: What `venue_pnl` answers in "source".
+PNL_ETORO = "etoro"              # eToro's own netProfit for the position
+PNL_ETORO_QUOTE = "etoro_quote"  # an eToro quote's closing side, converted
+PNL_ESTIMATE = "estimate"        # the platform's own mark (venue_mark.resolve)
+
+_ETORO = "etoro"
+_OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
+#: The venue stamp's reader, as an estimate's words name it.
+_STAMP_WORDS = {"fill": "fill", "tick": "tick", "candle": "candle",
+                "close dialog": "close-dialog"}
+#: The stored holdings' world, as the words say it.
+_WORLD_WORDS = {"live": "real", "demo": "demo"}
+#: The sentence every estimate's hover ends with.
+_ESTIMATE_TAIL = ("It can differ from the eToro app by the spread, the "
+                  "conversion rate and fees.")
+
+
+def etoro_carried(trade) -> bool:
+    """Is `trade` an OPEN row eToro carries (2026-11-06)? A bot row outside
+    the platform's simulator, stamped broker "etoro" by the lane that
+    booked it, OPEN or CLOSE_PENDING. A paper row, another broker's row, a
+    legacy Position (no metadata) and every closed row: no — a close keeps
+    the P&L it booked."""
+    meta = getattr(trade, "metadata", None)
+    if not isinstance(meta, dict) or getattr(trade, "paper", True):
+        return False
+    if getattr(trade, "status", "") not in _OPEN_STATUSES:
+        return False
+    return str(meta.get("broker") or "").strip().lower() == _ETORO
+
+
+def _pnl_num(value):
+    """float, or None for anything that is not a finite number."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out == out and abs(out) != float("inf") else None
+
+
+def _pnl_pid(raw) -> str:
+    """A position id as eToro's list and the row both spell it, or ""."""
+    if raw is None or isinstance(raw, bool):
+        return ""
+    if isinstance(raw, (int, str)):
+        return str(raw).strip()
+    return ""
+
+
+def _is_etoro_source(source) -> bool:
+    """A LiveQuote written by an eToro reader ("etoro", or a future
+    "etoro_..." feed)."""
+    s = str(source or "").strip().lower()
+    return s == _ETORO or s.startswith((_ETORO + "_", _ETORO + "-"))
+
+
+class _Holdings(NamedTuple):
+    """The user's stored eToro holdings: {position id: row}, when they were
+    read, the world they were read in and the account's currency."""
+    by_pid: dict
+    at: object
+    world: str
+    currency: str
+
+
+def _etoro_holdings(*, user_id=None, config_id=None):
+    """One read of the eToro row (by its user, or by a config of that
+    user): _Holdings, or None when no eToro row is stored."""
+    from bot_program.models import EtoroAccount
+    qs = EtoroAccount.objects.only("demo", "broker_positions",
+                                   "broker_positions_at",
+                                   "last_equity_currency")
+    if user_id is not None:
+        qs = qs.filter(user_id=user_id)
+    elif config_id is not None:
+        qs = qs.filter(user__asset_bot_configs__id=config_id)
+    else:
+        return None
+    acct = qs.order_by("pk").first()
+    if acct is None:
+        return None
+    by_pid = {}
+    for row in (acct.broker_positions or []):
+        if not isinstance(row, dict):
+            continue
+        pid = _pnl_pid(row.get("position_id"))
+        if pid and pid not in by_pid:
+            by_pid[pid] = row
+    return _Holdings(by_pid, acct.broker_positions_at,
+                     "demo" if acct.demo else "live",
+                     str(acct.last_equity_currency or "").strip().upper())
+
+
+class _RowUnits:
+    """usd_per_unit's view of a bot row with no sizing stamp: its class and
+    its symbol, so a forex row's quote currency is converted at the live
+    rate (an AssetBotTrade carries no `instrument` to read it from)."""
+    __slots__ = ("value_per_unit", "asset_class", "instrument")
+
+    def __init__(self, trade):
+        self.value_per_unit = None
+        self.asset_class = getattr(trade, "asset_class", "") or ""
+        self.instrument = _InstrumentShim(getattr(trade, "symbol", "") or "",
+                                          self.asset_class)
+
+
+def _usd_per_unit_of(trade, rates=None):
+    """USD one price point of one unit of `trade` is worth: its sizing
+    stamp (value_per_unit, an option's multiplier with it), else the live
+    quote-currency rate (usd_per_unit). None when that cannot be read."""
+    meta = getattr(trade, "metadata", None) or {}
+    if meta.get("value_per_unit") or is_option_row(trade):
+        return value_per_unit(trade)
+    return usd_per_unit(_RowUnits(trade), rates)
+
+
+def _age_of(at, now):
+    if at is None:
+        return None
+    try:
+        return max(0.0, (now - at).total_seconds())
+    except TypeError:            # a naive time is not a measured one
+        return None
+
+
+def _age_said(age_s) -> str:
+    from bot_program.venue_mark import age_words
+    return age_words(age_s) or "age unknown"
+
+
+def _feed_label(source) -> str:
+    """The feed's name as /health/ prints it (market_data.feeds), else its
+    key."""
+    key = str(source or "").strip()
+    try:
+        from market_data.feeds import BY_KEY
+        label = (BY_KEY.get(key.lower()) or {}).get("label")
+    except Exception:  # noqa: BLE001 — a name is a courtesy
+        label = None
+    return label or key or "an unnamed feed"
+
+
+def _etoro_own(trade, holdings, now):
+    """(eToro's net profit, when it was read, "") for a row whose world's
+    holdings list its position id with a number, read less than
+    ETORO_PNL_MAX_AGE_S ago — else (None, None, why not, in words)."""
+    from bot_program.engine.venue_close import position_id_for
+    from dashboard.position_summary import world_of
+
+    pid = _pnl_pid(position_id_for(trade))
+    if not pid:
+        return None, None, "the position records no eToro position id"
+    if holdings is None:
+        return None, None, "no eToro holdings are stored"
+    if holdings.at is None:
+        return None, None, "eToro's holdings have not been read yet"
+    if holdings.world != world_of(trade):
+        return None, None, (
+            f"the stored holdings are eToro's "
+            f"{_WORLD_WORDS.get(holdings.world, holdings.world)} account's, "
+            f"not this position's")
+    age = _age_of(holdings.at, now)
+    if age is None or age > ETORO_PNL_MAX_AGE_S:
+        return None, None, (
+            f"eToro's holdings were read {_age_said(age)} ago, more than "
+            f"{ETORO_PNL_MAX_AGE_S // 60} min")
+    if holdings.currency not in ("", "USD"):
+        return None, None, (f"the account's figures are in "
+                            f"{holdings.currency}, not USD")
+    held = holdings.by_pid.get(pid)
+    if held is None:
+        return None, None, (f"eToro's holdings, read {_age_said(age)} ago, "
+                            f"do not list this position")
+    net = _pnl_num(held.get("net_profit"))
+    if net is None:
+        return None, None, (f"eToro's holdings, read {_age_said(age)} ago, "
+                            f"carry no profit or loss for this position")
+    return net, holdings.at, ""
+
+
+def _etoro_side(trade, quote, now):
+    """(the closing side's price, its time, "bid" | "ask") of an
+    eToro-written quote younger than ETORO_QUOTE_MAX_AGE_S — the bid for a
+    long, the ask for a short, as eToro values an open position — or None.
+    A quote of another feed is never the closing side, sides or not."""
+    if quote is None or not _is_etoro_source(getattr(quote, "source", "")):
+        return None
+    long_ = str(getattr(trade, "side", "") or "").upper() in ("BUY", "LONG")
+    word = "bid" if long_ else "ask"
+    price = _pnl_num(getattr(quote, word, None))
+    at = getattr(quote, "updated_at", None)
+    age = _age_of(at, now)
+    if price is None or price <= 0 or age is None \
+            or age > ETORO_QUOTE_MAX_AGE_S:
+        return None
+    return price, at, word
+
+
+def _figures(trade, pnl, notional):
+    """(percentage of the entry's notional, the percentage on capital, R
+    over the risk the row opened with, that risk) for a figure in USD."""
+    from bot_program.manual_close import _risk_dollars
+    meta = getattr(trade, "metadata", None) or {}
+    pct = cap = r = None
+    if pnl is not None and notional:
+        pct = round(pnl / notional * 100, 2)
+        cap = pnl_on_capital_pct(pnl, getattr(trade, "asset_class", ""),
+                                 notional, leverage=meta.get("leverage"),
+                                 carrier=_ETORO)
+    try:
+        risk = float(_risk_dollars(trade) or 0.0)
+    except Exception:  # noqa: BLE001 — no risk is no R, never a crash
+        risk = 0.0
+    if pnl is not None and risk > 0:
+        r = pnl / risk
+    return pct, cap, r, (risk if risk > 0 else None)
+
+
+def _answer(source, pnl, at, now, *, pct, cap, r=None, risk=None, words="",
+            title="", ccy="", marks_usd=True):
+    return {"pnl_usd": pnl, "source": source, "at": at,
+            "age_s": _age_of(at, now), "pnl_pct": pct, "cap_pct": cap,
+            "r": r, "risk": risk, "words": words, "title": title,
+            "ccy": ccy, "marks_usd": marks_usd}
+
+
+def _marks_in_usd(trade) -> bool:
+    """Are the book's own marks for this row in dollars (2026-11-06,
+    shown_book)? Not for a forex row opened before value_per_unit was
+    stamped: _trade_to_position marks it at value_per_unit 1, in the
+    pair's quote currency (position_summary._unconverted_ccy, the position
+    page's reader)."""
+    from dashboard.position_summary import _unconverted_ccy
+    try:
+        return not _unconverted_ccy(trade, "USD")
+    except Exception:  # noqa: BLE001 — unknown is not dollars
+        return False
+
+
+def _venue_answer(trade, own, quote, row, now, rates):
+    """The answer for one open eToro row (see venue_pnl). `own` is
+    _etoro_own's triple, `quote` the platform's quote row for the symbol,
+    `row` the row as the book marked it (UnifiedPosition)."""
+    net, net_at, why = own
+    entry = _pnl_num(getattr(trade, "entry_price", None))
+    qty = abs(_pnl_num(getattr(trade, "qty", None)) or 0.0)
+    vpu = _usd_per_unit_of(trade, rates)
+    notional = (abs(entry * qty * vpu)
+                if entry and qty and vpu is not None else None) or None
+    marks_usd = _marks_in_usd(trade)
+
+    # 1. eToro's own figure for the position.
+    if net is not None:
+        pnl = round(net, 2)
+        pct, cap, r, risk = _figures(trade, pnl, notional)
+        return _answer(
+            PNL_ETORO, pnl, net_at, now, pct=pct, cap=cap, r=r, risk=risk,
+            ccy="USD", marks_usd=marks_usd,
+            title=(f"eToro's own profit or loss for this position, from its "
+                   f"holdings read {_age_said(_age_of(net_at, now))} ago."))
+
+    # 2. An eToro quote's closing side, converted here.
+    side = _etoro_side(trade, quote, now)
+    if side is not None and entry and qty and vpu is not None:
+        price, q_at, word = side
+        sign = (1 if str(getattr(trade, "side", "") or "").upper()
+                in ("BUY", "LONG") else -1)
+        pnl = round((price - entry) * qty * vpu * sign, 2)
+        pct, cap, r, risk = _figures(trade, pnl, notional)
+        age = _age_said(_age_of(q_at, now))
+        return _answer(
+            PNL_ETORO_QUOTE, pnl, q_at, now, pct=pct, cap=cap, r=r,
+            risk=risk, ccy="USD", marks_usd=marks_usd,
+            words=f"estimate: eToro quote, {age}",
+            title=(f"Not eToro's own figure: {why}. Computed here at eToro's "
+                   f"{word} ({price:g}), the side eToro closes this position "
+                   f"at, read {age} ago. {_ESTIMATE_TAIL}"))
+
+    # 3. The platform's own mark-based figure, unchanged — and said so.
+    pnl = _pnl_num(getattr(row, "unrealized_pnl", None))
+    pct = _pnl_num(getattr(row, "unrealized_pnl_pct", None))
+    cap = _pnl_num(getattr(row, "pnl_on_capital_pct", None))
+    at = getattr(row, "mark_at", None)
+    src = getattr(row, "mark_source", None) or ""
+    age = _age_said(getattr(row, "mark_age_s", None))
+    words, basis = "", "No price marks this position yet, so there is no figure."
+    if pnl is not None and src == "quote":
+        feed = _feed_label(getattr(quote, "source", "") if quote is not None
+                           else "")
+        words = f"estimate: {feed} quote, {age}"
+        basis = f"Computed here at the {feed} quote's last price, {age} old."
+    elif pnl is not None and src in ("venue", "venue_stale"):
+        via = _STAMP_WORDS.get(getattr(row, "mark_via", "") or "", "")
+        words = f"estimate: eToro {via + ' ' if via else ''}price, {age}"
+        basis = (f"Computed here at eToro's last "
+                 f"{via + ' ' if via else ''}price, {age} old.")
+    elif pnl is not None:
+        words = "estimate"
+        basis = "Computed here from the platform's own mark."
+    return _answer(PNL_ESTIMATE, pnl, at, now, pct=pct, cap=cap,
+                   words=words, marks_usd=marks_usd,
+                   title=(f"Not eToro's own figure: {why}. {basis} "
+                          f"{_ESTIMATE_TAIL}"))
+
+
+def _venue_answers(trades, holdings, rows, now):
+    out, rest, rates = {}, [], {}
+    for t in trades:
+        own = _etoro_own(t, holdings, now)
+        if own[0] is not None:
+            out[t.id] = _venue_answer(t, own, None, rows.get(t.id), now, rates)
+        else:
+            rest.append((t, own))
+    if rest:
+        # ONE quote read for the rows eToro's own figure did not answer.
+        from market_data.models import LiveQuote
+        quotes = {q.instrument.symbol: q for q in
+                  LiveQuote.objects.select_related("instrument")
+                  .filter(instrument__symbol__in={t.symbol for t, _o in rest})}
+        for t, own in rest:
+            row = rows.get(t.id)
+            if row is None:
+                row = _trade_to_position(t, {}, quotes)
+            out[t.id] = _venue_answer(t, own, quotes.get(t.symbol), row, now,
+                                      rates)
+    return out
+
+
+def venue_pnls(user, trades, *, rows=None, now=None) -> dict:
+    """{trade id: venue_pnl's answer} for every open eToro row among
+    `trades` (AssetBotTrades of one user; anything else is skipped), with
+    one read of the eToro row and at most one quote read — none at all
+    when no row is eToro's. `rows` ({trade id: the row as the book marked
+    it}) spares the estimate a second marking. `user` is the User or its
+    id. DISPLAY ONLY (see the section head)."""
+    carried = [t for t in (trades or []) if etoro_carried(t)]
+    if not carried:
+        return {}
+    from django.utils import timezone
+    now = now or timezone.now()
+    uid = getattr(user, "pk", user)
+    holdings = _etoro_holdings(user_id=uid) if uid is not None else None
+    return _venue_answers(carried, holdings, dict(rows or {}), now)
+
+
+def venue_pnl(trade, *, row=None, now=None):
+    """THE P&L A PAGE SHOWS FOR AN OPEN eTORO ROW (2026-11-06), or None for
+    a row eToro does not carry (a paper row, another broker's, a closed
+    one: its booking stands).
+
+    {"pnl_usd", "source", "at", "age_s", "pnl_pct", "cap_pct", "r", "risk",
+     "words", "title", "ccy", "marks_usd"}:
+      1. "etoro": eToro's own net profit for the position, when the stored
+         holdings of the row's world list its position id with a number
+         and were read less than ETORO_PNL_MAX_AGE_S ago — at that read;
+      2. "etoro_quote": else, with an eToro-written quote younger than
+         ETORO_QUOTE_MAX_AGE_S, the P&L at its CLOSING side (bid for a
+         long, ask for a short), converted to USD (usd_per_unit) — at the
+         quote's time;
+      3. "estimate": else the figure the book already marks the row at
+         (venue_mark.resolve through _trade_to_position) — at the mark's
+         time. None stays None: nothing here invents a figure.
+    `pnl_pct` divides the figure by the entry's notional in USD, `cap_pct`
+    by the capital it ties up, `r` by the risk the row opened with
+    (manual_close._risk_dollars) for the first two sources: a mark's R
+    beside eToro's figure would contradict its sign. `words` is "" for
+    eToro's own figure and "estimate: <feed> quote, <age>" otherwise;
+    `title` says why. `ccy` "USD" for the first two, "" for the estimate
+    (the row's own money). `marks_usd` is False for a forex row opened
+    before value_per_unit was stamped, whose marks (and so the book's sums
+    over them) are in the pair's quote currency: shown_book leaves its
+    value as the book has it. `row` is the row as the book marked it, when
+    the caller holds it. DISPLAY ONLY (see the section head)."""
+    if not etoro_carried(trade):
+        return None
+    from django.utils import timezone
+    now = now or timezone.now()
+    holdings = _etoro_holdings(config_id=getattr(trade, "config_id", None))
+    return _venue_answers([trade], holdings,
+                          {trade.id: row} if row is not None else {},
+                          now).get(trade.id)
+
+
+def venue_pnls_for_rows(user, rows, *, now=None) -> dict:
+    """venue_pnls over an open book already marked (UnifiedPosition and
+    Position rows): the eToro rows' trades are read once, and nothing at
+    all is read when no row is an open eToro one."""
+    cand = {}
+    for r in rows or []:
+        tid = getattr(r, "trade_id", None)
+        if (getattr(r, "source", "") == "bot" and tid
+                and not getattr(r, "paper", True)
+                and str(getattr(r, "carrier", "") or "").strip().lower()
+                == _ETORO
+                and getattr(r, "status", "") in _OPEN_STATUSES):
+            cand[tid] = r
+    if not cand:
+        return {}
+    from bot_program.models import AssetBotTrade
+    trades = list(AssetBotTrade.objects.filter(id__in=list(cand)))
+    return venue_pnls(user, trades, rows=cand, now=now)
+
+
+class ShownRow:
+    """An open row as a page prints it (2026-11-06): the row's own
+    attributes, with venue_pnl's figure and percentage on an eToro row and
+    the words beside it. A display copy: the row itself is never written,
+    so what goes on to live_book_value is the marks' book, untouched."""
+
+    def __init__(self, row, venue=None):
+        self._row = row
+        self.venue_pnl = venue
+        if venue is not None:
+            self.unrealized_pnl = venue["pnl_usd"]
+            self.unrealized_pnl_pct = venue["pnl_pct"]
+            self.pnl_on_capital_pct = venue["cap_pct"]
+            self.pnl_words = venue["words"]
+            self.pnl_title = venue["title"]
+        else:
+            self.unrealized_pnl = getattr(row, "unrealized_pnl", None)
+            self.unrealized_pnl_pct = getattr(row, "unrealized_pnl_pct", None)
+            self.pnl_on_capital_pct = getattr(row, "pnl_on_capital_pct", None)
+            self.pnl_words = ""
+            self.pnl_title = ""
+
+    def __getattr__(self, name):
+        # Only for the row's own attributes: never a dunder (copy and
+        # pickle probe those before __init__ has run) nor the row itself.
+        if name.startswith("__") or name == "_row":
+            raise AttributeError(name)
+        return getattr(self._row, name)
+
+
+def shown_open_rows(user, rows, *, now=None):
+    """(display rows, {trade id: answer}) for an open book already marked:
+    ShownRow copies with eToro's figure on its rows, or the rows
+    themselves when none is an open eToro row."""
+    rows = list(rows or [])
+    venues = venue_pnls_for_rows(user, rows, now=now)
+    if not venues:
+        return rows, {}
+    return [ShownRow(r, venues.get(getattr(r, "trade_id", None))
+                     if getattr(r, "source", "") == "bot" else None)
+            for r in rows], venues
+
+
+def shown_unrealized(rows):
+    """The open P&L the rows SHOW, summed (None when no row shows one)."""
+    vals = [_pnl_num(getattr(r, "unrealized_pnl", None)
+                     if not isinstance(r, dict) else r.get("unrealized_pnl"))
+            for r in rows or []]
+    vals = [v for v in vals if v is not None]
+    return round(sum(vals), 2) if vals else None
+
+
+#: What the VALUE cells say they are (2026-11-06), wherever shown_book's
+#: figure is printed.
+SHOWN_VALUE_WORDS = (f"Cash plus everything open across both books: an "
+                     f"eToro position its holdings list (read in the last "
+                     f"{ETORO_PNL_MAX_AGE_S // 60} minutes) at eToro's own "
+                     f"profit or loss, every other position at its live "
+                     f"mark.")
+
+
+def shown_book(user, book, venues=None):
+    """live_book_value's BookValue AS A PAGE PRINTS IT (2026-11-06).
+
+    The review of the change for the operator's report (an open eToro
+    forex row read a gain on Sauron and a small loss in the eToro app):
+    the rows printed eToro's figure while the VALUE cells beside them still
+    held the mark's, because the book adds a funded row at its marked
+    notional — cost plus the mark's P&L. Here the open P&L inside VALUE is
+    eToro's figure instead of the mark's, for each funded open eToro row
+    whose figure is eToro's own or its quote's closing side (venue_pnl):
+    value + (that figure - the marked P&L). A copy (`_replace`), so FREE
+    and every share of the book follow the value printed beside them;
+    ALLOCATED, the exposure and the open P&L are the book's own.
+
+    Left as the book has it: a row whose figure is an estimate (it IS the
+    mark's), one the book could not price (it is not in the value), and a
+    forex row whose marks are in its quote currency (marks_usd False).
+    `venues` is {trade id: venue_pnl's answer} when the caller holds it;
+    else it is read here, and only when an open eToro row is in the book.
+
+    DISPLAY ONLY: the BookValue handed in is never written, and the gates'
+    denominator (Portfolio.current_value, which portfolio.tasks writes
+    from live_book_value) keeps the marks. None stays None."""
+    if book is None or book.value is None:
+        return book
+    if venues is None:
+        venues = venue_pnls_for_rows(user, book.rows)
+    if not venues:
+        return book
+    adjust, moved = 0.0, 0
+    for row in book.rows:
+        if getattr(row, "source", "") != "bot" or getattr(row, "paper", True):
+            continue
+        venue = venues.get(getattr(row, "trade_id", None))
+        if not venue or venue.get("source") not in (PNL_ETORO,
+                                                     PNL_ETORO_QUOTE):
+            continue
+        if not venue.get("marks_usd", False):
+            continue
+        # Only a row live_book_value counted: priced, with a notional.
+        if getattr(row, "current_price", None) is None \
+                or notional_usd(row) is None:
+            continue
+        marked = _pnl_num(getattr(row, "unrealized_pnl", None))
+        shown = _pnl_num(venue.get("pnl_usd"))
+        if marked is None or shown is None:
+            continue
+        adjust += shown - marked
+        moved += 1
+    if not moved:
+        return book
+    return book._replace(value=round(book.value + adjust, 2))

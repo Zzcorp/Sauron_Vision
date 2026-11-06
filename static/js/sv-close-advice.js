@@ -457,8 +457,14 @@
             fact(grid, "Waiting for", n.age_text);
         } else {
             fact(grid, "Price now", n.mark_text);
-            fact(grid, "Profit or loss", n.pnl_text, "", tone(n.pnl));
-            fact(grid, "R now", n.r_now_text, "", tone(n.r_now));
+            /* Whose figure (2026-11-06): on an eToro position, eToro's own
+               or an estimate and from what (n.pnl_said), as the row says;
+               and, when the R printed is eToro's, the R Sauron's read below
+               measured at the price shown (n.r_now_said). */
+            fact(grid, "Profit or loss", n.pnl_text, n.pnl_said || "",
+                 tone(n.pnl));
+            fact(grid, "R now", n.r_now_text, n.r_now_said || "",
+                 tone(n.r_now));
             fact(grid, "To the stop", n.r_to_stop_text,
                  isNum(n.r_to_planned_stop)
                     ? "the broker's stop; " + n.r_to_planned_stop.toFixed(2) +

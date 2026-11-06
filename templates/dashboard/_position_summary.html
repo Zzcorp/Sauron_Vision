@@ -23,7 +23,8 @@ The refresh sentence shows only where the script runs (html.pd-js).
     <div class="pd-big{% if summary.big_tone %} pd-{{ summary.big_tone }}{% endif %}">
         <span class="pd-big-label">{{ summary.big_label }}</span>
         <span class="pd-big-value">{{ summary.big_value }}</span>
-        {% if summary.big_sub %}<span class="pd-big-sub">{{ summary.big_sub }}</span>{% endif %}
+        {# The sub says whose figure it is (2026-11-06): eToro's own, or an estimate and from what; the title says why. #}
+        {% if summary.big_sub %}<span class="pd-big-sub"{% if summary.big_title %} title="{{ summary.big_title }}"{% endif %}>{{ summary.big_sub }}</span>{% endif %}
     </div>
     <p class="pd-sentence">{{ summary.sentence }}</p>
     <dl class="pd-facts">
