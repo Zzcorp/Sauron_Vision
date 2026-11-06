@@ -213,7 +213,7 @@ def broker_equity(user, cfg):
     nl = getattr(client, "net_liquidation", None)
     if callable(nl):
         try:
-            with etoro_budget.at(etoro_budget.P2, "pool check"):
+            with etoro_budget.at_priority(etoro_budget.P2, "pool check"):
                 got = nl()
             # the (value, currency) pair every adapter documents; anything
             # else is not a reading
@@ -232,7 +232,7 @@ def broker_equity(user, cfg):
         if not callable(fn):
             return None
         try:
-            with etoro_budget.at(etoro_budget.P2, "pool check"):
+            with etoro_budget.at_priority(etoro_budget.P2, "pool check"):
                 equity = float(fn() or 0)
         except Exception as e:  # noqa: BLE001
             logger.debug("capital_truth: balance unreadable for %s: %s",

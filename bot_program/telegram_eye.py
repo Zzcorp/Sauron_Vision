@@ -697,7 +697,7 @@ def read_live_account(api_key: str, user_key: str, *,
     from bot_program.engine import etoro_budget
     from bot_program.engine.etoro_client import EtoroTrader
     client = EtoroTrader(api_key, user_key, env="live", timeout=5.0)
-    with etoro_budget.at(etoro_budget.P2, "status read"):
+    with etoro_budget.at_priority(etoro_budget.P2, "status read"):
         out = {"equity": client.net_liquidation(),
                "positions": len(client.get_positions())}
         if cells:

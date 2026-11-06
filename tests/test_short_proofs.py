@@ -1177,7 +1177,7 @@ class TheKeysBudgetTests(_Base):
         from bot_program.engine import etoro_budget as eb
         from bot_program.engine import etoro_client as ec
         self.eb = eb
-        eb.reset()
+        eb.forget_all()
         for target, name in ((eb, "BUDGET"), (ec, "RATE_PAUSE")):
             p = mock.patch.object(target, name, True)
             p.start()
@@ -1186,7 +1186,7 @@ class TheKeysBudgetTests(_Base):
         p = mock.patch.object(eb, "_now", lambda: 600_000.0)
         p.start()
         self.addCleanup(p.stop)
-        self.addCleanup(eb.reset)
+        self.addCleanup(eb.forget_all)
         self.kh = eb.key_hash("user-k")
 
     def _fill(self, family, n):
@@ -1214,7 +1214,7 @@ class TheKeysBudgetTests(_Base):
         for family in eb.FAMILIES:
             with self.subTest(family=family):
                 cache.clear()
-                eb.reset()
+                eb.forget_all()
                 cap = eb.limit(family, eb.P5)
                 self._fill(family, cap)
                 wire = self._wire()

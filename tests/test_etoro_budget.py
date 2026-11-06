@@ -92,7 +92,7 @@ class _BudgetOn:
     def setUp(self):
         super().setUp()
         cache.clear()
-        eb.reset()
+        eb.forget_all()
         vh.reset()
         for target, name in ((eb, "BUDGET"), (ec, "RATE_PAUSE")):
             p = mock.patch.object(target, name, True)
@@ -105,7 +105,7 @@ class _BudgetOn:
         _clear_eligibility()
         self.addCleanup(_clear_eligibility)
         self.addCleanup(vh.reset)
-        self.addCleanup(eb.reset)
+        self.addCleanup(eb.forget_all)
         self.addCleanup(cache.clear)
 
 
@@ -395,16 +395,16 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
         self.assertEqual(seen, [("spend", "market", eb.P1, "search"),
                                 ("spend", "market", eb.P1, "ticker")])
         seen.clear()
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             self._wire()[0].ticker("AAPL")
         self.assertEqual(seen, [("take", "market", eb.P3, "search"),
                                 ("take", "market", eb.P3, "ticker")])
         seen.clear()
-        with eb.at(eb.P4, "proposal"):
+        with eb.at_priority(eb.P4, "proposal"):
             t.ticker("AAPL")
         self.assertEqual(seen, [("take", "market", eb.P4, "ticker")])
         seen.clear()
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
             t.get_positions()
         self.assertEqual(seen, [("take", "account", eb.P2, "account"),
@@ -422,7 +422,7 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
         self.assertEqual(seen, [("take", "market", eb.P5, "search"),
                                 ("take", "market", eb.P5, "candles")])
         seen.clear()
-        with eb.at(eb.P2, "a caller that set more"):
+        with eb.at_priority(eb.P2, "a caller that set more"):
             t.klines("AAPL", interval="4h", limit=5)
         self.assertEqual(seen, [("take", "market", eb.P2, "candles")])
 
@@ -436,7 +436,7 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
                     t.market_order("AAPL", "BUY", 1.0, stop_loss=90.0,
                                    take_profit=110.0)
                 else:
-                    with eb.at(scope):
+                    with eb.at_priority(scope):
                         t.market_order("AAPL", "BUY", 1.0, stop_loss=90.0,
                                        take_profit=110.0)
             self.assertTrue(seen)
@@ -453,7 +453,7 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
         for scope in (None, eb.P1, eb.P3, eb.P5):
             seen.clear()
             t, _ = self._wire()
-            with mock.patch("time.sleep"), eb.at(
+            with mock.patch("time.sleep"), eb.at_priority(
                     eb.P5 if scope is None else scope):
                 res = t.close_position("555", "AAPL", 1.0,
                                        open_order_id="77")
@@ -475,7 +475,7 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
             (200, {"status": {"id": 11, "name": "WaitingForMarket"}}),
             (200, {"status": {"id": 7, "name": "Canceled"}})]},
             routes=[("DELETE", "/orders/", 202, {})])
-        with mock.patch("time.sleep"), eb.at(eb.P5):
+        with mock.patch("time.sleep"), eb.at_priority(eb.P5):
             self.assertIs(t.cancel_order("78"), True)
         self.assertEqual(len(_wire_calls(fake, "/orders/78")), 1)
         self.assertIn(("spend", "execution", eb.P0, "cancel"), seen)
@@ -501,7 +501,8 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
     def test_a_refused_read_sends_nothing_and_is_no_venue_failure(self):
         _fill(KH, eb.MARKET, eb.limit(eb.MARKET, eb.P3))
         t, fake = _client([SEARCH_AAPL, RATES_OK], env="live")
-        with eb.at(eb.P3, "mark"), self.assertRaises(eb.Refused) as cm:
+        with eb.at_priority(eb.P3, "mark"), \
+                self.assertRaises(eb.Refused) as cm:
             t.ticker("AAPL")
         self.assertEqual(fake.calls, [])
         self.assertEqual(t.wire_reads, 0)
@@ -519,7 +520,7 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
         t, fake = _sclient({("GET", "/rates"): [
             (503, {}), (200, {"rates": [{"bid": 30.0, "ask": 30.2,
                                          "lastExecution": 30.1}]})]})
-        with eb.at(eb.P3, "mark"), mock.patch("time.sleep"):
+        with eb.at_priority(eb.P3, "mark"), mock.patch("time.sleep"):
             self.assertEqual(float(t.ticker("XAGUSD")["lastPrice"]), 30.1)
         self.assertEqual(len(_wire_calls(fake, "/rates")), 2)
         eb.flush()                     # the retry's count, queued once sent
@@ -531,7 +532,7 @@ class TheSitesTests(_BudgetOn, SimpleTestCase):
         with mock.patch.object(eb, "_cache", return_value=_Down()), \
                 mock.patch("time.sleep"):
             res = t.close_position("555", "AAPL", 1.0, open_order_id="77")
-            with eb.at(eb.P3, "mark"), self.assertRaises(eb.Refused):
+            with eb.at_priority(eb.P3, "mark"), self.assertRaises(eb.Refused):
                 t.ticker("AAPL")
         self.assertEqual(res["status"], "FILLED")
         self.assertEqual(len(_wire_calls(fake, "market-close-orders")), 1)
@@ -587,7 +588,7 @@ class TheSpendQueueTests(_BudgetOn, SimpleTestCase):
                 "close" if "market-close-orders" in url else url))
             return real(method, url, **kw)
         fake._hit = hit
-        with mock.patch("time.sleep"), eb.at(eb.P0, "kill switch"):
+        with mock.patch("time.sleep"), eb.at_priority(eb.P0, "kill switch"):
             for pid, oid in (("555", "77"), ("556", "78")):
                 res = t.close_position(pid, "AAPL", 1.0, open_order_id=oid)
                 self.assertEqual(res["status"], "FILLED")
@@ -699,7 +700,7 @@ class TheAccountHelpersTests(_BudgetOn, TestCase):
         _fill(self.KU, eb.ACCOUNT, eb.limit(eb.ACCOUNT, eb.P2))
         for name in ("net_liquidation", "margin_cells", "balance_usdt",
                      "broker_portfolio"):
-            with self.subTest(name), eb.at(eb.P2, "account sync"), \
+            with self.subTest(name), eb.at_priority(eb.P2, "account sync"), \
                     self.assertRaises(eb.Refused):
                 getattr(t, name)()
         self.assertEqual(t._session.calls, [])
@@ -716,7 +717,7 @@ class TheAccountHelpersTests(_BudgetOn, TestCase):
         t = ec.EtoroTrader("k", "u", env="live")
         t._session = _FakeSession([("GET", "/aggregate-portfolio", 500, {}),
                                    ("GET", "/portfolio", 500, {})])
-        with mock.patch("time.sleep"), eb.at(eb.P2, "account sync"):
+        with mock.patch("time.sleep"), eb.at_priority(eb.P2, "account sync"):
             self.assertIsNone(t.net_liquidation())
             self.assertIsNone(t.margin_cells())
             self.assertEqual(t.balance_usdt(), 0.0)
@@ -783,7 +784,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
         self.assertEqual(b.rate_pause_s(), 40.0)
         self.assertEqual(vh.pause_s(b), 40.0, "today's readers read it")
         for p in (eb.P3, eb.P4, eb.P5):
-            with self.subTest(priority=p), eb.at(p), \
+            with self.subTest(priority=p), eb.at_priority(p), \
                     self.assertRaises(eb.Refused) as cm:
                 b.ticker("AAPL")
             self.assertEqual(cm.exception.reason, eb.PAUSE)
@@ -791,7 +792,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
                 cm.exception))
         self.assertEqual(fake.calls, [])
         # P2 reads no pause, nor does a read no caller classified (P1)
-        with eb.at(eb.P2):
+        with eb.at_priority(eb.P2):
             b.account()
         self.assertEqual(float(b.ticker("AAPL")["lastPrice"]), 100.0)
         # another key, another world: nothing holds
@@ -800,7 +801,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
         self.assertEqual(_hclient([], env="demo")[0].rate_pause_s(), 0.0)
         self.bclock.t += 40
         self.assertEqual(b.rate_pause_s(), 0.0)
-        with eb.at(eb.P3):
+        with eb.at_priority(eb.P3):
             b.ticker("AAPL")
 
     def test_two_429s_at_once_grant_one_pause(self):
@@ -826,7 +827,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
         stalled = _Recorder(events, gate=gate, stall_s=1.0)
         with mock.patch.object(eb, "_cache", return_value=stalled):
             started = time.monotonic()
-            with eb.at(eb.P0, "kill switch"), \
+            with eb.at_priority(eb.P0, "kill switch"), \
                     self.assertRaises(requests.HTTPError):
                 a.ticker("AAPL")
             took = time.monotonic() - started
@@ -842,7 +843,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
                          "granted all the same, dated at the 429")
         # the next take of this process is judged on it
         b, _ = _hclient([SEARCH_AAPL[:4], RATES_OK[:4]])
-        with eb.at(eb.P3), self.assertRaises(eb.Refused) as cm:
+        with eb.at_priority(eb.P3), self.assertRaises(eb.Refused) as cm:
             b.ticker("AAPL")
         self.assertEqual(cm.exception.reason, eb.PAUSE)
 
@@ -862,7 +863,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
         a.instrument_id("AAPL")
         eb.flush()
         with self._no_flusher():
-            with eb.at(eb.P0, "pending-close drain"), \
+            with eb.at_priority(eb.P0, "pending-close drain"), \
                     self.assertRaises(requests.HTTPError):
                 a.ticker("AAPL")
             self.assertIsNone(cache.get(eb._pause_key(KH, "live")),
@@ -883,7 +884,8 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
                     with self.assertRaises(requests.HTTPError):
                         a.ticker("AAPL")
                 else:
-                    with eb.at(scope), self.assertRaises(requests.HTTPError):
+                    with eb.at_priority(scope), \
+                            self.assertRaises(requests.HTTPError):
                         a.ticker("AAPL")
                 self.assertEqual(
                     cache.get(eb._pause_key(KH, "live")),
@@ -893,7 +895,7 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
         self._meet_429()
         for scope in (None, eb.P5):
             t, fake = _wire()
-            with mock.patch("time.sleep"), eb.at(
+            with mock.patch("time.sleep"), eb.at_priority(
                     eb.P5 if scope else eb.P0):
                 res = t.close_position("555", "AAPL", 1.0,
                                        open_order_id="77")
@@ -1126,7 +1128,7 @@ class TheManageTickBookReadsTests(_BudgetOn, TestCase):
     def test_a_snapshot_takes_the_priority_its_caller_names(self):
         from bot_program.asset_engine.base import make_bot
         bot, seen = make_bot(self.cfg), _spent(self)
-        with eb.at(eb.P3, "mark"):              # never lowered to P3
+        with eb.at_priority(eb.P3, "mark"):              # never lowered to P3
             bot._broker_snapshot(self._client(), "positions",
                                  priority=eb.P0, why="a close's book")
         self.assertEqual(self._book_reads(seen),
@@ -1183,7 +1185,7 @@ class TheManageTickBookReadsTests(_BudgetOn, TestCase):
         at = src.index("fractional = self._venue_fractional_units(client, "
                        "symbol)")
         before = src[max(0, at - 300):at]
-        self.assertIn("etoro_budget.at(etoro_budget.P1,", before)
+        self.assertIn("etoro_budget.at_priority(etoro_budget.P1,", before)
 
 
 class TheMarksBeforeProposalsTests(_BudgetOn, TestCase):
@@ -2113,10 +2115,10 @@ class TheKeyIsNowhereTests(_BudgetOn, SimpleTestCase):
                                     RATES_429 + ({"Retry-After": "40"},)])
             with self.assertRaises(Exception):
                 t.ticker("AAPL")                       # a pause, noted
-            with eb.at(eb.P3), self.assertRaises(eb.Refused):
+            with eb.at_priority(eb.P3), self.assertRaises(eb.Refused):
                 t.ticker("AAPL")                       # refused: the pause
             _fill(kh, eb.MARKET, 61, priority=eb.P0)   # an overrun, logged
-            with eb.at(eb.P5), self.assertRaises(eb.Refused):
+            with eb.at_priority(eb.P5), self.assertRaises(eb.Refused):
                 eb.take(kh, eb.MARKET, eb.P5, where="candles")
             with mock.patch.object(eb, "_cache", return_value=_Down()):
                 eb.spend(kh, eb.MARKET, eb.P0, where="close")

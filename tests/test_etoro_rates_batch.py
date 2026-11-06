@@ -201,7 +201,7 @@ class _RatesOn:
     def setUp(self):
         super().setUp()
         cache.clear()
-        er.reset()
+        er.forget_all()
         p = mock.patch.object(er, "CACHE", True)
         p.start()
         self.addCleanup(p.stop)
@@ -215,7 +215,7 @@ class _RatesOn:
         self.addCleanup(p.stop)
         _clear_eligibility()
         self.addCleanup(_clear_eligibility)
-        self.addCleanup(er.reset)
+        self.addCleanup(er.forget_all)
         self.addCleanup(cache.clear)
 
     @contextmanager
@@ -434,7 +434,7 @@ class TheParserTests(_RatesOn, SimpleTestCase):
         (2026-11-01, review)."""
         self._untrusted("no row came back for any of the 2 ids asked",
                         body=lambda ids: {"rates": []})
-        er.reset()
+        er.forget_all()
         self._untrusted("no row came back for any of the 2 ids asked",
                         body=lambda ids: {"rates": None})
 
@@ -501,15 +501,15 @@ class TheParserTests(_RatesOn, SimpleTestCase):
 
     def test_a_budget_refusal_sends_nothing_and_is_no_failure(self):
         from tests.test_etoro_budget import _fill
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         p = mock.patch.object(eb, "BUDGET", True)
         p.start()
         self.addCleanup(p.stop)
         _fill(KH, eb.MARKET, eb.limit(eb.MARKET, eb.P3))
         w = _Wire(prices={11: 10.0, 22: 20.0})
         t = _trader(w)
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             got = t.tickers(["AAA", "BBB"])
         self.assertEqual(w.rates(), [])
         self.assertTrue(getattr(got["AAA"], "budget_refused", False))
@@ -519,8 +519,8 @@ class TheParserTests(_RatesOn, SimpleTestCase):
     def test_the_batch_is_taken_once_at_the_callers_priority(self):
         seen = []
         real = eb.take
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         p = mock.patch.object(eb, "BUDGET", True)
         p.start()
         self.addCleanup(p.stop)
@@ -530,7 +530,8 @@ class TheParserTests(_RatesOn, SimpleTestCase):
             return real(kh, family, priority, **kw)
         w = _Wire(prices={11: 10.0, 22: 20.0, 33: 30.0})
         t = _trader(w)
-        with mock.patch.object(eb, "take", take), eb.at(eb.P4, "proposal"):
+        with mock.patch.object(eb, "take", take), \
+                eb.at_priority(eb.P4, "proposal"):
             t.tickers(["AAA", "BBB", "CCC"])
         self.assertEqual(seen, [("market", eb.P4, "rates")],
                          "one token for three ids")
@@ -559,8 +560,8 @@ class TheParserTests(_RatesOn, SimpleTestCase):
         p = mock.patch.object(ec, "RATE_PAUSE", True)
         p.start()
         self.addCleanup(p.stop)
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         w = _Wire(prices={11: 10.0, 22: 20.0}, status=429)
         t = _trader(w)
         got = t.tickers(["AAA", "BBB"])
@@ -797,8 +798,8 @@ class TheRefusalMemoTests(_RatesOn, SimpleTestCase):
     def setUp(self):
         super().setUp()
         from tests.test_etoro_budget import _fill
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         p = mock.patch.object(eb, "BUDGET", True)
         p.start()
         self.addCleanup(p.stop)
@@ -808,29 +809,29 @@ class TheRefusalMemoTests(_RatesOn, SimpleTestCase):
 
     def test_a_proposals_refusal_never_closes_a_mark(self):
         self.fill(KH, eb.MARKET, eb.limit(eb.MARKET, eb.P4))
-        with eb.at(eb.P4, "proposal"):
+        with eb.at_priority(eb.P4, "proposal"):
             got = er.prefetch(self.t, ["AAA", "BBB"])
         self.assertTrue(getattr(got["AAA"], "budget_refused", False))
         self.assertEqual(self.w.rates(), [])
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             tick = er.quote(self.t, "AAA", max_age_s=30, refill=["BBB"])
         self.assertEqual(tick["lastPrice"], "101.0")
         self.assertEqual(self.w.sets(), ["11,22"], "the mark asked its own")
 
     def test_a_marks_refusal_closes_a_proposal(self):
         self.fill(KH, eb.MARKET, eb.limit(eb.MARKET, eb.P3))
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             er.prefetch(self.t, ["AAA", "BBB"])
-        with eb.at(eb.P4, "proposal"), self.assertRaises(eb.Refused):
+        with eb.at_priority(eb.P4, "proposal"), self.assertRaises(eb.Refused):
             er.quote(self.t, "AAA", max_age_s=30, refill=["BBB"])
         self.assertEqual(self.w.rates(), [])
 
     def test_a_failed_batch_closes_every_reader(self):
         w = _Wire(prices={11: 101.0, 22: 102.0}, status=503)
         t = _trader(w)
-        with eb.at(eb.P4, "proposal"), mock.patch("time.sleep"):
+        with eb.at_priority(eb.P4, "proposal"), mock.patch("time.sleep"):
             er.prefetch(t, ["AAA", "BBB"])
-        with eb.at(eb.P3, "mark"), self.assertRaises(er.BatchFailed):
+        with eb.at_priority(eb.P3, "mark"), self.assertRaises(er.BatchFailed):
             er.quote(t, "AAA", max_age_s=30, refill=["BBB"])
         self.assertEqual(w.sets(), ["11,22", "11,22"], "nothing more asked")
 
@@ -855,7 +856,7 @@ class TheOffPathTests(_ShutOn, SimpleTestCase):
         for scope in (eb.P0, eb.P1, None):
             with self.subTest(scope=scope):
                 cache.clear()
-                er.reset()
+                er.forget_all()
                 events = []
                 t = _trader(_Wire(prices={11: 101.0}))
                 with mock.patch.object(er, "_cache",
@@ -863,7 +864,7 @@ class TheOffPathTests(_ShutOn, SimpleTestCase):
                     if scope is None:
                         tick = t.ticker("AAA")       # unclassified: P1
                     else:
-                        with eb.at(scope, "close"):
+                        with eb.at_priority(scope, "close"):
                             tick = t.ticker("AAA")
                     on_the_path = list(events)
                 self.assertEqual(tick["lastPrice"], "101.0")
@@ -882,7 +883,7 @@ class TheOffPathTests(_ShutOn, SimpleTestCase):
         t = _trader(_Wire(prices={11: 101.0, 22: 102.0}))
         with mock.patch.object(er, "_cache", return_value=stalled):
             started = time.monotonic()
-            with eb.at(eb.P0, "kill switch"):
+            with eb.at_priority(eb.P0, "kill switch"):
                 t.ticker("AAA")
                 t.ticker("BBB")
             took = time.monotonic() - started
@@ -898,26 +899,26 @@ class TheOffPathTests(_ShutOn, SimpleTestCase):
         t = _trader(_Wire(prices={11: 101.0}))
         with mock.patch.object(er, "_cache",
                                return_value=self._recorder(events)):
-            with eb.at(eb.P3, "mark"):
+            with eb.at_priority(eb.P3, "mark"):
                 t.ticker("AAA")
         self.assertIn("cache set_many", events)
 
     def test_a_reader_is_answered_by_what_this_process_queued(self):
         t = _trader(_Wire(prices={11: 101.0}))
         with mock.patch.object(er, "_wake_writer"):  # no writer thread runs
-            with eb.at(eb.P0, "kill switch"):
+            with eb.at_priority(eb.P0, "kill switch"):
                 t.ticker("AAA")
             # the rate: the cadence keeps no memo of its own since
             # 2026-11-01 (review), the answer is its memory
             self.assertEqual(len(er._WRITES), 1)
-            with eb.at(eb.P3, "mark"):
+            with eb.at_priority(eb.P3, "mark"):
                 got = er.get("live", 11, symbol="AAA", max_age_s=30)
         self.assertEqual(got["lastPrice"], "101.0")
         self.assertEqual(len(er._WRITES), 0)
 
     def test_the_writer_writes_with_no_reader(self):
         t = _trader(_Wire(prices={11: 101.0}))
-        with eb.at(eb.P0, "kill switch"):
+        with eb.at_priority(eb.P0, "kill switch"):
             t.ticker("AAA")
         deadline = time.monotonic() + 5.0
         while (cache.get(er._key("live", 11)) is None
@@ -936,7 +937,7 @@ class TheOffPathTests(_ShutOn, SimpleTestCase):
             self.assertIsNot(er._WRITES, theirs)
             self.assertEqual(len(er._WRITES), 0, "the parent's are its own")
             t = _trader(_Wire(prices={11: 101.0}))
-            with eb.at(eb.P0, "kill switch"):
+            with eb.at_priority(eb.P0, "kill switch"):
                 t.ticker("AAA")
             er.flush_writes()         # never waits on the parent's lock
         finally:
@@ -1796,8 +1797,8 @@ class TheSnapshotPricedOrderTests(TestCase):
             p.start()
             self.addCleanup(p.stop)
         cache.clear()
-        er.reset()
-        self.addCleanup(er.reset)
+        er.forget_all()
+        self.addCleanup(er.forget_all)
         self.addCleanup(cache.clear)
         _clear_eligibility()
         self.addCleanup(_clear_eligibility)
@@ -2250,8 +2251,8 @@ class TheShapeCommandTests(_RatesOn, TestCase):
         p = mock.patch.object(ec, "RATE_PAUSE", True)
         p.start()
         self.addCleanup(p.stop)
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         for code, sent in ((429, 1), (503, 2)):
             with self.subTest(code=code):
                 w = _Wire(prices={18: 1.0, 100005: 2.0}, status=code)
@@ -2271,8 +2272,8 @@ class TheShapeCommandTests(_RatesOn, TestCase):
 
     def test_it_goes_through_the_budget_at_p5(self):
         from tests.test_etoro_budget import _fill
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         p = mock.patch.object(eb, "BUDGET", True)
         p.start()
         self.addCleanup(p.stop)

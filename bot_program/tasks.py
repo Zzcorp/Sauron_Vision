@@ -1019,7 +1019,7 @@ def sync_etoro_accounts():
             # P2 IN THE eTORO REQUEST BUDGET (2026-11-01, engine/
             # etoro_budget): an account read, taken while the key's
             # account minute keeps its floor for the drain and the orders.
-            with etoro_budget.at(etoro_budget.P2, "account sync"):
+            with etoro_budget.at_priority(etoro_budget.P2, "account sync"):
                 reading, margin, cells = _read_etoro_aggregate(client)
                 aggregate_sent = True
                 try:
@@ -1341,7 +1341,7 @@ def refresh_etoro_cells(account_pk: int, why: str = "") -> dict:
         at = timezone.now()                # BEFORE the GET (see the sync)
         # P2 in the eToro request budget (2026-11-01): a read the budget
         # does not send writes nothing, and says so below.
-        with etoro_budget.at(etoro_budget.P2, "account re-read"):
+        with etoro_budget.at_priority(etoro_budget.P2, "account re-read"):
             _reading, margin, cells = _read_etoro_aggregate(client)
         if cells != CELLS_READ or margin is None:
             logger.warning("eToro re-read (%s): %s answered no cash / used "
