@@ -123,16 +123,18 @@ def _orc_calls_today() -> int:
 
 
 def _orc_rungs_today() -> dict:
-    """{rung: {calls, would}} for the card's ladder (the Orcs' O2 spec
-    B.16a; O2b, 2026-11-06), the day since 00:00 UTC, as the line's:
+    """{rung: {calls, would, probes}} for the card's ladder (the Orcs' O2
+    spec B.16a; O2b, 2026-11-06), the day since 00:00 UTC, as the line's:
 
-      calls  the Orcs line's ledger rows (spend.orc_line_q), by the rung
-             their source_ref ends with: the rung that ANSWERED (B.2b), a
-             wake's, a smoke's or, later, a probe's
-      would  the wakes rendered, by the router's own choice
-             (components["route"]["would_rung"]), recorded whatever its
-             switch says; a quiet or a merged wake aside, since no model
-             would read it
+      calls   the Orcs line's ledger rows (spend.orc_line_q), by the rung
+              their source_ref ends with: the rung that ANSWERED (B.2b), a
+              wake's, a smoke's or a probe's
+      would   the wakes rendered, by the router's own choice
+              (components["route"]["would_rung"]), recorded whatever its
+              switch says; a quiet or a merged wake aside, since no model
+              would read it
+      probes  of those calls, the probes' (their source_ref names a probe:
+              Orc:<pk>:Wake:<w>:probe:<rung>; O2b's probes, 2026-11-06)
 
     Two queries, the route read by its key alone, never a wake's whole
     components. A count, never money: the dollars are the TODAY cell's."""
@@ -143,24 +145,29 @@ def _orc_rungs_today() -> dict:
     from ai_agents.catalog import ORC_LADDER_V1
     from ai_agents.models import AgentTask
     from ai_agents.spend import ORC_SOURCE_PREFIXES, orc_line_q
-    from bot_program.orcs.constants import (WAKE_STATUS_MERGED,
+    from bot_program.orcs.constants import (PROBE_REF_MARK,
+                                            WAKE_STATUS_MERGED,
                                             WAKE_STATUS_QUIET)
     from bot_program.orcs.models import OrcWake
     start = timezone.now().replace(hour=0, minute=0, second=0,
                                    microsecond=0)
-    calls = Counter()
+    calls, probes = Counter(), Counter()
     for ref in (AgentTask.objects.filter(created_at__gte=start)
                 .filter(orc_line_q())
                 .values_list("structured_output__source_ref", flat=True)):
         ref = str(ref or "")
         if ref.startswith(ORC_SOURCE_PREFIXES):
-            calls[ref.rsplit(":", 1)[-1]] += 1
+            rung = ref.rsplit(":", 1)[-1]
+            calls[rung] += 1
+            if PROBE_REF_MARK in ref:
+                probes[rung] += 1
     would = Counter(str(r or "") for r in (
         OrcWake.objects.filter(created_at__gte=start)
         .exclude(status__in=(WAKE_STATUS_QUIET, WAKE_STATUS_MERGED))
         .values_list("components__route__would_rung", flat=True)))
     return {step["rung"]: {"calls": calls.get(step["rung"], 0),
-                           "would": would.get(step["rung"], 0)}
+                           "would": would.get(step["rung"], 0),
+                           "probes": probes.get(step["rung"], 0)}
             for step in ORC_LADDER_V1}
 
 
@@ -169,6 +176,23 @@ def _orc_router_on() -> bool:
     card's sentence says which rung answers (B.16a)."""
     from bot_program.orcs.switches import router_on
     return router_on()
+
+
+def _orc_probes_on() -> bool:
+    """The Orcs probes' switch (orcs_probes), OFF when unreadable: the
+    card's sentence says whether a rung is probed (B.16a; O2b's probes,
+    2026-11-06)."""
+    from bot_program.orcs.switches import probes_on
+    return probes_on()
+
+
+def _orc_boundaries() -> list:
+    """Each band boundary's validation state by money world (B.16a; O2b's
+    probes, 2026-11-06): its probe pairs, its completed blocks of 20 and
+    whether two are complete (bot_program/orcs/probes.boundary_states).
+    Shown only: no router reads it. Counts, never money."""
+    from bot_program.orcs import probes
+    return probes.boundary_states()
 
 
 def agent_choice(name: str, tier: str) -> tuple:
@@ -306,8 +330,13 @@ def ai_models_dashboard(request):
             {**rung, "label": MODELS.get(rung["model"], {}).get(
                 "label", rung["model"]),
              "calls_today": rungs_today[rung["rung"]]["calls"],
-             "would_today": rungs_today[rung["rung"]]["would"]}
+             "would_today": rungs_today[rung["rung"]]["would"],
+             "probes_today": rungs_today[rung["rung"]]["probes"]}
             for rung in ORC_LADDER_V1],
+        # O2b's probes (2026-11-06, B.16a): whether a rung is probed, and
+        # each boundary's validation state
+        "orc_probes_on": _orc_probes_on(),
+        "orc_boundaries": _orc_boundaries(),
         "orc_agent_keys": ORC_AGENT_KEYS,
         "prices_source": PRICING_SOURCE,
         "cache_source": CACHE_SOURCE,

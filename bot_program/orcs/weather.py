@@ -16,9 +16,11 @@ BINDS: the scheduler counts each Orc's model wakes against
 world (real 12, 14 or 16 by the trading day's class; paper and demo 6),
 never read back from OrcDayBaseline.caps, which holds what its first
 reader's world produced. The Orc's dollars a day are the scheduler's
-(OrcSetting per_orc_daily_usd). The frontier quota and the probes are
-shown only: no probe is sent, and the router never reads this frontier
-quota (the O2 spec B.8).
+(OrcSetting per_orc_daily_usd). From O2b's probes (2026-11-06, B.8a) its
+`probes` BINDS too: bot_program/orcs/probes.py sends a probe only on a day
+it allows (none on a stormy day), behind the probes' switch (orcs_probes,
+OFF as it ships). The frontier quota is shown only: the router never
+reads it (the O2 spec B.8).
 
     calm       day score < 30
     eventful   30 to < 55
@@ -45,15 +47,17 @@ WAKES_PER_DAY = {"real": {"calm": 12, "eventful": 14, "stormy": 16},
                  "paper": 6}
 FRONTIER_PER_DAY = {"calm": 1, "eventful": 2, "stormy": 4}
 _RANK = {"calm": 0, "eventful": 1, "stormy": 2}
-#: What binds of caps_for's (the scheduler's count cap); the rest is shown.
-BINDING = ("wakes_per_day",)
+#: What binds of caps_for's: the scheduler's count cap (O2a) and the probes
+#: (O2b, 2026-11-06, B.8a: probes.py reads them); the rest is shown.
+BINDING = ("wakes_per_day", "probes")
 
 
 def caps_for(day_class, real) -> dict:
     """The caps of one Orc's day by its own money world (`real`) and the
-    trading day's class: `wakes_per_day` binds (A.12); the frontier quota
-    and the probes are shown only (no probe is sent, and the router never
-    reads this quota)."""
+    trading day's class: `wakes_per_day` binds (A.12); `probes` binds
+    (B.8a: a probe is sent only on a day it allows, none on a stormy day,
+    and never beside real money); the frontier quota is shown only (the
+    router never reads it)."""
     wakes = (WAKES_PER_DAY["real"].get(day_class, 12) if real
              else WAKES_PER_DAY["paper"])
     return {"wakes_per_day": int(wakes),

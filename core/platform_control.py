@@ -122,6 +122,7 @@ LIVE_MONEY_SWITCHES = (
 ORC_MIND_SWITCHES = (
     "orcs_minds",                   # a model reads an Orc's wakes, in shadow
     "orcs_router",                  # the routed rung (Opus among them) answers
+    "orcs_probes",                  # a neighbouring rung reads a paper wake
 )
 
 #: Every switch whose ON takes the trading PIN, at every door
@@ -375,6 +376,18 @@ DEFAULT_COMPONENTS = [
     # r0. Description measured below 300.
     {"key": "orcs_router", "name": "Orc Router (routed rungs in shadow)",
      "description": "Off (default). While off, every Orc wake a model reads is answered on r0 and the router's choice is only recorded. On, with the minds on, the rung the router chose answers, one effort per model until the smoke's PASS. Nothing it decides sends an order. Turning it on takes the PIN.",
+     "category": "system"},
+    # THE ORCS' PROBES (2026-11-06, the Orcs' O2 spec B.11, N2): beside a
+    # paper or demo wake a model read, a neighbouring rung (h0, or the rung
+    # across a band boundary) reads the same stored dossier again, blind to
+    # that answer, on the probes' own allowance (15% of the Orcs line by
+    # default) inside C - R; the pair is kept only in its table and the
+    # ledger, graded, never applied, and real money gets none. OFF on
+    # arrival (no is_enabled key), exempt from "all on" and turned on only
+    # with the trading PIN at /ops/ (ORC_MIND_SWITCHES); OFF takes no PIN,
+    # and the next probe is not sent. Description measured below 300.
+    {"key": "orcs_probes", "name": "Orc Probes (neighbouring rungs in shadow)",
+     "description": "Off (default). On, with the minds on: beside a paper or demo wake a model read, a neighbouring rung reads the same dossier again, blind, on its own allowance (15% of the Orcs line); graded in shadow, never applied. Real money gets none. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.

@@ -764,17 +764,21 @@ MOVED_WORDS = {
 #: family factor) above its caller's cap, is refused by code (over_budget)
 #: before anything is reserved: a digest that grew with an idea's life
 #: would make the reservation no bound at all. The smoke sends a wake's
-#: stored dossier, capped as a wake's; the others are §1.0.9's, measured
+#: stored dossier, capped as a wake's; so does a probe (O2b, 2026-11-06,
+#: B.11: the wake's own stored blocks); the others are §1.0.9's, measured
 #: with `orcs tokens` like S once each caller ships.
-TICKET_MAX_TOKENS = {"smoke": DOSSIER_MAX_TOKENS, "captain": 10000,
-                     "emperor": 16000, "skeptic": 6000, "postmortem": 12000,
-                     "tribunal": 12000, "question": DOSSIER_MAX_TOKENS + 400}
+TICKET_MAX_TOKENS = {"smoke": DOSSIER_MAX_TOKENS, "probe": DOSSIER_MAX_TOKENS,
+                     "captain": 10000, "emperor": 16000, "skeptic": 6000,
+                     "postmortem": 12000, "tribunal": 12000,
+                     "question": DOSSIER_MAX_TOKENS + 400}
 #: §1.0.9: the triage ceiling a ticket caller reserves under (A.13): the
-#: smoke C - R, the real-money non-urgent class. A later caller adds its
-#: row with its CALLER_RUNGS row.
-TICKET_CLASS = {"smoke": CLASS_REAL}
+#: smoke and the probes C - R, the real-money non-urgent class (a probe
+#: also within its own allowance, PROBES_USD_SHARE; O2b, 2026-11-06). A
+#: later caller adds its row with its CALLER_RUNGS row.
+TICKET_CLASS = {"smoke": CLASS_REAL, "probe": CLASS_REAL}
 #: §1.0.9: a caller's tickets a UTC day; 0 counts none (the smoke is one
-#: per command, which the command keeps).
+#: per command, which the command keeps). The probes' caps are by kind and
+#: a user a day (PROBES_PER_DAY, below; O2b, 2026-11-06).
 TICKET_DAY_CAP = {"smoke": 0}
 #: A.57: one billed attempt per item; a call that failed with no bill is
 #: tried again at most this many times.
@@ -800,6 +804,12 @@ TICKET_CODE_WORDS = {
     CODE_ITEM_CLOSED: "this item had its one billed call already",
     CODE_ITEM_BUSY: "a call for this item is in flight",
     CODE_EXPIRED: "it waited for the budget past its UTC day",
+    # O2b's probes (2026-11-06, B.11): a probe's own refusals
+    "probes_off": "the probes' switch is off",
+    "probe_allowance": "the probes' own allowance of the Orcs line is used",
+    "real_waits": "a real-money wake waits for its model call: probes go "
+                  "last",
+    "real_money": "real money gets no probe",
 }
 #: A.61: S's count (OrcSetting "s_tokens") and the smoke's reasons for a
 #: FAIL (claude_smoke's own: call A, call B, no cache read, less than 2x).
@@ -841,3 +851,51 @@ FALLBACK_MAX_TOKENS = 8000
 #: The smoke's words when B.5's map answers a rung on another (orcs.py).
 SMOKE_MAPPED_T = ("rung {asked}, answered as {rung} (one effort per model "
                   "until the smoke's PASS for the {family} family)")
+
+# ── O2b: the probes (2026-11-06, the O2 spec B.8a, B.11, B.12, B.15b,
+# B.16a, B.16b) ──────────────────────────────────────────────────────────
+# Behind `orcs_probes`, OFF on arrival and turned on only with the trading
+# PIN (N2): beside a paper or demo wake a model read, a neighbouring rung
+# reads the wake's own stored dossier again, blind, on a ticket of its own
+# allowance, stored only in OrcTierGrade and the ledger
+# (bot_program/orcs/probes.py). Nothing here sends anything.
+
+#: N2: the probes' switch (core/platform_control.py ORC_MIND_SWITCHES).
+PROBES_SWITCH = "orcs_probes"
+#: §1.0.9: the probes' ticket caller, and their source_ref's word:
+#: Orc:<pk>:Wake:<w>:probe:<rung> (the ledger's probe rows hold the mark).
+PROBE_CALLER = "probe"
+PROBE_REF_MARK = f":{PROBE_CALLER}:"
+#: OrcTierGrade.kind: an h0 probe, a boundary probe, and Fable's blind twin
+#: (B.10, O2b's last commit); the kinds a probe is sent as.
+TIER_GRADE_KINDS = ("h0", "boundary", "twin")
+PROBE_KINDS = ("h0", "boundary")
+#: OrcTierGrade.boundary: the band boundaries a boundary probe crosses
+#: (BAND_ROUTINE_MAX, BAND_MATERIAL_MAX, BAND_COMPLEX_MAX); h0 names none.
+PROBE_BOUNDARIES = (BAND_ROUTINE_MAX, BAND_MATERIAL_MAX, BAND_COMPLEX_MAX)
+#: B.11 (§4 Q13): a user's probes a UTC day, by kind, counted in the
+#: tickets' book by (caller, kind, user); OrcSetting "probes_per_day"
+#: overrides a kind, binding at once (0 sends none of that kind).
+PROBES_PER_DAY = {"boundary": 6, "h0": 40}
+PROBES_PER_DAY_KEY = "probes_per_day"
+#: B.11: the probes' own allowance of the Orcs line: this share of its cap,
+#: read at once ($1.50 at $10); OrcSetting "probes_usd_per_day" holds an
+#: explicit value, in dollars.
+PROBES_USD_SHARE = 0.15
+PROBES_USD_KEY = "probes_usd_per_day"
+#: B.11 as built: a probe is sent within this many minutes of the routed
+#: answer (the wake's finished_at), else dropped by code: B.12 prices both
+#: answers after the LATER one, so a late probe would move the routed
+#: answer's grade too.
+PROBE_FRESH_MIN = 15
+#: B.12: the pairs the watchdog's grade reads, this many days back.
+PROBE_GRADE_DAYS = 7
+#: B.12: a boundary reads "validated" after this many completed blocks of
+#: SEAT_WINDOW pairs per (boundary, kind, world): shown only, read by no
+#: router (the catalog's ladder note).
+VALIDATED_BLOCKS = 2
+#: The probes' codes (TICKET_CODE_WORDS above).
+CODE_PROBES_OFF = "probes_off"
+CODE_PROBE_ALLOWANCE = "probe_allowance"
+CODE_REAL_WAITS = "real_waits"
+CODE_PROBE_REAL = "real_money"

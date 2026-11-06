@@ -538,8 +538,9 @@ class BulkEnableExemptTests(_Fixture):
     #: a seeded System row each, OFF, that lets a model spend AI money and
     #: moves no account money. "All on" holds them back like the live ones.
     #: Grown on purpose (2026-11-06, O2b): the router's switch, whose ON
-    #: lets a routed rung (Opus among them) answer a wake.
-    MINDS = ("orcs_minds", "orcs_router")
+    #: lets a routed rung (Opus among them) answer a wake; and the probes'
+    #: switch, whose ON lets a neighbouring rung read a paper wake again.
+    MINDS = ("orcs_minds", "orcs_router", "orcs_probes")
 
     def setUp(self):
         super().setUp()

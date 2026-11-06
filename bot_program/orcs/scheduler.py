@@ -51,13 +51,18 @@ is claimed: the worker (tasks.orc_think) and the watchdog
            breaker, the ledger gaps; and a ticket past its wall time made
            an orphan hold (A.57)
   tickets  A.57 (O2a's arm, 2026-11-05): every model call that is not a
-           wake (from O2a, `orcs smoke --row`) holds its bound through
-           reserve_ticket, under the line lock: its caller and rung a row
-           of §1.0.9, its request refused by code above TICKET_MAX_TOKENS,
-           the four gates, its item (one billed attempt), its day cap, its
-           class's ceiling and the core's floor, then the line, with the
-           money in flight and held. settle_ticket releases it as the
-           settle releases a wake's, the ledger check included
+           wake (from O2a, `orcs smoke --row`; from O2b the probes) holds
+           its bound through reserve_ticket, under the line lock: its
+           caller and rung a row of §1.0.9, its request refused by code
+           above TICKET_MAX_TOKENS, the four gates and the caller's own
+           switch, its item (one billed attempt), its day cap by its key,
+           its class's ceiling and the core's floor, a probe's own
+           allowance, then the line, with the money in flight and held.
+           settle_ticket releases it as the settle releases a wake's, the
+           ledger check included
+  pairs    B.12 (O2b's probes, 2026-11-06): store_pair writes one probe
+           pair (OrcTierGrade), its block counted under the line lock;
+           probes.py builds it with no lock held
 
 THE MONEY (N3): every check of the line reads its cap, what it booked
 today and the OTHER calls' money in flight and held, through mind.py
@@ -70,6 +75,12 @@ the claim and reserve_ticket also hold the booked spend, the money in
 flight and held and this bound within that share for a call on those
 tiers (r2-r5, the tier read through mind.price), else `deep_share`. A
 real-money urgent wake is exempt (decision D30); a ticket never is.
+THE PROBES' OWN ALLOWANCE (B.11; O2b's probes, 2026-11-06): a probe's
+ticket is also held to the probes' booked spend today (the ledger's probe
+rows, read through mind.py), their tickets and holds in flight and this
+bound within OrcSetting "probes_usd_per_day" (15% of the line's cap by
+default), else `probe_allowance`; and its day cap is counted by (caller,
+kind, user): 6 boundary probes and 40 h0 probes a user a day.
 
 THE SETTLE. Validation, the officer and the lookup of the provider's
 ledger row have run already, with no lock held (N8, mind.py). Then one
@@ -136,7 +147,8 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         CODE_EXPIRED, CODE_INFLIGHT,
                                         CODE_ITEM_BUSY, CODE_ITEM_CLOSED,
                                         CODE_OVER_BUDGET,
-                                        CODE_PAUSED, CODE_QUIET,
+                                        CODE_PAUSED, CODE_PROBE_ALLOWANCE,
+                                        CODE_QUIET,
                                         CODE_ROUTINE_CAP, CODE_ROW_CLOSED,
                                         CODE_SPACING, CODE_TRIAGE,
                                         CODE_WALL_TIME, CODE_WORKER_SILENT,
@@ -156,10 +168,13 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         ORC_STATEMENT_TIMEOUT_MS,
                                         PER_ORC_DAILY_KEY,
                                         PER_ORC_DAILY_USD, PER_ORC_HIGH_KEY,
+                                        PROBE_CALLER, PROBE_KINDS,
+                                        PROBES_PER_DAY, PROBES_PER_DAY_KEY,
+                                        PROBES_USD_KEY, PROBES_USD_SHARE,
                                         RANKS, REPLY_ANSWER, REPLY_CLOSED,
                                         REPLY_UNBILLED, REPLY_UNSENT,
                                         ROUTINE_SHARE,
-                                        ROUTINE_SHARE_KEY,
+                                        ROUTINE_SHARE_KEY, SEAT_WINDOW,
                                         STALE_MIN, STALL_MIN, STATE_ACTIVE,
                                         STATE_BORN, STATE_CARE_OWNED,
                                         STATE_DEAD, THINK_RUN_S,
@@ -586,15 +601,17 @@ def drop_hold(wake, now) -> dict:
 
 # ── the tickets (A.57; O2a's arm, 2026-11-05) ────────────────────────────
 # Every model call that is not a wake reserves through a ticket: from O2a,
-# `orcs smoke --row`; later the probes, the twin, Captains, the Emperor,
-# the Skeptic, post-mortems, the council of war and questions. A ticket is
+# `orcs smoke --row`; from O2b the probes (bot_program/orcs/probes.py);
+# later the twin, Captains, the Emperor, the Skeptic, post-mortems, the
+# council of war and questions. A ticket is
 # an entry of OrcSetting "minds_inflight" {kind: "ticket", usd: its bound,
 # at, wall_s, caller, rung, item, orc, ref}, counted in every in-flight sum
 # of the line like a running wake's bound (mind_gateway.inflight_usd), and
 # released only by its settle; past its wall time the watchdog makes it an
 # orphan hold until 00:00 UTC (_tickets_wall_time). Its book, OrcSetting
-# "minds_tickets" {day, counts {caller: n}, items {item: {...}}}, keeps
-# the day caps and ONE BILLED ATTEMPT PER ITEM: a call with usage closes
+# "minds_tickets" {day, counts {key: n}, items {item: {...}}}, keeps the
+# day caps by key (a caller's name; a probe's `probe:<kind>:<user>`, O2b)
+# and ONE BILLED ATTEMPT PER ITEM: a call with usage closes
 # its item, billed or refused alike; one failure with no bill leaves one
 # more try; a refusal for budget (no call made) may wait, at most until
 # the next UTC day, when the item closes `expired`. So an item refused
@@ -645,29 +662,116 @@ def _item_code(item) -> str:
     return ""
 
 
+def probes_per_day() -> dict:
+    """B.11 (O2b's probes, 2026-11-06): a user's probes a UTC day by kind,
+    PROBES_PER_DAY (boundary 6, h0 40), each kind overridden by OrcSetting
+    "probes_per_day", binding at once (0 sends none of that kind)."""
+    out = dict(PROBES_PER_DAY)
+    over = _setting(PROBES_PER_DAY_KEY)
+    if isinstance(over, dict):
+        for kind, value in over.items():
+            if kind in out:
+                try:
+                    out[kind] = max(0, int(value))
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def probes_usd_per_day(cap) -> float:
+    """B.11: the probes' own allowance of the Orcs line: OrcSetting
+    "probes_usd_per_day", an explicit value in dollars; else
+    PROBES_USD_SHARE (15%) of the line's cap `cap`, read at once ($1.50 at
+    $10). An unreadable value is the default."""
+    over = _setting(PROBES_USD_KEY)
+    if over is not None and not isinstance(over, (bool, dict, list)):
+        try:
+            return max(0.0, float(over))
+        except (TypeError, ValueError):
+            pass
+    return PROBES_USD_SHARE * max(0.0, float(cap or 0.0))
+
+
+def ticket_cap(caller, request) -> tuple:
+    """(the key a ticket's day is counted under in the tickets' book, its
+    cap a UTC day, or None for none). A probe's (O2b's probes, 2026-11-06,
+    B.11) is `probe:<kind>:<user>`, its kind's cap a user a day
+    (probes_per_day); ValueError, before anything is held, for a probe of
+    no probe kind or no user. Any other caller's is its name, with
+    TICKET_DAY_CAP's cap (0 counts none)."""
+    req = request if isinstance(request, dict) else {}
+    if caller == PROBE_CALLER:
+        kind = str(req.get("kind") or "")
+        if kind not in PROBE_KINDS:
+            raise ValueError(f"a probe's kind is one of {PROBE_KINDS}, not "
+                             f"{kind!r}")
+        try:
+            user = int(req.get("user"))
+        except (TypeError, ValueError):
+            raise ValueError("a probe names its user: its cap is a user's "
+                             "a day") from None
+        return f"{caller}:{kind}:{user}", int(probes_per_day()[kind])
+    cap = int(TICKET_DAY_CAP.get(caller) or 0)
+    return str(caller), (cap or None)
+
+
+def probe_allowance_code(*, bound, booked, inflight, allowance) -> str:
+    """B.11: `probe_allowance` when the probes' booked spend today, their
+    tickets and holds in flight and this bound pass the probes' own
+    allowance; "" otherwise. Pure."""
+    if float(booked) + float(inflight) + float(bound) > float(allowance) \
+            + 1e-9:
+        return CODE_PROBE_ALLOWANCE
+    return ""
+
+
+def _caller_inflight(caller, now) -> float:
+    """The money one caller's tickets hold in flight, and the holds they
+    left (a call with no bill, an orphan, a ledger gap), in OrcSetting
+    "minds_inflight", locked: the caller holds the line lock."""
+    store = _inflight_row()
+    value = _pruned(store.value if isinstance(store.value, dict) else {},
+                    now)
+    total = 0.0
+    for entry in value.values():
+        if isinstance(entry, dict) and entry.get("caller") == caller:
+            try:
+                total += float(entry.get("usd") or 0)
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
 def reserve_ticket(caller, request, *, now=None) -> dict:
     """A.57: one ticket for a call of `caller` that is not a wake. Its
     request comes first: `request` {rung, tokens (the estimate of the
     exact text it sends, x the family factor: mind.ticket_tokens), item,
-    orc, ref}. ValueError, before anything is held, for a caller that is
-    no ticket row of §1.0.9 (mind_gateway.CALLER_RUNGS, TICKET_MAX_TOKENS,
-    TICKET_CLASS) or a rung outside its list. Then, the first that fails
-    answering by code with nothing held: the request above
-    TICKET_MAX_TOKENS (`over_budget`, before any lock); under the line
-    lock, its item (one billed attempt), the four gates, the caller's day
-    cap, its class's ceiling and the core's floor (A.13, A.18), then the
+    orc, ref; a probe's kind, user and would_rung too}. ValueError, before
+    anything is held, for a caller that is no ticket row of §1.0.9
+    (mind_gateway.CALLER_RUNGS, TICKET_MAX_TOKENS, TICKET_CLASS), a rung
+    outside its list (a probe's r2 only as B.5's map of r3 or r4), or a
+    probe of no kind or no user. Then, the first that fails answering by
+    code with nothing held: the request above TICKET_MAX_TOKENS
+    (`over_budget`, before any lock); under the line lock, its item (one
+    billed attempt), the four gates and the caller's own switch (the
+    probes': `probes_off`), its day cap by its key (ticket_cap), its
+    class's ceiling, the deep share and the core's floor (A.13, B.13,
+    A.18), a probe's own allowance (`probe_allowance`, B.11), then the
     line for the whole bound plus the money in flight and held (A.20).
-    A pass holds the bound (no fallback, B.14) and counts the day.
+    Every check a database read under the line lock (N8). A pass holds
+    the bound (no fallback, B.14) and counts the day under its key.
     Returns {ok, code, key, bound, model, tier}."""
     from bot_program.orcs import mind, switches
     now = now or timezone.now()
     req = dict(request or {})
     rung = str(req.get("rung") or "")
-    mind.ticket_caller(caller, rung)
+    mind.ticket_caller(caller, rung,
+                       would=str(req.get("would_rung") or "") or None)
     cap, klass = TICKET_MAX_TOKENS.get(caller), TICKET_CLASS.get(caller)
     if cap is None or klass is None:
         raise ValueError(f"the {caller} caller has no ticket row "
                          f"(TICKET_MAX_TOKENS, TICKET_CLASS)")
+    cap_key, day_cap = ticket_cap(caller, req)
     tokens = max(0, int(req.get("tokens") or 0))
     # the bound: the catalog's arithmetic, read before the lock
     price = mind.ticket_price(rung, tokens)
@@ -682,16 +786,24 @@ def reserve_ticket(caller, request, *, now=None) -> dict:
         books = _tickets_row()
         book = ticket_book(books.value, now)
         prior = book["items"].get(item) if item else None
-        code = _item_code(prior) or switches.gate_code()
-        day_cap = int(TICKET_DAY_CAP.get(caller) or 0)
-        if not code and day_cap and int(book["counts"].get(caller) or 0) \
-                >= day_cap:
+        code = (_item_code(prior) or switches.gate_code()
+                or switches.caller_code(caller))
+        if not code and day_cap is not None and int(
+                book["counts"].get(cap_key) or 0) >= day_cap:
             code = CODE_DAY_CAP
         if not code:
             # B.13 (O2b, 2026-11-06): the deep share too, on the ticket's
             # own tier; a ticket is never exempt
+            purse = mind.purse()
             code = class_money_code(klass, bound=price["bound"],
-                                    purse=mind.purse(), tier=price["tier"])
+                                    purse=purse, tier=price["tier"])
+            if not code and caller == PROBE_CALLER:
+                # B.11 (O2b's probes, 2026-11-06): the probes' own
+                # allowance, on their own booked spend and money in flight
+                code = probe_allowance_code(
+                    bound=price["bound"], booked=mind.probes_spent(),
+                    inflight=_caller_inflight(caller, now),
+                    allowance=probes_usd_per_day(purse["cap"]))
         if not code:
             _ok, code, _why = mind.ask_line(rung_name=rung,
                                             bound_usd=price["bound"])
@@ -721,7 +833,7 @@ def reserve_ticket(caller, request, *, now=None) -> dict:
                       "at": now.isoformat(), "wall_s": int(price["wall_s"])}
         store.value = value
         store.save(update_fields=["value"])
-        book["counts"][caller] = int(book["counts"].get(caller) or 0) + 1
+        book["counts"][cap_key] = int(book["counts"].get(cap_key) or 0) + 1
         if item:
             book["items"][item] = {**(prior or {}), "caller": caller,
                                    "day": book["day"],
@@ -817,6 +929,29 @@ def settle_ticket(key, outcome, *, now=None) -> dict:
             books.value = book
             books.save(update_fields=["value"])
     return out
+
+
+def store_pair(fields):
+    """B.12 (O2b's probes, 2026-11-06): one probe pair (OrcTierGrade, its
+    `fields` built by probes.py with no lock held), its block the count of
+    the earlier pairs of its (boundary, kind, world) over SEAT_WINDOW,
+    counted and written in one short transaction under the line lock, so
+    two workers never share an index: database work only (N8). None, and
+    nothing written, when the pair is stored already (one per wake and
+    kind)."""
+    from bot_program.orcs.models import OrcTierGrade
+    try:
+        with transaction.atomic():
+            line_lock()
+            n = OrcTierGrade.objects.filter(
+                kind=fields["kind"], boundary=fields.get("boundary"),
+                world=fields["world"]).count()
+            return OrcTierGrade.objects.create(block=n // SEAT_WINDOW,
+                                               **fields)
+    except IntegrityError as e:
+        logger.warning("[orcs] a probe pair of wake %s is stored already: "
+                       "%s", getattr(fields.get("wake"), "pk", "?"), e)
+        return None
 
 
 def _tickets_wall_time(now) -> int:

@@ -977,7 +977,8 @@ def _route(band, raw_band, *, kind, day_class, score, world,
     later commit's). {rung (the answering rung after the effort map),
     would_rung (the table's), why, version (ROUTING_VERSION), words (the
     would-route words: tier words, never a model id or a cost),
-    escalated, probes (listed, none sent), twin}. Recorded whatever the
+    escalated, probes (listed here; probes.py sends them behind the
+    probes' switch, orcs_probes), twin}. Recorded whatever the
     router's switch says; admission writes the rung that answers
     (components["rung"]): r0 while the switch is OFF, this route's rung
     while it is ON (B.2b)."""

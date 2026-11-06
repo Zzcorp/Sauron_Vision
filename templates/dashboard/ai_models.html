@@ -161,11 +161,15 @@
         switch and the Orcs line are on, every wake a model reads is
         answered on r0: the router's switch (orcs_router) is off, and its
         choice is only recorded.{% endif %}
+        {% if orc_probes_on %}The probes' switch (orcs_probes) is on: beside
+        a paper or demo wake a model read, a neighbouring rung reads the
+        same dossier again, blind, on the probes' own allowance.{% else %}The
+        probes' switch (orcs_probes) is off: no rung is probed.{% endif %}
         Orc calls today, from the ledger: {{ orc_calls_today }}.
     </p>
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Rung</th><th>Model</th><th>Effort</th><th>Used for</th><th>Calls today</th><th>Would route today</th></tr></thead>
+        <thead><tr><th>Rung</th><th>Model</th><th>Effort</th><th>Used for</th><th>Calls today</th><th>Would route today</th><th>Probes today</th></tr></thead>
         <tbody>
         {% for r in orc_ladder %}
         <tr data-rung="{{ r.rung }}">
@@ -175,6 +179,7 @@
             <td style="color:var(--text-muted); font-size:12px;">{{ r.note }}</td>
             <td data-label="Calls today">{{ r.calls_today }}</td>
             <td data-label="Would route today">{{ r.would_today }}</td>
+            <td data-label="Probes today">{{ r.probes_today }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -182,9 +187,31 @@
     </div>
     <p style="padding:8px 16px 0; color:var(--text-muted); font-size:12px;">
         Calls today: the Orcs line's ledger rows since 00:00 UTC, by the rung
-        that answered. Would route today: the wakes rendered since 00:00 UTC,
-        by the router's own choice, recorded whatever its switch says (a
-        quiet or merged wake aside).
+        that answered, the probes among them. Would route today: the wakes
+        rendered since 00:00 UTC, by the router's own choice, recorded
+        whatever its switch says (a quiet or merged wake aside). Probes
+        today: of those calls, the probes'.
+    </p>
+    <div class="table-wrapper">
+    <table class="sv-perf-table" id="orc-boundaries">
+        <thead><tr><th>Boundary</th><th>World</th><th>Pairs</th><th>Completed blocks</th><th>State</th></tr></thead>
+        <tbody>
+        {% for b in orc_boundaries %}
+        <tr data-boundary="{{ b.boundary }}" data-world="{{ b.world }}">
+            <td><strong>{{ b.boundary }}</strong></td>
+            <td>{{ b.world }}</td>
+            <td data-label="Pairs">{{ b.pairs }}</td>
+            <td data-label="Completed blocks">{{ b.blocks }}</td>
+            <td data-label="State">{% if b.validated %}validated{% else %}unvalidated{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p style="padding:8px 16px 0; color:var(--text-muted); font-size:12px;">
+        Each band boundary by its probe pairs, paper and demo never pooled:
+        a block is 20 pairs, and a boundary reads validated after two
+        completed blocks; shown only: no router reads it.
     </p>
     <p style="padding:8px 16px 0; color:var(--text-muted); font-size:12px;">
         Agent names on the Orcs' line (no override is read for them):

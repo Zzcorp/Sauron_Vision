@@ -65,19 +65,25 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: arm (2026-11-05) adds the queued intents at the tick (intents.py) and
 #: the scheduler's tickets. O2a's light (2026-11-05) adds no module: it
 #: wires the render pass to the scheduler and rewrites the words. O2b's
-#: route in shadow (2026-11-06) adds the pure router (router.py).
+#: route in shadow (2026-11-06) adds the pure router (router.py); O2b's
+#: probes (2026-11-06) the probes and their forward grade (probes.py).
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
-              "mind", "scheduler", "intents", "router")
+              "mind", "scheduler", "intents", "router", "probes")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
 O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
-    "models": ("OrcIntent", "OrcIntent.Meta", "OrcIntent.__str__"),
+    "models": ("OrcIntent", "OrcIntent.Meta", "OrcIntent.__str__",
+               # O2b's probes (2026-11-06): the probe pairs' table
+               "OrcTierGrade", "OrcTierGrade.Meta", "OrcTierGrade.__str__"),
     # O2a's mind (2026-11-05)
     "switches": ("_component_on", "gate_code", "minds_on",
                  # O2a's queue (2026-11-05)
                  "minds_switch_on",
                  # O2b's routed rung (2026-11-06): the router's switch
-                 "router_on"),
+                 "router_on",
+                 # O2b's probes (2026-11-06): the probes' switch, and a
+                 # caller's own switch (N2) read beside the four gates
+                 "probes_on", "caller_code"),
     "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
@@ -105,7 +111,9 @@ O2_CODE = {
     # model calls today
     "surfaces": ("_minds", "_model_calls"),
     # O2a's queue (2026-11-05): the minds' worker, its ticket, its watchdog
-    "tasks": ("_think_ticket", "orc_think", "orc_minds_watch"),
+    "tasks": ("_think_ticket", "orc_think", "orc_minds_watch",
+              # O2b's probes (2026-11-06): the worker's probe pass, last
+              "_probe_pass"),
     # O2a's arm (2026-11-05): the O arm's would mode, the intents taken at
     # the tick and expired at the close (A.42-A.45b)
     "ghost": ("_faith", "_take_intents", "_to_would", "arm_effective",
@@ -413,10 +421,14 @@ SURFACES = {
 }
 #: What only the surfaces import (test item f). bot_program/models.py
 #: re-exports every Orc table for the app's model registry, OrcIntent
-#: included, and is allowed that one name.
+#: included, and is allowed that one name. O2b's probes (2026-11-06,
+#: changed on purpose): OrcTierGrade, which keeps what each rung answered
+#: of a probe pair, joins it, and the registry's re-export of it is
+#: allowed beside OrcIntent's (N1.6).
 SURFACE_ONLY = {"OrcIntent", "scheduler", "mandate", "validator", "mind",
-                "mind_gateway"}
-REGISTRY = ("bot_program/models.py", "OrcIntent")
+                "mind_gateway", "OrcTierGrade"}
+REGISTRY = {("bot_program/models.py", "OrcIntent"),
+            ("bot_program/models.py", "OrcTierGrade")}
 #: The reverse accessors from the platform's rows to the Orcs (test g).
 REVERSE = {"orc", "orc_leg", "orcs"}
 
@@ -1363,7 +1375,7 @@ class TheImportersAreFrozenTests(MindTestCase):
             if not parts & SURFACE_ONLY or rel in SURFACES:
                 continue
             with self.subTest(f"{rel}: {mod}.{name}"):
-                self.assertEqual((rel, name), REGISTRY)
+                self.assertIn((rel, name), REGISTRY)
 
 
 class NoReverseAccessorTests(MindTestCase):

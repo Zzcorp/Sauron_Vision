@@ -12,7 +12,12 @@ import path never loads it.
 
 THE ROUTER'S SWITCH (O2b, 2026-11-06): `orcs_router`, read by `router_on`,
 decides which rung answers a wake the four gates let a model read: OFF r0,
-ON the rung the router chose."""
+ON the rung the router chose.
+
+THE PROBES' SWITCH (O2b's probes, 2026-11-06): `orcs_probes`, read by
+`probes_on`, is a model caller's own switch (N2, A.2): a probe needs it
+beside the four gates. `caller_code` names a caller's own switch while it
+is OFF, read before each probe, at its reservation and at the gateway."""
 import logging
 
 logger = logging.getLogger(__name__)
@@ -101,3 +106,25 @@ def router_on() -> bool:
     wake a model reads, on r0. The tick never reads it."""
     from bot_program.orcs.constants import ROUTER_SWITCH
     return _component_on(ROUTER_SWITCH)
+
+
+def probes_on() -> bool:
+    """The probes' switch (`orcs_probes`; O2b's probes, 2026-11-06, the O2
+    spec B.11, N2), OFF when unreadable. Read before each probe
+    (probes.run), at its reservation and again at the gateway, so a probe
+    is sent only while it is ON (frictionless off). The tick never reads
+    it."""
+    from bot_program.orcs.constants import PROBES_SWITCH
+    return _component_on(PROBES_SWITCH)
+
+
+def caller_code(caller) -> str:
+    """A model caller's OWN switch (N2, A.2: a caller needs its own switch
+    beside the four gates), as its code while it is OFF; "" while it is ON
+    and for a caller with none of its own: the wake (the minds switch is
+    its own) and the smoke (its `--yes`). O2b's probes (2026-11-06): the
+    probe's is `orcs_probes` (`probes_off`). Unreadable is OFF."""
+    from bot_program.orcs.constants import CODE_PROBES_OFF, PROBE_CALLER
+    if caller == PROBE_CALLER and not probes_on():
+        return CODE_PROBES_OFF
+    return ""

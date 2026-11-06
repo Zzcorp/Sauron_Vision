@@ -21,6 +21,10 @@ with his PIN, the Orcs line above 0). Both arrive closed.
   ticket_*       A.57 (O2a's arm, 2026-11-05): a ticket's caller, the
                  estimate of the exact text it sends and its bound, for the
                  scheduler's tickets and `orcs smoke` (reads, never a call)
+  judge_probe    B.11 (O2b's probes, 2026-11-06): a probe's answer through
+                 the same validator, with no lock held, blind to the
+                 routed answer; probes_spent, the probes' booked spend
+                 today, for the scheduler's allowance (a read)
   answering_map  B.5 (O2b, 2026-11-06): {rung: the rung that answers it},
                  the effort map the router reads (router.py names no
                  model): the gateway's ladder and the smoke's verdicts,
@@ -56,7 +60,7 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 
-from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
+from bot_program.orcs.constants import (ACTIONS, CODE_UNSENT, INTENT_KINDS,
                                         REPLY_ANSWER, REPLY_BILLED,
                                         REPLY_CLOSED, REPLY_UNBILLED,
                                         REPLY_UNSENT, RUNG_LIMITS, RUNG_NONE,
@@ -66,7 +70,7 @@ from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
                                         INTENT_STATUS_REFUSED, INTENT_TTL_S,
                                         MINDS_SWITCH, MODE_REFUSED,
                                         MODE_SHADOW, O2A_RUNG,
-                                        OFFICER_REFUSE,
+                                        OFFICER_REFUSE, PROBE_CALLER,
                                         S_VERSION, SCHEMA_VERSION,
                                         SMOKE_VERDICT_KEY, STATE_CARE_OWNED,
                                         W11_ASK_KEY,
@@ -86,7 +90,12 @@ ACTION_WORDS = {"hold": "hold", "revise_plan": "revise the plan"}
 
 
 def source_ref(wake, rung, caller=CALLER) -> str:
-    """`Orc:<pk>:Wake:<w>:<rung>` (§1.0.9): the Orcs line's own prefix."""
+    """`Orc:<pk>:Wake:<w>:<rung>` (§1.0.9): the Orcs line's own prefix. A
+    probe's names its wake and itself (B.11; O2b's probes, 2026-11-06):
+    `Orc:<pk>:Wake:<w>:probe:<rung>`, so the ledger counts it on its rung
+    and its own allowance finds it."""
+    if caller == PROBE_CALLER:
+        return f"Orc:{wake.orc_id}:Wake:{wake.pk}:{PROBE_CALLER}:{rung}"
     word = "Wake" if caller == CALLER else str(caller).capitalize()
     return f"Orc:{wake.orc_id}:{word}:{wake.pk}:{rung}"
 
@@ -309,14 +318,23 @@ def ask_line(*, rung_name, bound_usd, exclude_wake=None,
 # ── the tickets, as the scheduler and the commands weigh them (A.57; O2a's
 # arm, 2026-11-05): the gateway's reads, never a call ────────────────────
 
-def ticket_caller(caller, rung_name) -> None:
+def ticket_caller(caller, rung_name, *, would=None) -> None:
     """A.57: a ticket is for a caller of §1.0.9 that is not the wake
-    (mind_gateway.CALLER_RUNGS), on one of that caller's rungs: else
-    ValueError, before anything is held or sent (N4)."""
+    (mind_gateway.CALLER_RUNGS), on one of that caller's rungs, or one it
+    reaches only as B.5's map of `would` (a probe's r2: O2b's probes,
+    2026-11-06): else ValueError, before anything is held or sent (N4)."""
     from bot_program.orcs import mind_gateway
     if caller == CALLER:
         raise ValueError("a wake is claimed, never ticketed")
-    mind_gateway.check_rung(caller, rung_name)
+    mind_gateway.check_rung(caller, rung_name, would=would)
+
+
+def probes_spent() -> float:
+    """What the probes booked today on the Orcs line (the ledger's probe
+    rows, through the gateway): their own allowance weighs it (B.11; O2b's
+    probes, 2026-11-06). A read, never a call."""
+    from bot_program.orcs import mind_gateway
+    return mind_gateway.probes_spent()
 
 
 def ticket_price(rung_name, tokens) -> dict:
@@ -555,6 +573,66 @@ def judge(wake, reply, *, now) -> dict:
                              "bar": bars[-1] if bars else None}
     outcome["intent"] = intent
     return outcome
+
+
+def judge_probe(wake, reply, *, now) -> dict:
+    """B.11 (O2b's probes, 2026-11-06): a probe's answer through the same
+    validator as the wake's (V1-V14), with no lock held, BLIND to the
+    routed answer: as of the wake's own moment (its validation context,
+    the facts its dossier showed), on the Orc's plan as that context read
+    it (vctx's plan_version and plan_at, and the 24-hour plan changes made
+    before the wake's claim), so the routed answer's own plan change never
+    judges the probe. The officer is not asked: a pair compares answers,
+    and the officer's day counters already hold the routed answer's. One
+    side of the pair: {action, level_id (kept as _kept keeps it: an id
+    only when it names the wake's own menu), valid, rule, stop (a
+    tighten's would-stop, a price), at}; nothing of its note. A billed
+    failure, or an answer that cannot be judged, is invalid (V1). Never
+    raises."""
+    from django.utils.dateparse import parse_datetime
+
+    from bot_program.orcs import validator
+    from bot_program.orcs.models import Orc
+    side = {"action": "", "level_id": "", "valid": False, "rule": "V1",
+            "stop": None, "at": now.isoformat()}
+    if reply.get("kind") != REPLY_ANSWER:
+        return side
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    vctx = comps.get("vctx") if isinstance(comps.get("vctx"), dict) else {}
+    try:
+        orc = Orc.objects.select_related("root_trade").get(pk=wake.orc_id)
+        trade = orc.root_trade
+        as_of = parse_datetime(str(comps.get("as_of") or "")) or now
+        facts = validator.facts_index(orc, as_of=as_of, vctx=vctx)
+        claimed = wake.started_at or as_of
+        before = []
+        for change in orc.plan_changes_24h or []:
+            at = (parse_datetime(str(change.get("at") or ""))
+                  if isinstance(change, dict) else None)
+            if at is not None and at < claimed:
+                before.append(change)
+        verdict = validator.validate(
+            reply.get("text"), stop_reason=reply.get("stop_reason"),
+            vctx=vctx, facts=facts, plan_changes=before,
+            plan_version=vctx.get("plan_version"),
+            plan_at=vctx.get("plan_at"), reasons=wake.reasons,
+            symbol=orc.symbol, side=orc.side, now=wake.finished_at or now,
+            marks=_marks(trade), precision=_precision(trade))
+    except Exception as e:  # noqa: BLE001 — an unjudged probe is invalid
+        logger.warning("[orcs] wake %s: a probe's answer could not be "
+                       "judged: %s", wake.pk, e)
+        return side
+    answer = verdict.get("answer") or {}
+    kept = _kept(answer, vctx) if answer else {}
+    action = str(kept.get("action") or "")
+    action = action if action in ACTIONS else ""
+    stop = verdict.get("would_stop") if action == "tighten" else None
+    side.update(action=action,
+                level_id=str(kept.get("level_id") or "") if answer else "",
+                valid=verdict.get("status") == WAKE_STATUS_DONE,
+                rule=str(verdict.get("rule") or ""),
+                stop=float(stop) if stop is not None else None)
+    return side
 
 
 def _words_of(verdict) -> str:

@@ -51,7 +51,9 @@ O2b's first commit (2026-11-06) records the route in shadow; its second
 lets the route's rung answer behind the router's switch (orcs_router, OFF
 as it ships: r0 answers every wake a model reads), which the scheduler
 reads, never this module. The caller hands the gate closed with no
-frontier quota (B.9 is a later commit's), and no probe is sent.
+frontier quota (B.9 is a later commit's). The probes listed here are sent
+by bot_program/orcs/probes.py behind the probes' switch (orcs_probes, OFF
+as it ships; O2b's third commit), never by this module.
 
 B.1's signature has neither `score` nor `raw_band`: B.11's boundary
 probe needs the score, and B.6's escalated the band with no floor.

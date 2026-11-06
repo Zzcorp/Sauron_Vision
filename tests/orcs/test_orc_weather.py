@@ -155,11 +155,13 @@ class TheWeatherTests(TestCase):
         self.assertEqual(later.day_class, "stormy")
         self.assertEqual(later.history[-1]["day_class"], "stormy")
 
-    def test_caps_for_binds_the_model_wakes(self):
+    def test_caps_for_binds_the_model_wakes_and_the_probes(self):
         """O2a (2026-11-05, the O2 spec A.12, §4 Q4): the wake cap binds,
         per Orc and its own money world: real 12, 14 or 16 by the day's
-        class, paper and demo 6 (O1 showed 12); the frontier quota and the
-        probes stay shown only until O2b."""
+        class, paper and demo 6 (O1 showed 12). O2b (2026-11-06, B.8a;
+        changed on purpose): the probes bind too, none on a stormy day
+        (bot_program/orcs/probes.py reads them); the frontier quota stays
+        shown only."""
         from bot_program.orcs.weather import caps_for
         self.assertEqual(caps_for("calm", True)["wakes_per_day"], 12)
         self.assertEqual(caps_for("eventful", True)["wakes_per_day"], 14)
@@ -168,7 +170,9 @@ class TheWeatherTests(TestCase):
         self.assertEqual(caps_for("calm", False)["wakes_per_day"], 6)
         self.assertEqual(caps_for("stormy", True)["frontier_quota"], 4)
         self.assertEqual(caps_for("calm", True)["binding"],
-                         ["wakes_per_day"])
+                         ["wakes_per_day", "probes"])
+        self.assertEqual([caps_for(d, False)["probes"] for d in (
+            "calm", "eventful", "stormy")], [True, True, False])
         self.assertNotIn("display_only", caps_for("calm", True))
         for v in caps_for("calm", True).values():
             self.assertNotIsInstance(v, float, "no dollar figure")

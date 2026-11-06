@@ -11,7 +11,9 @@ inside its functions.
   CALLER_RUNGS      the rungs each caller may use (§1.0.9). A rung outside
                     the caller's list raises before anything is sent. From
                     O2b (2026-11-06, B.15a) the wake's are r0-r4 (r5 only
-                    through the Fable gate, C4's) and the smoke's h0, r0-r4
+                    through the Fable gate, C4's) and the smoke's h0, r0-r4;
+                    the probe's (B.15b) h0, r0, r1, r3 and r4, with r2 only
+                    as B.5's map of r3 and r4 (MAPPED_RUNGS)
   bound             A.21: every prompt token at the model's 1h cache write
                     on 1.35 x the estimate of the exact text sent, plus the
                     rung's max_tokens of output; plus the fallback's own,
@@ -26,11 +28,15 @@ inside its functions.
                     never `total_only`. Its refusal is a code: line_off,
                     total, line or deep_share.
   call              the four gates read again just before the send (A.2),
-                    the refusal while any seat reads above L0 (A.29), the
+                    and the caller's own switch (the probes', O2b), the
+                    refusal while any seat reads above L0 (A.29), the
                     line asked, then ONE send (max_attempts=1) on the Orcs
                     line, agent "orc", the caller's source_ref, no client
                     refusal re-run. What came back is a reply dict, never
                     an exception, but for a rung the caller may not use.
+  probes_spent      what the probes booked today on the Orcs line (the
+                    ledger's ':probe:' rows), which their own allowance
+                    weighs (B.11; O2b's probes, 2026-11-06)
   measure_tokens    the provider's free token count (`orcs tokens`, A.61):
                     never complete(), never ledgered.
   ledger_row        the settle's one lookup of the provider's own ledger
@@ -48,11 +54,11 @@ from bot_program.orcs.constants import (BOUND_HEADROOM, CODE_AUTHORITY,
                                         CODE_LINE, CODE_LINE_OFF, CODE_TOTAL,
                                         CODE_UNBILLED, CODE_UNSENT,
                                         FALLBACK_MAX_TOKENS, FALLBACK_RUNGS,
-                                        MINDS_INFLIGHT_KEY, REPLY_ANSWER,
-                                        REPLY_BILLED, REPLY_CLOSED,
-                                        REPLY_UNBILLED, REPLY_UNSENT,
-                                        RUNG_LIMITS, WAKE_STATUS_RUNNING,
-                                        WALL_S)
+                                        MINDS_INFLIGHT_KEY, PROBE_REF_MARK,
+                                        REPLY_ANSWER, REPLY_BILLED,
+                                        REPLY_CLOSED, REPLY_UNBILLED,
+                                        REPLY_UNSENT, RUNG_LIMITS,
+                                        WAKE_STATUS_RUNNING, WALL_S)
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +70,17 @@ SOURCE_PREFIX = "Orc:"
 #: §1.0.9: each caller and the rungs it may use. Later commits extend it;
 #: r5 is reachable only through O2b's Fable gate (C4's). O2b's routed rung
 #: (2026-11-06, B.15a): a wake answers on the rung the router chose, r0-r4,
-#: and the smoke takes the wake's rungs beside h0.
+#: and the smoke takes the wake's rungs beside h0. O2b's probes (2026-11-06,
+#: B.15b): a probe reads on h0, r0, r1, r3 or r4 (paper never routes to r2,
+#: real money's material rung).
 CALLER_RUNGS = {"wake": ("r0", "r1", "r2", "r3", "r4"),
-                "smoke": ("h0", "r0", "r1", "r2", "r3", "r4")}
+                "smoke": ("h0", "r0", "r1", "r2", "r3", "r4"),
+                "probe": ("h0", "r0", "r1", "r3", "r4")}
+#: §1.0.9's "mapped": a rung a caller reaches only as B.5's map of another
+#: (one effort per model until the smoke's PASS): a probe answers on r2
+#: only as the map of r3 or r4 (Opus at its one effort), named by the
+#: rung it was asked as (`would`).
+MAPPED_RUNGS = {"probe": {"r2": ("r3", "r4")}}
 #: The keywords a caller's request may carry; the gateway sets the rest,
 #: the fallbacks among them (B.14: the gateway builds the list form).
 REQUEST_KEYS = ("system_blocks", "shared_user_blocks", "private_user_blocks",
@@ -96,16 +110,22 @@ def rung(name) -> dict:
     raise ValueError(f"no rung {name!r} on the Orcs' ladder")
 
 
-def check_rung(caller, name) -> None:
+def check_rung(caller, name, *, would=None) -> None:
     """ValueError, before anything is sent, for a caller missing from
-    CALLER_RUNGS or a rung outside its list (N4)."""
+    CALLER_RUNGS or a rung outside its list (N4), but a rung MAPPED_RUNGS
+    admits as B.5's map of `would`, the rung it was asked as (O2b's
+    probes, 2026-11-06)."""
     allowed = CALLER_RUNGS.get(caller)
     if allowed is None:
         raise ValueError(f"no Orc caller {caller!r}: every model caller is "
                          f"a row of CALLER_RUNGS")
-    if name not in allowed:
-        raise ValueError(f"the {caller} caller may not use rung {name!r} "
-                         f"(its rungs: {', '.join(allowed)})")
+    if name in allowed:
+        return
+    if would is not None and would in MAPPED_RUNGS.get(caller, {}).get(
+            name, ()):
+        return
+    raise ValueError(f"the {caller} caller may not use rung {name!r} "
+                     f"(its rungs: {', '.join(allowed)})")
 
 
 def bound(name, est_tokens, *, fallback=False) -> float:
@@ -132,9 +152,10 @@ def bound(name, est_tokens, *, fallback=False) -> float:
 
 def sends_fallback(caller, name, real_money) -> bool:
     """B.14 (O2b, 2026-11-06): only a real-money wake on r2-r5 names a
-    fallback. Paper and demo wakes, and every ticket (the smoke; later the
-    probes, the twin, Captains and the rest), send none: their bounds stay
-    the primary's alone, and a refusal is a billed failure, as on r0."""
+    fallback. Paper and demo wakes, and every ticket (the smoke, the
+    probes; later the twin, Captains and the rest), send none: their
+    bounds stay the primary's alone, and a refusal is a billed failure, as
+    on r0 (a refused probe is stored invalid)."""
     return caller == "wake" and bool(real_money) and name in FALLBACK_RUNGS
 
 
@@ -178,6 +199,27 @@ def line_summary() -> dict:
     """Both lines and the total (spend.lines_summary), for the staff."""
     from ai_agents import spend
     return spend.lines_summary()
+
+
+def probes_spent() -> float:
+    """What the probes booked today on the Orcs line (B.11; O2b's probes,
+    2026-11-06): the ledger's rows since 00:00 UTC, on the line's own
+    membership, whose source_ref names a probe (Orc:<pk>:Wake:<w>:probe:
+    <rung>). Their own allowance weighs it, never the whole line's spend,
+    which would let an Opus probe run only in the first hours of the UTC
+    day."""
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import orc_line_q
+    start = timezone.now().replace(hour=0, minute=0, second=0,
+                                   microsecond=0)
+    total = (AgentTask.objects.filter(created_at__gte=start)
+             .filter(orc_line_q())
+             .filter(structured_output__source_ref__icontains=PROBE_REF_MARK)
+             .aggregate(s=Sum("cost_usd"))["s"])
+    return float(total or 0)
 
 
 def deep_share() -> float:
@@ -317,16 +359,18 @@ def _error_words(exc) -> str:
 
 def call(*, caller, rung_name, request, source_ref, bound_usd,
          exclude_wake=None, exclude_key=None, real_urgent=False,
-         real_money=False) -> dict:
+         real_money=False, would_rung=None) -> dict:
     """ONE model call for `caller` on rung `rung_name`, or none. `request`
     holds the caller's blocks, schema and efforts (REQUEST_KEYS); this
     function sets the model, the rung's limits, the agent, the line, the
     source_ref, max_attempts=1 and the fallback: the list form for a
     real-money wake (`real_money`) on r2-r5 only (B.14; O2b, 2026-11-06).
-    Returns a reply dict:
+    `would_rung`: the rung a probe was asked as, which admits its mapped
+    r2 (MAPPED_RUNGS; O2b's probes, 2026-11-06). Returns a reply dict:
 
-      closed     nothing sent: a gate is OFF, a seat reads above L0, or
-                 the line refused (`code`)
+      closed     nothing sent: a gate is OFF, the caller's own switch is
+                 OFF (the probes'), a seat reads above L0, or the line
+                 refused (`code`)
       unsent     nothing sent: the request was refused before the send
                  (a ValueError of build_request)
       answer     the model answered (`text`, `usage`)
@@ -337,15 +381,15 @@ def call(*, caller, rung_name, request, source_ref, bound_usd,
 
     ValueError for a rung the caller may not use, a source_ref that is not
     an Orc's, or a request key the gateway owns: before anything is sent."""
-    check_rung(caller, rung_name)
+    check_rung(caller, rung_name, would=would_rung)
     if not str(source_ref or "").startswith(SOURCE_PREFIX):
         raise ValueError(f"an Orc call's source_ref starts {SOURCE_PREFIX!r}")
     extra = set(request or {}) - set(REQUEST_KEYS)
     if extra:
         raise ValueError(f"the gateway sets {sorted(extra)} itself")
     step = rung(rung_name)
-    from bot_program.orcs.switches import gate_code
-    code = gate_code() or authority_code()
+    from bot_program.orcs.switches import caller_code, gate_code
+    code = gate_code() or caller_code(caller) or authority_code()
     if code:
         return _reply(REPLY_CLOSED, sent=False, code=code, step=step)
     allowed, code, why = ask_line(rung_name=rung_name, bound_usd=bound_usd,

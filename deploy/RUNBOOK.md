@@ -1337,8 +1337,10 @@ one effort per model until the smoke's PASS, and the Orc's page shows it
 as "would route: r2 (deep tier, medium effort)"; recording it sends no
 call and spends nothing. With the switch ON, that rung answers (see "The
 Orcs' router (O2b)" below). Each rung's row counts today's calls (the
-Orcs line's ledger rows, by the rung that answered) and today's
-would-counts (the wakes the router would send it). No tier setting on
+Orcs line's ledger rows, by the rung that answered), today's
+would-counts (the wakes the router would send it) and today's probes;
+below the ladder each band boundary shows its probe pairs and whether it
+reads validated (see "The Orcs' probes (O2b)" below). No tier setting on
 this page ever moves the ladder or the route, and no override can be
 saved for an Orc agent name. The card also counts the day's Orc calls
 from the ledger. The catalog table lists each model's cache-read price
@@ -1983,6 +1985,61 @@ waiting is answered on r0 at the next claim, re-priced on r0 (its stored
 dossier still fits), and every later wake is answered on r0, its route
 only recorded. A call already in flight finishes on its rung and is
 booked.
+
+### The Orcs' probes (O2b)
+
+A probe measures the rungs beside the one that answered: beside a paper
+or demo wake a model read (answered in shadow, or refused), a
+neighbouring rung reads the same stored dossier again, blind to that
+answer, and the two answers are kept side by side and graded. The switch
+`orcs_probes` ("Orc Probes (neighbouring rungs in shadow)", System, OFF
+on arrival, left OFF by "all on", turned on only with your trading PIN at
+/ops/) decides whether any is sent. A probe is never sent beside real
+money, and nothing it decides is applied: it writes no plan, no proposal,
+no note, no journal line and no card line, and it never counts in the
+Orc's own day caps. It is kept only in the probe pairs' table and the
+ledger, billed on the Orcs line.
+
+Which, beside paper and demo wakes only: h0 on calm and eventful days
+(none on a stormy day), and the rung across a band boundary when the
+wake's score sits within 5 of 30, 55 or 75 (for example r1 beside an r0
+wake at 27), one effort per model until the smoke's PASS, as for a wake.
+A probe sends no fallback: a refused answer is kept as invalid.
+
+When: `worker-orc` sends them after its wakes, last of all: while a
+real-money wake waits for its call, none is sent. A probe goes within 15
+minutes of the answer it stands beside, else it is dropped; each one is
+billed once.
+
+What they may spend: their own allowance, `probes_usd_per_day`, by
+default 15% of the line ($1.50 at $10), read at once; an explicit value
+is in dollars. A user gets at most 6 boundary probes and 40 h0 probes a
+day (`probes_per_day`). Inside the line every probe also stays within
+C − R (the real-money non-urgent class), the 70% deep share for an Opus
+rung and the $3.00 held for calls in flight. That is about $0.48 a day
+for 6 boundary probes on r1, plus cents for h0, and never more than the
+allowance. Both settings bind at once, with no restart:
+
+```bash
+./deploy/dc exec web python manage.py shell -c "from bot_program.orcs.models import OrcSetting; OrcSetting.objects.update_or_create(key='probes_usd_per_day', defaults={'value': 1.0})"
+./deploy/dc exec web python manage.py shell -c "from bot_program.orcs.models import OrcSetting; OrcSetting.objects.update_or_create(key='probes_per_day', defaults={'value': {'boundary': 6, 'h0': 40}})"
+```
+
+Where to read them: /orcs/seats/ (staff) adds the ladder table, one row
+per kind, boundary and money world: the pairs, the completed blocks of
+20, each side's valid answers, how often both named the same action and
+level, each side's forward R over the next final decision-frame bar after
+the later answer, and each side's cost per pair. /ai-models/ counts each
+rung's probes today and shows each boundary's state: validated after two
+completed blocks. The state is shown only: no router reads it, and the
+ladder does not change.
+
+To turn them on, with the minds switch and the Orcs line on: on /ops/
+(Switches, System), turn on "Orc Probes (neighbouring rungs in shadow)"
+with your trading PIN. The shell's `component on` refuses this key and
+points to /ops/, and the Django admin will not turn it on either. To stop
+them: turning `orcs_probes` OFF takes no PIN; the next probe is not sent,
+and one already in flight finishes and is booked.
 
 ## Operating notes
 
