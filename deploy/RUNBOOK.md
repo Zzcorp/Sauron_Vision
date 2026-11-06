@@ -914,17 +914,20 @@ one position the platform's own row cannot see.
 
 ## The Oculus (/oculus/)
 
-The page above the other thirty. They each answer their own subsystem's
+The page above the others. They each answer their own subsystem's
 question well; this one answers the operator's — **is the machine
 turning, and which of its wheels are actually engaged?** It owns no data,
-adds no arithmetic, caches nothing, and writes nothing. Ten panels, one
-per cycle: the switches, the scan, the ladder, the signals, the
-evolution, the personalities, the allocation, the horizon, the backtests,
-the trust. The switches and the forge are platform-wide and follow
+adds no arithmetic of its own, and writes nothing. Eleven cycles and the
+book: the viewer's own book on top, then one panel per cycle — the forge,
+the switches, the scan, the ladder, the signals, the evolution, the
+personalities, the allocation, the horizon, the backtests, the
+confidence. The switches and the forge are platform-wide and follow
 `/health/`'s rule — staff only, as on `/ops/`: any other login reads the
 other cycles and its own book, with no switch state on any panel, and
 the forge's source-tree scan and migration plan run only for the reader
-who gets their answer.
+who gets their answer. It carries no form and no POST: every action is a
+link to the page that holds it, behind its own PIN, and no broker or
+model is called to draw it.
 
 What it does that no single page could:
 
@@ -948,8 +951,57 @@ What it does that no single page could:
    everything to 0 because it is the public login gateway and must never
    raise; behind auth the duty is the opposite, because an operator acts
    differently on each. Every counter that renders `—` is also listed by
-   name at the foot of the page, so a dash can never pass for a quiet
-   zero.
+   name at the foot of the page — the book's included — with its reason
+   in words (the kind of failure, never its message) and the command that
+   fixes it, so a dash can never pass for a quiet zero.
+
+4. **Every count names its window, and amber needs a threshold.** Each
+   count says what it is counted over: `now`, `7 d`, `30 d` or
+   `all time`; a code constant says `constant`. A value turns amber (⚠)
+   or coral (⨯) only past its stated threshold, with its words — a budget
+   below zero, a late resolver, a call nobody grades — and a dash never
+   does. "Not due yet" is not late: detections inside their horizon (the
+   resolver's own `not_due`), signals still live and calls whose due date
+   is ahead are counted apart from the late ones.
+
+**The book, in three money worlds.** REAL MONEY, DEMO and PAPER side by
+side, never summed — there is no total. The split is
+`dashboard.position_summary.world_of`, the rule the Horde and the
+headband count REAL with: a row at a broker's demo account (`paper`
+False, `broker_env` "paper") is simulated money and never counts as
+REAL. Each world prints its open positions, its risk at the stops (the
+desk's own `book_risk` arithmetic, per currency, never added across
+currencies), the positions with no readable stop and, for REAL, the
+closes pending at the venue. Below sits **what the desk sizes with**:
+its two venues, live and paper, exactly as `capital_desk.budget_for`
+answers them, with its reason (the governor's "100" says which of its two
+meanings it is), its currency and what it left aside. The desk's live
+venue is `paper=False`, so it still counts the demo rows: a sentence
+says how many, and their risk, measured from the desk's own count. When
+C1–C3 takes demo out of the desk the same sentence reads "counts REAL
+rows only" by itself. The paper venue divides by the paper AND the live
+pools, and the page says so in numbers. Money keeps its cents.
+
+**What is stored, and how it is dated.** The page counts at load, except
+these readings, each printed with its age:
+
+- the forge's guard scan, once per image (`oculus:forge:guards:<sha>`;
+  an unstamped image keeps it ten minutes): "scan checked at this build";
+- the forge's migration plan, ten minutes (`oculus:forge:migrations:<sha>`),
+  because `migrate` can run on the same image;
+- the backtests' "signals a run could not simulate", ten minutes
+  (`oculus:slow:unsimulated`), counted again at once when a run completes;
+- the confidence counts and the desk passes' lifetime counts, ten minutes
+  each (`oculus:slow:predictions`, `oculus:slow:desk_passes`): the two
+  whole-table reads with no index for their filter;
+- the probe's two counts, which are `manage.py probe_routes`' own tally
+  with its own time: after a deploy or a cache flush they are a dash
+  that says "no probe since the cache was cleared".
+
+A cache that cannot be read never costs the page: it counts instead.
+Clearing the cache (a deploy does) makes the next GET count everything
+afresh. A warm render reads about 27 queries for staff and 26 for any
+other login (the budgets are tested).
 
 Each panel is fenced on its own: a cycle whose table is mid-migration is
 reported **dead**, never dropped — a vanished panel reads as "there is no
@@ -963,8 +1015,8 @@ the page — one shared axis would flatten every slow cycle into a flat
 line and read as "dead" when the honest reading is "slower than the
 scanner, by design".
 
-Nothing to run. Open the page; `tests/test_oculus.py` holds it to the
-three rules above.
+Nothing to run. Open the page; `tests/test_oculus.py` and
+`tests/test_oculus_truth.py` hold it to the rules above.
 
 ---
 
