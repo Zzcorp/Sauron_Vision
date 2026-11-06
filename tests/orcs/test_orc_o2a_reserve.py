@@ -523,12 +523,33 @@ class TheConcurrentClaimsTests(MindTransactionTestCase):
         self.wakes = [self._orc(user, cfg, seat, n) for n in (1, 2)]
 
     def test_two_concurrent_claims_where_one_fits_make_one_call(self):
+        """The call in flight is held inside the fake client (no lock
+        held) until neither wake is pending (2026-11-06, O2b's routed
+        rung): the other claim has then answered its wake by code, or,
+        were the line lock broken, claimed it and sent a second request.
+        An answer that came back at once let the first call's settle take
+        the line lock before the second claim did; the second bound then
+        fitted beside the first call's booked cost, inside the line, and
+        two calls were made one after the other (on PostgreSQL about one
+        run in six on O2a's tip)."""
+        import time as clock
+
         from django.db import connection as conn
 
         from bot_program.orcs import scheduler
+        from bot_program.orcs.models import OrcWake
         for w in self.wakes:
             self.assertEqual(scheduler.admit(w)["status"], "pending")
         self.use_fake(fake_answer(answer()))
+        ids, real_send = [w.pk for w in self.wakes], self.fake._send
+
+        def held_send(path, kwargs):
+            deadline = clock.monotonic() + 20
+            while clock.monotonic() < deadline and OrcWake.objects.filter(
+                    pk__in=ids, status="pending").exists():
+                clock.sleep(0.02)
+            return real_send(path, kwargs)
+        self.fake._send = held_send
         errors, results, go = [], [], threading.Barrier(2)
 
         def worker():
@@ -547,7 +568,6 @@ class TheConcurrentClaimsTests(MindTransactionTestCase):
         self.assertEqual(errors, [])
         self.assert_one_call()
         self.assertEqual(sorted(r["thought"] for r in results), [0, 1])
-        from bot_program.orcs.models import OrcWake
         ends = sorted(OrcWake.objects.filter(
             pk__in=[w.pk for w in self.wakes]).values_list(
             "status", "skipped_reason"))

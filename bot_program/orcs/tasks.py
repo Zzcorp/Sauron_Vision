@@ -5,16 +5,18 @@ and the faithfulness audit (weekly), on the SLOW queue by exact name,
 never a glob (a glob to `orcs` would put them behind the minds' calls).
 O2a (2026-11-05, the O2 spec A.17): the minds' worker task orc_think, the
 one task the `orcs` queue carries (worker-orc consumes it), and its
-watchdog orc_minds_watch on `slow`. O1c (§5.2a, §7.5.3, §10.7): the day
-roll (MK0 per model family, the day's weather, the calendar's actuals),
-the session close (each closed session's MK block per model family) and
-the hourly read (IN-slow, the class's hourly terms, the level-break and
-sweep drums), on the slow queue by exact name, on UTC crontabs that cover
-both sides of the clock change: every pass is idempotent; and the wakes'
-render (orc_render_wakes, every 2 minutes: the score, the weather and the
-dossier of each wake the tick recorded, off the tick). Each is behind the
-switch; a pass with nothing to do returns `idle`, so the census keeps the
-component's row."""
+watchdog orc_minds_watch on `slow`. O2b's probes (2026-11-06, B.11, B.12):
+orc_think sends the probes after its claims, last of all, and
+orc_minds_watch grades the probe pairs forward after its own pass. O1c
+(§5.2a, §7.5.3, §10.7): the day roll (MK0 per model family, the day's
+weather, the calendar's actuals), the session close (each closed
+session's MK block per model family) and the hourly read (IN-slow, the
+class's hourly terms, the level-break and sweep drums), on the slow queue
+by exact name, on UTC crontabs that cover both sides of the clock change:
+every pass is idempotent; and the wakes' render (orc_render_wakes, every
+2 minutes: the score, the weather and the dossier of each wake the tick
+recorded, off the tick). Each is behind the switch; a pass with nothing
+to do returns `idle`, so the census keeps the component's row."""
 import logging
 
 from celery import shared_task
@@ -337,6 +339,26 @@ def _think_ticket() -> bool:
         return False
 
 
+def _probe_pass(started) -> dict:
+    """B.11 as built (O2b's probes, 2026-11-06): the probes, last of all,
+    after the run's claims, in what is left of THINK_RUN_S since the run
+    `started` (time.monotonic), with no lock held (probes.run: the probes'
+    switch, the four gates and a waiting real-money wake read before each
+    one). Fenced: a failure is logged and the run's claims stand."""
+    import time
+
+    from bot_program.orcs.constants import THINK_RUN_S
+    left = THINK_RUN_S - (time.monotonic() - started)
+    if left <= 0:
+        return {"probed": 0}
+    try:
+        from bot_program.orcs import probes
+        return probes.run(budget_s=left)
+    except Exception as e:  # noqa: BLE001 — the run's own result stands
+        logger.warning("[orcs] the probes did not run: %s", e)
+        return {"probed": 0}
+
+
 @shared_task
 @guarded_task("orcs")
 def orc_think():
@@ -344,14 +366,20 @@ def orc_think():
     worker-orc alone consumes, every 60 s and on a ticket from the render
     pass. One run claims the best pending wake, reads it in shadow through
     the gateway with no lock held, settles it, and again, for THINK_RUN_S
-    at most; each claim reads the four gates anew.
+    at most; each claim reads the four gates anew. Then, last of all and
+    in what is left of the run, the probes (O2b's probes, 2026-11-06,
+    B.11: behind `orcs_probes`, OFF as it ships, paper and demo wakes
+    only, while no real-money wake waits).
 
     With the minds switch off, every pending wake is answered by code
     (`minds_off`) and the pass is idle. The result names `thought` and
-    `by_code`, never a `skipped`, `parsed` or `attempted` key: the task
-    gate reads those as a health verdict. While a gate is closed (as they
-    ship), the render pass answers every wake by code, no wake is pending
-    and every pass is idle."""
+    `by_code` (and `probed` when a probe was sent), never a `skipped`,
+    `parsed` or `attempted` key: the task gate reads those as a health
+    verdict. While a gate is closed (as they ship), the render pass
+    answers every wake by code, no wake is pending and every pass is
+    idle."""
+    import time
+
     from bot_program.orcs import scheduler, switches
     from bot_program.orcs.constants import CODE_MINDS_OFF
     if not switches.minds_switch_on():
@@ -359,11 +387,16 @@ def orc_think():
         words = (f"; {closed} waiting wake(s) answered by code" if closed
                  else "")
         return {"idle": f"the minds switch is off{words}"}
+    started = time.monotonic()
     out = scheduler.run()
-    if not out["thought"] and not out["by_code"]:
+    probed = int(_probe_pass(started).get("probed") or 0)
+    if not out["thought"] and not out["by_code"] and not probed:
         return {"idle": "no wake waits for a model"}
-    return {"status": "success", "thought": out["thought"],
-            "by_code": out["by_code"]}
+    result = {"status": "success", "thought": out["thought"],
+              "by_code": out["by_code"]}
+    if probed:
+        result["probed"] = probed
+    return result
 
 
 @shared_task
@@ -374,6 +407,20 @@ def orc_minds_watch():
     never on `orcs`, whose two slots long calls may hold. The stall alarm,
     the stale and backlog closes, the wall time, the holds expired at
     00:00 UTC, the breaker and the ledger gaps; its result names their
-    counts, never a `skipped`, `parsed` or `attempted` key."""
-    from bot_program.orcs import scheduler
-    return scheduler.watch()
+    counts, never a `skipped`, `parsed` or `attempted` key. Then (O2b's
+    probes, 2026-11-06, B.12) the probe pairs graded forward, with no lock
+    held (probes.grade_forward: the scheduler never names the pricing),
+    fenced; a pass that graded any names `probes_graded`."""
+    from bot_program.orcs import probes, scheduler
+    out = scheduler.watch()
+    try:
+        graded = int(probes.grade_forward() or 0)
+    except Exception as e:  # noqa: BLE001 — the watchdog's pass stands
+        logger.warning("[orcs] the probe pairs were not graded: %s", e)
+        graded = 0
+    if not graded:
+        return out
+    out = {k: v for k, v in out.items() if k != "idle"}
+    out.setdefault("status", "success")
+    out["probes_graded"] = graded
+    return out
