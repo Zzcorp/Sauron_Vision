@@ -3,7 +3,8 @@ N3's one exception, §1.1.7 T14 and A.59's lines; 2026-11-05).
 
 - `orcs smoke --row ROOT`: dry by default (the rung, the family, the
   tokens, the bound, the line's answer, the gates); `--yes` refused while
-  any of the four gates is off; only the smoke's rungs (r0, h0); a ticket
+  any of the four gates is off; only the smoke's rungs (r0, h0; from O2b
+  the wake's r1-r4 too, refused while the router's switch is off); a ticket
   reserved and the whole bound asked of the line; ONE send, billed on the
   Orcs line (agent orc, source_ref Orc:<pk>:Smoke:<wake>:<rung>); the
   answer and its validation printed; nothing written to the Orc
@@ -110,19 +111,30 @@ class TheSmokeTests(CommandFixture):
         self.assertEqual(self.tickets(), {})
 
     def test_only_the_smokes_rungs_are_accepted(self):
-        """P35: r1-r5 are refused before anything is reserved or sent;
-        Fable cannot be reached; h0 is the smoke's second rung."""
+        """P35: r5 and a rung off the ladder are refused before anything
+        is reserved or sent; Fable cannot be reached; h0 is the smoke's
+        rung beside r0. Changed on purpose (2026-11-06, O2b B.15a): the
+        smoke takes the wake's rungs r1-r4 too, under a wake's gates, so
+        with the router's switch (orcs_router) OFF, as it ships, each is
+        refused with nothing reserved or sent
+        (tests/orcs/test_orc_o2b_routed.py sends one with it ON)."""
         from ai_agents.models import AgentTask
 
         from bot_program.orcs import mind_gateway
         w = self.rendered()
         self.smoke("--yes")
         self.assert_one_call()
-        for rung in ("r1", "r2", "r3", "r4", "r5", "x9"):
+        for rung in ("r5", "x9"):
             with self.subTest(rung=rung), \
                     self.assertRaises(CommandError) as cm:
                 self.smoke("--rung", rung, "--yes")
             self.assertIn(f"rung {rung!r}", str(cm.exception))
+        for rung in ("r1", "r2", "r3", "r4"):
+            with self.subTest(rung=rung), \
+                    self.assertRaises(CommandError) as cm:
+                self.smoke("--rung", rung, "--yes")
+            self.assertIn(f"rung {rung}", str(cm.exception))
+            self.assertIn("(orcs_router)", str(cm.exception))
         self.assert_no_call()
         self.assertEqual(self.tickets(), {})
         self.smoke("--rung", "h0", "--yes")
@@ -438,11 +450,13 @@ class TheTicketTests(CommandFixture):
     def test_a_caller_outside_the_table_raises_before_anything_is_held(self):
         """§1.0.9: the wake is claimed, never ticketed; a caller with no
         row yet (a Captain, a question) and a rung outside the smoke's
-        raise before any lock, hold or count."""
+        raise before any lock, hold or count. Changed on purpose
+        (2026-11-06, O2b B.15a): the smoke's rungs are h0 and r0-r4, so
+        an unknown rung stands where r1 stood."""
         from bot_program.orcs import scheduler
         from bot_program.orcs.models import OrcSetting
         for caller, rung in (("wake", "r0"), ("captain", "r0"),
-                             ("question", "r0"), ("smoke", "r1"),
+                             ("question", "r0"), ("smoke", "x9"),
                              ("smoke", "r5")):
             with self.subTest(caller=caller, rung=rung), \
                     self.assertRaises(ValueError):

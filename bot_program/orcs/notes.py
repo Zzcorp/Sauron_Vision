@@ -506,7 +506,11 @@ def _intellect(card):
     """The last wake's intellect. Its rung is the card's (O2a, A.62): a
     model's rung in tier words once a model was sent the wake (mind.py
     writes it at the settle), RUNG_NONE for a code answer, and O1's or any
-    other words read as RUNG_NONE: the slot carries no model id."""
+    other words read as RUNG_NONE: the slot carries no model id.
+    `escalated` (a floor raised the wake's band, the render's; O2b,
+    2026-11-06, the O2 spec B.6) and `late` (the answer landed after the
+    row closed, the settle's) are the card's, each True only when the
+    card says True."""
     it = card.get("intellect")
     if not isinstance(it, dict):
         return None
@@ -518,7 +522,8 @@ def _intellect(card):
                         if score is not None else DASH),
             "band": band, "day_class": str(it.get("day_class") or ""),
             "rung_t": rung if RUNG_WORDS_RE.match(rung) else RUNG_NONE,
-            "escalated": False, "late": it.get("late") is True,
+            "escalated": it.get("escalated") is True,
+            "late": it.get("late") is True,
             "at": it.get("at")}
 
 

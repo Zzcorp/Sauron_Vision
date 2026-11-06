@@ -390,7 +390,10 @@ WAKE_RENDERED_WORDS = "its dossier is written; a model may read it next"
 #: model's rung in tier words, never its id or its cost.
 RUNG_NONE = "No model (code only)"
 RUNG_T = "{rung} · {tier} tier, {effort} effort"
-#: The routing table's version the weather is computed for (display only).
+#: The routing table's version (the O2 spec B.3): the day's weather row
+#: keeps it, and from O2b (2026-11-06) every rendered wake's route
+#: (OrcWake.components["route"]["version"], bot_program/orcs/router.py).
+#: A later table is a new ladder with a new version.
 ROUTING_VERSION = "table-v1"
 
 #: The eToro tape (§5.2a item 3, IN12): 15m and 5m candles, behind the
@@ -494,6 +497,9 @@ CODE_AUTHORITY = "authority"
 CODE_ROW_CLOSED = "row_closed"
 CODE_DEAD = "dead"
 CODE_UNSENT = "unsent"
+#: O2b's frontier (2026-11-06, B.15c): r5, or its blind twin, closed at the
+#: send while the frontier switch (orcs_frontier) is OFF.
+CODE_FRONTIER_OFF = "frontier_off"
 #: A.7: a wake the render pass could not finish (its merge, its render or
 #: its admission raised): answered by code, never pending, never silence.
 CODE_RENDER_FAILED = "render_failed"
@@ -507,7 +513,7 @@ WAKE_CODES = (
     "routine_cap", "dollar_cap", "spacing", CODE_DEAD, CODE_ROW_CLOSED,
     "over_budget", "breaker", "render_failed", "paused", "backlog",
     CODE_AUTHORITY, "pre_o2", "wall_time", "worker_silent", CODE_UNSENT,
-    CODE_UNBILLED, CODE_BILLED_FAILURE)
+    CODE_UNBILLED, CODE_BILLED_FAILURE, CODE_FRONTIER_OFF)
 WAKE_CODE_WORDS = {
     CODE_PLATFORM_OFF: "the platform's master switch is off",
     CODE_MINDS_OFF: "the minds switch is off",
@@ -536,6 +542,7 @@ WAKE_CODE_WORDS = {
     CODE_UNSENT: "the request was refused before it was sent",
     CODE_UNBILLED: "the call failed with no bill",
     CODE_BILLED_FAILURE: "the call failed and was billed",
+    CODE_FRONTIER_OFF: "the frontier switch (orcs_frontier) is off",
 }
 
 #: A.21: each rung's explicit bound and its httpx stall timeout. No model
@@ -559,7 +566,9 @@ BOUND_HEADROOM = 1.35
 #: holds each rung's measured p90.
 HIGH = {"h0": 0.0025, "r0": 0.0594, "r1": 0.1294, "r2": 0.1789,
         "r3": 0.2989, "r4": 0.5389, "r5": 1.8644}
-#: The rung every O2a wake is answered on (A.21; §4 Q2).
+#: The rung every O2a wake is answered on (A.21; §4 Q2), and from O2b
+#: (2026-11-06, B.2b) every wake while the router's switch is OFF, and a
+#: wake that records no rung of its own.
 O2A_RUNG = "r0"
 
 #: A.28-A.30: the doctrine's and the schema's versions, S's size cap.
@@ -759,17 +768,21 @@ MOVED_WORDS = {
 #: family factor) above its caller's cap, is refused by code (over_budget)
 #: before anything is reserved: a digest that grew with an idea's life
 #: would make the reservation no bound at all. The smoke sends a wake's
-#: stored dossier, capped as a wake's; the others are §1.0.9's, measured
+#: stored dossier, capped as a wake's; so does a probe (O2b, 2026-11-06,
+#: B.11: the wake's own stored blocks); the others are §1.0.9's, measured
 #: with `orcs tokens` like S once each caller ships.
-TICKET_MAX_TOKENS = {"smoke": DOSSIER_MAX_TOKENS, "captain": 10000,
-                     "emperor": 16000, "skeptic": 6000, "postmortem": 12000,
-                     "tribunal": 12000, "question": DOSSIER_MAX_TOKENS + 400}
+TICKET_MAX_TOKENS = {"smoke": DOSSIER_MAX_TOKENS, "probe": DOSSIER_MAX_TOKENS,
+                     "captain": 10000, "emperor": 16000, "skeptic": 6000,
+                     "postmortem": 12000, "tribunal": 12000,
+                     "question": DOSSIER_MAX_TOKENS + 400}
 #: §1.0.9: the triage ceiling a ticket caller reserves under (A.13): the
-#: smoke C - R, the real-money non-urgent class. A later caller adds its
-#: row with its CALLER_RUNGS row.
-TICKET_CLASS = {"smoke": CLASS_REAL}
+#: smoke and the probes C - R, the real-money non-urgent class (a probe
+#: also within its own allowance, PROBES_USD_SHARE; O2b, 2026-11-06). A
+#: later caller adds its row with its CALLER_RUNGS row.
+TICKET_CLASS = {"smoke": CLASS_REAL, "probe": CLASS_REAL}
 #: §1.0.9: a caller's tickets a UTC day; 0 counts none (the smoke is one
-#: per command, which the command keeps).
+#: per command, which the command keeps). The probes' caps are by kind and
+#: a user a day (PROBES_PER_DAY, below; O2b, 2026-11-06).
 TICKET_DAY_CAP = {"smoke": 0}
 #: A.57: one billed attempt per item; a call that failed with no bill is
 #: tried again at most this many times.
@@ -795,8 +808,129 @@ TICKET_CODE_WORDS = {
     CODE_ITEM_CLOSED: "this item had its one billed call already",
     CODE_ITEM_BUSY: "a call for this item is in flight",
     CODE_EXPIRED: "it waited for the budget past its UTC day",
+    # O2b's probes (2026-11-06, B.11): a probe's own refusals
+    "probes_off": "the probes' switch is off",
+    "probe_allowance": "the probes' own allowance of the Orcs line is used",
+    "real_waits": "a real-money wake waits for its model call: probes go "
+                  "last",
+    "real_money": "real money gets no probe",
 }
 #: A.61: S's count (OrcSetting "s_tokens") and the smoke's reasons for a
 #: FAIL (claude_smoke's own: call A, call B, no cache read, less than 2x).
 S_TOKENS_KEY = "s_tokens"
 SMOKE_FAIL_REASONS = ("call_a", "call_b", "cache", "effort")
+
+# ── O2b: the route in shadow (2026-11-06, the O2 spec B.1-B.6, B.16c) ──────
+# The router (bot_program/orcs/router.py) is pure and names rungs only. Its
+# choice is recorded on every rendered wake, minds on or off; while the
+# router's switch is OFF, r0 answers every wake a model reads: nothing
+# here sends anything.
+
+#: The router's choice in tier words (B.16c), as the Orc's page shows it
+#: (mind.rung_words, from the catalog by the rung's name): never a model
+#: id, never a cost.
+ROUTE_WOULD_T = "would route: {rung} ({tier} tier, {effort} effort)"
+
+# ── O2b: the routed rung answers (2026-11-06, the O2 spec B.2b, B.4, B.5,
+# B.13-B.15a, B.16a) ─────────────────────────────────────────────────────
+# Behind `orcs_router`, OFF on arrival and turned on only with the trading
+# PIN (N2): OFF, r0 answers every wake a model reads and the router's
+# choice is only recorded; ON, with the minds on, the rung the router chose
+# answers, one effort per model until the smoke's PASS. Nothing here sends
+# anything.
+
+#: N2: the router's switch (core/platform_control.py ORC_MIND_SWITCHES).
+ROUTER_SWITCH = "orcs_router"
+#: The rungs above r0, which only the router's switch opens to a wake and
+#: to `orcs smoke --rung` (B.15a); r5 also only through Fable's gate (B.15c,
+#: O2b's frontier, 2026-11-06), which the smoke never passes. h0 is a
+#: probe's rung, r0 the default.
+ROUTED_RUNGS = ("r1", "r2", "r3", "r4", "r5")
+#: B.13: the tiers the deep share holds (ai_agents/spend.py: deep and
+#: frontier), mirrored by the scheduler on the money in flight and held;
+#: the share itself is the budget's, read through the gateway.
+DEEP_TIERS = ("deep", "frontier")
+#: B.14: the rungs on which a real-money wake names the server's fallback
+#: (the list form, the catalog's ORC_FALLBACK_V1), and its own max_tokens.
+FALLBACK_RUNGS = ("r2", "r3", "r4", "r5")
+FALLBACK_MAX_TOKENS = 8000
+#: The smoke's words when B.5's map answers a rung on another (orcs.py).
+SMOKE_MAPPED_T = ("rung {asked}, answered as {rung} (one effort per model "
+                  "until the smoke's PASS for the {family} family)")
+
+# ── O2b: the probes (2026-11-06, the O2 spec B.8a, B.11, B.12, B.15b,
+# B.16a, B.16b) ──────────────────────────────────────────────────────────
+# Behind `orcs_probes`, OFF on arrival and turned on only with the trading
+# PIN (N2): beside a paper or demo wake a model read, a neighbouring rung
+# reads the wake's own stored dossier again, blind, on a ticket of its own
+# allowance, stored only in OrcTierGrade and the ledger
+# (bot_program/orcs/probes.py). Nothing here sends anything.
+
+#: N2: the probes' switch (core/platform_control.py ORC_MIND_SWITCHES).
+PROBES_SWITCH = "orcs_probes"
+#: §1.0.9: the probes' ticket caller, and their source_ref's word:
+#: Orc:<pk>:Wake:<w>:probe:<rung> (the ledger's probe rows hold the mark).
+PROBE_CALLER = "probe"
+PROBE_REF_MARK = f":{PROBE_CALLER}:"
+#: OrcTierGrade.kind: an h0 probe, a boundary probe, and Fable's blind twin
+#: (B.10: O2b's frontier, 2026-11-06, beside an r5 wake only); the kinds a
+#: probe is sent as.
+TIER_GRADE_KINDS = ("h0", "boundary", "twin")
+PROBE_KINDS = ("h0", "boundary")
+#: OrcTierGrade.boundary: the band boundaries a boundary probe crosses
+#: (BAND_ROUTINE_MAX, BAND_MATERIAL_MAX, BAND_COMPLEX_MAX); h0 names none.
+PROBE_BOUNDARIES = (BAND_ROUTINE_MAX, BAND_MATERIAL_MAX, BAND_COMPLEX_MAX)
+#: B.11 (§4 Q13): a user's probes a UTC day, by kind, counted in the
+#: tickets' book by (caller, kind, user); OrcSetting "probes_per_day"
+#: overrides a kind, binding at once (0 sends none of that kind).
+PROBES_PER_DAY = {"boundary": 6, "h0": 40}
+PROBES_PER_DAY_KEY = "probes_per_day"
+#: B.11: the probes' own allowance of the Orcs line: this share of its cap,
+#: read at once ($1.50 at $10); OrcSetting "probes_usd_per_day" holds an
+#: explicit value, in dollars.
+PROBES_USD_SHARE = 0.15
+PROBES_USD_KEY = "probes_usd_per_day"
+#: B.11 as built: a probe is sent within this many minutes of the routed
+#: answer (the wake's finished_at), else dropped by code: B.12 prices both
+#: answers after the LATER one, so a late probe would move the routed
+#: answer's grade too.
+PROBE_FRESH_MIN = 15
+#: B.12: the pairs the watchdog's grade reads, this many days back.
+PROBE_GRADE_DAYS = 7
+#: B.12: a boundary reads "validated" after this many completed blocks of
+#: SEAT_WINDOW pairs per (boundary, kind, world): shown only, read by no
+#: router (the catalog's ladder note).
+VALIDATED_BLOCKS = 2
+#: The probes' codes (TICKET_CODE_WORDS above).
+CODE_PROBES_OFF = "probes_off"
+CODE_PROBE_ALLOWANCE = "probe_allowance"
+CODE_REAL_WAITS = "real_waits"
+CODE_PROBE_REAL = "real_money"
+
+# ── O2b: Fable's gate and its blind twin (2026-11-06, the O2 spec B.4b,
+# B.8b, B.9, B.10, B.15c, §4 Q12) ──────────────────────────────────────────
+# Behind `orcs_frontier`, OFF on arrival and turned on only with the trading
+# PIN (N2): with the router's switch ON, a real-money extreme wake may be
+# answered by r5 (Fable) beside its r4 blind twin when every clause of
+# Fable's gate holds (router.fable_gate), under a daily quota of 0 by
+# default. The pair is priced at the dossier's size cap, about $3.57 (r5's
+# bound with its fallback and its twin's), above the $3.00 the Orcs may hold
+# in flight (ORC_LIVE_FLOOR_USD): in O2 the gate cannot open, so no r5 and
+# no twin call is sent. Nothing here sends anything.
+
+#: N2: the frontier's switch (core/platform_control.py ORC_MIND_SWITCHES).
+FRONTIER_SWITCH = "orcs_frontier"
+#: Fable's rung, and the rung its blind twin is asked as (B.5 maps it: r2
+#: until Opus's PASS).
+FRONTIER_RUNG = "r5"
+TWIN_RUNG = "r4"
+#: §1.0.9: the twin's caller, and its source_ref's word:
+#: Orc:<pk>:Wake:<w>:twin:<rung> (its ticket's `pair` names the r5 wake).
+TWIN_CALLER = "twin"
+TWIN_REF_MARK = f":{TWIN_CALLER}:"
+#: B.8b (§4 Q12): the r5 calls a user may make a UTC day across all
+#: classes, OrcSetting "frontier_per_day" (0 by default: Fable is off by
+#: quota too), less the user's r5 calls today. The day row's frontier_quota
+#: shows it; nothing that routes reads the day row.
+FRONTIER_PER_DAY = 0
+FRONTIER_PER_DAY_KEY = "frontier_per_day"

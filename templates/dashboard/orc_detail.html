@@ -6,7 +6,8 @@
 {# One Orc (O1d, spec §9.2): its thesis, plan, journal, arms, wakes and #}
 {# grade, read by code. The one form is the operator's own thesis. From #}
 {# O2a (the O2 spec A.62): each wake's status and rung, the proposals in #}
-{# shadow with the officer's would-verdict, the refusals. #}
+{# shadow with the officer's would-verdict, the refusals. O2b (B.16c, #}
+{# 2026-11-06): beside the rung sent, the router's choice in shadow. #}
 <div class="orc-page">
 <div style="margin-bottom:12px;"><a href="{% url 'orcs_list' %}" class="orc-muted">← every Orc</a></div>
 {% if messages %}<ul class="orc-messages">{% for m in messages %}<li class="card">{{ m }}</li>{% endfor %}</ul>{% endif %}
@@ -130,7 +131,7 @@
             <td data-label="Band">{{ w.band|default:"—" }}</td>
             <td data-label="Day">{{ w.day_class|default:"—" }}</td>
             <td data-label="Status">{{ row.status_t }}</td>
-            <td data-label="Rung">{{ row.rung|default:"—" }}</td>
+            <td data-label="Rung">{% if row.rung or row.route_t %}{{ row.rung }}{% if row.rung and row.route_t %} · {% endif %}{{ row.route_t }}{% else %}—{% endif %}</td>
         </tr>
         {% endwith %}{% endfor %}
         </tbody>

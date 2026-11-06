@@ -139,7 +139,7 @@ COMMANDS = [
     {
         "name": "orcs",
         "title": "The Orcs",
-        "purpose": "Each open position's Orc as a command: both switches and the Orcs budget line, every live Orc with its last journal lines, the adoption of the open rows, a wake's dossier with the model's answer when one was read, and the minds' smoke, verdicts and count of S. Nothing here sends an order or moves a stop; only `smoke --yes` sends a model call (once, with the four gates ON, billed on the Orcs line), and `tokens --s --yes` asks the provider's free token count.",
+        "purpose": "Each open position's Orc as a command: both switches and the Orcs budget line, every live Orc with its last journal lines, the adoption of the open rows, a wake's dossier with the model's answer when one was read, and the minds' smoke, verdicts and count of S. Nothing here sends an order or moves a stop; only `smoke --yes` sends a model call (once, with the four gates ON, and for a rung above r0 the router's switch too, billed on the Orcs line), and `tokens --s --yes` asks the provider's free token count.",
         "usage": [
             "python manage.py orcs                          # the switches, the Orcs line, the minds' queue, every live Orc",
             "python manage.py orcs adopt --open             # plan: the open rows that would be adopted",
@@ -153,6 +153,7 @@ COMMANDS = [
             "python manage.py orcs smoke --row ROOT_ID         # dry: the one call the Orc's latest stored dossier would make",
             "python manage.py orcs smoke --row ROOT_ID --yes   # ... sent once, on the Orcs line (the four gates ON)",
             "python manage.py orcs smoke --row ROOT_ID --rung h0 --yes",
+            "python manage.py orcs smoke --row ROOT_ID --rung r2 --yes   # a routed rung: the router's switch ON too",
             "python manage.py orcs smoke-verdict --family sonnet --pass             # what claude_smoke --yes printed",
             "python manage.py orcs smoke-verdict --family opus --fail effort cache",
             "python manage.py orcs tokens --s                  # dry: what would be counted",
