@@ -2060,13 +2060,18 @@ and one already in flight finishes and is booked.
 
 Fable (r5) stays at 0 through O2. The router sends an extreme wake to r5
 only when every clause of Fable's gate holds, read in this order, the
-first that fails written in the route on the wake's journal entry (and
-shown as "extreme: r4, ..."): real money; the band is extreme; a frontier
-quota is left today; the frontier switch is ON; the pair fits under the
-wake's class's ceiling and the deep tiers' share; the pair fits under the
-$3.00 the Orcs may hold in flight; and the dossier, written for Fable at
-1.35 times the tokens, is within its size cap (one that is not is written
-again for r4, which answers it). Otherwise r4 answers, as before.
+first that fails kept in the route on the wake's journal entry as
+"extreme: r4, ..." (no page shows it): real money; the band is extreme; a
+frontier quota is left today; the frontier switch is ON; the pair fits
+under the wake's class's ceiling and the deep tiers' share; the pair fits
+under the $3.00 the Orcs may hold in flight; the router's switch
+(`orcs_router`) is ON, since no dossier is written for Fable while it is
+OFF; and that dossier, written for Fable at 1.35 times the tokens, is
+within its size cap (one that is not is written again for r4, which
+answers it). Otherwise the wake is answered as any other: while the
+router's switch (`orcs_router`) is OFF, as it ships, r0 answers every
+wake a model reads, extreme ones and real money included; with it ON, r4
+answers (r2, at Opus's one effort, until the smoke's PASS for Opus).
 
 The pair is r5 with its r4 blind twin. The twin reads the same stored
 dossier on r4 (on r2, at Opus's one effort, until the smoke's PASS for

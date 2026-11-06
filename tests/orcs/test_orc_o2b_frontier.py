@@ -910,6 +910,30 @@ class TheFrontierWordsTests(MindTestCase):
                       "the router never reads", "--rung r5`",
                       "real money", "extreme", "r4"):
             self.assertIn(words, section)
+        # 2026-11-06, completing O2b: the gate's clauses as router.fable_gate
+        # reads them, the router's switch among them; who answers when one
+        # fails, the router's switch OFF as it ships; the failing clause
+        # kept in the route, which no page shows
+        clauses = ("real money; the band is extreme; a frontier quota is "
+                   "left today; the frontier switch is ON; the pair fits "
+                   "under the wake's class's ceiling and the deep tiers' "
+                   "share; the pair fits under the $3.00 the Orcs may hold "
+                   "in flight; the router's switch (`orcs_router`) is ON, "
+                   "since no dossier is written for Fable while it is OFF; "
+                   "and that dossier, written for Fable at 1.35 times the "
+                   "tokens, is within its size cap")
+        self.assertIn(clauses, section)
+        for words in ("Otherwise the wake is answered as any other: while "
+                      "the router's switch (`orcs_router`) is OFF, as it "
+                      "ships, r0 answers every wake a model reads, extreme "
+                      "ones and real money included; with it ON, r4 answers "
+                      "(r2, at Opus's one effort, until the smoke's PASS "
+                      "for Opus).",
+                      "kept in the route on the wake's journal entry as "
+                      "\"extreme: r4, ...\" (no page shows it)"):
+            self.assertIn(words, section)
+        for words in ("Otherwise r4 answers, as before", "shown as"):
+            self.assertNotIn(words, section)
         self.assertNotIn("component on orcs_frontier", text)
         flat = " ".join(text.split())
         smoke = flat.split("Three subcommands prepare the minds",

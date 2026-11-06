@@ -22,9 +22,11 @@ is OFF, read before each probe, at its reservation and at the gateway.
 THE FRONTIER'S SWITCH (O2b's frontier, 2026-11-06): `orcs_frontier`, read by
 `frontier_on`, is one clause of Fable's gate (B.9, read at the render), the
 twin's own switch and r5's beside the wake's (B.15c, read again at the
-claim and at each of the pair's sends): OFF, r4 answers an extreme wake.
-In O2 the gate cannot open whatever it says (the pair's bound is above the
-money the Orcs may hold in flight)."""
+claim and at each of the pair's sends): OFF, an extreme wake routes r4,
+which answers it while the router's switch is ON (r0 answers every wake
+while that one is OFF, as it ships; 2026-11-06, completing O2b). In O2 the
+gate cannot open whatever it says (the pair's bound is above the money the
+Orcs may hold in flight)."""
 import logging
 
 logger = logging.getLogger(__name__)
