@@ -278,7 +278,9 @@ class TheRefreshKeepsUpWithABurstTests(SimpleTestCase):
                       fn)
         self.assertIn("else if (msg.type === 'signal') railSoon();", js)
         soon = js.split("function railSoon()")[1][:300]
-        self.assertIn("400", soon)
+        # Exactly 400, not 4000 or 1400 (the clock itself is measured under
+        # node: TheSwapWaitsForTheReaderTests.test_the_clock_is_measured).
+        self.assertRegex(soon, r"\}, 400\);")
 
     def test_the_rail_sweeps_every_minute(self):
         """Price and age departures have no push: they reach the rail on the
@@ -441,11 +443,39 @@ async function burst() {
   return out;
 }
 
+/* The clock, measured rather than read off the code (2026-11-06, the
+   review): a socket announcement waits 400ms for the rest of a burst, and
+   the sweep asks every minute, never while the tab is hidden, and at once
+   when it comes back. */
+async function cadence() {
+  const out = {};
+  let W = boot();
+  W.wsSend({ type: 'signal' }); await W.advance(399);
+  out.at_399ms = W.fetches();
+  await W.advance(2);
+  out.at_401ms = W.fetches();
+  W = boot();
+  await W.advance(59990);
+  out.sweep_before_1min = W.fetches();
+  await W.advance(20);
+  out.sweep_at_1min = W.fetches();
+  W.doc.hidden = true; W.doc.visibilityState = 'hidden';
+  await W.advance(60000);
+  out.sweep_hidden = W.fetches();
+  W.doc.hidden = false; W.doc.visibilityState = 'visible';
+  D.dispatch(W.doc, new D.Event('visibilitychange', {}));
+  await W.advance(50);
+  out.on_return = W.fetches();
+  out.errors = W.errors();
+  return out;
+}
+
 (async () => {
   const out = {};
   out.reader_holds = await readerHolds();
   out.chip_applies = await chipApplies();
   out.burst = await burst();
+  out.cadence = await cadence();
   process.stdout.write(JSON.stringify(out));
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 """
@@ -561,6 +591,18 @@ class TheSwapWaitsForTheReaderTests(TestCase):
         self.assertEqual(r["cards_after_click"], [middle, first],
                          self._dump("chip_applies"))
         self.assertFalse(r["chip_after_click"]["shown"])
+        self.assertEqual(r["errors"], [])
+
+    def test_the_clock_is_measured(self):
+        """(2026-11-06, the review) The debounce and the sweep, by the
+        page's own timers rather than by the text of the code."""
+        r = self.report["cadence"]
+        self.assertEqual(r["at_399ms"], 0, self._dump("cadence"))
+        self.assertEqual(r["at_401ms"], 1, self._dump("cadence"))
+        self.assertEqual(r["sweep_before_1min"], 0, self._dump("cadence"))
+        self.assertEqual(r["sweep_at_1min"], 1, self._dump("cadence"))
+        self.assertEqual(r["sweep_hidden"], 1, self._dump("cadence"))
+        self.assertEqual(r["on_return"], 2, self._dump("cadence"))
         self.assertEqual(r["errors"], [])
 
     def test_a_burst_costs_two_fetches_and_ends_complete(self):

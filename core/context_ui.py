@@ -104,7 +104,9 @@ def _class_index(cls) -> int:
 def _watch_facts(request, items, total) -> None:
     """held, and the order variables of every watchlist item: --o-sym by
     symbol, --o-cls by class (the vocabulary's order) then the list's own,
-    --o-held the held items first."""
+    --o-held the held items first, and --o-cheld by class then the held
+    items first within it (grouped by class with the held-first sort,
+    2026-11-06, the review)."""
     held = {}
     try:
         from dashboard.signal_rail import held_symbols
@@ -129,6 +131,11 @@ def _watch_facts(request, items, total) -> None:
     for i, item in enumerate(items):
         if not item["held"]:
             item["o_held"] = 10000 + i + 1
+    in_class = {}
+    for item in sorted(items, key=lambda it: (not it["held"], it["o_cls"])):
+        k = _class_index(item.get("asset_class") or "")
+        in_class[k] = in_class.get(k, 0) + 1
+        item["o_cheld"] = k * 10000 + in_class[k]
 
 
 def _watch_facets(items, total) -> dict:

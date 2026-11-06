@@ -356,6 +356,10 @@ body.light-mode .sr-pop-foot { background: var(--bg-card, #fff); }
 [data-sv-fhost="watch"][data-f-sort="symbol"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-sort="symbol"][data-sv-list]>*{order:var(--o-sym,0)}
 [data-sv-fhost="watch"][data-f-sort="held"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-sort="held"][data-sv-list]>*{order:var(--o-held,0)}
 [data-sv-fhost="watch"][data-f-group="1"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-group="1"][data-sv-list]>*{order:var(--o-cls,0)}
+/* (2026-11-06, the review) Grouped, the held-first sort holds inside each
+   class: --o-cheld is the class, then the held items first. (Grouped by
+   symbol is --o-cls itself: the list is drawn by class, then symbol.) */
+[data-sv-fhost="watch"][data-f-group="1"][data-f-sort="held"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-group="1"][data-f-sort="held"][data-sv-list]>*{order:var(--o-cheld,0)}
 
 /* Group headers are siblings of the rows, never wrappers (a watchlist item
    stays a direct child of its body). */

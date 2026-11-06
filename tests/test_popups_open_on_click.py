@@ -326,6 +326,67 @@ async function rowOpensCard() {
   return out;
 }
 
+/* On a touch screen or a window under 900px only a PINNED card displays
+   (sv-rail.css): a card measured before it is pinned measures 0px tall.
+   Here a card is 700px tall once pinned and nothing before, and its row
+   sits near the bottom of the screen. */
+async function pinnedMeasure() {
+  const W = boot();
+  const out = {};
+  const proto = D.Element.prototype;
+  const base = Object.getOwnPropertyDescriptor(proto, 'offsetHeight');
+  Object.defineProperty(proto, 'offsetHeight', { configurable: true, get() {
+    if (this.classList.contains('sr-popup') || this.classList.contains('dh-pop')) {
+      return this.classList.contains('sv-pinned') ? 700 : 0;
+    }
+    return base.get.call(this);
+  } });
+  try {
+    const low = { top: 900, bottom: 934, left: 1560, right: 1860, width: 300, height: 34, x: 1560, y: 900 };
+    const wrap = W.wraps()[0];
+    wrap.getBoundingClientRect = () => low;
+    W.click(wrap.querySelector('a.sr-signal')); await W.advance(20);
+    const pop = wrap.querySelector('.sr-popup');
+    out.card = { pinned: pop.classList.contains('sv-pinned'), top: parseFloat(pop.style.top),
+                 max: parseFloat(pop.style.maxHeight) };
+    W.click(W.page); await W.advance(20);
+    const item = W.doc.querySelectorAll('#railWatchBody .wl-item')[0];
+    item.getBoundingClientRect = () => low;
+    const wpop = item.querySelector('.wl-pop');
+    W.click(item); await W.advance(20);
+    out.watch = { pinned: wpop.classList.contains('sv-pinned'), top: parseFloat(wpop.style.top),
+                  max: parseFloat(wpop.style.maxHeight) };
+  } finally {
+    Object.defineProperty(proto, 'offsetHeight', base);
+  }
+  out.errors = W.errors();
+  return out;
+}
+
+/* The headband SIGNALS dropdown open on the hover beat, NOT pinned: the
+   operator is reading its rows, so a burst must not swap them under the
+   hand (a click would then open another signal's card). */
+async function dropdownReads() {
+  const W = boot();
+  const out = {};
+  const rows = () => W.doc.querySelectorAll('#hbSignalRows .sv-sig-row[data-signal-id]').map(r => r.getAttribute('data-signal-id'));
+  out.rows_before = rows();
+  W.pointTo(W.signalsCat()); await W.advance(700);
+  out.open = W.ddOpen();
+  out.pinned = W.dd().classList.contains('sv-pinned');
+  W.pointTo(W.dd().querySelector('.sv-sig-row')); await W.advance(50);
+  W.wsSend({ type: 'signal' }); await W.advance(1500);
+  out.fetches = W.fetches();
+  out.rows_while_reading = rows();
+  out.cards_while_reading = W.cards();
+  W.pointTo(W.page); await W.advance(800);
+  out.open_after = W.ddOpen();
+  out.rows_after = rows();
+  out.cards_after = W.cards();
+  out.errors = W.errors();
+  return out;
+}
+
 (async () => {
   const out = {};
   out.signal_card = await signalCard();
@@ -335,6 +396,8 @@ async function rowOpensCard() {
   out.dropdown = await dropdown();
   out.rail_waits = await railWaits();
   out.row_opens_card = await rowOpensCard();
+  out.pinned_measure = await pinnedMeasure();
+  out.dropdown_reads = await dropdownReads();
   process.stdout.write(JSON.stringify(out));
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 """
@@ -367,10 +430,13 @@ def _inputs():
     ctx.update({
         "user": user, "sv_sweep": False,
         "ticker_items": [_news(4000 + i) for i in range(4)],
+        # Made-up symbols (2026-11-06, the review): a fixture names no
+        # instrument anyone holds. One sits in both bands, as in the hover
+        # harness this page copies.
         "ui_headband": [_instrument(s, i) for i, s in enumerate(
-            ["EURUSD", "GBPUSD", "AAPL", "BTCUSD"])],
+            ["PPHBA", "PPHBB", "PPHBC", "PPHBD"])],
         "ui_watchlist": [_instrument(s, i) for i, s in enumerate(
-            ["EURCAD", "GLDM", "AAPL"])],
+            ["PPWLA", "PPWLB", "PPHBC"])],
     })
     load = "{% load sauron_tags static %}"
     bands = raw[raw.index(BANDS_FROM):raw.index(BANDS_TO)]
@@ -448,13 +514,25 @@ class PopupsOpenOnClickTests(TestCase):
         r = self.report["signal_card"]
         self.assertLessEqual(r["max_height"], 1080 - 24, self._dump("signal_card"))
         self.assertGreaterEqual(r["top"], 12)
-        src = (Path(settings.BASE_DIR) / "templates" / "_partials"
-               / "signal_rail_items.html").read_text(encoding="utf-8")
-        foot = src.split('<div class="sr-pop-foot">', 1)
-        self.assertEqual(len(foot), 2, "no .sr-pop-foot in the card")
-        self.assertIn("sr-pop-actions-react", foot[1].split("</div>\n                    </div>\n                </div>")[0])
-        self.assertIn("▸ INSTRUMENT", foot[1])
-        self.assertIn("▸ ALL SIGNALS", foot[1])
+        # The card as the partial renders it, read as a tree (2026-11-06,
+        # the review): the foot holds both action rows, whatever the
+        # template's indentation.
+        from bs4 import BeautifulSoup
+        self.client.force_login(_user("pop_struct"))
+        soup = BeautifulSoup(_partial(self.client), "html.parser")
+        pops = soup.select(".sr-signal-wrap .sr-popup")
+        self.assertTrue(pops, "no card rendered")
+        for pop in pops:
+            foot = pop.select_one(":scope > .sr-pop-foot")
+            self.assertIsNotNone(foot, "no .sr-pop-foot in the card")
+            react = foot.select_one(".sr-pop-actions-react")
+            self.assertIsNotNone(react)
+            self.assertIsNotNone(react.select_one(".sr-pop-btn-act"))
+            self.assertIsNotNone(react.select_one(".sr-pop-btn-pass"))
+            explore = [b.get_text(strip=True) for b in
+                       foot.select(".sr-pop-actions:not(.sr-pop-actions-react) .sr-pop-btn")]
+            self.assertIn("▸ INSTRUMENT", explore)
+            self.assertIn("▸ ALL SIGNALS", explore)
         css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-rail.css"
                ).read_text(encoding="utf-8")
         block = css.split(".sr-pop-foot {", 1)[1].split("}", 1)[0]
@@ -542,6 +620,38 @@ class PopupsOpenOnClickTests(TestCase):
         self.assertEqual(r["card"], {"shown": True, "pinned": True},
                          self._dump("row_opens_card"))
         self.assertFalse(r["dd_open"], "the dropdown stayed pinned under the card")
+        self.assertEqual(r["errors"], [])
+
+    def test_a_pinned_card_is_measured_as_it_shows(self):
+        """(2026-11-06, the review) On a touch screen or under 900px only a
+        pinned card displays: one measured before it was pinned measured 0px
+        and was placed with a guess, its TAKE TRADE and PASS off the bottom
+        of the screen. Pinned first, then measured, it fits."""
+        r = self.report["pinned_measure"]
+        for key in ("card", "watch"):
+            with self.subTest(card=key):
+                self.assertTrue(r[key]["pinned"], self._dump("pinned_measure"))
+                self.assertLessEqual(r[key]["top"] + 700, 1080 - 12,
+                                     self._dump("pinned_measure"))
+                self.assertGreaterEqual(r[key]["top"], 12)
+        self.assertEqual(r["errors"], [])
+
+    def test_an_open_dropdown_holds_its_rows(self):
+        """(2026-11-06, the review) The SIGNALS dropdown open on the hover
+        beat is read like a pinned one: a burst's refresh waits, so a click
+        never lands on a row that moved under the hand, and the held answer
+        lands when the dropdown closes."""
+        r = self.report["dropdown_reads"]
+        self.assertTrue(r["open"], self._dump("dropdown_reads"))
+        self.assertFalse(r["pinned"])
+        self.assertEqual(r["fetches"], 1, self._dump("dropdown_reads"))
+        self.assertEqual(r["rows_while_reading"], r["rows_before"],
+                         "the rows were swapped under the hand:\n"
+                         + self._dump("dropdown_reads"))
+        self.assertEqual(len(r["cards_while_reading"]), 2)
+        self.assertFalse(r["open_after"])
+        self.assertEqual(len(r["rows_after"]), 3, self._dump("dropdown_reads"))
+        self.assertEqual(len(r["cards_after"]), 3)
         self.assertEqual(r["errors"], [])
 
 

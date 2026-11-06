@@ -1105,23 +1105,59 @@ class MoneyDirectionTests(_Base):
         _partial(self.client)
         self.assertEqual(self._world(), before)
 
+    #: The display modules that may name the rail, and nothing else
+    #: (2026-11-06, the review: the guard used to read nine engine apps and
+    #: skip trader_profile.py whole; it now reads EVERY Python file of the
+    #: project, tests aside, against this list).
+    RAIL_READERS = {
+        "dashboard/signal_rail.py", "dashboard/rail_prefs.py",
+        "dashboard/models.py", "dashboard/views.py", "dashboard/urls.py",
+        "dashboard/migrations/0003_raildeparture.py",
+        "core/context_processors.py", "core/context_ui.py",
+        "portfolio/migrations/0019_traderprofile_rail_prefs.py",
+    }
+    RAIL_WORDS = ("RailDeparture", "signal_rail", "rail_prefs")
+
     def test_no_engine_module_reads_the_rail(self):
+        """A guard, not a regression test: it passed before the rail existed,
+        by construction. Every Python file of the project but the tests and
+        the display modules above is read; trader_profile.py may carry the
+        field's declaration and its comment, nothing more."""
         base = Path(settings.BASE_DIR)
-        hits = []
-        for top in ("signals", "bot_program", "alerts", "portfolio",
-                    "ai_agents", "brain", "backtester", "market_data",
-                    "scraping"):
-            for path in (base / top).rglob("*.py"):
-                rel = path.relative_to(base).as_posix()
-                if (rel == "portfolio/trader_profile.py"
-                        or re.match(r"portfolio/migrations/\d+_traderprofile"
-                                    r"_rail_prefs\.py$", rel)):
+        hits, read = [], 0
+        for path in sorted(base.rglob("*.py")):
+            rel = path.relative_to(base).as_posix()
+            top = rel.split("/", 1)[0]
+            if (top in ("tests", "venv", ".venv", "node_modules", "staticfiles")
+                    or "/site-packages/" in rel or rel in self.RAIL_READERS):
+                continue
+            read += 1
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for word in self.RAIL_WORDS:
+                if word not in text:
                     continue
-                text = path.read_text(encoding="utf-8", errors="replace")
-                for word in ("RailDeparture", "signal_rail", "rail_prefs"):
-                    if word in text:
-                        hits.append(f"{rel}: {word}")
+                lines = [ln for ln in text.splitlines() if word in ln]
+                if rel == "portfolio/trader_profile.py" and all(
+                        ln.strip().startswith("#")
+                        or re.match(r"\s*rail_prefs = models\.JSONField\(", ln)
+                        for ln in lines):
+                    continue
+                hits.append(f"{rel}: {word}")
         self.assertEqual(hits, [])
+        self.assertGreater(read, 500, "the guard read almost nothing")
+
+    def test_the_take_trade_path_reads_nothing_of_the_rail(self):
+        """The ticket's views live in dashboard/views.py beside the rail's
+        own: none of them names the rail (a guard, as above)."""
+        import inspect
+        from dashboard import views
+        for fn in (views.take_trade_preview, views.take_trade_execute,
+                   views.asset_trade_preview, views.asset_trade_execute,
+                   views.take_trade_arm, views.take_trade_lane_knobs):
+            src = inspect.getsource(fn)
+            for word in self.RAIL_WORDS:
+                with self.subTest(view=fn.__name__, word=word):
+                    self.assertNotIn(word, src)
 
     def test_a_retired_signal_stays_active_and_takeable(self):
         from signals.models import Signal

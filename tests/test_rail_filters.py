@@ -256,7 +256,8 @@ class TheWatchlistTests(TestCase):
 
     def test_filters_never_write_the_watchlist_flag(self):
         """Instrument.is_watchlist widens the scan universe: no filter
-        touches it."""
+        touches it. A guard, not a regression test: it passed before the
+        filters existed, by construction."""
         from instruments.models import Instrument
         _star("RFFL1", "forex")
         _star("RFFL2", "stock", last="100")
@@ -282,23 +283,52 @@ function boot(opts) {
   const doc = new D.Document();
   doc.body.innerHTML = IN.page;
   doc.cookie = 'theme=dark; csrftoken=TOKEN123; other=1';
-  let now = 0, seq = 0;
-  const timers = new Map(), errors = [], posts = [], sockets = [], store = {}, engaged = [];
+  let now = 0, seq = 0, rails = 0;
+  const timers = new Map(), errors = [], posts = [], passes = [], sockets = [], store = {}, engaged = [];
   const st = (f, ms, ...a) => { const id = ++seq; timers.set(id, { at: now + Math.max(0, +ms || 0), f, a, every: 0 }); return id; };
   const si = (f, ms, ...a) => { const id = ++seq; const every = Math.max(1, +ms || 0); timers.set(id, { at: now + every, f, a, every }); return id; };
   const clr = id => { timers.delete(id); };
   const later = (ms, v) => new Promise(res => { st(() => res(v), ms); });
+  /* A session that expired: login_required redirects, and the login page
+     answers 200 — ok, but redirected, and not JSON. */
+  const loginPage = () => later(10, { ok: true, status: 200, redirected: true,
+    text: () => Promise.resolve('<html>login</html>'),
+    json: () => Promise.reject(new Error('not JSON: the login page')) });
   const fetch = (url, o) => {
     if (url === '/api/rail-prefs/') {
       posts.push({ method: o && o.method, headers: o && o.headers, body: o && o.body });
+      if (opts.expired) return loginPage();
       const status = opts.saveStatus || 200;
-      return later(10, { ok: status === 200, status, json: () => Promise.resolve({ ok: status === 200 }) });
+      return later(10, { ok: status === 200, status, redirected: false, json: () => Promise.resolve({ ok: status === 200 }) });
+    }
+    if (url === '/api/signal-rail/pass/') {
+      passes.push(o && o.body);
+      if (opts.expired) return loginPage();
+      return later(10, { ok: true, status: 200, redirected: false, json: () => Promise.resolve({ ok: true, reason: 'passed' }) });
     }
     if (url === '/partials/signal-rail/') {
+      rails += 1;
       return later(10, { ok: true, status: 200, redirected: false, text: () => Promise.resolve(IN.answer) });
     }
     return Promise.resolve({ ok: false, status: 404, redirected: false,
       text: () => Promise.resolve(''), json: () => Promise.reject(new Error('404')) });
+  };
+  /* The stylesheet's stand-in. A row the test marks data-x-hidden is one
+     some filter hides; the class filter is applied as sv-rail.css writes
+     it — a row or a group header whose class the host does not show, unless
+     the host peeks (tests/test_rail_filters_css.py evaluates the stylesheet
+     itself); an inline display is the element's own. */
+  const computed = el => {
+    let display = (el.style && el.style.display) || 'block';
+    if (el.hasAttribute && el.hasAttribute('data-x-hidden')) display = 'none';
+    else if (el.hasAttribute && (el.hasAttribute('data-sv-row') || el.hasAttribute('data-sv-grp'))
+             && el.getAttribute('data-asset-class') !== null && display !== 'none') {
+      const host = el.closest('[data-sv-fhost]');
+      const shown = host ? (host.getAttribute('data-f-class') || '').split(/\s+/).filter(Boolean) : [];
+      if (host && host.getAttribute('data-f-peek') !== '1' && shown.length
+          && shown.indexOf(el.getAttribute('data-asset-class')) < 0) display = 'none';
+    }
+    return { display, position: '' };
   };
   class WS { constructor(u) { this.url = u; sockets.push(this); } close() { if (this.onclose) this.onclose({}); } send() {} }
   const win = {
@@ -309,9 +339,7 @@ function boot(opts) {
     location: { protocol: 'http:', host: 'localhost:8000', pathname: '/', search: '', reload() {}, assign() {} },
     localStorage: { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } },
     innerWidth: 1920, innerHeight: 1080, navigator: { userAgent: 'node' },
-    /* No CSS engine here: a row the test marks data-x-hidden is one the
-       stylesheet hides. */
-    getComputedStyle: el => ({ display: el.hasAttribute && el.hasAttribute('data-x-hidden') ? 'none' : (el.style.display || 'block'), position: '' }),
+    getComputedStyle: computed,
     matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
     SV: { popup: { opened() {}, closed() {} } },
     svIdleLock: { engage: (x) => { engaged.push(x); } },
@@ -328,8 +356,21 @@ function boot(opts) {
     catch (e) { errors.push('LOAD ' + s.label + ': ' + (e && e.stack || e)); }
   }
   const W = {
-    doc, posts, engaged,
+    doc, win, posts, passes, engaged, store,
+    rails: () => rails,
     errors: () => errors.concat(D.errors()),
+    pointTo(el) {
+      const chain = n => { const a = []; while (n && n.nodeType === 1) { a.push(n); n = n.parentNode; } return a; };
+      const old = D.getPointer();
+      const oldLive = old && old.isConnected ? old : null;
+      const oldC = oldLive ? chain(oldLive) : [];
+      const newC = el ? chain(el) : [];
+      if (oldLive) D.dispatch(oldLive, new D.Event('mouseout', { bubbles: true, relatedTarget: el }));
+      oldC.filter(n => !newC.includes(n)).forEach(n => D.dispatch(n, new D.Event('mouseleave', { relatedTarget: el })));
+      D.setPointer(el);
+      if (el) D.dispatch(el, new D.Event('mouseover', { bubbles: true, relatedTarget: oldLive }));
+      newC.filter(n => !oldC.includes(n)).reverse().forEach(n => D.dispatch(n, new D.Event('mouseenter', { relatedTarget: oldLive })));
+    },
     async advance(ms) {
       const end = now + ms;
       for (;;) {
@@ -408,7 +449,9 @@ async function survives() {
   out.class_after_refresh = [W.attr('railSignals', 'data-f-class'), W.attr('hbSignalsDD', 'data-f-class')];
   out.status_after_refresh = W.status();
   out.rule_buttons_after_refresh = W.doc.querySelectorAll('#railRuleList [data-f-key="rule"]').length;
-  W.doc.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-sv-row]')[0].setAttribute('data-x-hidden', '');
+  /* Another filter hides the FX card too (the class filter already hides
+     the other two): the count must follow the swap. */
+  W.doc.querySelector('#railSignalsBody .sr-signal-wrap[data-sv-row][data-asset-class="forex"]').setAttribute('data-x-hidden', '');
   W.fire('sv:live-swapped', { region: 'hb-signals-detail' }); await W.advance(50);
   out.status_after_region_swap = W.status();
   out.class_after_region_swap = W.attr('hbSignalsDD', 'data-f-class');
@@ -440,12 +483,163 @@ async function tickOnFilteredWatchlist() {
   return out;
 }
 
+/* A PASS: the card leaves at once, the counts never call it "hidden by
+   your filters", and the rail asks the server again. */
+async function passCounts() {
+  const W = boot();
+  const out = {};
+  const ids = W.doc.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-signal-id]').map(w => w.getAttribute('data-signal-id'));
+  out.status_before = W.status();
+  W.win.dismissSignal(ids[0]);
+  await W.advance(100);
+  W.fire('sv:live-swapped', { region: 'hb-signals' }); await W.advance(50);
+  out.status_after = W.status();
+  out.passes = W.passes.length;
+  await W.advance(1200);
+  out.rails = W.rails();
+  /* The server's answer here does not know the pass yet (it still draws
+     the card, and a third that arrived): the outbox keeps the card out. */
+  out.status_after_refetch = W.status();
+  out.passed_drawn = W.doc.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-signal-id="' + ids[0] + '"]').filter(w => w.style.display !== 'none').length;
+  out.peek_offered = W.doc.querySelectorAll('#railSigFacets [data-f-key="peek"]').filter(p => !p.hasAttribute('hidden')).length;
+  out.errors = W.errors();
+  return out;
+}
+
+/* A session that expired: the login page answers 200, redirected. Nothing
+   was stored, and the page must not say otherwise. */
+async function expiredSession() {
+  const W = boot({ expired: true });
+  const out = {};
+  W.click(W.chip('#railSigFacets', 'cls', 'forex')); await W.advance(700);
+  out.unsaved = W.doc.querySelectorAll('[data-f-kind="signals"] [data-f-unsaved]').length;
+  out.status = W.status();
+  const id = W.doc.querySelector('#railSignalsBody .sr-signal-wrap[data-signal-id]').getAttribute('data-signal-id');
+  W.win.dismissSignal(id);
+  await W.advance(1500);
+  out.passes = W.passes.length;
+  out.rails_after_pass = W.rails();
+  out.outbox = JSON.parse(W.store['sauron_dismissed_signals'] || '[]');
+  out.errors = W.errors();
+  return out;
+}
+
+/* One section changed, one section saved: a stale second tab must not
+   write back the other section's choices. */
+async function sectionsSaved() {
+  const W = boot();
+  const out = {};
+  W.click(W.chip('#railSigFacets', 'cls', 'forex')); await W.advance(700);
+  out.first = W.posts.length ? Object.keys(JSON.parse(W.posts[0].body).prefs).sort() : null;
+  W.click(W.chip('#railWatchFacets', 'held', 'held')); await W.advance(700);
+  out.second = W.posts.length > 1 ? Object.keys(JSON.parse(W.posts[1].body).prefs).sort() : null;
+  out.errors = W.errors();
+  return out;
+}
+
+/* The "(no rule)" toggle mutes the signals that name no rule. */
+async function noRuleMute() {
+  const W = boot();
+  const out = {};
+  const list = W.doc.getElementById('railRuleList');
+  const b = W.doc.createElement('button');
+  b.setAttribute('type', 'button');
+  b.setAttribute('class', 'rf-rule');
+  b.setAttribute('data-f-key', 'rule');
+  b.setAttribute('data-f-val', '');
+  b.setAttribute('data-rule-key', 'r-none');
+  list.appendChild(b);
+  W.click(b); await W.advance(700);
+  out.style = W.doc.getElementById('svRuleOff').textContent;
+  out.pressed = b.getAttribute('aria-pressed');
+  out.saved = W.posts.length ? JSON.parse(W.posts[W.posts.length - 1].body).prefs.sig.rules_off : null;
+  out.errors = W.errors();
+  return out;
+}
+
+/* LEFT THE RAIL open under a class filter: its hidden rows are counted,
+   and "show all" is offered. */
+async function leftTally() {
+  const W = boot();
+  const out = {};
+  W.click(W.chip('#railSigFacets', 'gone', '1')); await W.advance(50);
+  out.gone_open = W.attr('railSignals', 'data-f-gone');
+  out.left_rows = W.doc.querySelectorAll('#railSignalsBody .sr-gone-row').length;
+  W.click(W.chip('#railSigFacets', 'cls', 'crypto')); await W.advance(50);
+  out.status = W.status();
+  out.peek_offered = W.doc.querySelectorAll('#railSigFacets [data-f-key="peek"]').filter(p => !p.hasAttribute('hidden')).length;
+  out.errors = W.errors();
+  return out;
+}
+
+/* A refresh held while the operator reads, under a class filter: the chip
+   counts what the filters will show, and says what they will hide. */
+async function heldUnderFilter() {
+  const W = boot();
+  const out = {};
+  W.click(W.chip('#railSigFacets', 'cls', 'forex')); await W.advance(50);
+  W.pointTo(W.doc.querySelector('#railSignalsBody .sr-signal-wrap a.sr-signal')); await W.advance(100);
+  W.wsSend({ type: 'signal' }); await W.advance(1500);
+  const chip = W.doc.getElementById('railHeld');
+  out.chip = chip ? { shown: !chip.hasAttribute('hidden'), text: chip.textContent.trim() } : null;
+  out.probes_left = W.doc.querySelectorAll('[data-sv-probe]').length;
+  out.cards = W.doc.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-signal-id]').length;
+  out.errors = W.errors();
+  return out;
+}
+
+/* A fill opens a position on a starred instrument: the sweep re-renders
+   the headband WATCHLIST rows, and the rail's items follow them. */
+async function watchHeld() {
+  const W = boot();
+  const out = {};
+  const item = W.doc.querySelectorAll('#railWatchBody [data-sv-row][data-symbol]')[0];
+  const sym = item.getAttribute('data-symbol');
+  out.before = item.getAttribute('data-held');
+  out.count_before = W.doc.querySelector('#railWatchFacets [data-sv-wheld]') ? W.doc.querySelector('#railWatchFacets [data-sv-wheld]').textContent.trim() : null;
+  const region = W.doc.querySelector('[data-sv-live="hb-watchlist-detail"]');
+  const row = region.querySelectorAll('.sv-wl-row[data-symbol]').filter(r => r.getAttribute('data-symbol') === sym)[0];
+  row.setAttribute('data-held', '1');
+  row.setAttribute('style', '--o-sym:1;--o-cls:1;--o-held:1;--o-cheld:1');
+  W.fire('sv:live-swapped', { region: 'hb-watchlist-detail', node: region }); await W.advance(20);
+  out.after = item.getAttribute('data-held');
+  out.style = item.getAttribute('style');
+  const wheld = W.doc.querySelector('#railWatchFacets [data-sv-wheld]');
+  out.count_after = wheld ? wheld.textContent.trim() : null;
+  out.errors = W.errors();
+  return out;
+}
+
+/* Grouped by class, a class whose rows another filter hides loses its
+   header with them — in the page's <head>, never inside a region. */
+async function emptyGroup() {
+  const W = boot();
+  const out = {};
+  W.click(W.chip('#railSigPanel', 'group', '1')); await W.advance(50);
+  out.group = W.attr('railSignals', 'data-f-group');
+  W.doc.querySelectorAll('#railSignalsBody .sr-list > [data-sv-row][data-asset-class="crypto"]').forEach(r => r.setAttribute('data-x-hidden', ''));
+  W.fire('htmx:afterSwap', {}); await W.advance(50);
+  const style = W.doc.getElementById('svGrpOff');
+  out.style = style ? style.textContent : null;
+  out.in_head = !!(style && style.parentNode === W.doc.head);
+  out.errors = W.errors();
+  return out;
+}
+
 (async () => {
   const out = {};
   out.chips_and_save = await chipsAndSave();
   out.locked_save = await lockedSave();
   out.survives = await survives();
   out.tick = await tickOnFilteredWatchlist();
+  out.pass_counts = await passCounts();
+  out.expired = await expiredSession();
+  out.sections = await sectionsSaved();
+  out.no_rule = await noRuleMute();
+  out.left_tally = await leftTally();
+  out.held_filter = await heldUnderFilter();
+  out.watch_held = await watchHeld();
+  out.empty_group = await emptyGroup();
   process.stdout.write(JSON.stringify(out));
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 """
@@ -463,6 +657,10 @@ def _inputs():
     _sig(_inst("RFNDA", "forex"), rule="rf_node_a", minutes_ago=30)
     _sig(_inst("RFNDB", "crypto"), rule="rf_node_b", entry="100", stop="95",
          target="110", minutes_ago=20)
+    # One signal in LEFT THE RAIL: its stop crossed.
+    gone = _inst("RFNDG", "forex")
+    _sig(gone, rule="rf_node_g", minutes_ago=25)
+    _quote(gone, "1.07000")
     _star("RFNWA", "forex")
     _star("RFNWB", "crypto", last="64000")
     req = RequestFactory().get("/")
@@ -560,19 +758,115 @@ class TheFiltersInTheBrowserTests(TestCase):
         self.assertEqual(r["errors"], [])
 
     def test_filters_survive_a_rail_refresh_and_a_region_swap(self):
+        """(2026-11-06, the review) The harness used to ignore the class
+        filter when it counted, and asserted "3 shown" for an FX filter over
+        an FX, a crypto and a stock card — a line no browser draws. It now
+        applies the class filter as the stylesheet writes it: one shown, two
+        hidden, and after another filter hides the FX card too, none."""
         r = self.report["survives"]
         self.assertEqual(r["cards"], 2, self._dump("survives"))
         self.assertTrue(any(s.startswith("1 shown · 1 hidden by your filters")
                             for s in r["status_marked"]), self._dump("survives"))
         self.assertEqual(r["cards_after_refresh"], 3, self._dump("survives"))
         self.assertEqual(r["class_after_refresh"], ["forex", "forex"])
-        self.assertTrue(all(s.startswith("3 shown") for s in r["status_after_refresh"]),
+        self.assertTrue(all(s.startswith("1 shown · 2 hidden by your filters")
+                            for s in r["status_after_refresh"]),
                         self._dump("survives"))
         self.assertEqual(r["rule_buttons_after_refresh"], 3, self._dump("survives"))
-        self.assertTrue(any(s.startswith("2 shown · 1 hidden")
+        self.assertTrue(any(s.startswith("0 shown · 3 hidden")
                             for s in r["status_after_region_swap"]), self._dump("survives"))
         self.assertEqual(r["class_after_region_swap"], "forex")
         self.assertEqual(r["peek"], ["1", "1"], self._dump("survives"))
+        self.assertEqual(r["errors"], [])
+
+    def test_a_pass_is_never_counted_as_filtered(self):
+        """(2026-11-06, the review) A passed card left the rail; the status
+        line said "1 shown · 1 hidden by your filters" with no filter set,
+        and the counts waited for the next sweep. The card is out of every
+        count at once, and the rail asks the server again."""
+        r = self.report["pass_counts"]
+        self.assertEqual(r["status_before"], ["2 shown", "2 shown"],
+                         self._dump("pass_counts"))
+        self.assertEqual(r["status_after"], ["1 shown", "1 shown"],
+                         self._dump("pass_counts"))
+        self.assertEqual(r["peek_offered"], 0)
+        self.assertEqual(r["passes"], 1)
+        self.assertGreaterEqual(r["rails"], 1, "the rail did not ask again")
+        self.assertEqual(r["status_after_refetch"], ["2 shown", "2 shown"],
+                         self._dump("pass_counts"))
+        self.assertEqual(r["passed_drawn"], 0)
+        self.assertEqual(r["errors"], [])
+
+    def test_an_expired_session_saves_nothing_and_says_so(self):
+        """The login page answers 200 to an expired session: a save there
+        is "not saved", and a pass stays in the outbox for the next load."""
+        r = self.report["expired"]
+        self.assertGreaterEqual(r["unsaved"], 1, self._dump("expired"))
+        self.assertTrue(all("not saved" in s for s in r["status"]))
+        self.assertEqual(r["passes"], 1)
+        self.assertEqual(r["rails_after_pass"], 0, self._dump("expired"))
+        self.assertEqual(len(r["outbox"]), 1)
+        self.assertEqual(r["errors"], [])
+
+    def test_a_save_carries_only_the_section_that_changed(self):
+        r = self.report["sections"]
+        self.assertEqual(r["first"], ["sig"], self._dump("sections"))
+        self.assertEqual(r["second"], ["watch"], self._dump("sections"))
+        self.assertEqual(r["errors"], [])
+
+    def test_the_no_rule_toggle_mutes_and_is_kept(self):
+        r = self.report["no_rule"]
+        self.assertIn('[data-rule-key="r-none"]', r["style"], self._dump("no_rule"))
+        self.assertEqual(r["pressed"], "false")
+        self.assertEqual(r["saved"], [""])
+        from dashboard.rail_prefs import clean, rule_off_css, rule_rows
+        kept = clean({"sig": {"rules_off": ["", "x", ""]}})
+        self.assertEqual(kept["sig"]["rules_off"], ["", "x"])
+        self.assertIn('[data-rule-key="r-none"]', rule_off_css(kept))
+        self.assertIn(("", "r-none", 0, False), rule_rows([], kept))
+        self.assertEqual(r["errors"], [])
+
+    def test_left_rows_a_filter_hides_are_counted(self):
+        """(2026-11-06, the review) LEFT THE RAIL open under a class filter:
+        the rows it hides are counted, and "show all" is offered."""
+        r = self.report["left_tally"]
+        self.assertEqual(r["gone_open"], "1", self._dump("left_tally"))
+        self.assertEqual(r["left_rows"], 1)
+        self.assertTrue(any("(1 in LEFT THE RAIL)" in s for s in r["status"]),
+                        self._dump("left_tally"))
+        self.assertEqual(r["peek_offered"], 1)
+        self.assertEqual(r["errors"], [])
+
+    def test_the_held_chip_counts_what_the_filters_show(self):
+        """A refresh held while the operator reads, under an FX filter, that
+        brings a stock card: nothing new shows, so the chip says it is
+        filtered, never "1 new"."""
+        r = self.report["held_filter"]
+        self.assertEqual(r["chip"], {"shown": True, "text": "↻ 1 filtered"},
+                         self._dump("held_filter"))
+        self.assertEqual(r["probes_left"], 0)
+        self.assertEqual(r["cards"], 2)
+        self.assertEqual(r["errors"], [])
+
+    def test_the_watchlist_rail_follows_the_swept_rows(self):
+        """(2026-11-06, the review) The headband WATCHLIST rows are re-drawn
+        by the 60s sweep; the rail's items were not, so after a fill the
+        HELD filter and the held-first sort disagreed between the two."""
+        r = self.report["watch_held"]
+        self.assertEqual(r["before"], "0", self._dump("watch_held"))
+        self.assertEqual(r["after"], "1", self._dump("watch_held"))
+        self.assertIn("--o-held:1", r["style"])
+        self.assertEqual(r["count_before"], "0")
+        self.assertEqual(r["count_after"], "1")
+        self.assertEqual(r["errors"], [])
+
+    def test_an_empty_group_loses_its_header(self):
+        r = self.report["empty_group"]
+        self.assertEqual(r["group"], "1", self._dump("empty_group"))
+        self.assertIn('#railSignals [data-sv-grp][data-asset-class="crypto"]',
+                      r["style"] or "", self._dump("empty_group"))
+        self.assertNotIn('[data-asset-class="forex"]', r["style"] or "")
+        self.assertTrue(r["in_head"])
         self.assertEqual(r["errors"], [])
 
     def test_a_price_tick_still_paints_a_filtered_watchlist(self):

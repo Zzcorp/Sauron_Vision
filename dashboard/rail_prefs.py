@@ -80,6 +80,9 @@ def _classes(value) -> list:
 
 
 def _rules(value) -> list:
+    """The muted rules, deduped and bounded. The empty name is a rule too:
+    the signals that name none, muted by the "(no rule)" toggle (its key is
+    "r-none", dashboard.signal_rail.rule_key) — 2026-11-06, the review."""
     if not isinstance(value, (list, tuple)):
         return []
     out = []
@@ -87,7 +90,7 @@ def _rules(value) -> list:
         if not isinstance(v, str):
             continue
         name = v.strip()
-        if not name or len(name) > MAX_RULE_LEN or name in out:
+        if len(name) > MAX_RULE_LEN or name in out:
             continue
         out.append(name)
         if len(out) >= MAX_RULES:

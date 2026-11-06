@@ -48,6 +48,13 @@
 
   var state = {}, peeking = {}, ruleKeys = {};
   var saveTimer = null, unsaved = false;
+  /* The sections changed since the last save that held: only they are
+     posted, so a second tab left open on old choices never writes back the
+     section it did not touch (2026-11-06, the review). */
+  var dirty = {};
+  /* A rule's key: "r" + ten hex of its name's sha1, or "r-none" for the
+     signals that name no rule (dashboard.signal_rail.rule_key). */
+  var RULE_KEY = /^r(-none|[0-9a-f]{10})$/;
 
   function arr(list) { return Array.prototype.slice.call(list || []); }
   function hosts(kind) { return arr(document.querySelectorAll('[data-sv-fhost="' + kind + '"]')); }
@@ -130,7 +137,7 @@
     state.signals.rules_off.forEach(function (name) {
       var key = ruleKeys[name];
       rec.push([name, key || '']);
-      if (!key || !/^r[0-9a-f-]+$/.test(key)) return;
+      if (!key || !RULE_KEY.test(key)) return;
       css += '[data-sv-fhost="signals"]:not([data-f-peek="1"]) [data-sv-row]'
            + '[data-rule-key="' + key + '"]{display:none!important}';
     });
@@ -150,13 +157,25 @@
     h = sec && sec.querySelector('[data-sv-fhost="' + kind + '"]');
     return h || hosts(kind)[0] || null;
   }
-  function tally(host) {
-    var rows = host ? arr(host.querySelectorAll('[data-sv-list] > [data-sv-row]')) : [];
+  /* A row the operator passed (data-sv-out, the pass outbox in base.html)
+     left the rail: it is in no count, shown or hidden. LEFT THE RAIL's
+     rows count too while it is open, the ones the filters hide said apart
+     (2026-11-06, the review). */
+  function visible(r) {
     var gcs = window.getComputedStyle;
-    var shown = rows.filter(function (r) {
-      return !gcs || gcs(r).display !== 'none';
-    }).length;
-    return { total: rows.length, shown: shown, hidden: rows.length - shown };
+    return !gcs || gcs(r).display !== 'none';
+  }
+  function tally(host) {
+    var rows = host ? arr(host.querySelectorAll('[data-sv-list] > [data-sv-row]'))
+      .filter(function (r) { return !r.hasAttribute('data-sv-out'); }) : [];
+    var shown = rows.filter(visible).length;
+    var goneHidden = 0;
+    if (host && host.getAttribute('data-f-gone') === '1') {
+      goneHidden = arr(host.querySelectorAll('[data-sv-gone] [data-sv-row]'))
+        .filter(function (r) { return !visible(r); }).length;
+    }
+    return { total: rows.length, shown: shown, goneHidden: goneHidden,
+             hidden: rows.length - shown + goneHidden };
   }
   function count(kind) {
     arr(document.querySelectorAll('[data-f-kind="' + kind + '"] [data-f-status]')).forEach(function (st) {
@@ -164,7 +183,10 @@
       var n = tally(bar ? hostFor(bar, kind) : null);
       var text;
       if (peeking[kind]) text = 'showing all ' + n.total + ' ·';
-      else if (n.hidden > 0) text = n.shown + ' shown · ' + n.hidden + ' hidden by your filters ·';
+      else if (n.hidden > 0) {
+        text = n.shown + ' shown · ' + n.hidden + ' hidden by your filters'
+          + (n.goneHidden ? ' (' + n.goneHidden + ' in LEFT THE RAIL)' : '') + ' ·';
+      }
       else text = n.total + ' shown';
       if (unsaved) text += ' · not saved';
       var t = st.querySelector('[data-f-status-text]');
@@ -180,8 +202,44 @@
       var label = peeking[kind] ? 'back to your filters' : 'show all';
       if (peek.textContent !== label) peek.textContent = label;
     });
+    writeGroupStyle();
   }
   function countAll() { Object.keys(state).forEach(count); }
+
+  /* Grouped by class, a class whose rows the filters all hide loses its
+     header with them (2026-11-06, the review): one generated rule per host
+     and class in <style id="svGrpOff">, in <head> like the muted rules, so
+     no live region ever sees a client edit. A header's own state changes
+     no row, so this never feeds back into the counts. */
+  function writeGroupStyle() {
+    var css = '';
+    Object.keys(state).forEach(function (kind) {
+      hosts(kind).forEach(function (h) {
+        var id = h.getAttribute('id');
+        if (!id || h.getAttribute('data-f-group') !== '1') return;
+        var classes = {}, alive = {};
+        arr(h.querySelectorAll('[data-sv-list] > [data-sv-grp]')).forEach(function (g) {
+          classes[g.getAttribute('data-asset-class') || ''] = true;
+        });
+        arr(h.querySelectorAll('[data-sv-list] > [data-sv-row]')).forEach(function (r) {
+          if (r.hasAttribute('data-sv-out') || !visible(r)) return;
+          alive[r.getAttribute('data-asset-class') || ''] = true;
+        });
+        Object.keys(classes).forEach(function (cls) {
+          if (alive[cls] || !/^[a-z_]*$/.test(cls)) return;
+          css += '#' + id + ' [data-sv-grp][data-asset-class="' + cls + '"]{display:none!important}';
+        });
+      });
+    });
+    var style = document.getElementById('svGrpOff');
+    if (!style) {
+      if (!css) return;
+      style = document.createElement('style');
+      style.setAttribute('id', 'svGrpOff');
+      (document.head || document.body).appendChild(style);
+    }
+    if (style.textContent !== css) style.textContent = css;
+  }
 
   function apply(kind) {
     writeHosts(kind);
@@ -219,6 +277,7 @@
       return;
     }
     peeking[kind] = false;
+    dirty[kind] = true;
     apply(kind);
     saveSoon();
   }
@@ -244,8 +303,17 @@
   }
   function save() {
     saveTimer = null;
-    var prefs = {};
-    Object.keys(state).forEach(function (kind) { prefs[SECTION[kind]] = pack(kind); });
+    var prefs = {}, sent = [];
+    Object.keys(state).forEach(function (kind) {
+      if (!dirty[kind]) return;
+      prefs[SECTION[kind]] = pack(kind);
+      sent.push(kind);
+    });
+    if (!sent.length) return;
+    sent.forEach(function (kind) { dirty[kind] = false; });
+    /* A section that did not reach the profile is posted again with the
+       next change. */
+    function failed() { sent.forEach(function (kind) { dirty[kind] = true; }); markUnsaved(true); }
     fetch('/api/rail-prefs/', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
@@ -253,12 +321,17 @@
     }).then(function (r) {
       if (r.status === 423) {
         if (window.svIdleLock) window.svIdleLock.engage(false);
-        markUnsaved(true);
-        return;
+        failed();
+        return null;
       }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      markUnsaved(false);
-    }).catch(function () { markUnsaved(true); });
+      /* An expired session is redirected to the login page, which answers
+         200: saved only when the server says so, in its own JSON. */
+      if (!r.ok || r.redirected) throw new Error('HTTP ' + r.status);
+      return r.json().then(function (j) {
+        if (!j || !j.ok) throw new Error('not saved');
+        markUnsaved(false);
+      });
+    }).catch(failed);
   }
 
   /* ── the rules list follows the rail ─────────────────────────────── */
@@ -320,6 +393,11 @@
       var kind = bar.getAttribute('data-f-kind');
       if (!state[kind]) return;
       e.preventDefault();
+      /* A rule's toggle carries its own key: learnt from the control
+         pressed, whenever the list was drawn. */
+      if (c.getAttribute('data-f-key') === 'rule' && c.hasAttribute('data-rule-key')) {
+        ruleKeys[c.getAttribute('data-f-val') || ''] = c.getAttribute('data-rule-key');
+      }
       change(kind, c.getAttribute('data-f-key'), c.getAttribute('data-f-val') || '',
              c.hasAttribute('data-f-toggle'));
     });

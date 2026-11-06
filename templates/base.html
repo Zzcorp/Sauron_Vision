@@ -114,6 +114,8 @@
     <link rel="stylesheet" href="{% static 'css/sv-rail.css' %}">
     {# The rules muted from the rail's filters (2026-11-06), one generated rule each, from the operator's prefs; static/js/sv-rail-filters.js rewrites it on a change. #}
     <style id="svRuleOff" data-rules="{{ rail_rule_off_json|default:'[]' }}">{{ rail_rule_off_css|default:''|safe }}</style>
+    {# A group header whose class has no row left to show (2026-11-06): one rule per host and class, written by static/js/sv-rail-filters.js — in <head>, so no live region ever sees a client edit. #}
+    <style id="svGrpOff"></style>
     <script src="{% static 'js/sv-rail-filters.js' %}" defer></script>
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
@@ -1376,9 +1378,9 @@
                         <div class="rail-facets rf-compact" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=False %}</div>
                         <div data-sv-live="hb-watchlist-detail">
                         <div class="sv-wl-rows" data-sv-list="watch">
-                        {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
+                        {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cheld:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
                         {% for w in ui_watchlist %}
-                        <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }}">
+                        <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                             <span class="ipr-sym">{{ w.symbol }}</span>
                             <span class="ipr-qty">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                             {% if w.last %}
@@ -1569,9 +1571,9 @@
             <div class="rf-row"><span class="rf-k">DENSITY</span><button type="button" class="rf-opt" data-f-key="dense" data-f-val="0" aria-pressed="{% if rail_prefs.watch.dense %}false{% else %}true{% endif %}">comfortable</button><button type="button" class="rf-opt" data-f-key="dense" data-f-val="1" aria-pressed="{% if rail_prefs.watch.dense %}true{% else %}false{% endif %}">compact</button></div>
         </div>
         <div class="rail-body" id="railWatchBody" data-sv-fhost="watch" data-sv-list="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
-            {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
+            {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cheld:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
             {% for w in ui_watchlist %}
-            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }}">
+            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                 <div class="wl-row1">
                     <span class="wl-sym">{{ w.symbol }}</span>
                     <span class="wl-last">{% px w.last w.asset_class w.symbol %}</span>
@@ -1808,8 +1810,11 @@
     if (!pop) return;
     if (wrap._srCancel) wrap._srCancel();
     if (window.svPin) window.svPin.take(pop, function () { hidePopup(wrap); }, wrap);
-    showPopup(wrap);
+    /* Pinned BEFORE it is measured (2026-11-06, the review): on a touch
+       screen or under 900px only a pinned card displays, and one measured
+       hidden was placed as if it had no height. */
     pop.classList.add('sv-pinned');
+    showPopup(wrap);
     var a = wrap.querySelector('a.sr-signal');
     if (a) a.setAttribute('aria-expanded', 'true');
     if (window.SV && SV.popup) SV.popup.opened(pop);
@@ -2031,21 +2036,33 @@
       body: JSON.stringify({ signal_id: parseInt(sid, 10), undo: !!undo })
     }).then(function (r) {
       if (r.status === 423 && window.svIdleLock) window.svIdleLock.engage(false);
-      return !!r.ok;
+      /* Stored only when the server says so, in its own JSON: an expired
+         session is redirected to the login page, which answers 200
+         (2026-11-06, the review). */
+      if (!r.ok || r.redirected) return false;
+      return r.json().then(function (j) { return !!(j && j.ok); },
+                           function () { return false; });
     }).catch(function () { return false; });
   }
-  /* The headband popup's row for the same signal hides with the card. */
-  function hideRows(sid) {
-    document.querySelectorAll('.sv-sig-row[data-signal-id="' + sid + '"]').forEach(function (row) {
-      row.style.display = 'none';
+  /* A passed card and its headband row leave every count at once
+     (data-sv-out): a pass is not "hidden by your filters". The row hides
+     now; the card collapses (dismissSignal). */
+  function markOut(sid) {
+    document.querySelectorAll('.sr-signal-wrap[data-signal-id="' + sid + '"], .sv-sig-row[data-signal-id="' + sid + '"]').forEach(function (el) {
+      el.setAttribute('data-sv-out', '');
+      if (el.classList.contains('sv-sig-row')) el.style.display = 'none';
     });
   }
   function outbox(sid) {
     var set = loadSet();
     set.add(sid);
     saveSet(set);
-    hideRows(sid);
-    sendPass(sid, false);
+    markOut(sid);
+    /* Stored: the rail asks again at once, so its counts and LEFT THE RAIL
+       say it now rather than at the next sweep. */
+    sendPass(sid, false).then(function (ok) {
+      if (ok && window.svRailSoon) window.svRailSoon();
+    });
   }
   function applyDismissals() {
     var set = loadSet();
@@ -2056,6 +2073,7 @@
       if (!set.has(sid)) return;
       onScreen[sid] = true;
       el.style.display = 'none';
+      el.setAttribute('data-sv-out', '');
       if (!sentThisLoad[sid]) sendPass(sid, false);
     });
     var body = document.getElementById('railSignalsBody');
@@ -2097,7 +2115,10 @@
   /* Optional: clear-all helper for the user, callable from the console. */
   window.sauronUndismissAllSignals = function() {
     localStorage.removeItem(DISM_KEY);
-    document.querySelectorAll('.sr-signal-wrap').forEach(function(w) { w.style.display = ''; });
+    document.querySelectorAll('.sr-signal-wrap').forEach(function(w) {
+      w.style.display = '';
+      w.removeAttribute('data-sv-out');
+    });
   };
   /* ↺ BRING BACK (2026-11-06): your own pass or take, undone on the
      server, and the rail asks again at once. */
@@ -4623,8 +4644,11 @@ window.svWheelMarquee = function (frame, track) {
     const body = document.getElementById('railSignalsBody');
     if (!body) return false;
     if (body.querySelector('.sr-popup.show')) return true;
+    /* The headband SIGNALS dropdown open at all — pinned, or on the hover
+       beat — is the operator reading its rows: a click must never land on
+       a row that moved under the hand (2026-11-06, the review). */
     const dd = document.getElementById('hbSignalsDD');
-    if (dd && dd.classList.contains('sv-pinned')) return true;
+    if (dd && (dd.classList.contains('sv-pinned') || dd.style.display === 'block')) return true;
     return !!(body.matches && body.matches(':hover'));
   }
   /* The counts outside the replaced body, from the answer's own meta:
@@ -4653,7 +4677,10 @@ window.svWheelMarquee = function (frame, track) {
     say(document.querySelector('[data-sv-live="hb-signals-sub"]'),
         m.long + ' long · ' + m.short + ' short');
   }
-  /* "↻ N new": the cards a held answer would add. */
+  /* "↻ N new": the cards a held answer would add — counted through the
+     stylesheet, in a hidden probe inside the rail's own host, so a card
+     the filters will hide reads "filtered", never "new" (2026-11-06, the
+     review). The probe lives for this call only. */
   function paintHeld() {
     const chip = document.getElementById('railHeld');
     if (!chip) return;
@@ -4661,13 +4688,23 @@ window.svWheelMarquee = function (frame, track) {
     const on = {};
     document.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-signal-id]')
       .forEach(w => { on[w.getAttribute('data-signal-id')] = 1; });
+    const host = document.getElementById('railSignals');
     const box = document.createElement('div');
+    box.setAttribute('hidden', '');
+    box.setAttribute('data-sv-probe', '');
     box.innerHTML = railHeld;
-    let fresh = 0;
+    if (host) host.appendChild(box);
+    let fresh = 0, filtered = 0;
     box.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
-      if (!on[w.getAttribute('data-signal-id')]) fresh += 1;
+      if (on[w.getAttribute('data-signal-id')]) return;
+      const cs = window.getComputedStyle ? window.getComputedStyle(w) : null;
+      if (cs && cs.display === 'none') filtered += 1; else fresh += 1;
     });
-    chip.textContent = fresh ? '↻ ' + fresh + ' new' : '↻ update';
+    if (box.parentNode) box.parentNode.removeChild(box);
+    let text = '↻ update';
+    if (fresh) text = '↻ ' + fresh + ' new' + (filtered ? ' · ' + filtered + ' filtered' : '');
+    else if (filtered) text = '↻ ' + filtered + ' filtered';
+    chip.textContent = text;
     chip.removeAttribute('hidden');
   }
   function railApply(html) {
@@ -4762,6 +4799,48 @@ window.svWheelMarquee = function (frame, track) {
       window.svRailRelease(true);
     });
   })();
+
+  /* The watchlist rail's own facts follow the headband WATCHLIST rows
+     (2026-11-06, the review). The 60s sweep re-draws those rows, a fill
+     changes what is held, and the two lists are one list under one set of
+     filters: the rail's items take the held fact and the order ranks the
+     sweep just drew (their --o-* properties only), and the HELD counts
+     follow. Prices stay with applyTick. */
+  function svWlVars(item, from) {
+    const vars = {};
+    (from.getAttribute('style') || '').split(';').forEach(p => {
+      const i = p.indexOf(':');
+      const k = i > 0 ? p.slice(0, i).trim() : '';
+      if (k.indexOf('--o-') === 0) vars[k] = p.slice(i + 1).trim();
+    });
+    const kept = (item.getAttribute('style') || '').split(';')
+      .filter(p => p.trim() && !(p.split(':')[0].trim() in vars));
+    Object.keys(vars).forEach(k => kept.push(k + ':' + vars[k]));
+    const next = kept.join(';');
+    if (item.getAttribute('style') !== next) item.setAttribute('style', next);
+  }
+  document.addEventListener('sv:live-swapped', function (e) {
+    const d = e && e.detail;
+    if (!d || d.region !== 'hb-watchlist-detail' || !d.node) return;
+    const body = document.getElementById('railWatchBody');
+    if (!body) return;
+    const fresh = {};
+    d.node.querySelectorAll('.sv-wl-row[data-symbol]')
+      .forEach(r => { fresh[r.getAttribute('data-symbol')] = r; });
+    let held = 0;
+    body.querySelectorAll('.wl-item[data-symbol]').forEach(item => {
+      const r = fresh[item.getAttribute('data-symbol')];
+      if (r) {
+        const h = r.getAttribute('data-held') || '0';
+        if (item.getAttribute('data-held') !== h) item.setAttribute('data-held', h);
+        svWlVars(item, r);
+      }
+      if (item.getAttribute('data-held') === '1') held += 1;
+    });
+    document.querySelectorAll('[data-sv-wheld]').forEach(el => {
+      if (el.textContent !== String(held)) el.textContent = String(held);
+    });
+  });
 
   /* Exposed for the /ws/eye/ listener. A fill is the ONLY announcement a
      bot-taken signal ever produces — no new Signal row is written, so the
@@ -5478,9 +5557,16 @@ window.svWheelMarquee = function (frame, track) {
       hidePortalPopup(was);
       return;
     }
+    /* Pinned BEFORE it is measured (2026-11-06, the review): on a touch
+       screen or a phone only a pinned card displays. */
+    var first = item.querySelector(sel) || was;
+    if (first) first.classList.add('sv-pinned');
     showPortalPopup(item, sel, width, side);
     var pop = item._portalPop;
-    if (!pop || pop.style.display !== 'block') return;
+    if (!pop || pop.style.display !== 'block') {
+      if (first) first.classList.remove('sv-pinned');
+      return;
+    }
     window.svPin.take(pop, function(){ hidePortalPopup(pop); }, item);
     pop.classList.add('sv-pinned');
     addPopX(pop, '.dh-pop-head', function(){ hidePortalPopup(pop); });
@@ -5730,6 +5816,9 @@ window.svWheelMarquee = function (frame, track) {
       if (window.SV && window.SV.dwell && window.SV.dwell.hideWithin) {
         window.SV.dwell.hideWithin(dd);
       }
+      // The SIGNALS rows were being read: a rail refresh that waited for
+      // them lands now (2026-11-06, the review).
+      if (dd.id === 'hbSignalsDD' && window.svRailRelease) window.svRailRelease();
     }
     function hideSoon(){
       if (hideTimer) clearTimeout(hideTimer);
@@ -5749,7 +5838,6 @@ window.svWheelMarquee = function (frame, track) {
       window.svPin.drop(dd);
       popRegister(dd, false);
       hideNow();
-      if (dd.id === 'hbSignalsDD' && window.svRailRelease) window.svRailRelease();
     }
     // Published for the news dwell-card: stepping from a row onto its
     // card exits this dropdown, and without a shared grace the panel
