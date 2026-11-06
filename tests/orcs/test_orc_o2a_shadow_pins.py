@@ -64,9 +64,10 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: merge, the claim, the watchdogs, the breaker, the Orc's states); O2a's
 #: arm (2026-11-05) adds the queued intents at the tick (intents.py) and
 #: the scheduler's tickets. O2a's light (2026-11-05) adds no module: it
-#: wires the render pass to the scheduler and rewrites the words.
+#: wires the render pass to the scheduler and rewrites the words. O2b's
+#: route in shadow (2026-11-06) adds the pure router (router.py).
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
-              "mind", "scheduler", "intents")
+              "mind", "scheduler", "intents", "router")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
 O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
@@ -90,7 +91,10 @@ O2_CODE = {
              "_minds_switch_on", "RenderPass", "RenderPass.__new__",
              # O2a's light (2026-11-05): the gates read once per render, a
              # render pass that could not finish a wake (A.7)
-             "_gate_code", "_render_failed"),
+             "_gate_code", "_render_failed",
+             # O2b's route in shadow (2026-11-06): the route's money world
+             # (the budget's) and the route recorded on every render
+             "_route_world", "_route"),
     # O2a's light (2026-11-05): the words (A.4, A.62): a wake's status in
     # words, the card's intents and intellect, the plan on the line
     "notes": ("wake_status_t", "_intents", "intellect_after", "_has_plan",

@@ -71,8 +71,9 @@ class ThePinsTests(SimpleTestCase):
     def test_no_pending_wake_is_ever_written(self):
         """A.3 (O2a, changed on purpose 2026-11-05): `pending` is written by
         scheduler.py only, never in wake.py or the tick (observe.py); the
-        dispatch seam O2a filled is narrowed to what O2b and O2c add (the
-        O2 spec §1.0 item 6)."""
+        dispatch seam O2a filled is narrowed to what O2c adds (the O2 spec
+        §1.0 item 6; changed on purpose 2026-11-06: O2b's router filled
+        its part, bot_program/orcs/router.py)."""
         from tests.orcs.test_orc_o2a_shadow_pins import (PKG,
                                                          pending_writes,
                                                          tree_of)
@@ -90,8 +91,10 @@ class ThePinsTests(SimpleTestCase):
         src = inspect.getsource(importlib.import_module(
             "bot_program.orcs.wake"))
         self.assertNotIn("# O2:", src, "O2a filled the dispatch seam")
-        self.assertIn("# O2b, O2c: the router; drum deliveries add W12",
-                      src, "the seam that remains is marked")
+        self.assertNotIn("# O2b, O2c: the router", src,
+                         "O2b's router filled its part")
+        self.assertIn("# O2c: drum deliveries add W12", src,
+                      "the seam that remains is marked")
 
     def test_the_o2_seams_are_marked(self):
         for name, needle in (("dossier_market", "# O2:"),

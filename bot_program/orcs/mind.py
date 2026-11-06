@@ -21,6 +21,12 @@ with his PIN, the Orcs line above 0). Both arrive closed.
   ticket_*       A.57 (O2a's arm, 2026-11-05): a ticket's caller, the
                  estimate of the exact text it sends and its bound, for the
                  scheduler's tickets and `orcs smoke` (reads, never a call)
+  answering_map  B.5 (O2b, 2026-11-06): {rung: the rung that answers it},
+                 the effort map the router reads (router.py names no
+                 model): the gateway's ladder and the smoke's verdicts,
+                 read once per render, never under a lock
+  rung_words     a rung in tier words (A.62), or the router's choice in
+                 them ("would route: r2 (deep tier, medium effort)", B.16c)
   write_*        the outcome's writes, called by the settle inside its one
                  transaction: database writes only. A done answer writes
                  its decision (with the booking), its plan (a revision),
@@ -46,7 +52,8 @@ from decimal import Decimal
 from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
                                         REPLY_ANSWER, REPLY_BILLED,
                                         REPLY_CLOSED, REPLY_UNBILLED,
-                                        REPLY_UNSENT, RUNG_NONE, RUNG_T,
+                                        REPLY_UNSENT, RUNG_LIMITS, RUNG_NONE,
+                                        RUNG_T,
                                         INTENT_STATUS_QUEUED,
                                         INTENT_STATUS_RECORDED,
                                         INTENT_STATUS_REFUSED, INTENT_TTL_S,
@@ -82,28 +89,61 @@ def source_ref(wake, rung, caller=CALLER) -> str:
 SENT = (REPLY_ANSWER, REPLY_BILLED, REPLY_UNBILLED)
 
 
-def rung_words(rung_name) -> str:
+def rung_words(rung_name, words=RUNG_T) -> str:
     """A rung in tier words for the card (A.62): "r0 · balanced tier, low
-    effort". No model id, no cost. Read through the gateway's catalog
-    read, never under a lock (think, before the settle)."""
+    effort"; with `words` constants.ROUTE_WOULD_T, the router's choice as
+    the Orc's page shows it (B.16c; O2b, 2026-11-06): "would route: r2
+    (deep tier, medium effort)". No model id, no cost. Read through the
+    gateway's catalog read (no query), never under a lock (think, before
+    the settle; the render, before its journal entry)."""
     from bot_program.orcs import mind_gateway
     try:
         step = mind_gateway.rung(rung_name)
     except (ValueError, KeyError):
         return RUNG_NONE
-    return RUNG_T.format(rung=step["rung"], tier=step["tier"],
-                         effort=step["effort"])
+    return words.format(rung=step["rung"], tier=step["tier"],
+                        effort=step["effort"])
+
+
+def answering_map() -> dict:
+    """B.5 (O2b, 2026-11-06): {rung: the rung that answers it}, the effort
+    map the router reads (router.py holds no model knowledge). Until the
+    smoke's PASS is recorded for a model's family (A.61), that model runs
+    at one effort, its first rung's on the ladder: Sonnet's rungs answer
+    as r0 (low effort), Opus's as r2 (medium), so r1 answers as r0 and r3
+    and r4 as r2. With the PASS each of its rungs answers as itself. The
+    gateway's ladder (the catalog, no query) and the smoke's verdicts (one
+    read) are read once per render, before its transaction: never under
+    a lock (N8). A rung the ladder does not hold is left out."""
+    from bot_program.orcs import mind_gateway
+    from bot_program.orcs.models import OrcSetting
+    verdicts = OrcSetting.get(SMOKE_VERDICT_KEY) or {}
+    steps = []
+    for name in sorted(RUNG_LIMITS):
+        try:
+            steps.append(mind_gateway.rung(name))
+        except (ValueError, KeyError):
+            continue
+    first = {}
+    for step in steps:
+        first.setdefault(step["family"], step["rung"])
+    return {step["rung"]: (step["rung"] if _passed(verdicts, step["family"])
+                           else first[step["family"]])
+            for step in steps}
 
 
 # ── the request (A.23) ───────────────────────────────────────────────────
 
-def smoke_pass(family) -> bool:
-    """The smoke's recorded verdict for `family` is a PASS (A.61)."""
-    from bot_program.orcs.models import OrcSetting
-    verdicts = OrcSetting.get(SMOKE_VERDICT_KEY) or {}
+def _passed(verdicts, family) -> bool:
     entry = verdicts.get(family) if isinstance(verdicts, dict) else None
     return isinstance(entry, dict) and str(entry.get("verdict") or "") \
         .lower() == "pass"
+
+
+def smoke_pass(family) -> bool:
+    """The smoke's recorded verdict for `family` is a PASS (A.61)."""
+    from bot_program.orcs.models import OrcSetting
+    return _passed(OrcSetting.get(SMOKE_VERDICT_KEY) or {}, family)
 
 
 def efforts(rung_name) -> dict:

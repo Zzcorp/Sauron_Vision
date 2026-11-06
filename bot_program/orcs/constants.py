@@ -390,7 +390,10 @@ WAKE_RENDERED_WORDS = "its dossier is written; a model may read it next"
 #: model's rung in tier words, never its id or its cost.
 RUNG_NONE = "No model (code only)"
 RUNG_T = "{rung} · {tier} tier, {effort} effort"
-#: The routing table's version the weather is computed for (display only).
+#: The routing table's version (the O2 spec B.3): the day's weather row
+#: keeps it, and from O2b (2026-11-06) every rendered wake's route
+#: (OrcWake.components["route"]["version"], bot_program/orcs/router.py).
+#: A later table is a new ladder with a new version.
 ROUTING_VERSION = "table-v1"
 
 #: The eToro tape (§5.2a item 3, IN12): 15m and 5m candles, behind the
@@ -800,3 +803,13 @@ TICKET_CODE_WORDS = {
 #: FAIL (claude_smoke's own: call A, call B, no cache read, less than 2x).
 S_TOKENS_KEY = "s_tokens"
 SMOKE_FAIL_REASONS = ("call_a", "call_b", "cache", "effort")
+
+# ── O2b: the route in shadow (2026-11-06, the O2 spec B.1-B.6, B.16c) ──────
+# The router (bot_program/orcs/router.py) is pure and names rungs only. Its
+# choice is recorded on every rendered wake, minds on or off, while r0
+# answers every wake a model reads: nothing here sends anything.
+
+#: The router's choice in tier words (B.16c), as the Orc's page shows it
+#: (mind.rung_words, from the catalog by the rung's name): never a model
+#: id, never a cost.
+ROUTE_WOULD_T = "would route: {rung} ({tier} tier, {effort} effort)"

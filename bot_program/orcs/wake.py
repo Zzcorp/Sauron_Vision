@@ -49,15 +49,22 @@ dossier:
 
   1. scheduler.absorb: the Orc's pending wake merged into this one, so
      its dossier lists every reason (P15);
-  2. render_wake, AS OF its moment: its complexity score, band and the
-     day's class (complexity.py, weather.py), its dossier stored block by
-     block (dossier.py), then the OrcWake's score and hashes and its
-     status: `quiet` under F6 (a code `reading` and Orc.latest_note);
-     `skipped` with the code of a gate it reads OFF (minds_off,
-     line_off...); else it stays `recorded` for admission. A journal
-     `wake` entry, kept off the card's lines, ends in those status words;
-     the card's `intellect` (no model's rung: RUNG_NONE) and `integrity`;
-  3. scheduler.admit (A.11): `pending`, or `skipped` with its code.
+  2. render_wake, AS OF its moment: its complexity score, its band with
+     and without its floor and the day's class (complexity.py,
+     weather.py); the route (O2b, 2026-11-06, the O2 spec B.1-B.4): the
+     rung the pure router (router.py) chooses, recorded in shadow in
+     components["route"] and the `wake` entry, on the budget's money
+     world, which render_queued hands on (scheduler.is_real); then ONE
+     dossier, still for the reference family, stored block by block
+     (dossier.py); then the OrcWake's score and hashes and its status:
+     `quiet` under F6 (a code `reading` and Orc.latest_note); `skipped`
+     with the code of a gate it reads OFF (minds_off, line_off...); else
+     it stays `recorded` for admission. A journal `wake` entry, kept off
+     the card's lines, ends in those status words; the card's `intellect`
+     (no model's rung: RUNG_NONE; `escalated` when a floor raised the
+     band) and `integrity`;
+  3. scheduler.admit (A.11): `pending`, or `skipped` with its code. r0
+     answers every wake a model reads: the route moves no call yet.
 
 A pass that admitted a wake sends one orc_think ticket (tasks.py).
 Detection, spacing and the proxy for the last answered facts hash live in
@@ -80,7 +87,7 @@ render or its admission) marks it `failed` in its components and answers
 it by code (`skipped`, render_failed): never pending, never retried,
 never counted as the worker's silence (P11), and never stopping the next.
 
-# O2b, O2c: the router; drum deliveries add W12
+# O2c: drum deliveries add W12
 """
 import hashlib
 import json
@@ -93,9 +100,10 @@ from bot_program.orcs.constants import (BAND_HOLD_AFTER_URGENT_MIN,
                                         CODE_MINDS_OFF, CODE_RENDER_FAILED,
                                         FACTS_HASH_VERSION,
                                         MIN_WAKE_SPACING_MIN,
-                                        PRINT_BANDS_MIN, RUNG_NONE,
-                                        STATE_DEAD, VENUE_LIVE,
-                                        VENUE_PAPER, W3_NEAR_ATR1H,
+                                        PRINT_BANDS_MIN, ROUTE_WOULD_T,
+                                        RUNG_NONE, STATE_DEAD, VENUE_DEMO,
+                                        VENUE_LIVE, VENUE_PAPER,
+                                        W3_NEAR_ATR1H,
                                         W3_ONCE_H, W4_GIVEBACK_SHARE,
                                         W4_THRESHOLDS, W5_EARNINGS_H,
                                         W5_LATE_MIN, W5_OFFSETS_MIN,
@@ -879,23 +887,42 @@ def _evidence(orc, trade, ctx, reasons, now):
     return vctx
 
 
-def render_wake(wake):
-    """Score, weather and dossier of one recorded wake, AS OF its moment
-    (components["as_of"]), with the care's state and the price the tick
-    saw. Writes the OrcWake's score, band, day class, components, block
-    hashes and status, the journal's `wake` entry (off the card's lines),
-    the card's intellect and integrity, and a quiet wake's reading.
-    Raises on a failure (render_queued fences it). Returns the wake.
+def _route_world(world, real_money) -> str:
+    """The route's money world (O2b, 2026-11-06, the O2 spec B.1, §4 Q6):
+    the budget's, never the render's own. "live" only when `real_money`
+    (scheduler.is_real: the seat AND the row's own world live, which
+    render_queued reads); else the row's demo or paper world, or "" for a
+    row that states none, which birth.world (`world`) reads as live: all
+    three route as paper."""
+    if real_money:
+        return VENUE_LIVE
+    return world if world in (VENUE_DEMO, VENUE_PAPER) else ""
+
+
+def render_wake(wake, *, real_money=None):
+    """Score, weather, route and dossier of one recorded wake, AS OF its
+    moment (components["as_of"]), with the care's state and the price the
+    tick saw. Writes the OrcWake's score, band, day class, components
+    (the route among them), block hashes and status, the journal's `wake`
+    entry (off the card's lines), the card's intellect and integrity, and
+    a quiet wake's reading. Raises on a failure (render_queued fences
+    it). Returns the wake.
 
     While the minds are on (O2a, A.8): the validation context and the
     evidence facts first, in their own short transactions, then the
     render's own transaction as in O1, which also stores S and keeps the
     shared count, S's hash and version, the context and the facts hash in
     the components. A wake the settle sent back reads the Orc's journal
-    up to its journal_as_of, still as of its own moment (A.24)."""
+    up to its journal_as_of, still as of its own moment (A.24).
+
+    The route (O2b, 2026-11-06, B.1-B.4): `real_money` is the budget's
+    money world (scheduler.is_real), which render_queued, the only caller,
+    reads and hands on; None (unread) routes as paper, is_real's own rule.
+    The effort map (mind.answering_map) is read once here, before the
+    render's transaction, never under a lock (N8)."""
     from django.db import transaction
 
-    from bot_program.orcs import dossier
+    from bot_program.orcs import dossier, mind
     orc = wake.orc
     trade = orc.root_trade
     tick = dict(wake.components or {})
@@ -925,17 +952,50 @@ def render_wake(wake):
         if upto is not None:
             ctx["journal_as_of"] = upto
         vctx = _evidence(orc, trade, ctx, reasons, now)
+    effort = mind.answering_map()
     with transaction.atomic():
         return _render(wake, orc, trade, tick, ctx, reasons, now=now,
-                       real=real, vctx=vctx, gate=gate)
+                       real=real, vctx=vctx, gate=gate,
+                       route_world=_route_world(world, real_money),
+                       effort=effort)
+
+
+def _route(band, raw_band, *, kind, day_class, score, world,
+           effort) -> dict:
+    """The route of one wake, as components["route"] and the `wake`
+    entry keep it (O2b, 2026-11-06, B.1-B.3, B.16c): router.route on the
+    band with and without its floor, the budget's money world, the day and
+    the effort map, the Fable gate closed with no frontier quota (B.9 is a
+    later commit's). {rung (the answering rung after the effort map),
+    would_rung (the table's), why, version (ROUTING_VERSION), words (the
+    would-route words: tier words, never a model id or a cost),
+    escalated, probes (listed, none sent), twin}. Recorded in shadow: r0
+    answers every wake a model reads (admission's components["rung"])."""
+    from bot_program.orcs import mind, router
+    got = router.route(band, world, kind, day_class, 0, router.GATE_CLOSED,
+                       effort, score=score, raw_band=raw_band)
+    return {"rung": got["rung"], "would_rung": got["would_rung"],
+            "why": list(got["why"]), "version": got["routing_version"],
+            "words": mind.rung_words(got["would_rung"], ROUTE_WOULD_T),
+            "escalated": bool(got["escalated"]),
+            "probes": list(got["probes"]), "twin": bool(got["twin"])}
 
 
 def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
-            gate=""):
+            gate="", route_world="", effort=None):
     """O1's per-wake render, in its own transaction: it takes the Orc's
     lock only at its final journal.append. Its status (A.3; O2a): `quiet`
     under F6; `skipped` with `gate`, the code of a gate read OFF; else
-    `recorded`, for admission (A.7 step 3)."""
+    `recorded`, for admission (A.7 step 3).
+
+    O2b (2026-11-06, the O2 spec B.4): the band first (the weather, the
+    inputs, the components, the stakes, the score, the floors, the band
+    with and without its floor), then the route (_route, on
+    `route_world` and the effort map `effort`), then ONE dossier.render,
+    still for the reference family. The reorder changes nothing the
+    dossier reads: _position_inputs reads no key of `ctx` the render
+    writes (held, integrity, po3), and what reads those keys (F5, the
+    snapshot, the card's integrity) still runs after the render."""
     from bot_program.orcs import complexity, dossier, journal, weather
     price = tick.get("price")
     day = weather.current(orc.user, orc.asset_class, now, real=real)
@@ -943,7 +1003,6 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
     hour_at = _parse(hour.get("at")) if isinstance(hour, dict) else None
     market = hour if hour_at is not None and now - hour_at <= timedelta(
         minutes=90) else (day.components or {}).get("market") or {}
-    rendered = dossier.render(orc, trade, ctx, as_of=now)
     inputs = _position_inputs(orc, trade, ctx, reasons, now, market)
     comps = _components(inputs)
     st = complexity.stakes(real=real, hand=bool(orc.manual))
@@ -953,9 +1012,14 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
     floor = complexity.floors(kind=kind, real=real, binding_on_table=False,
                               day_class=day.day_class, birth="W1" in codes)
     seen = orc.seen or {}
-    band = complexity.band(sc, prev_band=seen.get("band"),
-                           hold_until=_parse(seen.get("band_hold_until")),
-                           now=now, floor=floor)
+    # the band's memory: its last band and the urgent hold (O1c)
+    memory = {"prev_band": seen.get("band"),
+              "hold_until": _parse(seen.get("band_hold_until")), "now": now}
+    band = complexity.band(sc, floor=floor, **memory)
+    raw_band = complexity.band(sc, floor=None, **memory)
+    route = _route(band, raw_band, kind=kind, day_class=day.day_class,
+                   score=sc, world=route_world, effort=effort)
+    rendered = dossier.render(orc, trade, ctx, as_of=now)
     f5_on, f5_items = complexity.f5(ctx.get("integrity"))
     snapshot = _snapshot(orc, trade, ctx)
     fh = facts_hash(snapshot)
@@ -979,6 +1043,8 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
                        "trimmed": rendered.get("trimmed"),
                        "render": RENDER_DONE, "as_of": tick.get("as_of"),
                        "price": price,
+                       # O2b (B.2): the router's choice, in shadow
+                       "route": route,
                        **{k: tick[k] for k in ADMISSION_KEEP if k in tick}}
     if vctx is not None:
         # O2a (A.8): what the mind reads, as of this dossier
@@ -1008,7 +1074,8 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
                       f"score {sc:.0f} · {band}", "band": band,
                       "day_class": day.day_class, "rung_t": RUNG_NONE,
                       "status_t": status_t, "wake": wake.pk,
-                      "escalated": False, "late": False,
+                      # B.6 (O2b): a floor raised this wake's band
+                      "escalated": route["escalated"], "late": False,
                       "at": now.isoformat()},
         "integrity": {"flag": (ctx.get("integrity") or {}).get("flag", "ok"),
                       "t": integrity_words(ctx.get("integrity"))}}
@@ -1020,7 +1087,8 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
         "score": sc, "band": band, "day_class": day.day_class,
         "status": status, "f5": f5_items, "trimmed": rendered.get("trimmed"),
         "withheld": rendered.get("withheld"), "tokens":
-        rendered.get("tokens")}, snapshot=snapshot, facts_hash=fh, wake=wake,
+        rendered.get("tokens"), "route": route}, snapshot=snapshot,
+        facts_hash=fh, wake=wake,
         block_hashes=rendered["hashes"], card=False, card_extra=card_extra,
         remember=remember, at=now)
     if quiet:
@@ -1049,8 +1117,11 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
     2026-11-05), none holding an Orc lock across the dossier render (N8):
 
       1. scheduler.absorb: the Orc's pending wake merged into this one,
-         under the Orc's lock, committed before the render (P15);
-      2. render_wake, in O1's own per-wake transaction;
+         under the Orc's lock, committed before the render (P15), so the
+         survivor's band and route are the union's;
+      2. render_wake, in O1's own per-wake transaction, handed the
+         budget's money world (scheduler.is_real, read here with no lock
+         held) for its route (O2b, 2026-11-06);
       3. scheduler.admit: `pending`, or `skipped` with its code, the Orc's
          lock taken for the status write only (A.11).
 
@@ -1078,7 +1149,7 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
             if (w.components or {}).get("render") != RENDER_QUEUED:
                 continue
             scheduler.absorb(w)
-            render_wake(w)
+            render_wake(w, real_money=scheduler.is_real(w.orc))
             done += 1
         except Exception as e:  # noqa: BLE001 — one wake never stops one
             failed += 1

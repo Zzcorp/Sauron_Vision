@@ -1329,11 +1329,15 @@ core line's spend and what is left of it) and adds a third:
 
 The card "The Orcs (read-only)" shows the ladder the Orcs read (model and
 effort per rung). It is an unvalidated prior: once the minds switch and
-the Orcs line are on, every wake a model reads is answered on r0; a
-router comes with O2b. No tier setting on this page ever moves it, and no
-override can be saved for an Orc agent name. The card also counts the
-day's Orc calls from the ledger. The catalog table lists each model's
-cache-read price and the shortest prefix it will cache.
+the Orcs line are on, every wake a model reads is answered on r0. Routing
+is recorded in shadow (O2b): each rendered wake also keeps the rung a
+router would choose from its band and money world, one effort per model
+until the smoke's PASS, and the Orc's page shows it as "would route: r2
+(deep tier, medium effort)"; it sends no call and spends nothing. No tier
+setting on this page ever moves the ladder or the route, and no override
+can be saved for an Orc agent name. The card also counts the day's Orc
+calls from the ledger. The catalog table lists each model's cache-read
+price and the shortest prefix it will cache.
 
 **The provider smoke.** Two facts behind the Orcs' design need the real
 API: how many tokens their dossier is on each model's tokenizer, and
@@ -1833,7 +1837,9 @@ settles it: `done` (answered in shadow), `refused` (by the validator),
 `failed`, `late` (it came back after the position closed: kept, applied to
 nothing), `stale` (not answered in 30 minutes while the worker was
 silent: the care holds the idea) or `merged`. The Orc's page shows each
-status in words, with the rung that read it.
+status in words, with the rung that read it and, while that is another
+rung, the one a router would choose, recorded in shadow ("would route: r2
+(deep tier, medium effort)"): r0 still answers every wake a model reads.
 
 To turn them on, in this order:
 

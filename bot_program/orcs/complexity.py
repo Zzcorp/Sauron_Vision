@@ -6,8 +6,11 @@ Each s_i runs 0..100 through piecewise-linear breakpoints, the house form
 of market_stress.COMPONENTS. The market terms (vol, regime, prints, news,
 stress, gap) are the class's hourly complexity; the position and decision
 terms (stop, decision_point, size, disagreement, reversibility) are read
-on every wake. O1 journals the vector, the score, the band and the day's
-class on every detected wake and routes NOTHING (the router is O2's).
+on every wake. Every rendered wake journals the vector, the score, the
+band and the day's class, and routes nothing here: from O2b (2026-11-06)
+its band, and the band with no floor, feed the pure router
+(bot_program/orcs/router.py), whose choice is recorded in shadow while r0
+answers every wake a model reads.
 
 A missing input is a dash with its reason and adds nothing (a stale
 posture zeroes `stress`, a blind analyst zeroes `news`, an unread calendar

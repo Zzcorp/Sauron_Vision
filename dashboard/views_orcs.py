@@ -27,10 +27,16 @@ shadow" with the officer's would-verdict and its status, the refusals,
 and for staff the Orcs line beside the minds switch and the day's Orc
 calls from the ledger. The four gates are read once per page. Nothing
 here calls a model.
+
+THE ROUTE (O2b, 2026-11-06, the O2 spec B.16c). Beside the rung a model
+was sent, each wake's Rung column shows the rung a pure router chose for
+it, recorded in shadow ("would route: r2 (deep tier, medium effort)"),
+while that is another rung: r0 answers every wake a model reads.
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import timedelta
 from functools import wraps
 
@@ -68,6 +74,10 @@ NOT_FOUND = "No Orc by that number in your book."
 AUTHOR_STYLE = {"code": "fact", "care": "fact", "reconcile": "fact",
                 "morgul": "fact", "orc": "note", "captain": "note",
                 "operator": "yours"}
+#: The router's choice as code writes it (constants.ROUTE_WOULD_T through
+#: mind.rung_words): any other words are never shown.
+ROUTE_WORDS_RE = re.compile(r"^would route: [a-z]\d \([a-z]+ tier, [a-z]+ "
+                            r"effort\)$")
 
 
 def _r(x):
@@ -148,17 +158,36 @@ def _officer_t(officer) -> str:
     return words
 
 
+def _route_t(w, comps, sent) -> str:
+    """The router's choice for wake `w` in tier words (the O2 spec B.16c;
+    O2b, 2026-11-06), from components["route"]: "would route: r2 (deep
+    tier, medium effort)", while it is not the rung that was sent (r0
+    answers every wake a model reads). "" for a quiet wake (code reads it
+    whatever the route), a wake rendered before the router, or words that
+    are not the router's own tier words."""
+    route = comps.get("route") if isinstance(comps.get("route"),
+                                             dict) else {}
+    words = str(route.get("words") or "")
+    if w.status == "quiet" or not ROUTE_WORDS_RE.match(words) or \
+            str(route.get("would_rung") or "") == sent:
+        return ""
+    return words
+
+
 def _wake_rows(wakes) -> list:
-    """Each wake with its status in words (A.4) and the rung that was
-    sent it ("" when no model was: a code answer, quiet, merged)."""
+    """Each wake with its status in words (A.4), the rung that was sent
+    it ("" when no model was: a code answer, quiet, merged) and, beside
+    it, the router's choice while that is another rung (_route_t,
+    recorded in shadow)."""
     from bot_program.orcs.notes import wake_status_t
     out = []
     for w in wakes:
         comps = w.components if isinstance(w.components, dict) else {}
+        rung = (str(comps.get("rung") or "")
+                if w.started_at is not None else "")
         out.append({"w": w, "status_t": wake_status_t(w.status,
                                                       w.skipped_reason),
-                    "rung": (str(comps.get("rung") or "")
-                             if w.started_at is not None else "")})
+                    "rung": rung, "route_t": _route_t(w, comps, rung)})
     return out
 
 
