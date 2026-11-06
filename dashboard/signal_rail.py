@@ -620,7 +620,7 @@ def _empty(error="") -> dict:
     return {"cards": [], "rows": [], "gone": [], "gone_n": 0, "gone_more": 0,
             "gone_tags": [], "gone_tags_words": "", "n": 0, "long_n": 0,
             "short_n": 0, "active_n": 0, "older_n": 0, "new24": 0,
-            "classes": classes, "rules": [], "votes_n": 0, "live_n": 0,
+            "classes": classes, "rules": [], "groups": [], "votes_n": 0, "live_n": 0,
             "held_n": 0, "ceiling_hit": False, "evaluated": 0, "total": 0,
             "ceiling": RAIL_SAFETY_CEILING, "error": error, "meta": meta,
             "title": meta["title"]}
@@ -838,6 +838,16 @@ def _build(request) -> dict:
         title += (f" · showing the newest {RAIL_SAFETY_CEILING} of {total} "
                   f"signals from the last {RAIL_WINDOW_HOURS}h")
 
+    groups, seen_cls = [], set()
+    for s in cards:
+        cls = s.rail.asset_class
+        if cls in seen_cls:
+            continue
+        seen_cls.add(cls)
+        groups.append({"asset_class": cls,
+                       "label": CLASS_SHORT.get(cls, (cls or "other").upper()),
+                       "o_cls": _class_index(cls) * 10000})
+
     rows_out = [{
         "id": s.pk,
         "symbol": s.instrument.symbol,
@@ -867,7 +877,8 @@ def _build(request) -> dict:
         "gone_tags_words": " · ".join(f"{t.lower()} {c}" for t, c in gone_tags),
         "n": n, "long_n": long_n, "short_n": short_n, "active_n": active_n,
         "older_n": older_n, "new24": new24, "classes": classes,
-        "rules": rule_list, "votes_n": votes_n, "live_n": live_n,
+        "rules": rule_list, "groups": groups,
+        "votes_n": votes_n, "live_n": live_n,
         "held_n": held_n, "ceiling_hit": ceiling_hit,
         "evaluated": len(candidates), "total": total,
         "ceiling": RAIL_SAFETY_CEILING, "error": "", "meta": meta,

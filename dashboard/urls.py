@@ -182,6 +182,8 @@ urlpatterns = [
     # The operator's own PASS on a rail signal, kept on the server so every
     # browser agrees (2026-11-06). Display only; under /api/ for the 423.
     path("api/signal-rail/pass/", views.signal_rail_pass, name="signal_rail_pass"),
+    # The rail's filters and display choices, per user (2026-11-06).
+    path("api/rail-prefs/", views.rail_prefs_json, name="rail_prefs_json"),
     path("partials/ticker/", views.ticker_partial, name="ticker_partial"),
     path("partials/notif-items/", views.notif_items_partial, name="notif_items_partial"),
     path("partials/panel-counts/", views.panel_counts_json, name="panel_counts_json"),

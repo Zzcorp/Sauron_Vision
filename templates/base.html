@@ -112,6 +112,9 @@
     <script src="{% static 'js/sv-council-band.js' %}" defer></script>
     {# THE SIGNAL RAIL (2026-11-06): every signal, LEFT THE RAIL, the facet counts; its filters hide and order rows by the facts each row carries. After the council band, before the phone tier, which stays the last shell sheet. #}
     <link rel="stylesheet" href="{% static 'css/sv-rail.css' %}">
+    {# The rules muted from the rail's filters (2026-11-06), one generated rule each, from the operator's prefs; static/js/sv-rail-filters.js rewrites it on a change. #}
+    <style id="svRuleOff" data-rules="{{ rail_rule_off_json|default:'[]' }}">{{ rail_rule_off_css|default:''|safe }}</style>
+    <script src="{% static 'js/sv-rail-filters.js' %}" defer></script>
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
@@ -1171,8 +1174,10 @@
                     {% endcomment %}
                     <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{{ rail.n|default:"0" }}</span>
                     <span class="ip-sub" data-sv-live="hb-signals-sub">{{ rail.long_n|default:"0" }} long · {{ rail.short_n|default:"0" }} short</span>
-                    <div class="ip-dropdown" id="hbSignalsDD" data-sv-fhost="signals">
+                    <div class="ip-dropdown" id="hbSignalsDD" data-sv-fhost="signals" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.sig kind="signals" %}>
                         <div class="ip-dd-head">SIGNALS ON THE RAIL</div>
+                        {# The rail's own filters, on the same state (2026-11-06): outside every live region, so a sweep never writes them. #}
+                        <div class="rail-facets rf-compact" data-f-kind="signals" role="toolbar" aria-label="Filter the signals">{% include "_partials/rail_sig_chips.html" with p=rail_prefs.sig full=False %}</div>
                         <div data-sv-live="hb-signals-detail">
                         <div class="ip-dd-grid" title="{{ rail.title }}">
                             <div class="ip-dd-cell"><span class="dk">ON THE RAIL</span><span class="dv" data-sv-rail-n="n">{{ rail.n|default:"0" }}</span></div>
@@ -1357,22 +1362,34 @@
                     <span class="ip-label">WATCHLIST</span>
                     <span class="ip-count" id="ipWatchlistCount" data-sv-live="hb-watchlist" data-sv-live-key="hb-watchlist">{{ panel_watchlist|default:"0" }}</span>
                     <span class="ip-sub">tracked</span>
-                    <div class="ip-dropdown">
+                    {% comment %}
+                    THE WATCHLIST RAIL'S OWN LIST (2026-11-06): every star the
+                    rail draws, in its order, under its filters (this
+                    dropdown is a watch host too), instead of six cached
+                    rows. The rows stay inside the live region — their prices
+                    refresh with the sweep — and carry the same facts as the
+                    rail's items; the chips sit outside it.
+                    {% endcomment %}
+                    <div class="ip-dropdown" id="hbWatchDD" data-sv-fhost="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
                         <div class="ip-dd-head">WATCHLIST</div>
+                        <div class="rail-facets rf-compact" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=False %}</div>
                         <div data-sv-live="hb-watchlist-detail">
-                        {% for w in panel_watchlist_rows %}
-                        <div class="ip-dd-row">
+                        <div class="sv-wl-rows" data-sv-list="watch">
+                        {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
+                        {% for w in ui_watchlist %}
+                        <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }}">
                             <span class="ipr-sym">{{ w.symbol }}</span>
-                            <span class="ipr-qty">{% if w.last %}{{ w.last }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
-                            {% if w.change is not None %}
-                            <span class="ipr-pct {% if w.change >= 0 %}up{% else %}down{% endif %}">{{ w.change|floatformat:2 }}%</span>
-                            {% comment %} The quote may exist with no change on it; 0.00% was
-                               printed here before, which is a different claim. {% endcomment %}
-                            {% else %}<span class="ipr-pct sv-unknown" title="No change recorded for this quote">&mdash;</span>{% endif %}
+                            <span class="ipr-qty">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                            {% if w.last %}
+                            <span class="ipr-pct {% if w.change_pct >= 0 %}up{% else %}down{% endif %}">{{ w.change_pct|floatformat:2 }}%</span>
+                            {% comment %} No quote, no change: a dash, never 0.00%, which is a different claim. {% endcomment %}
+                            {% else %}<span class="ipr-pct sv-unknown" title="No quote for this instrument">&mdash;</span>{% endif %}
                         </div>
                         {% empty %}
                         <div class="sv-empty"><b>No watchlist</b>Nothing is flagged for tracking yet.</div>
                         {% endfor %}
+                        {% if ui_watch_facets.more %}<div class="ip-dd-note" style="order:99999999">Showing {{ ui_watch_facets.n }} of {{ ui_watch_facets.total }} starred. /instruments/?filter=watchlist lists every one.</div>{% endif %}
+                        </div>
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
                     </div>
@@ -1490,17 +1507,35 @@
     replaces, so the state they carry survives it. The sweep (sv_sweep)
     renders no card: the body is not a region.
     {% endcomment %}
-    <div class="rail-section sig-section" id="railSignals" data-sv-fhost="signals" data-f-gone="0">
+    <div class="rail-section sig-section" id="railSignals" data-sv-fhost="signals" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.sig kind="signals" %}>
         <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railSignals').classList.toggle('collapsed');localStorage.setItem('sauron_rail_sig',document.getElementById('railSignals').classList.contains('collapsed')?'1':'0');})()">
             <span class="rh-icon">&#x25C8;</span>
             <span class="rh-label">SIGNALS</span>
             <button type="button" class="rh-held" id="railHeld" hidden title="A refresh is waiting while you read a card. Click to show it now."></button>
+            <button type="button" class="rh-gear" data-f-panel="railSigPanel" aria-controls="railSigPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
             <span class="rh-count" id="railSigCount" title="{{ rail.title }}">{{ rail.n|default:"0" }}</span>
             <span class="rh-chev">▼</span>
         </div>
-        <div class="rail-facets" id="railSigFacets" aria-label="Signals on the rail by asset class">
-            {% for key, label, n in rail.classes %}<span class="rf-chip" data-n="{{ n }}" title="{{ label }} signals on the rail">{{ label }} <b data-sv-fc="{{ key }}">{{ n }}</b></span>{% endfor %}
-            <button type="button" class="rf-chip rf-gone" data-sv-gone-toggle aria-pressed="false" title="Show or hide the signals that left the rail in the last 24 hours, and why">LEFT <b data-sv-gone-n>{{ rail.gone_n|default:"0" }}</b></button>
+        {% comment %}
+        THE FILTERS (2026-11-06): asset class (press more than one to
+        combine), long or short, the bots' vote, held, LEFT THE RAIL, and in
+        the ⚙ panel the minimum score, the stage, held or not, the sort, the
+        grouping by class, the density and a mute per rule. State on the
+        host above, facts on the rows; static/css/sv-rail.css hides and
+        orders, static/js/sv-rail-filters.js writes the state and saves it
+        to the operator's profile. "show all" pauses every filter at once,
+        for a look, and is not saved.
+        {% endcomment %}
+        <div class="rail-facets" id="railSigFacets" data-f-kind="signals" role="toolbar" aria-label="Filter the signals on the rail">{% include "_partials/rail_sig_chips.html" with p=rail_prefs.sig full=True %}</div>
+        <div class="rail-fpanel" id="railSigPanel" data-f-kind="signals" hidden>
+            <div class="rf-row"><span class="rf-k">MIN SCORE</span><button type="button" class="rf-opt" data-f-key="score" data-f-val="0" aria-pressed="{% if not rail_prefs.sig.score %}true{% else %}false{% endif %}">any</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="5" aria-pressed="{% if rail_prefs.sig.score == 5 %}true{% else %}false{% endif %}">.5</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="6" aria-pressed="{% if rail_prefs.sig.score == 6 %}true{% else %}false{% endif %}">.6</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="7" aria-pressed="{% if rail_prefs.sig.score == 7 %}true{% else %}false{% endif %}">.7</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="8" aria-pressed="{% if rail_prefs.sig.score == 8 %}true{% else %}false{% endif %}">.8</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="9" aria-pressed="{% if rail_prefs.sig.score == 9 %}true{% else %}false{% endif %}">.9</button></div>
+            <div class="rf-row"><span class="rf-k">STAGE</span><button type="button" class="rf-opt" data-f-key="stage" data-f-val="all" aria-pressed="{% if rail_prefs.sig.stage == 'votes' or rail_prefs.sig.stage == 'live' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="votes" aria-pressed="{% if rail_prefs.sig.stage == 'votes' %}true{% else %}false{% endif %}" title="Only the signals whose rule the bots count">votes</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="live" aria-pressed="{% if rail_prefs.sig.stage == 'live' %}true{% else %}false{% endif %}" title="Only the rules at a live-venue stage">live</button></div>
+            <div class="rf-row"><span class="rf-k">HELD</span><button type="button" class="rf-opt" data-f-key="held" data-f-val="all" aria-pressed="{% if rail_prefs.sig.held == 'held' or rail_prefs.sig.held == 'not' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="held" data-f-val="held" aria-pressed="{% if rail_prefs.sig.held == 'held' %}true{% else %}false{% endif %}">held</button><button type="button" class="rf-opt" data-f-key="held" data-f-val="not" aria-pressed="{% if rail_prefs.sig.held == 'not' %}true{% else %}false{% endif %}">not held</button></div>
+            <div class="rf-row"><span class="rf-k">SORT</span><button type="button" class="rf-opt" data-f-key="sort" data-f-val="new" aria-pressed="{% if rail_prefs.sig.sort == 'score' or rail_prefs.sig.sort == 'class' %}false{% else %}true{% endif %}">newest</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="score" aria-pressed="{% if rail_prefs.sig.sort == 'score' %}true{% else %}false{% endif %}">score</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="class" aria-pressed="{% if rail_prefs.sig.sort == 'class' %}true{% else %}false{% endif %}">class</button></div>
+            <div class="rf-row"><span class="rf-k">GROUP BY CLASS</span><button type="button" class="rf-opt" data-f-key="group" data-f-val="0" aria-pressed="{% if rail_prefs.sig.group %}false{% else %}true{% endif %}">off</button><button type="button" class="rf-opt" data-f-key="group" data-f-val="1" aria-pressed="{% if rail_prefs.sig.group %}true{% else %}false{% endif %}">on</button></div>
+            <div class="rf-row"><span class="rf-k">DENSITY</span><button type="button" class="rf-opt" data-f-key="dense" data-f-val="0" aria-pressed="{% if rail_prefs.sig.dense %}false{% else %}true{% endif %}">comfortable</button><button type="button" class="rf-opt" data-f-key="dense" data-f-val="1" aria-pressed="{% if rail_prefs.sig.dense %}true{% else %}false{% endif %}">compact</button></div>
+            <div class="rf-row"><span class="rf-k">LEFT THE RAIL</span><button type="button" class="rf-opt" data-f-key="gone" data-f-val="0" aria-pressed="{% if rail_prefs.sig.gone %}false{% else %}true{% endif %}">hidden</button><button type="button" class="rf-opt" data-f-key="gone" data-f-val="1" aria-pressed="{% if rail_prefs.sig.gone %}true{% else %}false{% endif %}">shown</button></div>
+            <div class="rf-row rf-row-rules"><span class="rf-k" title="Untick a rule to mute it; a rule that appears later is shown, never hidden">RULES</span><div class="rf-rules" id="railRuleList">{% for name, key, n, shown in rail_rule_rows %}<button type="button" class="rf-rule" data-f-key="rule" data-f-val="{{ name }}" data-rule-key="{{ key }}" aria-pressed="{{ shown|yesno:'true,false' }}" title="{{ name }}">{{ name|default:"(no rule)"|truncatechars:30 }} <b>{{ n }}</b></button>{% empty %}<span class="rf-none">No rule on the rail.</span>{% endfor %}</div></div>
         </div>
         <div class="rail-body" id="railSignalsBody">
             {% if not sv_sweep %}{% include "_partials/signal_rail_items.html" with rail_initial=True %}{% endif %}
@@ -1513,12 +1548,29 @@
         <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railWatch').classList.toggle('collapsed');localStorage.setItem('sauron_rail_watch',document.getElementById('railWatch').classList.contains('collapsed')?'1':'0');})()">
             <span class="rh-icon">◉</span>
             <span class="rh-label">WATCHLIST</span>
+            <button type="button" class="rh-gear" data-f-panel="railWatchPanel" aria-controls="railWatchPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
             <span class="rh-count" id="railWatchlistCount">{{ ui_watchlist|length }}</span>
             <span class="rh-chev">▼</span>
         </div>
-        <div class="rail-body" id="railWatchBody">
+        {% comment %}
+        THE WATCHLIST'S FILTERS (2026-11-06): asset class, held or not, and
+        in the ⚙ panel the sort (class, symbol, held first), the grouping by
+        class and the density. The host is the body below (its items stay
+        its direct children, which the live price painter and the hover
+        engine rely on); the items keep .wl-sym / .wl-last / .wl-chg and
+        their data-decimals, so a tick paints a filtered row exactly as
+        before. Up to a stated ceiling, never a silent one.
+        {% endcomment %}
+        <div class="rail-facets" id="railWatchFacets" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=True %}</div>
+        <div class="rail-fpanel" id="railWatchPanel" data-f-kind="watch" hidden>
+            <div class="rf-row"><span class="rf-k">SORT</span><button type="button" class="rf-opt" data-f-key="sort" data-f-val="class" aria-pressed="{% if rail_prefs.watch.sort == 'symbol' or rail_prefs.watch.sort == 'held' %}false{% else %}true{% endif %}">class</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="symbol" aria-pressed="{% if rail_prefs.watch.sort == 'symbol' %}true{% else %}false{% endif %}">symbol</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="held" aria-pressed="{% if rail_prefs.watch.sort == 'held' %}true{% else %}false{% endif %}">held first</button></div>
+            <div class="rf-row"><span class="rf-k">GROUP BY CLASS</span><button type="button" class="rf-opt" data-f-key="group" data-f-val="0" aria-pressed="{% if rail_prefs.watch.group %}false{% else %}true{% endif %}">off</button><button type="button" class="rf-opt" data-f-key="group" data-f-val="1" aria-pressed="{% if rail_prefs.watch.group %}true{% else %}false{% endif %}">on</button></div>
+            <div class="rf-row"><span class="rf-k">DENSITY</span><button type="button" class="rf-opt" data-f-key="dense" data-f-val="0" aria-pressed="{% if rail_prefs.watch.dense %}false{% else %}true{% endif %}">comfortable</button><button type="button" class="rf-opt" data-f-key="dense" data-f-val="1" aria-pressed="{% if rail_prefs.watch.dense %}true{% else %}false{% endif %}">compact</button></div>
+        </div>
+        <div class="rail-body" id="railWatchBody" data-sv-fhost="watch" data-sv-list="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
+            {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
             {% for w in ui_watchlist %}
-            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}">
+            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }}">
                 <div class="wl-row1">
                     <span class="wl-sym">{{ w.symbol }}</span>
                     <span class="wl-last">{% px w.last w.asset_class w.symbol %}</span>
@@ -1606,6 +1658,7 @@
                 <span style="font-size:10px;">Mark instruments as watchlist in the Instruments page.</span>
             </div>
             {% endfor %}
+            {% if ui_watch_facets.more %}<div class="sv-list-note" style="order:99999999">Showing {{ ui_watch_facets.n }} of {{ ui_watch_facets.total }} starred. /instruments/?filter=watchlist lists every one.</div>{% endif %}
         </div>
     </div>
 </div>
@@ -2056,34 +2109,19 @@
     });
   };
   /* LEFT THE RAIL is shown or hidden by an attribute on the rail section
-     (data-f-gone), which no refresh replaces; this browser remembers the
-     choice. */
-  var GONE_KEY = 'sauron_rail_gone';
-  function showGone(host, on) {
-    host.setAttribute('data-f-gone', on ? '1' : '0');
-    var chip = host.querySelector('[data-sv-gone-toggle]');
-    if (chip) chip.setAttribute('aria-pressed', on ? 'true' : 'false');
-  }
+     (data-f-gone), which no refresh replaces; its chip is one of the
+     rail's filters (static/js/sv-rail-filters.js), kept on the operator's
+     profile. ↺ BRING BACK is delegated here, to the section. */
   var railHost = document.getElementById('railSignals');
   if (railHost) {
-    try { showGone(railHost, localStorage.getItem(GONE_KEY) === '1'); } catch (e) {}
     railHost.addEventListener('click', function (e) {
       var t = e.target && e.target.closest ? e.target : null;
-      if (!t) return;
-      var chip = t.closest('[data-sv-gone-toggle]');
-      if (chip) {
-        var on = railHost.getAttribute('data-f-gone') !== '1';
-        showGone(railHost, on);
-        try { localStorage.setItem(GONE_KEY, on ? '1' : '0'); } catch (err) {}
-        return;
-      }
-      var back = t.closest('[data-sv-unpass]');
-      if (back) {
-        e.preventDefault();
-        e.stopPropagation();
-        back.disabled = true;
-        window.svRailUnpass(back.getAttribute('data-sv-unpass'));
-      }
+      var back = t && t.closest('[data-sv-unpass]');
+      if (!back) return;
+      e.preventDefault();
+      e.stopPropagation();
+      back.disabled = true;
+      window.svRailUnpass(back.getAttribute('data-sv-unpass'));
     });
   }
   if (document.readyState === 'loading') {

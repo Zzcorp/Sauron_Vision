@@ -5259,6 +5259,45 @@ def signal_rail_pass(request):
 
 
 @login_required
+def rail_prefs_json(request):
+    """GET/POST /api/rail-prefs/ — the rail's filters and display choices,
+    on the operator's profile (2026-11-06).
+
+    GET answers {"prefs": {...}}. POST takes {"prefs": {"sig": {...}}} (one
+    section or both; the other is kept), cleans it against the whitelist
+    (dashboard.rail_prefs), saves it with update_fields=["rail_prefs"] and
+    answers {"ok": true, "prefs": {...}}; a body that is not a JSON object
+    answers {"ok": false}, never a 500. Never read from the query string:
+    the headband sweep fetches with the page's own. Under /api/, a locked
+    session answers 423 (core.idle_lock).
+
+    DISPLAY ONLY: no engine module, bot, alert or ticket reads these prefs,
+    and no filter writes Instrument.is_watchlist.
+    """
+    import json
+
+    from django.http import JsonResponse
+
+    from dashboard import rail_prefs
+    from portfolio.trader_profile import TraderProfile
+
+    profile, _ = TraderProfile.objects.get_or_create(user=request.user)
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body or b"{}")
+        except (TypeError, ValueError):
+            body = None
+        incoming = body.get("prefs") if isinstance(body, dict) else None
+        if not isinstance(incoming, dict):
+            return JsonResponse({"ok": False})
+        prefs = rail_prefs.merge(profile.rail_prefs, incoming)
+        profile.rail_prefs = prefs
+        profile.save(update_fields=["rail_prefs"])
+        return JsonResponse({"ok": True, "prefs": prefs})
+    return JsonResponse({"prefs": rail_prefs.clean(profile.rail_prefs)})
+
+
+@login_required
 def ticker_partial(request):
     """Both halves of the news ticker's marquee. Fetched by the dashboard
     WebSocket listener when a scraper stores news, so fresh headlines

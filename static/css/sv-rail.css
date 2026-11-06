@@ -54,7 +54,7 @@
 .rf-chip b { color: var(--text-secondary); font-weight: 700; }
 /* A class with nothing on the rail is drawn and hidden, so a refresh can
    light it up without new markup. The LEFT chip always shows. */
-.rf-chip[data-n="0"]:not(.rf-gone) { display: none; }
+.rf-chip[data-n="0"]:not(.rf-gone):not([aria-pressed="true"]) { display: none; }
 button.rf-chip { cursor: pointer; }
 button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-glow); }
 .rf-chip[aria-pressed="true"] {
@@ -310,3 +310,153 @@ body.light-mode .sr-pop-foot { background: var(--bg-card, #fff); }
 @media (hover: none) {
     .sr-popup.sv-pinned, .dh-pop.sv-pinned { display: block !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FILTERS AND DISPLAY CHOICES (2026-11-06)
+   State on the host (data-f-* on the signals rail section, the headband
+   SIGNALS dropdown, the watchlist body and the headband WATCHLIST
+   dropdown, rendered from the operator's prefs and rewritten by
+   static/js/sv-rail-filters.js), facts on the row (data-asset-class,
+   data-side, data-score-b, data-votes, data-live, data-held,
+   data-rule-key). A refresh replaces rows, never a host, so a choice
+   survives every refresh by construction. "show all" (data-f-peek) pauses
+   every rule at once. A muted rule is one generated rule in
+   <style id="svRuleOff">.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="stock"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="stock"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="forex"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="forex"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="commodity"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="commodity"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="index"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="index"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="etf"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="etf"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="crypto"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="crypto"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="bond"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="bond"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="options"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="options"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="cfd"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="cfd"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-side="long"] [data-sv-row]:not([data-side="long"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-side="short"] [data-sv-row]:not([data-side="short"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="5"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="6"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="7"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"],[data-score-b="6"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="8"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"],[data-score-b="6"],[data-score-b="7"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="9"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"],[data-score-b="6"],[data-score-b="7"],[data-score-b="8"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-stage="votes"] [data-sv-row][data-votes="0"],
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-stage="live"] [data-sv-row][data-live="0"],
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-held="held"] [data-sv-row][data-held="0"],
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-held="not"] [data-sv-row][data-held="1"]{display:none!important}
+
+/* The lists order by CSS: the DOM stays newest first (and Tab with it),
+   each row carrying its rank for every sort. A host can be the list
+   itself (the watchlist body), hence the compound forms. */
+[data-sv-list]{display:flex;flex-direction:column}
+[data-sv-list]>*{flex-shrink:0}
+[data-f-sort="score"] [data-sv-list]>*,[data-f-sort="score"][data-sv-list]>*{order:var(--o-score,0)}
+[data-f-sort="class"] [data-sv-list]>*,[data-f-sort="class"][data-sv-list]>*,
+[data-f-group="1"] [data-sv-list]>*,[data-f-group="1"][data-sv-list]>*{order:var(--o-cls,0)}
+[data-f-group="1"][data-f-sort="score"] [data-sv-list]>*,[data-f-group="1"][data-f-sort="score"][data-sv-list]>*{order:var(--o-cscore,0)}
+[data-sv-fhost="watch"][data-f-sort="symbol"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-sort="symbol"][data-sv-list]>*{order:var(--o-sym,0)}
+[data-sv-fhost="watch"][data-f-sort="held"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-sort="held"][data-sv-list]>*{order:var(--o-held,0)}
+[data-sv-fhost="watch"][data-f-group="1"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-group="1"][data-sv-list]>*{order:var(--o-cls,0)}
+
+/* Group headers are siblings of the rows, never wrappers (a watchlist item
+   stays a direct child of its body). */
+[data-sv-grp]{display:none}
+[data-f-group="1"] [data-sv-grp]{display:block}
+.sv-grp {
+    padding: 6px 12px 3px;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.12);
+}
+
+/* Density: compact. */
+[data-f-dense="1"] .sr-signal{padding:6px 12px}
+[data-f-dense="1"] .sr-row3{display:none}
+[data-sv-fhost="watch"][data-f-dense="1"] :is(.wl-rowname,.wl-spark){display:none}
+[data-sv-fhost="watch"][data-f-dense="1"] .wl-item{padding:6px 14px;gap:3px}
+
+/* ── the filter controls ─────────────────────────────────────────────── */
+.rf-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 2px; }
+.rf-status {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 14px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.rf-status [data-f-unsaved] { color: var(--accent-red); }
+.rf-peek {
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.rf-peek[hidden] { display: none; }
+.rail-facets.rf-compact { padding: 6px 16px 8px; border-bottom: 1px solid var(--border); background: transparent; }
+.rail-head .rh-gear {
+    flex-shrink: 0;
+    width: 20px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+}
+.rail-head .rh-gear:hover, .rail-head .rh-gear[aria-expanded="true"] { color: var(--accent); border-color: var(--accent-dim); }
+.signals-rail:not(.open) .rh-gear { display: none; }
+.rail-fpanel {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-glow);
+    background: rgba(0, 0, 0, 0.22);
+    flex-shrink: 0;
+    max-height: 45%;
+    overflow-y: auto;
+}
+.rail-fpanel[hidden] { display: none; }
+.signals-rail:not(.open) .rail-fpanel, .rail-section.collapsed .rail-fpanel { display: none; }
+.rf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.rf-k {
+    min-width: 96px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+}
+.rf-opt, .rf-rule {
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    cursor: pointer;
+}
+.rf-opt[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent-dim); color: var(--accent); }
+.rf-rules { display: flex; flex-wrap: wrap; gap: 3px; }
+.rf-rule[aria-pressed="true"] { color: var(--text-primary); border-color: var(--border-glow); }
+.rf-rule[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
+.rf-rule b { color: var(--text-muted); font-weight: 700; }
+.rf-none { font-size: 9px; color: var(--text-muted); }
+.sv-list-note, .ip-dropdown .ip-dd-note {
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.sv-wl-rows { display: flex; flex-direction: column; }

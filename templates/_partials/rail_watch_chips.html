@@ -1,0 +1,10 @@
+{% comment %}
+The watchlist filters' chips (2026-11-06): the rail's bar (full) and the
+headband WATCHLIST popup's (compact), the same controls on the same state.
+The counts are over what is drawn (core.context_ui ui_watch_facets); a class
+at 0 hides by CSS unless it is pressed.
+{% endcomment %}
+<button type="button" class="rf-chip rf-all" data-f-key="cls" data-f-val="" aria-pressed="{% if p.cls %}false{% else %}true{% endif %}" title="Every asset class">ALL <b>{{ ui_watch_facets.n|default:"0" }}</b></button>{% for key, label, n in ui_watch_facets.classes %}<button type="button" class="rf-chip" data-f-key="cls" data-f-val="{{ key }}" data-n="{{ n }}" aria-pressed="{% if key in p.cls %}true{% else %}false{% endif %}" title="{{ label }} — press more than one class to combine them">{{ label }} <b data-sv-wc="{{ key }}">{{ n }}</b></button>{% endfor %}
+<span class="rf-sep" aria-hidden="true"></span>
+<button type="button" class="rf-chip" data-f-key="held" data-f-val="held" data-f-toggle aria-pressed="{% if p.held == 'held' %}true{% else %}false{% endif %}" title="Only the instruments you hold">HELD <b>{{ ui_watch_facets.held|default:"0" }}</b></button>{% if full %}<button type="button" class="rf-chip" data-f-key="held" data-f-val="not" data-f-toggle aria-pressed="{% if p.held == 'not' %}true{% else %}false{% endif %}" title="Only the instruments you do not hold">NOT HELD</button>{% endif %}
+<div class="rf-status" data-f-status><span data-f-status-text>{{ ui_watch_facets.n|default:"0" }} shown</span> <button type="button" class="rf-peek" data-f-key="peek" hidden>show all</button></div>

@@ -60,6 +60,7 @@ first render passes rail_initial and renders those rows itself.
 {% if rail.ceiling_hit %}<div class="sr-rail-note sr-rail-ceiling">Showing the newest {{ rail.ceiling }} of {{ rail.total }} signals from the last 48h. /signals/ lists every one.</div>{% endif %}
 {% url 'signals_list' as signals_url %}
 <div class="sr-list" data-sv-list="signals">
+{% for g in rail.groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cscore:{{ g.o_cls }};--o-score:0">{{ g.label }}</div>{% endfor %}
 {% for s in panel_recent_signals %}
             <div class="sr-signal-wrap{% if s.acted %} sr-acted sr-acted-{{ s.acted.by }}{% endif %}" data-signal-id="{{ s.id }}"{% if s.acted %} data-acted="{{ s.acted.by }}"{% endif %} data-sv-row data-asset-class="{{ s.rail.asset_class }}" data-side="{{ s.rail.side }}" data-score-b="{{ s.rail.score_band }}" data-stage="{{ s.rail.stage }}" data-votes="{{ s.rail.votes|yesno:'1,0' }}" data-live="{{ s.rail.live|yesno:'1,0' }}" data-held="{{ s.rail.held|yesno:'1,0' }}" data-rule-key="{{ s.rail.rule_key }}" data-created="{{ s.created_at|date:'c' }}" style="--o-score:{{ s.rail.o_score }};--o-cls:{{ s.rail.o_cls }};--o-cscore:{{ s.rail.o_cscore }}">
                 <button type="button" class="sr-x"

@@ -8,6 +8,7 @@ updates both lists and the 60s headband sweep never writes them. A click
 (or Enter) on a row opens its card in the rail (base.html,
 window.svRailFocus, delegated to #hbSignalRows).
 {% endcomment %}
+{% for g in rail.groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cscore:{{ g.o_cls }};--o-score:0">{{ g.label }}</div>{% endfor %}
 {% for sig in rail.rows %}
 <div class="ip-dd-row sv-sig-row" data-sv-row data-signal-id="{{ sig.id }}" role="button" tabindex="0" data-asset-class="{{ sig.rail.asset_class }}" data-side="{{ sig.rail.side }}" data-score-b="{{ sig.rail.score_band }}" data-stage="{{ sig.rail.stage }}" data-votes="{{ sig.rail.votes|yesno:'1,0' }}" data-live="{{ sig.rail.live|yesno:'1,0' }}" data-held="{{ sig.rail.held|yesno:'1,0' }}" data-rule-key="{{ sig.rail.rule_key }}" data-created="{{ sig.created_at|date:'c' }}" style="--o-score:{{ sig.rail.o_score }};--o-cls:{{ sig.rail.o_cls }};--o-cscore:{{ sig.rail.o_cscore }}" title="{{ sig.rule }}{% if sig.rail.stage_label %} · {{ sig.rail.stage_label }}{% endif %}">
     <span class="ipr-sym">{{ sig.symbol }}</span>
