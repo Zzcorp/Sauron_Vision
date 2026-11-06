@@ -26,6 +26,34 @@ HEADBAND_SYMBOLS = [
     "XPTUSD", "XPDUSD", "CORNUSD", "WHEATUSD", "COFFEEUSD",
 ]
 
+#: The watchlist rail's stated ceiling (2026-11-06). It used to slice the
+#: starred instruments at 40 without a word; it draws up to this many and
+#: says how many more there are.
+WATCHLIST_CEILING = 200
+
+
+def _testing() -> bool:
+    import sys
+    return "test" in sys.argv or any("pytest" in a for a in sys.argv)
+
+
+def _spark_fallback(inst_id):
+    """The 1h-bar spark of one starred instrument, cached 5 minutes — the
+    watchlist draws up to 200 of them and a chart that moves hourly need
+    not be re-read on every render (bypassed under the test runner, whose
+    rolled-back ids would otherwise share one key)."""
+    if _testing():
+        return _recent_closes(inst_id)
+    from django.core.cache import cache
+    key = f"wl:spark:{inst_id}"
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    closes = _recent_closes(inst_id)
+    cache.set(key, closes, 300)
+    return closes
+
+
 def _recent_closes(inst_id, n=12):
     """Last n closes, oldest-first — daily bars when they exist, 1h bars
     otherwise. The fallback matters: bot bars are written at 1h/4h and the
@@ -65,9 +93,86 @@ def _headband_sparks():
     return sparks
 
 
+def _class_index(cls) -> int:
+    from dashboard.signal_rail import CLASS_ORDER
+    try:
+        return CLASS_ORDER.index(cls)
+    except ValueError:
+        return len(CLASS_ORDER)
+
+
+def _watch_facts(request, items, total) -> None:
+    """held, and the order variables of every watchlist item: --o-sym by
+    symbol, --o-cls by class (the vocabulary's order) then the list's own,
+    --o-held the held items first, and --o-cheld by class then the held
+    items first within it (grouped by class with the held-first sort,
+    2026-11-06, the review)."""
+    held = {}
+    try:
+        from dashboard.signal_rail import held_symbols
+        held = held_symbols(request)
+    except Exception:  # noqa: BLE001 — held is a filter fact
+        held = {}
+    by_sym = sorted(range(len(items)), key=lambda i: items[i]["symbol"])
+    for rank, i in enumerate(by_sym, 1):
+        items[i]["o_sym"] = rank
+    seen = {}
+    held_rank = 0
+    for i, item in enumerate(items):
+        k = _class_index(item.get("asset_class") or "")
+        seen[k] = seen.get(k, 0) + 1
+        item["o_cls"] = k * 10000 + seen[k]
+        item["held"] = bool(held.get((item["symbol"] or "").upper()))
+        item["held_venue"] = held.get((item["symbol"] or "").upper(), "")
+    for i, item in enumerate(items):
+        if item["held"]:
+            held_rank += 1
+            item["o_held"] = held_rank
+    for i, item in enumerate(items):
+        if not item["held"]:
+            item["o_held"] = 10000 + i + 1
+    in_class = {}
+    for item in sorted(items, key=lambda it: (not it["held"], it["o_cls"])):
+        k = _class_index(item.get("asset_class") or "")
+        in_class[k] = in_class.get(k, 0) + 1
+        item["o_cheld"] = k * 10000 + in_class[k]
+
+
+def _watch_facets(items, total) -> dict:
+    """The watchlist's chips: a count per class (every class drawn, a zero
+    hidden by CSS), the held count, and how many stars the ceiling left
+    out."""
+    from dashboard.signal_rail import CLASS_ORDER, CLASS_SHORT
+    per = {}
+    for item in items:
+        per[item.get("asset_class") or ""] = per.get(item.get("asset_class") or "", 0) + 1
+    return {"classes": [(k, CLASS_SHORT.get(k, k.upper()), per.get(k, 0))
+                        for k in CLASS_ORDER],
+            "held": sum(1 for item in items if item.get("held")),
+            "n": len(items), "total": total,
+            "more": max(0, total - len(items))}
+
+
+def _watch_groups(items) -> list:
+    """One group header per class present, ordered before its items."""
+    from dashboard.signal_rail import CLASS_SHORT
+    out, seen = [], set()
+    for item in items:
+        cls = item.get("asset_class") or ""
+        if cls in seen:
+            continue
+        seen.add(cls)
+        out.append({"asset_class": cls,
+                    "label": CLASS_SHORT.get(cls, (cls or "other").upper()),
+                    "o_cls": _class_index(cls) * 10000})
+    return out
+
+
 def ui_extras(request):
     data = {
         "ui_watchlist": [],
+        "ui_watch_facets": {},
+        "ui_watch_groups": [],
         "ui_metrics": {},
         "ui_headband": [],
         # The handover card (core/passation.py): on every logged-in page
@@ -82,10 +187,20 @@ def ui_extras(request):
     except Exception:
         pass
     # ── Watchlist (with live quotes + 12-bar sparkline) ──
+    # (2026-11-06) Every star up to a STATED ceiling (WATCHLIST_CEILING),
+    # with the quote joined in the same query, and the facts the rail's
+    # filters read on each item: held (the operator holds it, the same memo
+    # the signal rail reads) and the ranks CSS orders by (symbol, class,
+    # held first). The headband WATCHLIST popup lists this same list.
     try:
         from instruments.models import Instrument
         from market_data.models import PriceData
-        qs = list(Instrument.objects.filter(is_watchlist=True, is_active=True)[:40])
+        starred = Instrument.objects.filter(is_watchlist=True, is_active=True)
+        qs = list(starred.select_related("live_quote")[:WATCHLIST_CEILING + 1])
+        total = len(qs)
+        if total > WATCHLIST_CEILING:
+            qs = qs[:WATCHLIST_CEILING]
+            total = starred.count()
         # Bulk-fetch last 12 daily closes for all watchlist instruments in
         # one query, then group by instrument id to avoid N+1.
         inst_ids = [i.id for i in qs]
@@ -105,7 +220,7 @@ def ui_extras(request):
         # symbols get 1h/4h bars from the watchlist pass, not daily ones.
         for inst in qs:
             if len(spark_by_inst.get(inst.id, [])) < 2:
-                closes = _recent_closes(inst.id)
+                closes = _spark_fallback(inst.id)
                 if closes:
                     spark_by_inst[inst.id] = closes
 
@@ -129,7 +244,10 @@ def ui_extras(request):
                 "spark_min": spark_min,
                 "spark_max": spark_max,
             })
+        _watch_facts(request, items, total)
         data["ui_watchlist"] = items
+        data["ui_watch_facets"] = _watch_facets(items, total)
+        data["ui_watch_groups"] = _watch_groups(items)
     except Exception:
         pass
 

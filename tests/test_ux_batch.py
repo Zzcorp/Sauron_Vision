@@ -189,8 +189,16 @@ class PanelCountsTests(TestCase):
 
     def test_headband_signals_popup_matches_the_rail(self):
         """The cell showed top-4 BY SCORE while the rail showed the newest
-        five — two truths on one screen."""
-        from core.context_processors import _panel_detail
+        five — two truths on one screen.
+
+        (2026-11-06) The rail lists every actionable signal now, not five,
+        and the popup is built from the rail's own snapshot per request
+        rather than inside the book-keyed headband cache
+        (tests/test_rail_every_signal.py) — so it is read where the page
+        reads it, from sauron_context, and it must name the same signals in
+        the same order as the rail."""
+        from core.context_processors import sauron_context
+        from django.test import RequestFactory
         from signals.models import Signal
         inst = _instrument()
         now = timezone.now()
@@ -203,10 +211,16 @@ class PanelCountsTests(TestCase):
                 is_active=True)
             Signal.objects.filter(pk=s.pk).update(
                 created_at=now - timedelta(minutes=60 - i))
-        out = _panel_detail(self.user)
+        req = RequestFactory().get("/")
+        req.user = self.user
+        out = sauron_context(req)
         rules = [row["rule"] for row in out["panel_top_signals"]]
-        self.assertEqual(rules, ["r5", "r4", "r3", "r2", "r1"],
-                         "popup must list the newest five, like the rail")
+        self.assertEqual(rules, ["r5", "r4", "r3", "r2", "r1", "r0"],
+                         "popup must list every signal the rail lists, "
+                         "newest first")
+        self.assertEqual([row["id"] for row in out["panel_top_signals"]],
+                         [s.id for s in out["panel_recent_signals"]],
+                         "popup and rail must be the same signals")
 
     def test_starring_broadcasts_the_absolute_count(self):
         inst = _instrument("PUSHX", "stock")

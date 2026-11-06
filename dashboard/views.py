@@ -4,6 +4,7 @@ import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
 from django.utils import timezone
 from datetime import timedelta
 from django.db import models
@@ -5187,7 +5188,9 @@ def take_trade_execute(request, signal_id):
                              target=body["target"],
                              leverage=body["leverage"],
                              pin_ok=pin_ok,
-                             dup_seen=body["dup_seen"])
+                             dup_seen=body["dup_seen"],
+                             shown_qty=body["shown_qty"],
+                             shown_raised=body["shown_raised"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
     # to the trade AFTER it was taken. It can only follow a trade, never
@@ -5214,7 +5217,8 @@ def _ticket_pin_words(res, pin_ok):
 
 def _parse_trade_body(request):
     """Parse an execute body into
-    {"close_ids": [...], "side": ..., "qty": ..., "stop": ..., "target": ...}.
+    {"close_ids": [...], "side": ..., "qty": ..., "stop": ..., "target": ...,
+     "shown_qty": ..., "shown_raised": ...} (and the keys below).
 
     Strict on shape: a non-object body 500'd (AttributeError on .get), and
     a string close_ids like "12" iterated per character into [1, 2] —
@@ -5307,6 +5311,20 @@ def _parse_trade_body(request):
     parsed["dup_seen"] = (None if raw_seen is None else
                           [s for s in raw_seen if isinstance(s, str)][:50])
 
+    # THE SIZE THE TICKET SHOWED (2026-11-06, review): the dialog's own
+    # size when the operator left it alone, and whether it was raised above
+    # the risk budget — so the send refuses a raise it did not show, or a
+    # raised size that moved since (manual_trade._shown_size_error).
+    # Absent is None: the caller says nothing.
+    shown, err = _number("shown_qty")
+    if err:
+        return None, err
+    parsed["shown_qty"] = shown
+    raw_raised = body.get("shown_raised")
+    if raw_raised is not None and not isinstance(raw_raised, bool):
+        return None, "shown_raised must be true or false"
+    parsed["shown_raised"] = raw_raised
+
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
             # The trading PIN rides the same body on a LIVE ticket. Its
@@ -5356,8 +5374,118 @@ def toggle_watchlist(request, symbol):
 def signal_rail_partial(request):
     """The signal rail's cards alone. Fetched by the dashboard WebSocket
     listener when a new signal fires, so the card slides into the rail
-    without a reload. Context processors supply panel_recent_signals."""
+    without a reload. Context processors supply panel_recent_signals.
+
+    (2026-11-06) Every signal that can be acted on now, not five, and
+    LEFT THE RAIL with each departure's reason (dashboard.signal_rail). It
+    takes NO filter parameter: the filters run in the browser on the facts
+    each row carries, so one render serves every operator's view. It also
+    carries the meta block that paints the counts outside the rail and the
+    <template> of the headband popup's rows, so one fetch updates both
+    lists. Answers 423 while PIN-locked (core.idle_lock, /partials/)."""
     return render(request, "_partials/signal_rail_items.html")
+
+
+@login_required
+@require_POST
+def signal_rail_pass(request):
+    """POST /api/signal-rail/pass/ — the operator's own PASS, on the server
+    (2026-11-06).
+
+    Body {"signal_id": int, "undo": bool}. Without undo it records the
+    departure for this operator alone (dashboard.RailDeparture, user set):
+    TAKEN when the book shows their own exact hand position on the signal
+    (the ticket's success path retires the card through this same call),
+    PASSED otherwise — so a pass made on one browser holds on every other,
+    and LEFT THE RAIL says it in words. With undo it deletes that row and
+    the card comes back. 400 on a bad body, 404 on an unknown signal; under
+    /api/ a locked session answers 423 (core.idle_lock).
+
+    DISPLAY ONLY: the Signal row is untouched — still active, still voting,
+    still takeable — and nothing the engine, the bots, the alerts or the
+    take-trade path read is written.
+    """
+    import json
+
+    from django.http import JsonResponse
+    from django.utils import timezone as _tz
+
+    from dashboard.models import RailDeparture
+    from dashboard.signal_rail import pass_words
+    from signals.models import Signal
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except (TypeError, ValueError):
+        body = None
+    if not isinstance(body, dict):
+        return JsonResponse({"ok": False, "error": "a JSON object is expected"},
+                            status=400)
+    try:
+        signal_id = int(body.get("signal_id"))
+    except (TypeError, ValueError):
+        signal_id = 0
+    if signal_id <= 0:
+        return JsonResponse({"ok": False, "error": "signal_id is required"},
+                            status=400)
+    signal = (Signal.objects.select_related("instrument")
+              .filter(pk=signal_id).first())
+    if signal is None:
+        return JsonResponse({"ok": False, "error": "no such signal"},
+                            status=404)
+    if body.get("undo"):
+        RailDeparture.objects.filter(signal=signal, user=request.user).delete()
+        return JsonResponse({"ok": True, "undone": True})
+    now = _tz.now()
+    reason, words = pass_words(signal, now)
+    row, created = RailDeparture.objects.get_or_create(
+        signal=signal, user=request.user,
+        defaults={"reason": reason, "words": words[:300], "departed_at": now})
+    if not created and row.reason == "passed" and reason == "taken":
+        # The ticket's success path reaches here after a pass: the book now
+        # shows the operator's own position, and the rail says so.
+        row.reason, row.words, row.departed_at = reason, words[:300], now
+        row.save(update_fields=["reason", "words", "departed_at"])
+    return JsonResponse({"ok": True, "reason": row.reason})
+
+
+@login_required
+def rail_prefs_json(request):
+    """GET/POST /api/rail-prefs/ — the rail's filters and display choices,
+    on the operator's profile (2026-11-06).
+
+    GET answers {"prefs": {...}}. POST takes {"prefs": {"sig": {...}}} (one
+    section or both; the other is kept), cleans it against the whitelist
+    (dashboard.rail_prefs), saves it with update_fields=["rail_prefs"] and
+    answers {"ok": true, "prefs": {...}}; a body that is not a JSON object
+    answers {"ok": false}, never a 500. Never read from the query string:
+    the headband sweep fetches with the page's own. Under /api/, a locked
+    session answers 423 (core.idle_lock).
+
+    DISPLAY ONLY: no engine module, bot, alert or ticket reads these prefs,
+    and no filter writes Instrument.is_watchlist.
+    """
+    import json
+
+    from django.http import JsonResponse
+
+    from dashboard import rail_prefs
+    from portfolio.trader_profile import TraderProfile
+
+    profile, _ = TraderProfile.objects.get_or_create(user=request.user)
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body or b"{}")
+        except (TypeError, ValueError):
+            body = None
+        incoming = body.get("prefs") if isinstance(body, dict) else None
+        if not isinstance(incoming, dict):
+            return JsonResponse({"ok": False})
+        prefs = rail_prefs.merge(profile.rail_prefs, incoming)
+        profile.rail_prefs = prefs
+        profile.save(update_fields=["rail_prefs"])
+        return JsonResponse({"ok": True, "prefs": prefs})
+    return JsonResponse({"prefs": rail_prefs.clean(profile.rail_prefs)})
 
 
 @login_required
@@ -5626,7 +5754,9 @@ def asset_trade_execute(request, symbol):
                               target=body["target"],
                               leverage=body["leverage"],
                               pin_ok=pin_ok,
-                              dup_seen=body["dup_seen"])
+                              dup_seen=body["dup_seen"],
+                              shown_qty=body["shown_qty"],
+                              shown_raised=body["shown_raised"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): linked after the trade, as above.
     if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
