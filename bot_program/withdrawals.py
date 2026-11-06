@@ -34,7 +34,7 @@ pools are never affected: they follow nothing.
 WHAT IS HELD BACK is the reserve (every request still `reserved`) plus
 any withdrawal already marked paid AFTER the reading being sized from:
 that money has left, but the last reading still counts it, and for up to
-one sync (15 minutes; 5 for eToro since 2026-10-31) the pools would
+one sync (15 minutes; 1 for eToro since 2026-11-06) the pools would
 otherwise grow back into it. A
 withdrawal marked paid at a time BEFORE that reading, confirmed while the
 readings still showed the money, is held back from it just the same
@@ -1088,7 +1088,7 @@ def refollow(user) -> bool:
     """Re-size every following pool from the stored reading NOW, as
     views_admin_hq does after a share changes — rather than leaving the
     pools on the old reserve until the next sync, up to 15 minutes away
-    (5 for eToro since 2026-10-31).
+    (1 for eToro since 2026-11-06).
     True when it ran. Never raises: the request is already written."""
     try:
         from .capital_truth import account_equity
