@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% load sauron_tags %}
+{% block title %}Design kit — Sauron Vision{% endblock %}
+{% block page_title %}Design kit{% endblock %}
+{% comment %}
+/design/kit/ (UI plan §7, S1a, 2026-11-06): every component of the kit on
+synthetic content, for staff. Nothing here is real and nothing here acts:
+every button is type="button" with no handler, no input sits in a form.
+The layout below is this page's own and takes tokens only.
+{% endcomment %}
+{% block extra_css %}
+<style>
+  .dk-page { display: flex; flex-direction: column; gap: var(--sv-sp-8); max-width: 1600px; }
+  .dk-intro { max-width: var(--sv-measure); color: var(--sv-ink-2); }
+  .dk-h1 { font-size: var(--sv-fs-title); font-weight: 600; line-height: var(--sv-lh-title); color: var(--sv-ink-1); }
+  .dk-h2 { margin-bottom: var(--sv-sp-4); }
+  .dk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sv-sp-5); }
+  .dk-row { display: flex; flex-wrap: wrap; gap: var(--sv-sp-3); align-items: center; }
+  .dk-stack { display: flex; flex-direction: column; gap: var(--sv-sp-3); }
+  .dk-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--sv-sp-4); }
+  .dk-swatch { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .dk-chip-sample { height: 40px; border-radius: var(--sv-radius-ctl); border: 1px solid var(--sv-line-2); }
+  .dk-scale { display: flex; flex-direction: column; gap: var(--sv-sp-3); }
+  .dk-scale-row { display: flex; align-items: baseline; gap: var(--sv-sp-5); flex-wrap: wrap; }
+  .dk-scale-row .sv-label { width: 220px; flex: none; }
+  .dk-table-wrap { overflow-x: auto; }
+  .dk-statusbar { display: flex; align-items: center; height: 32px; background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card); overflow: hidden; }
+  .dk-cell { display: flex; align-items: center; gap: 8px; padding: 0 14px; height: 100%; border-right: 1px solid var(--sv-line-1); white-space: nowrap; }
+  .dk-quote { display: flex; align-items: center; gap: 6px; }
+  .dk-quote-sym { font-size: var(--sv-fs-small); font-weight: 600; color: var(--sv-ink-2); }
+  .dk-mono { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+  .dk-static-dialog { position: static; transform: none; opacity: 1; visibility: visible; width: 100%; max-width: 520px; }
+  .dk-static-menu { position: static; opacity: 1; visibility: visible; transform: none; width: 220px; }
+  .dk-field { display: flex; flex-direction: column; gap: 6px; }
+  .dk-field-row { display: flex; align-items: center; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="dk-page">
+
+  <header class="dk-stack">
+    <span class="sv-label">Staff · synthetic data</span>
+    <h1 class="dk-h1">The design kit</h1>
+    <p class="dk-intro">Bloomberg's discipline and TradingView's calm, in Sauron's identity. Every component of the kit, on made-up rows: nothing here reads an account, a quote or a model, and no control acts.</p>
+  </header>
+
+  {# ── §3 The palette ── #}
+  <section class="sv-panel" aria-labelledby="dkPalette">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkPalette">Palette</span><span class="sv-panel-meta">opaque surfaces · one colour, one meaning</span></div>
+    <div class="sv-panel-body dk-stack">
+      {% for group, swatches in palette %}
+      <div class="dk-stack">
+        <span class="sv-label">{{ group }}</span>
+        <div class="dk-swatches">
+          {% for token, hexv, use in swatches %}
+          <div class="dk-swatch" data-kit="swatch">
+            <div class="dk-chip-sample" style="background: var({{ token }});"></div>
+            <span class="dk-mono">{{ hexv }}</span>
+            <span class="sv-panel-meta">{{ token }} · {{ use }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ── §4 Type ── #}
+  <section class="sv-panel" aria-labelledby="dkType">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkType">Type</span><span class="sv-panel-meta">Inter for words · JetBrains Mono for numbers · nothing under 11 px</span></div>
+    <div class="sv-panel-body dk-scale">
+      {% for token, use, face in scale %}
+      <div class="dk-scale-row" data-kit="type">
+        <span class="sv-label">{{ token }}</span>
+        {% if face == "mono" %}<span class="sv-num" style="font-size: var({{ token }}); font-weight: 500;">€10,453.61</span>
+        {% else %}<span style="font-size: var({{ token }});">{{ use }}</span>{% endif %}
+      </div>
+      {% endfor %}
+      <div class="dk-scale-row"><span class="sv-label">Wordmark</span><span style="font-family: var(--sv-font-brand); font-weight: 700; letter-spacing: .18em; color: var(--sv-eye);">SAURON VISION</span></div>
+    </div>
+  </section>
+
+  {# ── §7 Shell: quote cells and status cells ── #}
+  <section class="sv-panel" aria-labelledby="dkShell">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkShell">Shell cells</span><span class="sv-panel-meta">the market band and the status bar</span></div>
+    <div class="sv-panel-body dk-stack">
+      <div class="dk-statusbar" data-kit="quote-cells">
+        <div class="dk-cell dk-quote"><span class="dk-quote-sym">EURUSD</span><span class="sv-num">1.08745</span><span class="sv-num up">+0.12%</span><span class="sv-live-dot" title="eToro · live"></span></div>
+        <div class="dk-cell dk-quote"><span class="dk-quote-sym">XAUUSD</span><span class="sv-num">2,648.12</span><span class="sv-num down">-0.39%</span><span class="sv-fresh" title="eToro · 12 s"></span></div>
+        <div class="dk-cell dk-quote"><span class="dk-quote-sym">AAPL</span><span class="sv-num">227.06</span><span class="sv-num" style="color: var(--sv-ink-2);">0.00%</span><span class="sv-fresh sv-fresh--closed" title="eToro · closed"></span></div>
+      </div>
+      <div class="dk-statusbar" data-kit="status-cells">
+        <div class="dk-cell"><span class="sv-label">Portfolio</span><span class="sv-num">€10,453.61</span></div>
+        <div class="dk-cell"><span class="sv-label">Open P&amp;L</span><span class="sv-num up">+84.38 ▲</span></div>
+        <div class="dk-cell"><span class="sv-label">Positions</span><span class="sv-num">6</span><span class="sv-panel-meta">4 long · 2 short</span></div>
+        <div class="dk-cell"><span class="sv-label">Drawdown</span><span class="sv-num down">-2.40% ▼</span></div>
+        <div class="dk-cell"><span class="sv-armed-pill"><span class="sv-armed-dot"></span><span class="sv-armed-words">Real armed</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  {# ── §7 Data: the table ── #}
+  <section class="sv-panel" aria-labelledby="dkTable">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkTable">Table</span><span class="sv-panel-meta">numbers right-aligned in mono · the left edge is the REAL edge</span></div>
+    <div class="dk-table-wrap">
+      <table class="sv-table" data-kit="table">
+        <thead><tr>
+          <th>Symbol</th><th>Side</th><th>World</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">P&amp;L</th><th class="num">R</th><th></th>
+        </tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="{% if r.world == 'live' %}sv-row--live{% endif %}">
+            <td><span class="sv-sym">{{ r.sym }}<small>{{ r.sub }}</small></span></td>
+            <td><span class="sv-side sv-side--{{ r.side }}">{{ r.side_word }}</span></td>
+            <td>{% money_world r.world %}</td>
+            <td class="num">{{ r.qty|qty }}</td>
+            <td class="num">{{ r.entry }}</td>
+            <td class="num"><span class="sv-pnl"><span class="sv-pnl-value"{% if r.fresh == 'stale' %} style="color: var(--sv-ink-3);"{% endif %}>{{ r.mark }}</span>
+              <span class="sv-fresh sv-fresh--{{ r.fresh }}">{{ r.src|src_name }}{% if r.age %} · <span class="sv-fresh-age">{{ r.age }}</span>{% elif r.fresh == 'live' %} · live{% elif r.fresh == 'closed' %} · closed{% endif %}{% if r.fresh == 'stale' %} · <span class="sv-fresh-stale-word">stale</span>{% endif %}</span></span></td>
+            <td class="num"><span class="sv-pnl"><span class="sv-pnl-value {{ r.pnl_cls }}">{{ r.pnl }}{% if r.pnl_cls == 'up' %} ▲{% elif r.pnl_cls == 'down' %} ▼{% endif %}</span><span class="sv-pnl-src">{{ r.pnl_src }}</span></span></td>
+            <td class="num"><span class="{{ r.pnl_cls }}">{{ r.r }}</span></td>
+            <td style="text-align: right;"><button type="button" class="btn btn-sm btn-danger">Close</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="dk-grid">
+    {# ── KPI tiles, key-value grid, meter, sparkline ── #}
+    <section class="sv-panel" aria-labelledby="dkTiles">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkTiles">Tiles and figures</span></div>
+      <div class="sv-panel-body dk-stack">
+        <div class="sv-kpis" data-kit="kpis">
+          <div class="sv-kpi"><span class="sv-label">Open P&amp;L</span><div class="sv-kpi-value up">+84.38 ▲</div><div class="sv-kpi-sub">eToro's own on 4 of 6 rows</div></div>
+          <div class="sv-kpi"><span class="sv-label">Paper</span><div class="sv-kpi-value">≈ +6.60</div><div class="sv-kpi-sub">1 position · <span class="sv-est">estimate</span></div></div>
+          <div class="sv-kpi"><span class="sv-label">Risk open</span><div class="sv-kpi-value">3.1%</div><div class="sv-kpi-sub">of the book, at the stops</div></div>
+        </div>
+        <dl class="sv-kv sv-kv--3" data-kit="kv">
+          <div><dt>Entry</dt><dd>2,648.0</dd></div>
+          <div><dt>Stop</dt><dd class="down">2,672.0</dd></div>
+          <div><dt>Target</dt><dd class="up">2,600.0</dd></div>
+          <div><dt>Unknown</dt><dd><span class="sv-unknown">—</span></dd></div>
+        </dl>
+        <div class="sv-meter" data-kit="meter"><span class="sv-label">Score</span><div class="sv-meter-track" style="flex: 1;"><div class="sv-meter-fill" style="width: 72%;"></div></div><span class="sv-meter-num">0.72</span></div>
+        <svg class="sv-spark sv-spark--up" viewBox="0 0 120 28" preserveAspectRatio="none" data-kit="spark" role="img" aria-label="a synthetic rising line"><path d="M0 22 L15 20 L30 21 L45 15 L60 16 L75 10 L90 12 L105 6 L120 4"/></svg>
+        <svg class="sv-spark sv-spark--down" viewBox="0 0 120 28" preserveAspectRatio="none" role="img" aria-label="a synthetic falling line"><path d="M0 5 L15 8 L30 7 L45 12 L60 11 L75 16 L90 15 L105 20 L120 23"/></svg>
+      </div>
+    </section>
+
+    {# ── Chips ── #}
+    <section class="sv-panel" aria-labelledby="dkChips">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkChips">Chips</span><span class="sv-panel-meta">five styles instead of ten</span></div>
+      <div class="sv-panel-body dk-stack">
+        <div class="dk-row" data-kit="worlds">{% money_world "live" compact="1" %}{% money_world "demo" %}{% money_world "paper" %}</div>
+        <div class="dk-row" data-kit="sides"><span class="sv-side sv-side--up">Long</span><span class="sv-side sv-side--down">Short</span><span class="sv-chip">Forex</span><span class="sv-chip">Crypto</span></div>
+        <div class="dk-row" data-kit="states"><span class="sv-state sv-state--on">On</span><span class="sv-state sv-state--off">Off</span><span class="sv-state sv-state--error">Error</span><span class="sv-state sv-state--stale">Stale</span><span class="sv-state sv-state--pending">Closing</span></div>
+        <div class="dk-row" data-kit="counts"><span class="sv-count">13</span><span class="sv-ai">model</span><span class="sv-est">estimate</span></div>
+        <div class="dk-stack" data-kit="fresh">
+          <span class="sv-fresh sv-fresh--live">eToro · live</span>
+          <span class="sv-fresh">eToro · <span class="sv-fresh-age">12 s</span></span>
+          <span class="sv-fresh sv-fresh--stale">eToro · <span class="sv-fresh-age">3 min</span> · <span class="sv-fresh-stale-word">stale</span></span>
+          <span class="sv-fresh sv-fresh--closed">eToro · closed</span>
+          <span class="sv-fresh sv-fresh--ref">Binance · <span class="sv-fresh-age">18 min</span> · reference</span>
+        </div>
+      </div>
+    </section>
+
+    {# ── Buttons ── #}
+    <section class="sv-panel" aria-labelledby="dkButtons">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkButtons">Buttons</span><span class="sv-panel-meta">only buying and selling carry a market colour</span></div>
+      <div class="sv-panel-body dk-stack" data-kit="buttons">
+        <div class="dk-row"><button type="button" class="btn btn-primary">Save</button><button type="button" class="btn btn-secondary">Preview</button><button type="button" class="btn btn-ghost">Details</button></div>
+        <div class="dk-row"><button type="button" class="btn btn-buy">Buy 20,000 EURUSD</button><button type="button" class="btn btn-sell">Sell 1.5 XAUUSD</button></div>
+        <div class="dk-row"><button type="button" class="btn btn-stop">Close all</button><button type="button" class="btn btn-danger">Turn off</button><button type="button" class="btn btn-icon" aria-label="More">⋯</button><button type="button" class="btn" disabled title="No price: the ticket waits for eToro's next one">Disabled</button></div>
+        <div class="dk-row"><button type="button" class="btn btn-sm">Small</button><button type="button" class="btn">Default</button><button type="button" class="btn btn-lg">Large</button></div>
+      </div>
+    </section>
+
+    {# ── Controls ── #}
+    <section class="sv-panel" aria-labelledby="dkControls">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkControls">Controls</span></div>
+      <div class="sv-panel-body dk-stack" data-kit="controls">
+        <label class="dk-field"><span class="sv-label">Units</span><span class="dk-field-row"><input type="text" class="sv-input sv-input--num" value="20,000" inputmode="decimal" aria-label="Units (synthetic)"><span class="sv-unit">units</span></span></label>
+        <label class="dk-field"><span class="sv-label">PIN · places a live order (real money)</span><input type="password" class="sv-input sv-pin-field" inputmode="numeric" autocomplete="off" placeholder="PIN" aria-label="PIN (synthetic, does nothing)" style="max-width: 180px;"></label>
+        <div class="dk-row">
+          <label class="dk-row"><input type="checkbox" checked> Demo account</label>
+          <label class="dk-row"><input type="radio" name="dk-radio" checked> Paper</label>
+          <label class="dk-row"><input type="radio" name="dk-radio"> Live</label>
+        </div>
+        <label class="sv-toggle"><input type="checkbox" checked><span class="sv-toggle-track"></span>Compact rows (a display preference)</label>
+        <div class="sv-tabs" role="tablist" data-kit="tabs"><button type="button" class="sv-tab is-active" role="tab" aria-selected="true">Open</button><button type="button" class="sv-tab" role="tab" aria-selected="false">Closed</button><button type="button" class="sv-tab" role="tab" aria-selected="false">History</button></div>
+        <div class="sv-seg" data-kit="seg"><button type="button" class="sv-seg-btn">5m</button><button type="button" class="sv-seg-btn">15m</button><button type="button" class="sv-seg-btn is-active" aria-pressed="true">1h</button><button type="button" class="sv-seg-btn">4h</button><button type="button" class="sv-seg-btn">1D</button></div>
+        <div class="sv-menu dk-static-menu" role="menu" data-kit="menu"><button type="button" class="sv-menu-item" role="menuitem">✓ Newest first</button><button type="button" class="sv-menu-item" role="menuitem">Score</button><div class="sv-menu-sep"></div><button type="button" class="sv-menu-item" role="menuitem">Symbol</button></div>
+      </div>
+    </section>
+
+    {# ── Notices and the empty state ── #}
+    <section class="sv-panel" aria-labelledby="dkNotices">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkNotices">Notices</span></div>
+      <div class="sv-panel-body dk-stack" data-kit="notices">
+        <div class="sv-notice"><span class="sv-notice-icon">ⓘ</span><div><div class="sv-notice-title">Market closed</div><div>Prices are the last close; they update when the session opens.</div></div></div>
+        <div class="sv-notice sv-notice--warn"><span class="sv-notice-icon">⚠</span><div><div class="sv-notice-title">2 warnings</div><div>Book limit near · no Sauron signal on this side.</div></div></div>
+        <div class="sv-notice sv-notice--danger"><span class="sv-notice-icon">⨯</span><div><div class="sv-notice-title">Close refused</div><div>The broker said no; the position is still open.</div></div></div>
+        <div class="sv-empty-state" data-kit="empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"/><path d="M5.5 12c1.9-3 4-4.4 6.5-4.4s4.6 1.4 6.5 4.4c-1.9 3-4 4.4-6.5 4.4S7.4 15 5.5 12z"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/></svg>
+          <p>No position is open.</p>
+          <button type="button" class="btn btn-sm">Open the signals</button>
+        </div>
+      </div>
+    </section>
+
+    {# ── The number rules ── #}
+    <section class="sv-panel" aria-labelledby="dkNumbers">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkNumbers">Number rules</span><span class="sv-panel-meta">the qty and src_name filters</span></div>
+      <div class="sv-panel-body">
+        <dl class="sv-kv" data-kit="numbers">
+          {% for v in qty_samples %}<div><dt>{{ v|default:"none" }}</dt><dd>{{ v|qty }}</dd></div>{% endfor %}
+          {% for s in src_samples %}<div><dt>{{ s }}</dt><dd>{{ s|src_name }}</dd></div>{% endfor %}
+        </dl>
+      </div>
+    </section>
+  </div>
+
+  {# ── Overlays ── #}
+  <div class="dk-grid">
+    <section class="dk-stack" aria-labelledby="dkPopover">
+      <span class="sv-label" id="dkPopover">Popover</span>
+      <div class="sv-popover" data-kit="popover">
+        <div class="sv-popover-head"><span>XAUUSD · SHORT · 0.72</span><button type="button" class="btn btn-ghost btn-icon" aria-label="Close">×</button></div>
+        <div class="sv-popover-body dk-stack">
+          <dl class="sv-kv sv-kv--3"><div><dt>Entry</dt><dd>2,648.0</dd></div><div><dt>Stop</dt><dd class="down">2,672.0</dd></div><div><dt>Target</dt><dd class="up">2,600.0</dd></div></dl>
+          <p>The 4h range broke on rising volume; the daily trend points down. Reward to risk 2.0.</p>
+        </div>
+        <div class="sv-popover-foot"><button type="button" class="btn btn-ghost">Pass</button><button type="button" class="btn btn-sell">Add to position</button></div>
+      </div>
+    </section>
+    <section class="dk-stack" aria-labelledby="dkDialog">
+      <span class="sv-label" id="dkDialog">Dialog · a real-money order</span>
+      <div class="sv-dialog sv-dialog--danger dk-static-dialog" data-kit="dialog">
+        <div class="sv-dialog-head"><span class="sv-dialog-title">Buy EURUSD</span>{% money_world "live" compact="1" %}</div>
+        <div class="sv-dialog-body">
+          <p class="sv-dialog-msg">Executes immediately on the LIVE venue: real funds move at the broker.</p>
+          <div class="sv-dialog-facts"><div class="sv-dialog-fact"><span class="lbl">Units</span><span>20,000</span></div><div class="sv-dialog-fact"><span class="lbl">At the stop</span><span class="down">-117.80</span></div></div>
+        </div>
+        <div class="sv-dialog-foot"><button type="button" class="sv-dialog-btn">Cancel</button><button type="button" class="sv-dialog-btn sv-dialog-btn--go">Buy 20,000 EURUSD</button></div>
+      </div>
+    </section>
+  </div>
+
+</div>
+<!-- /dk-page -->
+{% endblock %}
