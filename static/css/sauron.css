@@ -44,10 +44,17 @@
             --topbar-height: 56px;
         }
         /* The browser's own parts follow the theme (2026-11-06). With no
-           colour scheme it paints them in its light default: scrollbars, a
-           select's open list, date pickers, any control no rule dresses.
-           The light-mode class sits on <body> (base.html), and the page's
-           scrollbars follow the root, hence :has(). */
+           colour scheme the browser paints what no rule dresses in its
+           light default. In Chromium that is a button left unstyled (a
+           light grey face with black text; a button that sets no colour of
+           its own wrote in black) and the frame of a select's open list,
+           whose options are dressed further down; in Firefox, which skips
+           the ::-webkit-scrollbar rules below, the page's scrollbars too.
+           Chromium's scrollbars (those rules, and the table wrappers'
+           scrollbar-color) and the date inputs (their own color-scheme)
+           were dressed already and do not change. The light-mode class
+           sits on <body> (base.html), and the page's scrollbars follow the
+           root, hence :has(). */
         :root { color-scheme: dark; }
         :root:has(> body.light-mode) { color-scheme: light; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -59,9 +66,13 @@
         /* Links (2026-11-06). A link no class dresses took the browser's
            blue, unreadable on the void (/orcs/ "Orc #13", footnotes). Now
            the text colour, underlined at 40 %, the full underline under the
-           pointer. :where() keeps both rules at an element's weight, so any
-           class that dresses its links still wins, and an <a> with no href
-           (no link) is left alone. */
+           pointer. :where() keeps both rules at an element's weight, so
+           whatever sets a link's colour (a class, a page's rule, an inline
+           style) keeps it. Its underline is another matter: where the
+           browser's is kept, it takes the 40 % tint of that colour unless
+           the same rule sets text-decoration too (the accent "… →" links
+           of /ops/, /command/ and the admin dashboard, for instance). An
+           <a> with no href (no link) is left alone. */
         a:where(:any-link) {
             color: var(--text-primary);
             text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
@@ -7510,9 +7521,15 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     vertical-align: middle;
 }
 /* A <button> does not inherit the page's font: the browser gives it its
-   own, and the bid and the ask printed on these two in Arial beside a
-   spread in the mono face (2026-11-06). The platform-wide reset is the
-   UI plan's next stage; the ticket cannot wait for it. */
+   own, and the two TAKE TRADE buttons printed their side labels
+   ("▼ SHORT", "▲ LONG") and their prices, the bid and the ask, in Arial
+   beside a spread in the mono face (2026-11-06). The whole shorthand now
+   comes from the ticket, the line height (1.6) with the face: the 9 px
+   label's line box grows from 10 to 14.4 px, so label and price sit
+   about 2 px further apart inside buttons whose size does not change
+   (the price keeps the line height .tk-px gives it). The platform-wide
+   reset is the UI plan's next stage, with the same result; the ticket
+   cannot wait for it. */
 .sv-ticket button { font: inherit; }
 .tk-side {
     display: flex;

@@ -74,6 +74,69 @@ body:has(.sv-sel-bar) .main-content { overflow-x: clip; }
    back its track; the table scrolls in its own wrapper, as it did under
    hidden. */
 body:has(.sv-sel-bar) .main-content { min-width: 0; }
+/* What the column's own width costs, paid for (2026-11-06). The tables
+   no longer borrow the rail's room, and two things the borrowed room had
+   hidden showed:
+   - THE ROW'S CLOSE. The book's table is wider than the column at most
+     desk widths, so CLOSE sat past the right edge of its wrapper until
+     the table was scrolled sideways: from 1280 to 1600 already on main
+     (with the rail open, under the rail, where no click reached it), and
+     now also at 1680 with the rail shut and at 1920 with it open, where
+     main showed it whole because the column ran under the rail by its
+     padding alone (on the synthetic fixture: cut to 68 % and 73 %,
+     "CLOS…"). Wider than a phone, the action column is pinned to the
+     wrapper's right edge: the button is whole whatever the scroll, and
+     the columns before it scroll under it, behind a hairline and a short
+     shadow, so a figure cut there reads as cut, not as a shorter figure.
+     The pinned cell needs a ground of its own, or what scrolls under it
+     would show through; so what the row paints is repeated on it - the
+     ticked tint (the rule above), the even rows' stripe and the hover
+     ground (.sv-perf-table and tbody rows, sauron.css) - over the card's
+     colour. It sits on the ladder's sticky rung (sv-overlay.css), the
+     selection bar's: the bar comes later in the card and stays above it.
+     A group's header row spans the table and is not pinned.
+     Phones (768 px and below, where the book's table stacks into cards)
+     are left as they were.
+   - THE SMALL CARDS ABOVE THE TABLE. Three to a row in a 640 px column,
+     the asset-class card cut its "unreal P&L" figure mid-number or hid
+     the column outright, and the month labels shrank to "D… J… F…". No
+     card in that row is now narrower than 300 px: it holds two, the
+     third under them, while three do not fit (at 1280, and at 1440 with
+     the rail open), and three as before where they do. */
+@media (min-width: 769px) {
+    body:has(.sv-sel-bar) .table-wrapper > table:has([data-sv-close-trade]) > :is(thead, tbody) > tr > :last-child:not([colspan]) {
+        position: sticky;
+        right: 0;
+        z-index: var(--z-sticky);
+        background:
+            linear-gradient(var(--sv-pin-tint, transparent), var(--sv-pin-tint, transparent)),
+            linear-gradient(var(--sv-pin-row, transparent), var(--sv-pin-row, transparent)),
+            var(--bg-card);
+        box-shadow: inset 1px 0 0 var(--border);
+    }
+    body:has(.sv-sel-bar) .table-wrapper > table:has([data-sv-close-trade]) > :is(thead, tbody) > tr > :last-child:not([colspan])::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 100%;
+        width: 14px;
+        pointer-events: none;
+        background: linear-gradient(to left, color-mix(in srgb, var(--bg-void) 75%, transparent), transparent);
+    }
+    body:has(.sv-sel-bar) .sv-perf-table > tbody > tr:nth-child(even) {
+        --sv-pin-row: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 35%, transparent);
+    }
+    body:has(.sv-sel-bar) .table-wrapper > table > tbody > tr:hover {
+        --sv-pin-row: var(--bg-card-hover, var(--bg-card));
+    }
+    body:has(.sv-sel-bar) [data-sv-position-row]:has(> td > .sv-sel-box:checked) {
+        --sv-pin-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+    }
+}
+body:has(.sv-sel-bar) .grid-3 {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+}
 .sv-sel-bar {
     position: sticky;
     bottom: calc(var(--se-bottom-edge, 24px) + var(--se-fab-size, 56px) + 16px);

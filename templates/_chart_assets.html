@@ -4,6 +4,13 @@ and draw through the ready hook, never straight after the include:
 
     window.svChartJsReady(function () { ... new Chart(...) ... });
 
+Only _signals_metrics.html does so far. The portfolio, strategies, news and
+backtest fragments still call `new Chart` straight after the include: their
+first swap throws "Chart is not defined" and draws nothing, as it did before
+this loader, and the news fragment's five-minute refresh draws once the
+library is there. Moving each into the hook is a follow-up outside the UI
+plan's S0, whose files these are not (2026-11-06).
+
 Every includer is an htmx fragment (/htmx/metrics/*). htmx re-creates the
 scripts of what it swaps in: the library's script tag came back as a script
 that loads in the background, while the inline chart code after it ran at
@@ -16,8 +23,9 @@ So the guard is the page's. The script below runs at every include. The
 first include on a page adds the library's script element and the ready
 hook; the library's load event sets the theme's defaults and runs what the
 hook was handed. Later includes (the signals fragment refreshes every
-minute) find the library or its script on the way, add nothing, and their
-charts draw at once. A load that fails is said in the console, and the next
+minute) find the library, or its script on the way, and add nothing: what
+they hand the hook draws at once when the library is there and at its load
+event otherwise. A load that fails is said in the console, and the next
 include tries again.
 {% endcomment %}
 <script>
