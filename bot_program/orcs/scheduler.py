@@ -49,7 +49,11 @@ is claimed: the worker (tasks.orc_think) and the watchdog
   watch    A.54-A.56 (orc_minds_watch, on `slow`): the stall alarm, the
            stale and backlog closes, the wall time, the holds, the
            breaker, the ledger gaps; and a ticket past its wall time made
-           an orphan hold (A.57)
+           an orphan hold (A.57). A call the worker sent that is still
+           inside its wall time (a running wake's, a probe's or a twin's
+           ticket) keeps the worker busy, never silent: from O2b an r3 or
+           r4 call may run past the 30-minute stale clock (2026-11-06,
+           completing O2b)
   tickets  A.57 (O2a's arm, 2026-11-05): every model call that is not a
            wake (from O2a, `orcs smoke --row`; from O2b the probes) holds
            its bound through reserve_ticket, under the line lock: its
@@ -224,6 +228,11 @@ BUDGET_CODES = (CODE_TRIAGE, CODE_INFLIGHT, CODE_DAY_CAP, CODE_ROUTINE_CAP,
                 CODE_DOLLAR_CAP, "line", "total", "deep_share")
 #: The return's words (A.53).
 RETURN_WORDS = "The Orc reads its position again: it cited the takeover."
+#: A.55 (2026-11-06, completing O2b): the ticket callers the `orcs` worker
+#: itself sends (the probes, after its claims; r5's blind twin, beside its
+#: wake). One of their calls inside its wall time keeps the worker busy;
+#: the smoke is sent from the shell, never by the worker.
+WORKER_TICKET_CALLERS = (PROBE_CALLER, TWIN_CALLER)
 
 
 def _utc(now):
@@ -1798,28 +1807,83 @@ def _stalled(now) -> int:
     return n
 
 
+def _wall_s(comps) -> int:
+    """A.21's wall time of a running wake, in seconds: WALL_S of the rung
+    it was claimed on (components["rung"]; r0 when it names none), plus
+    its twin's for an r5 wake's pair (O2b's frontier, 2026-11-06), sent
+    one after the other within the claim's one wall time. _wall_time
+    closes a wake past it; _worker_silent counts a wake inside it as a
+    call in flight."""
+    comps = comps if isinstance(comps, dict) else {}
+    rung = str(comps.get("rung") or O2A_RUNG)
+    wall = WALL_S.get(rung, WALL_S[O2A_RUNG])
+    twin = comps.get("twin") if isinstance(comps.get("twin"), dict) else {}
+    if twin.get("rung") in WALL_S:
+        wall += WALL_S[twin["rung"]]
+    return int(wall)
+
+
+def _calls_in_flight(now) -> bool:
+    """A.55 (2026-11-06, completing O2b): a call the worker sent is still
+    inside its wall time: a running wake claimed less than its wall time
+    ago (_wall_s), or a ticket of a caller the worker itself sends
+    (WORKER_TICKET_CALLERS: the probes, r5's twin) reserved less than its
+    `wall_s` ago. From O2b such a call may run past STALE_MIN (r3's wall
+    is 2,160 s, r4's 3,460 s), and while it does the worker is busy. A
+    smoke's ticket is the shell's, never the worker's; a call past its
+    wall time is the wall time's to judge (A.55, A.57). Reads only."""
+    from bot_program.orcs.models import OrcWake
+    for started, comps in OrcWake.objects.filter(
+            status=WAKE_STATUS_RUNNING, started_at__isnull=False,
+            started_at__lte=now).values_list("started_at", "components"):
+        if now - started <= timedelta(seconds=_wall_s(comps)):
+            return True
+    value = _setting(MINDS_INFLIGHT_KEY)
+    for entry in _pruned(value if isinstance(value, dict) else {},
+                         now).values():
+        if entry.get("kind") != HOLD_TICKET or \
+                entry.get("caller") not in WORKER_TICKET_CALLERS:
+            continue
+        at = _parse(entry.get("at"))
+        try:
+            wall = float(entry.get("wall_s") or 0)
+        except (TypeError, ValueError):
+            continue
+        if at is not None and at <= now and \
+                now - at <= timedelta(seconds=wall):
+            return True
+    return False
+
+
 def _worker_silent(now) -> bool:
     """A.55: no wake was claimed (started_at) and none settled in the
-    last STALE_MIN. A settle is a claimed wake that finished; a wake the
-    watchdog closed for its wall time is not one."""
+    last STALE_MIN, and no call the worker sent is still inside its wall
+    time (_calls_in_flight; 2026-11-06, completing O2b: from O2b an r3 or
+    r4 call, a routed wake's or a probe's, may run past STALE_MIN, and a
+    wake that waited behind it waited behind a busy worker, §4 Q8). A
+    settle is a claimed wake that finished; a wake the watchdog closed for
+    its wall time is not one."""
     from bot_program.orcs.models import OrcWake
     cutoff = now - timedelta(minutes=STALE_MIN)
     if OrcWake.objects.filter(started_at__gte=cutoff,
                               started_at__lte=now).exists():
         return False
-    return not (OrcWake.objects.filter(started_at__isnull=False,
-                                       finished_at__gte=cutoff,
-                                       finished_at__lte=now)
-                .exclude(skipped_reason=CODE_WALL_TIME).exists())
+    if OrcWake.objects.filter(started_at__isnull=False,
+                              finished_at__gte=cutoff,
+                              finished_at__lte=now) \
+            .exclude(skipped_reason=CODE_WALL_TIME).exists():
+        return False
+    return not _calls_in_flight(now)
 
 
 def _stale(now, *, paused) -> dict:
     """A.55: each pending wake older than STALE_MIN is closed: answered by
     code while a gate is OFF (its code) or after a pause of the watchdog
     (`paused`), with no care; `stale` with `worker_silent` when the worker
-    was silent, and its Orc goes to the care (A.52); else `skipped` with
-    `backlog`: it waited behind a busy worker, a code answer, never a
-    refusal and never silence."""
+    was silent (_worker_silent), and its Orc goes to the care (A.52); else
+    `skipped` with `backlog`: it waited behind a busy worker (a claim or a
+    settle in the last STALE_MIN, or a call still inside its wall time), a
+    code answer, never a refusal and never silence."""
     from bot_program.orcs import journal, switches
     from bot_program.orcs.models import OrcWake
     out = {"stale": 0, "backlog": 0, "by_code": 0}
@@ -1871,14 +1935,9 @@ def _wall_time(now) -> int:
                                           started_at__isnull=False)):
         comps = w0.components if isinstance(w0.components, dict) else {}
         rung = str(comps.get("rung") or O2A_RUNG)
-        wall = WALL_S.get(rung, WALL_S[O2A_RUNG])
-        twin = comps.get("twin") if isinstance(comps.get("twin"),
-                                               dict) else {}
-        if twin.get("rung") in WALL_S:
-            # an r5 wake's pair (O2b's frontier, 2026-11-06): its twin is
-            # sent first, then r5, within the claim's one wall time
-            wall += WALL_S[twin["rung"]]
-        if now - w0.started_at <= timedelta(seconds=wall):
+        # an r5 wake's pair (O2b's frontier, 2026-11-06): its twin is sent
+        # first, then r5, within the claim's one wall time (_wall_s)
+        if now - w0.started_at <= timedelta(seconds=_wall_s(comps)):
             continue
         with transaction.atomic():
             line_lock()

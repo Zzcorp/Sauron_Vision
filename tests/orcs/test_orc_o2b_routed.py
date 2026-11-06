@@ -22,6 +22,12 @@ turns a switch on for the operator: every gate answers as it ships.
 - the answering rung: RUNG_LIMITS, the bound, the tier, the source_ref and
   the grade's tag are r2's while would_rung keeps r3; so are the HIGH in
   flight and the wall time
+- a long call keeps the worker busy (A.55, §4 Q8; 2026-11-06, completing
+  O2b): behind another Orc's r3 call, a real-money Orc's own r4 call, an
+  r5 pair or an r3 probe, each still inside its wall time past the
+  30-minute stale clock, the wake that waited closes `backlog` and no Orc
+  goes to the care; past the wall, or behind a smoke sent from the shell,
+  the worker is silent
 - effort without a PASS: r1 is sent as r0 and r3 as r2; with the PASS the
   effort-only message carries the rung's effort and the top-level effort
   is the model's default
@@ -465,6 +471,163 @@ class TheAnsweringRungTests(_Routed):
         self.assertEqual((out["status"], twin.status, twin.est_usd),
                          ("failed", "failed", Decimal(0)))
         self.assertNotIn(f"w{twin.pk}", self.holds())
+
+
+class TheLongCallsKeepTheWorkerBusyTests(_Routed):
+    """A.55, §4 Q8 (2026-11-06, completing O2b): from O2b a call may run
+    past STALE_MIN inside its wall time (A.21: r3's 2,160 s, r4's and r5's
+    3,460 s, an r5 pair's both), a routed wake's or a probe's ticket. While
+    one does, the worker is busy, never silent: a wake that waited 31
+    minutes behind it closes `backlog`, a code answer, and no Orc goes to
+    the care. Each with its pair: past its wall time the same call keeps
+    nothing busy, and a smoke's ticket (sent from the shell, never by the
+    worker) never does."""
+
+    def running(self, orc, *, started, rung="r3", **comps):
+        """A wake of `orc` claimed at `started` on `rung`, still running."""
+        from bot_program.orcs.models import OrcWake
+        n = OrcWake.objects.count()
+        return OrcWake.objects.create(
+            orc=orc, reasons=[], dedupe_key=f"long{n}", kind="material",
+            status="running", est_usd=Decimal("0.71"), started_at=started,
+            components={"rung": rung, **comps})
+
+    def ticket(self, caller, rung, at, **extra):
+        """A ticket of `caller` on `rung` reserved at `at`, as the probes
+        (probes.send) and the smoke (orcs smoke --row) reserve theirs."""
+        from bot_program.orcs import scheduler
+        got = scheduler.reserve_ticket(caller, {
+            "rung": rung, "tokens": 1000, "orc": self.orc.pk,
+            "ref": f"Orc:{self.orc.pk}:Wake:0:{caller}:{rung}", **extra},
+            now=at)
+        self.assertTrue(got["ok"], got["code"])
+        return got["key"]
+
+    def assert_busy(self, out, waiting):
+        """The waiting wake closed behind a busy worker: `backlog`, and its
+        Orc kept from the care."""
+        from bot_program.orcs.models import Orc
+        waiting.refresh_from_db()
+        self.assertEqual((waiting.status, waiting.skipped_reason),
+                         ("skipped", "backlog"))
+        self.assertEqual((out["minds_backlog"], out["minds_stale"]), (1, 0))
+        orc = Orc.objects.get(pk=waiting.orc_id)
+        self.assertNotEqual(orc.state, "care_owned")
+        self.assertEqual(self.took(orc), [])
+
+    def assert_silent(self, out, waiting):
+        """The waiting wake closed for a silent worker: `stale`,
+        `worker_silent`, and its Orc to the care (A.52)."""
+        from bot_program.orcs.models import Orc
+        waiting.refresh_from_db()
+        self.assertEqual((waiting.status, waiting.skipped_reason),
+                         ("stale", "worker_silent"))
+        self.assertEqual(out["minds_stale"], 1)
+        orc = Orc.objects.get(pk=waiting.orc_id)
+        self.assertEqual(orc.state, "care_owned")
+        self.assertEqual(len(self.took(orc)), 1)
+
+    def test_another_orcs_r3_call_inside_its_wall_is_a_busy_worker(self):
+        """Another Orc's r3 call claimed 31 minutes ago (r3's wall is 36):
+        the wake that waited 31 minutes closes `backlog` and the call runs
+        on. The pair: once that call is past its wall, a wake that waited
+        31 minutes reads a silent worker, and the call is closed for its
+        wall time in the same pass."""
+        from bot_program.orcs.constants import STALE_MIN, WALL_S
+        base = self.rendered([W4])
+        now = timezone.now()
+        started = now - timedelta(minutes=31)
+        self.assertLess(STALE_MIN * 60, 31 * 60)
+        self.assertLess(31 * 60, WALL_S["r3"])
+        other = self.orcs(1)[0]
+        run = self.running(other, started=started)
+        waiting = self.pending(base, now - timedelta(minutes=31),
+                               reasons=[W4])
+        self.assert_busy(self.watch(now), waiting)
+        self.assertEqual(self.fresh(run).status, "running")
+        later = started + timedelta(seconds=WALL_S["r3"] + 60)
+        again = self.pending(base, later - timedelta(minutes=31),
+                             reasons=[W4])
+        self.assert_silent(self.watch(later), again)
+        run = self.fresh(run)
+        self.assertEqual((run.status, run.skipped_reason),
+                         ("failed", "wall_time"))
+
+    def test_its_own_orcs_r4_call_inside_its_wall_is_a_busy_worker(self):
+        """A.18: one call in flight per Orc, so a real-money Orc's next
+        wake waits behind its own r4 call, claimed 40 minutes ago (r4's
+        wall is 58): it closes `backlog` after 31 minutes, never
+        `worker_silent`, and the care never takes that Orc. The pair: past
+        r4's wall, the same wait reads a silent worker."""
+        from bot_program.orcs.constants import WALL_S
+        live = self.live()
+        base = self.rendered([W4], orc=live)
+        now = timezone.now()
+        started = now - timedelta(minutes=40)
+        self.assertLess(40 * 60, WALL_S["r4"])
+        run = self.running(live, started=started, rung="r4")
+        waiting = self.pending(base, now - timedelta(minutes=31), orc=live,
+                               reasons=[W4])
+        self.assert_busy(self.watch(now), waiting)
+        self.assertEqual(self.fresh(run).status, "running")
+        later = started + timedelta(seconds=WALL_S["r4"] + 60)
+        again = self.pending(base, later - timedelta(minutes=31), orc=live,
+                             reasons=[W4])
+        self.assert_silent(self.watch(later), again)
+        self.assertEqual(self.fresh(run).skipped_reason, "wall_time")
+
+    def test_an_r5_pairs_wall_is_the_wall_times_own(self):
+        """An r5 wake's pair (O2b's frontier) is sent within one wall time,
+        r5's and its twin's: claimed 70 minutes ago, past r5's 58 minutes
+        alone, it still keeps the worker busy, as _wall_time keeps it
+        running. The pair: past both walls, a silent worker."""
+        from bot_program.orcs.constants import WALL_S
+        base = self.rendered([W4])
+        now = timezone.now()
+        started = now - timedelta(minutes=70)
+        self.assertLess(WALL_S["r5"], 70 * 60)
+        self.assertLess(70 * 60, WALL_S["r5"] + WALL_S["r4"])
+        run = self.running(self.orcs(1)[0], started=started, rung="r5",
+                           twin={"key": "tpair", "rung": "r4", "bound": 0.87,
+                                 "ref": "x"})
+        waiting = self.pending(base, now - timedelta(minutes=31),
+                               reasons=[W4])
+        self.assert_busy(self.watch(now), waiting)
+        self.assertEqual(self.fresh(run).status, "running")
+        later = started + timedelta(seconds=WALL_S["r5"] + WALL_S["r4"]
+                                    + 60)
+        again = self.pending(base, later - timedelta(minutes=31),
+                             reasons=[W4])
+        self.assert_silent(self.watch(later), again)
+        self.assertEqual(self.fresh(run).skipped_reason, "wall_time")
+
+    def test_a_probe_inside_its_wall_is_a_busy_worker_a_smoke_never(self):
+        """The worker sends the probes (tasks.orc_think, after its claims):
+        an r3 probe reserved 31 minutes ago, inside r3's wall, keeps it
+        busy, and the wake that waited 31 minutes closes `backlog`. The
+        pair: once that probe is past its wall, a smoke's r4 ticket
+        reserved 31 minutes ago (the shell's call, inside its own wall)
+        keeps nothing busy: a silent worker."""
+        from bot_program.orcs.constants import WALL_S
+        _verdicts(sonnet="pass", opus="pass")
+        _switch("orcs_probes", True)
+        base = self.rendered([W4])
+        now = timezone.now()
+        at = now - timedelta(minutes=31)
+        probe = self.ticket("probe", "r3", at, kind="boundary",
+                            user=self.user.pk, would_rung="r3",
+                            item="probe:0:boundary")
+        self.assertEqual(self.tickets()[probe]["wall_s"], WALL_S["r3"])
+        waiting = self.pending(base, at, reasons=[W4])
+        self.assert_busy(self.watch(now), waiting)
+        self.assertEqual(self.tickets()[probe]["kind"], "ticket",
+                         "still in flight")
+        later = at + timedelta(seconds=WALL_S["r3"] + 60)
+        smoke = self.ticket("smoke", "r4", later - timedelta(minutes=31))
+        self.assertLess(31 * 60, self.tickets()[smoke]["wall_s"])
+        again = self.pending(base, later - timedelta(minutes=31),
+                             reasons=[W4])
+        self.assert_silent(self.watch(later), again)
 
 
 class EffortWithoutAPassTests(_Routed):
@@ -1000,6 +1163,14 @@ class TheRouterRunbookTests(MindTestCase):
         self.assertLess(section.index("1. Record the smoke's PASS"),
                         section.index("3. On /ops/"),
                         "the PASS is recorded first")
+        # A.55, §4 Q8 (2026-11-06, completing O2b): a long Opus call is a
+        # busy worker, never a silent one
+        self.assertIn("An Opus call may run past 30 minutes inside its "
+                      "wall time (about 36 minutes on r3, 58 on r4): a "
+                      "wake that waits behind it, its own Orc's next wake "
+                      "included, is answered by code as a backlog after 30 "
+                      "minutes, and no Orc goes to the care for that wait.",
+                      section)
         self.assertNotIn("component on orcs_router", text)
         # K-R8: the verdict the router assumes until one is recorded
         smoke = " ".join(text.split("**The provider smoke.**", 1)[1].split(

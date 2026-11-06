@@ -1984,6 +1984,13 @@ $1.37 on r4. Inside the line, calls on the deep tier (r2 to r4) stop at
 real-money urgent wake; the triage, each Orc's day caps and the $3.00
 held for calls in flight still bind.
 
+An Opus call may run past 30 minutes inside its wall time (about 36
+minutes on r3, 58 on r4): a wake that waits behind it, its own Orc's next
+wake included, is answered by code as a backlog after 30 minutes, and no
+Orc goes to the care for that wait. Only a worker with no call in flight,
+none claimed and none settled for 30 minutes is silent, which hands the
+waiting wake's Orc to the care.
+
 To stop it: turning `orcs_router` OFF takes no PIN. A wake already
 waiting is answered on r0 at the next claim, re-priced on r0 (its stored
 dossier still fits), and every later wake is answered on r0, its route
