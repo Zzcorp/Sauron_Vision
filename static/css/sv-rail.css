@@ -1,0 +1,466 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   THE SIGNAL RAIL (2026-11-06)
+   Every signal that can be acted on now, newest first, scrolling inside
+   the rail; the facet strip's counts per asset class; LEFT THE RAIL, each
+   departure in words. The rows carry their facts as data-* attributes and
+   the state sits on the hosts no refresh replaces, so these rules — and
+   no script — decide what shows. Linked after sv-council-band.css and
+   before the phone tier (templates/base.html).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── the rail head: "↻ N new" while a refresh waits for the reader ───── */
+.rail-head .rh-held {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border: 1px solid var(--accent-dim);
+    border-radius: 9px;
+    background: rgba(0, 232, 104, 0.08);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.rail-head .rh-held:hover { background: var(--accent-dim); }
+.rail-head .rh-held[hidden] { display: none; }
+.signals-rail:not(.open) .rh-held { display: none; }
+
+/* ── the facet strip: one count per asset class, and the LEFT chip ───── */
+.rail-facets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+    flex-shrink: 0;
+}
+.rf-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+.rf-chip b { color: var(--text-secondary); font-weight: 700; }
+/* A class with nothing on the rail is drawn and hidden, so a refresh can
+   light it up without new markup. The LEFT chip always shows. */
+.rf-chip[data-n="0"]:not(.rf-gone):not([aria-pressed="true"]) { display: none; }
+button.rf-chip { cursor: pointer; }
+button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-glow); }
+.rf-chip[aria-pressed="true"] {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: var(--accent);
+}
+.rf-chip[aria-pressed="true"] b { color: var(--accent); }
+.signals-rail:not(.open) .rail-facets { display: none; }
+.rail-section.collapsed .rail-facets { display: none; }
+
+/* ── the list ────────────────────────────────────────────────────────── */
+.sr-list { display: flex; flex-direction: column; }
+.sr-list > * { flex-shrink: 0; }
+.sr-signal .sr-row3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.sr-signal .sr-row3 .sr-rule {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.sr-stage {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 7.5px;
+    letter-spacing: .8px;
+    color: var(--text-muted);
+}
+.sr-stage-bearish { color: var(--accent-red); border-color: rgba(255, 94, 94, 0.45); }
+.sr-stage-high { color: var(--accent-gold-ink, #e8a33d); border-color: rgba(232, 163, 61, 0.45); }
+.sr-stage-medium { color: var(--text-secondary); }
+.sr-contra {
+    margin-top: 3px;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: .5px;
+    color: var(--accent-gold-ink, #e8a33d);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sr-pop-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: -4px 0 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.sr-pop-fact .sr-pop-k { margin-right: 4px; }
+.sr-pop-one {
+    flex: 1 1 auto;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent-gold-ink, #e8a33d);
+    border: 1px dashed rgba(232, 163, 61, 0.45);
+    border-radius: 2px;
+    text-align: center;
+}
+.sr-rail-note {
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+    border-bottom: 1px dashed var(--border);
+}
+.sr-rail-error { color: var(--accent-red); }
+
+/* ── LEFT THE RAIL: hidden unless the rail section says so ───────────── */
+[data-sv-fhost="signals"]:not([data-f-gone="1"]) [data-sv-gone] { display: none; }
+.sr-gone {
+    border-bottom: 1px solid var(--border-glow);
+    background: rgba(0, 0, 0, 0.18);
+}
+.sr-gone-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+}
+.sr-gone-tags {
+    padding: 0 12px 6px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-secondary);
+}
+.sr-gone-row {
+    padding: 7px 12px;
+    border-top: 1px dashed rgba(19, 48, 32, 0.6);
+    opacity: .82;
+}
+.sr-gone-row:hover { opacity: 1; background: var(--bg-card-hover); }
+.sr-gone-l1 { display: flex; align-items: center; gap: 6px; }
+.sr-gone-l1 .sr-sym {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.sr-gone-l1 .sr-badge { font-size: 8px; padding: 0 4px; border-radius: 2px; }
+.sr-gone-l1 .sr-badge-bullish { color: var(--accent); background: rgba(0, 232, 104, 0.12); }
+.sr-gone-l1 .sr-badge-bearish { color: var(--accent-red); background: rgba(255, 94, 94, 0.12); }
+.sr-gone-tag {
+    padding: 0 5px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+.sr-gone-tag-stop_crossed, .sr-gone-tag-closed_stop,
+.sr-gone-tag-rule_losing, .sr-gone-tag-rule_losing_live { color: var(--accent-red); border-color: rgba(255, 94, 94, 0.45); }
+.sr-gone-tag-target_reached, .sr-gone-tag-closed_target,
+.sr-gone-tag-taken { color: var(--accent); border-color: rgba(0, 232, 104, 0.45); }
+.sr-gone-tag-chased, .sr-gone-tag-rule_paused,
+.sr-gone-tag-rule_demoted { color: var(--accent-gold-ink, #e8a33d); border-color: rgba(232, 163, 61, 0.45); }
+.sr-gone-at {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.sr-gone-words, .sr-gone-pos {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+}
+.sr-gone-pos { color: var(--accent-gold-ink, #e8a33d); font-family: var(--font-mono); font-size: 9px; }
+.sr-gone-acts { display: flex; gap: 4px; margin-top: 5px; }
+.sr-gone-btn {
+    padding: 3px 8px;
+    border: 1px solid rgba(0, 232, 104, 0.3);
+    border-radius: 2px;
+    background: rgba(0, 232, 104, 0.06);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    cursor: pointer;
+}
+.sr-gone-btn:hover { background: rgba(0, 232, 104, 0.16); border-color: var(--accent); }
+.sr-gone-btn:disabled { opacity: .5; cursor: default; }
+.sr-gone-empty {
+    padding: 8px 12px 10px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+.signals-rail:not(.open) .sr-gone { display: none; }
+
+/* ── the headband SIGNALS popup: the rail's own rows ─────────────────── */
+.sv-sig-rows { display: flex; flex-direction: column; }
+.sv-sig-rows > * { flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   POPUPS THAT OPEN ON CLICK (2026-11-06)
+   A click or a tap pins the rail's signal card, the rail's watchlist
+   card, the data headband's card and the bottom bar's dropdowns
+   (.sv-pinned); hover still previews on a desktop. A pinned card shows
+   its ×, fits the screen and scrolls inside — with the wheel, the
+   trackpad or a finger — without ever chaining to the page behind.
+   ═══════════════════════════════════════════════════════════════════════ */
+.sv-pop-x {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: auto;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.sv-pop-x:hover, .sv-pop-x:focus-visible { color: var(--accent-red); border-color: var(--accent-red); outline: none; }
+.sv-pinned .sv-pop-x { display: inline-flex; }
+.sr-pop-head .sv-pop-x { margin-left: 6px; }
+.sr-pop-head .sr-urg + .sv-pop-x { margin-left: 6px; }
+.sr-pop-head .sr-pop-dir + .sv-pop-x { margin-left: auto; }
+.dh-pop-head .sv-pop-x { margin-left: 10px; align-self: flex-start; }
+.ip-dd-head .sv-pop-x { float: right; width: 18px; height: 18px; font-size: 12px; margin: -2px 0 0 8px; }
+
+/* The rail's signal card is the scroller: its head and its foot stay put
+   while the body scrolls between them, so TAKE TRADE and PASS are always
+   in view. -13px is the card's own padding. */
+.sr-popup { touch-action: pan-y; overscroll-behavior: contain; }
+.sr-popup::after { top: var(--sr-arrow-y, 50%); }
+.sr-popup .sr-pop-head {
+    position: sticky;
+    top: -13px;
+    z-index: 2;
+    margin: -13px -13px 8px;
+    padding: 13px 13px 8px;
+    background: #071a10;
+}
+.sr-pop-foot {
+    position: sticky;
+    bottom: -13px;
+    z-index: 2;
+    margin: 0 -13px -13px;
+    padding: 8px 13px 13px;
+    background: #050f0a;
+    border-top: 1px solid rgba(0, 232, 104, 0.18);
+}
+body.light-mode .sr-popup .sr-pop-head,
+body.light-mode .sr-pop-foot { background: var(--bg-card, #fff); }
+.sr-popup.sv-pinned { border-color: var(--accent); }
+
+/* Headband cards and dropdowns: the same containment for a finger. */
+.dh-pop, .ip-dropdown { touch-action: pan-y; overscroll-behavior: contain; }
+.ip-dropdown .ip-dd-head {
+    position: sticky;
+    top: -10px;
+    z-index: 2;
+    margin-top: -10px;
+    padding-top: 10px;
+    background: var(--bg-card);
+}
+.ip-dropdown [data-sv-dd-foot] { cursor: pointer; }
+.ip-dropdown .sv-sig-row { cursor: pointer; }
+.ip-dropdown .sv-sig-row:hover { background: var(--bg-card-hover); }
+
+/* A card the operator TAPPED open shows on a touch screen and a small one;
+   a hover card stays hidden there (sv-overlay.css: a tap must not be
+   swallowed by a preview). Higher specificity and !important, so these win
+   whatever the sheet order. */
+@media (max-width: 900px) {
+    .sr-popup.sv-pinned { display: block; }
+}
+@media (max-width: 640px) {
+    .sr-popup.sv-pinned, .dh-pop.sv-pinned { display: block !important; }
+}
+@media (hover: none) {
+    .sr-popup.sv-pinned, .dh-pop.sv-pinned { display: block !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FILTERS AND DISPLAY CHOICES (2026-11-06)
+   State on the host (data-f-* on the signals rail section, the headband
+   SIGNALS dropdown, the watchlist body and the headband WATCHLIST
+   dropdown, rendered from the operator's prefs and rewritten by
+   static/js/sv-rail-filters.js), facts on the row (data-asset-class,
+   data-side, data-score-b, data-votes, data-live, data-held,
+   data-rule-key). A refresh replaces rows, never a host, so a choice
+   survives every refresh by construction. "show all" (data-f-peek) pauses
+   every rule at once. A muted rule is one generated rule in
+   <style id="svRuleOff">.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="stock"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="stock"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="forex"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="forex"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="commodity"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="commodity"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="index"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="index"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="etf"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="etf"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="crypto"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="crypto"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="bond"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="bond"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="options"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="options"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-class]:not([data-f-class=""]):not([data-f-class~="cfd"]) :is([data-sv-row],[data-sv-grp])[data-asset-class="cfd"]{display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-side="long"] [data-sv-row]:not([data-side="long"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-side="short"] [data-sv-row]:not([data-side="short"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="5"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="6"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="7"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"],[data-score-b="6"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="8"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"],[data-score-b="6"],[data-score-b="7"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-score="9"] [data-sv-row]:is([data-score-b="0"],[data-score-b="1"],[data-score-b="2"],[data-score-b="3"],[data-score-b="4"],[data-score-b="5"],[data-score-b="6"],[data-score-b="7"],[data-score-b="8"]){display:none!important}
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-stage="votes"] [data-sv-row][data-votes="0"],
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-stage="live"] [data-sv-row][data-live="0"],
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-held="held"] [data-sv-row][data-held="0"],
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-held="not"] [data-sv-row][data-held="1"]{display:none!important}
+
+/* The lists order by CSS: the DOM stays newest first (and Tab with it),
+   each row carrying its rank for every sort. A host can be the list
+   itself (the watchlist body), hence the compound forms. */
+[data-sv-list]{display:flex;flex-direction:column}
+[data-sv-list]>*{flex-shrink:0}
+[data-f-sort="score"] [data-sv-list]>*,[data-f-sort="score"][data-sv-list]>*{order:var(--o-score,0)}
+[data-f-sort="class"] [data-sv-list]>*,[data-f-sort="class"][data-sv-list]>*,
+[data-f-group="1"] [data-sv-list]>*,[data-f-group="1"][data-sv-list]>*{order:var(--o-cls,0)}
+[data-f-group="1"][data-f-sort="score"] [data-sv-list]>*,[data-f-group="1"][data-f-sort="score"][data-sv-list]>*{order:var(--o-cscore,0)}
+[data-sv-fhost="watch"][data-f-sort="symbol"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-sort="symbol"][data-sv-list]>*{order:var(--o-sym,0)}
+[data-sv-fhost="watch"][data-f-sort="held"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-sort="held"][data-sv-list]>*{order:var(--o-held,0)}
+[data-sv-fhost="watch"][data-f-group="1"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-group="1"][data-sv-list]>*{order:var(--o-cls,0)}
+/* (2026-11-06, the review) Grouped, the held-first sort holds inside each
+   class: --o-cheld is the class, then the held items first. (Grouped by
+   symbol is --o-cls itself: the list is drawn by class, then symbol.) */
+[data-sv-fhost="watch"][data-f-group="1"][data-f-sort="held"] [data-sv-list]>*,[data-sv-fhost="watch"][data-f-group="1"][data-f-sort="held"][data-sv-list]>*{order:var(--o-cheld,0)}
+
+/* Group headers are siblings of the rows, never wrappers (a watchlist item
+   stays a direct child of its body). */
+[data-sv-grp]{display:none}
+[data-f-group="1"] [data-sv-grp]{display:block}
+.sv-grp {
+    padding: 6px 12px 3px;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.12);
+}
+
+/* Density: compact. */
+[data-f-dense="1"] .sr-signal{padding:6px 12px}
+[data-f-dense="1"] .sr-row3{display:none}
+[data-sv-fhost="watch"][data-f-dense="1"] :is(.wl-rowname,.wl-spark){display:none}
+[data-sv-fhost="watch"][data-f-dense="1"] .wl-item{padding:6px 14px;gap:3px}
+
+/* ── the filter controls ─────────────────────────────────────────────── */
+.rf-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 2px; }
+.rf-status {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 14px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.rf-status [data-f-unsaved] { color: var(--accent-red); }
+.rf-peek {
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.rf-peek[hidden] { display: none; }
+.rail-facets.rf-compact { padding: 6px 16px 8px; border-bottom: 1px solid var(--border); background: transparent; }
+.rail-head .rh-gear {
+    flex-shrink: 0;
+    width: 20px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+}
+.rail-head .rh-gear:hover, .rail-head .rh-gear[aria-expanded="true"] { color: var(--accent); border-color: var(--accent-dim); }
+.signals-rail:not(.open) .rh-gear { display: none; }
+.rail-fpanel {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-glow);
+    background: rgba(0, 0, 0, 0.22);
+    flex-shrink: 0;
+    max-height: 45%;
+    overflow-y: auto;
+}
+.rail-fpanel[hidden] { display: none; }
+.signals-rail:not(.open) .rail-fpanel, .rail-section.collapsed .rail-fpanel { display: none; }
+.rf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.rf-k {
+    min-width: 96px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+}
+.rf-opt, .rf-rule {
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    cursor: pointer;
+}
+.rf-opt[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent-dim); color: var(--accent); }
+.rf-rules { display: flex; flex-wrap: wrap; gap: 3px; }
+.rf-rule[aria-pressed="true"] { color: var(--text-primary); border-color: var(--border-glow); }
+.rf-rule[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
+.rf-rule b { color: var(--text-muted); font-weight: 700; }
+.rf-none { font-size: 9px; color: var(--text-muted); }
+.sv-list-note, .ip-dropdown .ip-dd-note {
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.sv-wl-rows { display: flex; flex-direction: column; }

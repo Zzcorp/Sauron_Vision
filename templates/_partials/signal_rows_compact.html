@@ -1,0 +1,23 @@
+{% comment %}
+The headband SIGNALS popup's rows (2026-11-06): the signal rail's own list —
+the same objects (rail.rows, built from the rail's snapshot), the same
+order, the same facts on each row for the same filters. base.html's first
+render draws them inside #hbSignalRows; every rail refresh after that
+paints them from the <template> the rail partial carries, so one fetch
+updates both lists and the 60s headband sweep never writes them. A click
+(or Enter) on a row opens its card in the rail (base.html,
+window.svRailFocus, delegated to #hbSignalRows).
+{% endcomment %}
+{% for g in rail.groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cscore:{{ g.o_cls }};--o-score:0">{{ g.label }}</div>{% endfor %}
+{% for sig in rail.rows %}
+<div class="ip-dd-row sv-sig-row" data-sv-row data-signal-id="{{ sig.id }}" role="button" tabindex="0" data-asset-class="{{ sig.rail.asset_class }}" data-side="{{ sig.rail.side }}" data-score-b="{{ sig.rail.score_band }}" data-stage="{{ sig.rail.stage }}" data-votes="{{ sig.rail.votes|yesno:'1,0' }}" data-live="{{ sig.rail.live|yesno:'1,0' }}" data-held="{{ sig.rail.held|yesno:'1,0' }}" data-rule-key="{{ sig.rail.rule_key }}" data-created="{{ sig.created_at|date:'c' }}" style="--o-score:{{ sig.rail.o_score }};--o-cls:{{ sig.rail.o_cls }};--o-cscore:{{ sig.rail.o_cscore }}" title="{{ sig.rule }}{% if sig.rail.stage_label %} · {{ sig.rail.stage_label }}{% endif %}">
+    <span class="ipr-sym">{{ sig.symbol }}</span>
+    <span class="ipr-side ipr-side--{{ sig.direction }}">{{ sig.direction|upper|slice:":4" }}</span>
+    <span class="ipr-meter"><span class="ipr-meter-fill" style="width:{{ sig.score_pct }}%;"></span></span>
+    <span class="ipr-score">{{ sig.score_pct }}</span>
+    <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}">{{ sig.created_at|timesince }} ago</span>
+</div>
+{% empty %}
+{% if rail.error %}<div class="ip-dd-empty">The rail could not be read; the signals are untouched. /signals/ lists every one.</div>
+{% else %}<div class="ip-dd-empty">No signal on the rail{% if rail.gone_n %} · {{ rail.gone_n }} left in the last 24h{% endif %}</div>{% endif %}
+{% endfor %}
