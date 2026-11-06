@@ -38,6 +38,7 @@ from datetime import timezone as dt_tz
 from decimal import Decimal
 from html import unescape
 from pathlib import Path
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -49,6 +50,7 @@ from django.utils import timezone
 from tests.orcs.helpers import (_config, _on, _row, _switch, _user,
                                 _wake_card, born, tracks_of)
 from tests.orcs.helpers_o2 import MindTestCase, fake_answer, minds_on
+from tests.orcs.test_orc_notes import _whole_second
 from tests.orcs.test_orc_o2a_call import MindFixture, answer
 
 UTC = dt_tz.utc
@@ -118,10 +120,16 @@ class _Words(MindTestCase):
 
     def setUp(self):
         _on()
-        self.user = _user(f"o2a_words_{type(self).__name__.lower()[:16]}")
-        self.cfg = _config(self.user)
-        self.row = _row(self.cfg, meta={"broker": "paper"})
-        self.orc = born(self, self.row)
+        # the row, its Orc and the birth's journal lines at one whole
+        # second (2026-11-06, as test_orc_notes._Seen): the slot prints
+        # those lines' `at`, and a birth at hh:mm:x1.25 on the real clock
+        # spelled "1.25" there, the spend the slot must never carry
+        with patch("django.utils.timezone.now", return_value=_whole_second()):
+            self.user = _user(
+                f"o2a_words_{type(self).__name__.lower()[:16]}")
+            self.cfg = _config(self.user)
+            self.row = _row(self.cfg, meta={"broker": "paper"})
+            self.orc = born(self, self.row)
         self.row.refresh_from_db()
 
     def slot(self, **kw):
@@ -647,11 +655,17 @@ class ThePagesWordsTests(_Words):
             html = self.client.get("/ai-models/").content.decode()
             return " ".join(html.split('The Orcs (read-only)', 1)[1]
                             .split("</div>\n</div>", 1)[0].split())
+        # changed on purpose (2026-11-06, completing O2a): true with the
+        # minds switch OFF and the line at 0, as they ship (code answers
+        # every wake), and with both ON; no router exists before O2b
+        said = ("read by the Orcs from O2; tier settings never move it. "
+                "Their calls bill the Orcs' own budget line "
+                "(ORC_DAILY_BUDGET_USD, off at 0). Once the minds switch and "
+                "the Orcs line are on, every wake a model reads is answered "
+                "on r0; a router comes with O2b.")
         text = card()
-        self.assertIn("read by the Orcs from O2; tier settings never move "
-                      "it. Their calls bill the Orcs' own budget line "
-                      "(ORC_DAILY_BUDGET_USD, off at 0). O2a answers every "
-                      "wake on r0.", text)
+        self.assertIn(said, text)
+        self.assertNotIn("O2a answers every wake", text)
         self.assertNotIn("No Orc runs today", text)
         self.assertIn("Orc calls today, from the ledger: 0.", text)
         AgentTask.objects.create(agent="orc", provider="claude", model="m",
@@ -661,6 +675,10 @@ class ThePagesWordsTests(_Words):
                                  model="m", prompt_summary="not an Orc",
                                  cost_usd=Decimal("0.05"))
         self.assertIn("Orc calls today, from the ledger: 1.", card())
+        minds_on(self)
+        text = card()
+        self.assertIn(said, text)
+        self.assertIn("Orc calls today, from the ledger: 1.", text)
 
 
 # ── the council band ─────────────────────────────────────────────────────

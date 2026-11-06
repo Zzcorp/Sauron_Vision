@@ -2235,20 +2235,25 @@ class TheBookFollowsTheCode(SimpleTestCase):
         self.assertEqual(len(minds), 1, rewrite + " (the second switch)")
         self.assertNotIn("is_enabled", minds[0], rewrite)
         chapter = self._text("safeguards", "The Orcs")
+        # changed on purpose (2026-11-06, completing O2a): a model reads the
+        # dossier at the Orc's wakes within the Orcs' caps, never "at each
+        # wake" (U-B2's words): code answers a quiet wake, a capped one, a
+        # spaced one and one the triage leaves
         self.assertIn("With a second switch on and its budget line set, a "
-                      "model reads that dossier at each wake, in shadow: it "
-                      "writes a plan and proposals that are graded, and "
-                      "nothing an Orc writes sends an order or moves a "
-                      "stop.", chapter)
+                      "model reads that dossier at its wakes, within the "
+                      "Orcs' caps, in shadow: it writes a plan and proposals "
+                      "that are graded, and nothing an Orc writes sends an "
+                      "order or moves a stop.", chapter)
         self.assertIn("nothing an Orc writes sends an order or moves a stop",
                       chapter, "K-B1")
         self.assertNotIn("No model is called", chapter)
         lexicon = self._lexicon("Orc")
         self.assertIn("With a second switch on and its budget line set, a "
-                      "model reads its dossier at each wake, in shadow: it "
-                      "writes a plan and proposals that are graded, and "
-                      "sends no order.", lexicon)
+                      "model reads its dossier at its wakes, within the "
+                      "Orcs' caps, in shadow: it writes a plan and proposals "
+                      "that are graded, and sends no order.", lexicon)
         self.assertNotIn("It calls no model", lexicon)
+        self.assertNotIn("at each wake", chapter + " " + lexicon)
         # the dated line stays as dated (K-B9)
         self.assertIn("no model is called, and nothing an Orc writes sends "
                       "an order or moves a stop", self._milestone("fd41a45"))

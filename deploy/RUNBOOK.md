@@ -1328,11 +1328,12 @@ core line's spend and what is left of it) and adds a third:
 - line on: `AI $x of $y (= $T − Orcs spent − $3.00 floor) · Orcs $z of $C · total $t of $T`.
 
 The card "The Orcs (read-only)" shows the ladder the Orcs read (model and
-effort per rung). It is an unvalidated prior: O2a answers every wake on
-r0, and O2b's router routes in shadow. No tier setting on this page ever
-moves it, and no override can be saved for an Orc agent name. The card
-also counts the day's Orc calls from the ledger. The catalog table lists
-each model's cache-read price and the shortest prefix it will cache.
+effort per rung). It is an unvalidated prior: once the minds switch and
+the Orcs line are on, every wake a model reads is answered on r0; a
+router comes with O2b. No tier setting on this page ever moves it, and no
+override can be saved for an Orc agent name. The card also counts the
+day's Orc calls from the ledger. The catalog table lists each model's
+cache-read price and the shortest prefix it will cache.
 
 **The provider smoke.** Two facts behind the Orcs' design need the real
 API: how many tokens their dossier is on each model's tokenizer, and

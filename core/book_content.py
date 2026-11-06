@@ -591,10 +591,10 @@ CHAPTERS = [
                       "managing the same idea and grades them against what "
                       "the care alone would have done, and builds the Orc's "
                       "dossier. With a second switch on and its budget line "
-                      "set, a model reads that dossier at each wake, in "
-                      "shadow: it writes a plan and proposals that are "
-                      "graded, and nothing an Orc writes sends an order or "
-                      "moves a stop.")},
+                      "set, a model reads that dossier at its wakes, within "
+                      "the Orcs' caps, in shadow: it writes a plan and "
+                      "proposals that are graded, and nothing an Orc writes "
+                      "sends an order or moves a stop.")},
             {"title": "The market's posture",
              "text": ("With its switch on, a stress score read every quarter "
                       "hour (the fall of the index, its volatility, the VIX, "
@@ -1750,7 +1750,7 @@ LEXICON = [
      "plain": ("With its switch on, the journal that follows one open idea, "
                "its legs together, from its birth to its close, written by "
                "code in prices and R. With a second switch on and its budget "
-               "line set, a model reads its dossier at each wake, in shadow: "
-               "it writes a plan and proposals that are graded, and sends no "
-               "order.")},
+               "line set, a model reads its dossier at its wakes, within the "
+               "Orcs' caps, in shadow: it writes a plan and proposals that "
+               "are graded, and sends no order.")},
 ]

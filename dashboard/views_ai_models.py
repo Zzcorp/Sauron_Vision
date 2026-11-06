@@ -89,12 +89,13 @@ KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 # The Orcs' agent names (spec §7.1 and §7.5.8, the union of both lists),
 # SHOWN on the page and never writable: the Orcs read their own pinned
 # ladder (catalog.ORC_LADDER_V1, through bot_program/orcs/mind_gateway.py:
-# O2a answers every wake on r0, O2b's router routes in shadow), never
-# resolve_agent, so an override row here would persist and be read by
-# nothing — exactly what KNOWN_AGENT_KEYS exists to refuse. Their spend
-# is the Orcs' budget line (ai_agents/spend.py), off at 0 until the
-# operator sets it; a model is asked only once he has also turned the
-# minds switch on with his PIN (2026-11-05).
+# with the minds switch and the Orcs line on, every wake a model reads is
+# answered on r0; no router before O2b), never resolve_agent, so an
+# override row here would persist and be read by nothing — exactly what
+# KNOWN_AGENT_KEYS exists to refuse. Their spend is the Orcs' budget line
+# (ai_agents/spend.py), off at 0 until the operator sets it; a model is
+# asked only once he has also turned the minds switch on with his PIN
+# (2026-11-05).
 ORC_AGENT_KEYS = (
     ("orc", "The Orc (one per open position)"),
     ("orc_confirm", "The Orc's confirm wake"),

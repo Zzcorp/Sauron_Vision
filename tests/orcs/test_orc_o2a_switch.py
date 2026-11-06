@@ -45,12 +45,15 @@ from tests.orcs.test_orc_tick_off import _Tick
 
 KEY = "orcs_minds"
 NAME = "Orc Minds (models in shadow)"
-#: A.1's description, word for word.
+#: A.1's description, word for word but one clause, changed on purpose
+#: (2026-11-06, completing O2a): a model reads "an Orc's wakes in shadow,
+#: within its day caps", never A.1's "each Orc's wake", since code answers
+#: a quiet wake, a capped one, a spaced one and one the triage leaves.
 DESCRIPTION = ("Off (default). With orcs on and the Orcs' budget line set "
-               "(ORC_DAILY_BUDGET_USD above 0), a model reads each Orc's "
-               "wake in shadow and writes plans and proposals that are "
-               "graded. Nothing it decides sends an order or moves a stop. "
-               "Turning it on takes the PIN.")
+               "(ORC_DAILY_BUDGET_USD above 0), a model reads an Orc's "
+               "wakes in shadow, within its day caps, and writes plans and "
+               "proposals that are graded. Nothing it decides sends an "
+               "order or moves a stop. Turning it on takes the PIN.")
 #: Test-only values, never the operator's.
 TEST_PIN = "583920"
 WRONG_PIN = "104729"

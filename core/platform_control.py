@@ -120,7 +120,7 @@ LIVE_MONEY_SWITCHES = (
 #: because somebody wrote it down. Each arrives OFF, with its row, in the
 #: commit that ships what it gates.
 ORC_MIND_SWITCHES = (
-    "orcs_minds",                   # a model reads each Orc's wake, in shadow
+    "orcs_minds",                   # a model reads an Orc's wakes, in shadow
 )
 
 #: Every switch whose ON takes the trading PIN, at every door
@@ -348,8 +348,11 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default). On: each open position gets an Orc, a journal written by code: its birth, thesis and army type, the care's and the venue's stop moves, reviews, thesis checks and the close. No model, no order, no stop moved. manage.py orcs.",
      "category": "system"},
     # THE ORCS' MINDS (2026-11-05, the Orcs' O2 spec A.1, N2): a model
-    # reads each Orc's wake in shadow, on the Orcs' own budget line, and
-    # writes plans and proposals that are graded, never applied. OFF on
+    # reads an Orc's wakes in shadow, within its day caps, on the Orcs' own
+    # budget line, and writes plans and proposals that are graded, never
+    # applied. Code answers the other wakes (a quiet wake, a cap, the
+    # spacing, the triage), so the description no longer says A.1's "each
+    # Orc's wake" (changed on purpose, 2026-11-06). OFF on
     # arrival (no is_enabled key), exempt from "all on" (BULK_ENABLE_EXEMPT)
     # and turned on only with the trading PIN at /ops/ (ORC_MIND_SWITCHES,
     # core/switch_pin.py); OFF takes no PIN. `orcs` above keeps its own
@@ -358,7 +361,7 @@ DEFAULT_COMPONENTS = [
     # (ORC_DAILY_BUDGET_USD above 0) are all on. Description measured below
     # 300.
     {"key": "orcs_minds", "name": "Orc Minds (models in shadow)",
-     "description": "Off (default). With orcs on and the Orcs' budget line set (ORC_DAILY_BUDGET_USD above 0), a model reads each Orc's wake in shadow and writes plans and proposals that are graded. Nothing it decides sends an order or moves a stop. Turning it on takes the PIN.",
+     "description": "Off (default). With orcs on and the Orcs' budget line set (ORC_DAILY_BUDGET_USD above 0), a model reads an Orc's wakes in shadow, within its day caps, and writes plans and proposals that are graded. Nothing it decides sends an order or moves a stop. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.

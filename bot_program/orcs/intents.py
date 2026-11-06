@@ -415,4 +415,3 @@ def _write(orc, outcomes, gone, *, now) -> None:
     except Exception:
         orc.seen, orc.card = seen0, card0
         raise
-
