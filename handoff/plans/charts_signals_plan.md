@@ -6,13 +6,15 @@ He asked for "un plan de magnification / amélioration pur et dur des charts et 
 
 1. "ameliore le design peu etre, plus haut de gamme, elegant"
    - His reference (asked): "un smart melange de bloomberg et trading view sous sauron" — a smart blend of Bloomberg (dense, data-first, terminal discipline) and TradingView (clean charts, fluid interaction), in Sauron's own identity.
-   - Still to ask: which screens first; dark/light; phone/desktop.
+   - His answers (point 5, 2026-11-06): "sombre, surtout sur ordinateur, dessins en dernier" — dark theme; mostly used on a computer (desktop first, the phone must still work); the drawing tools (point 4) come last.
+   - Still to ask: which screens first.
 2. "quand on click sur un signal faire que le dessous de popup soit mieux placer pour voir le contenu dessous, faire que scroll possible sur click de ce dernier par en hover etc"
    - Notes: the popups that open from a signal and from the headband open on click/tap and stay open; they sit inside the viewport with a scrolling body; hover is never the only way. Folded into `claude/railfilters` (section F of its design).
 3. "ameliorer responsive complet etc"
    - Notes: every page usable at phone and tablet widths (no horizontal scroll, touch targets, the band, the rail, the chart, the ticket, the positions).
 4. "Ajouter rectangle, lignes et design de ces derniers etc... comme trading view in sauron style, in the end... please"
-   - Notes: chart drawing tools (rectangles, trend and horizontal lines, and their styles: colour, width, dash, fill), saved per chart, in Sauron's style. "in the end" may mean last in order; to confirm.
+   - Notes: chart drawing tools (rectangles, trend and horizontal lines, and their styles: colour, width, dash, fill), saved per chart, in Sauron's style. Confirmed: last in order.
+5. "sombre, surtout sur ordinateur, dessins en dernier" (answers to our questions: dark, desktop first, drawings last).
 
 ## Related work already in flight
 
