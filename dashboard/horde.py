@@ -590,7 +590,11 @@ def _mark_t(row, mark_v, cls, symbol):
 
 
 def _r_title(row, mark_v, entry, stop, cls, symbol):
-    """The R's tooltip at the same precision as the mark beside it."""
+    """The R's tooltip at the same precision as the mark beside it — or,
+    on an eToro row whose R is eToro's own figure over the risk it opened
+    with (2026-11-06), the row's own words for that."""
+    if row.get("pnl_source") in ("etoro", "etoro_quote"):
+        return row["r_title"]
     if _f(row.get("r_multiple")) is None or None in (mark_v, entry, stop):
         return row["r_title"]
     return (f"Marked at {_price(mark_v, cls, symbol)} against an entry of "
@@ -715,6 +719,22 @@ class _Book:
                  "now")
 
 
+def _venue_map(user, trades, ups):
+    """{trade id: the P&L a seat prints for an open eToro row}
+    (portfolio.services.venue_pnls, 2026-11-06), over the rows the book
+    already marked. {} without an eToro seat (no read at all), and on any
+    failure: the marks' figures stand."""
+    if not trades:
+        return {}
+    try:
+        from portfolio.services import venue_pnls
+        return venue_pnls(user, trades,
+                          rows={up.trade_id: up for up in ups or []})
+    except Exception:  # noqa: BLE001 — a board never fails on it
+        logger.warning("[horde] eToro's own P&L unreadable", exc_info=True)
+        return {}
+
+
 def _read_book(user, pf, fp, now):
     """The seats, read with a constant number of queries:
     open legacy rows (skipped without a book), every OPEN / CLOSE_PENDING /
@@ -743,6 +763,12 @@ def _read_book(user, pf, fp, now):
     book.ups = _normalize_trades(book.trades) if book.trades else []
     if book.legacy:
         _reprice_legacy(book.legacy)
+    # eToro's OWN P&L on an eToro seat (2026-11-06, the operator's report:
+    # an open eToro forex row read a gain on Sauron and a small loss in the
+    # eToro app): the figure the positions page prints
+    # (portfolio.services.venue_pnls). The eToro row, and at most one
+    # quote, are read only when an eToro seat is open.
+    venues = _venue_map(user, book.trades, book.ups)
 
     # An opening stop of 0 is eToro's "no stop": no R, no 1R, no rail.
     stops = {f"bot-{t.id}": _a_stop(_initial_stop(t)) for t in book.trades}
@@ -752,7 +778,8 @@ def _read_book(user, pf, fp, now):
         levs[f"pos-{p.pk}"] = _pos_leverage(cls)
     book.rows = {}
     for up in book.ups:
-        book.rows[f"bot:{up.trade_id}"] = _live_row(up, stops, levs)
+        book.rows[f"bot:{up.trade_id}"] = _live_row(up, stops, levs,
+                                                    venues=venues)
     for p in book.legacy:
         book.rows[f"pf:{p.pk}"] = _live_row(p, stops, levs)
 
@@ -1195,17 +1222,27 @@ def _bot_seat(book, trade, up, row, sides_book, now):
 
     # the money, the positions page's own digits
     pnl_v, r_v = _f(row["unrealized_pnl"]), _f(row["r_multiple"])
+    # eToro's own figure (or its quote's side, converted) is in the
+    # account's dollars (2026-11-06), even on a forex row with no USD stamp.
+    in_usd = row.get("pnl_source") in ("etoro", "etoro_quote")
+    unstamped = cls == "forex" and not stamped and not in_usd
     money = {"pnl_t": row["pnl_text"], "pnl_v": pnl_v, "pnl_tone": row["pnl_tone"],
              "pct_t": row["pct_text"], "cap_pct_t": row["cap_pct_text"] or None,
              # No currency word on a forex row with no USD stamp: its money
              # is in the quote currency and is left out of every total.
-             "ccy": "" if (cls == "forex" and not stamped) else (cfg.base_currency or "USD"),
+             "ccy": ("USD" if in_usd else
+                     "" if unstamped else (cfg.base_currency or "USD")),
              "r_t": row["r_text"], "r_v": r_v,
              "r_tone": row["r_tone"],
-             "r_title": _r_title(row, mark_v, entry, istop, pcls, sym), "note": ""}
+             "r_title": _r_title(row, mark_v, entry, istop, pcls, sym), "note": "",
+             # whose figure the P&L is: "" for eToro's own, else
+             # "estimate: <feed> quote, <age>", with the why on hover
+             "pnl_words": row.get("pnl_words") or "",
+             "pnl_title": row.get("pnl_title") or ""}
     if working:
         money.update(pnl_t=DASH, pnl_v=None, pnl_tone="", pct_t=DASH,
-                     cap_pct_t=None, r_t=DASH, r_v=None, r_tone="", note=NOT_FILLED)
+                     cap_pct_t=None, r_t=DASH, r_v=None, r_tone="", note=NOT_FILLED,
+                     pnl_words="", pnl_title="")
     mark = {"t": _mark_t(row, mark_v, pcls, sym), "v": mark_v, "word": row["mark_word"],
             "title": row["mark_title"], "wait": row["mark_wait"],
             "source": row["mark_source"] or ""}
@@ -1379,8 +1416,8 @@ def _bot_seat(book, trade, up, row, sides_book, now):
         "_sort": (TONE_ORDER.index(lt["tone"]), WORLD_ORDER.index(world),
                   -(risk_d["v"] or 0.0), trade.id),
         "_theme": (sym, side, cls),
-        "_ccy": cfg.base_currency or "USD",
-        "_unstamped": cls == "forex" and not stamped,
+        "_ccy": "USD" if in_usd else (cfg.base_currency or "USD"),
+        "_unstamped": unstamped,
     }
     held = _venue_held_stop(trade)
     seat["commands"]["ask"]["facts"] = _facts_line(seat, {
@@ -2742,7 +2779,8 @@ def seat_detail(user, raw_key, *, now=None):
     quote = quotes.get(trade.symbol)
     from bot_program.manual_close import _initial_stop
     row = _live_row(up, {f"bot-{trade.id}": _a_stop(_initial_stop(trade))},
-                    {f"bot-{trade.id}": _trade_leverage(trade)})
+                    {f"bot-{trade.id}": _trade_leverage(trade)},
+                    venues=_venue_map(user, [trade], [up]))
     hand = _is_hand(trade)
     signal = None
     sid = meta.get("signal_id")

@@ -1636,9 +1636,10 @@ def _live_cell(text, sub="", tone="", title=""):
     return {"text": text, "sub": sub, "tone": tone, "title": title}
 
 
-def _stop_and_world_maps(rows):
+def _stop_and_world_maps(rows, user=None):
     """({row key: the stop each open position OPENED with},
-        {row key: its money world, as position_summary.world_of reads it}).
+        {row key: its money world, as position_summary.world_of reads it},
+        {trade id: the P&L a page shows for an open eToro row}).
 
     R is measured against the risk the trade was actually taken with. The
     CURRENT stop is the wrong denominator — a trailing stop rewrites it, so
@@ -1656,23 +1657,44 @@ def _stop_and_world_maps(rows):
     metadata-less row a demo fill reads "live". The worlds are taken
     before the stops, so a failing stop lookup costs the R column and not
     the real/paper split of the open P&L.
+
+    THE VENUE'S OWN P&L rides the same query too (2026-11-06, the
+    operator's report: an open eToro forex row read a gain on Sauron and a
+    small loss in the eToro app): with `user`, portfolio.services.venue_pnls
+    answers for each open eToro row — eToro's own figure when its fresh
+    holdings list the position, else an eToro quote's closing side, else
+    the mark's estimate, said so. It reads the eToro row (and at most one
+    quote read) only when such a row is open. The rows themselves are never
+    written: they go on to live_book_value as the marks priced them.
     """
-    stops, worlds = {}, {}
+    stops, worlds, venues = {}, {}, {}
     ids = [r.trade_id for r in rows
            if getattr(r, "source", "") == "bot"
            and getattr(r, "trade_id", None)]
     if not ids:
-        return stops, worlds
+        return stops, worlds, venues
     try:
         from bot_program.models import AssetBotTrade
         trades = list(AssetBotTrade.objects.filter(id__in=ids).only(
-            "id", "stop_loss", "metadata", "paper"))
+            "id", "stop_loss", "metadata", "paper", "status", "side", "qty",
+            "entry_price", "symbol", "asset_class", "config"))
     except Exception as e:
         logger.warning("Open trades unreadable, R and the money worlds read "
                        "as unmeasured: %s", e, exc_info=True)
-        return stops, worlds
+        return stops, worlds, venues
     for trade in trades:
         worlds[f"bot-{trade.id}"] = _world_of(trade)
+    if user is not None:
+        try:
+            from portfolio.services import venue_pnls
+            venues = venue_pnls(user, trades, rows={
+                r.trade_id: r for r in rows
+                if getattr(r, "source", "") == "bot"
+                and getattr(r, "trade_id", None)})
+        except Exception as e:  # noqa: BLE001 — the marks' figures stand
+            logger.warning("eToro's own P&L unreadable, the open rows show "
+                           "the marks' figures: %s", e, exc_info=True)
+            venues = {}
     try:
         from bot_program.manual_close import _initial_stop
         for trade in trades:
@@ -1683,7 +1705,7 @@ def _stop_and_world_maps(rows):
         # dashes with no explanation anywhere.
         logger.warning("Initial stops unavailable, R reads as unmeasured: %s",
                        e, exc_info=True)
-    return stops, worlds
+    return stops, worlds, venues
 
 
 def _leverage_map(rows):
@@ -1779,7 +1801,7 @@ def _mark_words(row) -> dict:
     return {"mark_word": "", "mark_wait": "", "mark_title": ""}
 
 
-def _live_row(row, stops, levs=None, worlds=None):
+def _live_row(row, stops, levs=None, worlds=None, venues=None):
     """One open position, shaped the way the tables already read it, plus R.
 
     A dict and not the model instance: UnifiedPosition declares __slots__, so
@@ -1792,6 +1814,17 @@ def _live_row(row, stops, levs=None, worlds=None):
     Position.unrealized_pnl: that column defaults to 0 and its only writer is
     an hourly task on one book, so on a row this page renders it is a
     permanent, confident +0.00.
+
+    eToro's OWN P&L (2026-11-06, the operator's report: an open eToro
+    forex row read a gain on Sauron and a small loss in the eToro app).
+    `venues` is {trade id: portfolio.services.venue_pnl's answer} for the
+    open eToro rows: the money cells (P&L, its two percentages) print that
+    figure, and while it is eToro's own or an eToro quote's closing side
+    the R is that figure over the risk the row opened with — a mark's +R
+    beside eToro's loss would contradict its own sign. pnl_words says
+    "estimate: <feed> quote, <age>" under the P&L wherever the figure is
+    not eToro's own. The price cell and its mark words are untouched: they
+    describe the price, not the money.
     """
     source = getattr(row, "source", "") or "position"
     ident = getattr(row, "trade_id", None) or getattr(row, "pk", None)
@@ -1832,6 +1865,32 @@ def _live_row(row, stops, levs=None, worlds=None):
     # by construction) — a numeric comparison here only ever matched on
     # exact equality of two independently rounded values.
     cap_pct = _as_float(getattr(row, "pnl_on_capital_pct", None))
+    venue = ((venues or {}).get(getattr(row, "trade_id", None))
+             if source == "bot" else None)
+    r_title = (
+        f"Marked at {mark:,.4f} against an entry of {entry:,.4f} and the "
+        f"stop this position opened with ({stop:,.4f})."
+        if r_mult is not None else
+        "No R: this position has no live mark, or no entry stop was ever "
+        "recorded, so there is no risk to divide the move by.")
+    if venue is not None:
+        from portfolio.services import PNL_ESTIMATE
+        pnl = _as_float(venue["pnl_usd"])
+        pct = _as_float(venue["pnl_pct"])
+        cap_pct = _as_float(venue["cap_pct"])
+        if venue["source"] != PNL_ESTIMATE:
+            r_raw = venue["r"]
+            r_mult = None if r_raw is None else round(r_raw, 2)
+            whose = ("eToro's own profit or loss"
+                     if venue["source"] == "etoro"
+                     else "The profit or loss at eToro's quote")
+            r_title = (
+                f"{whose} ({pnl:+,.2f}) over the risk this position opened "
+                f"with ({venue['risk']:,.2f})."
+                if r_mult is not None and pnl is not None
+                and venue.get("risk") else
+                "No R: no entry stop was ever recorded for this position, "
+                "so there is no risk to divide its profit or loss by.")
     instrument = getattr(row, "instrument", None)
     return {
         "key": key,
@@ -1874,12 +1933,16 @@ def _live_row(row, stops, levs=None, worlds=None):
         "r_raw": r_raw,
         "r_text": _live_num(r_mult, "{:+.2f}R"),
         "r_tone": _live_tone(r_mult),
-        "r_title": (
-            f"Marked at {mark:,.4f} against an entry of {entry:,.4f} and the "
-            f"stop this position opened with ({stop:,.4f})."
-            if r_mult is not None else
-            "No R: this position has no live mark, or no entry stop was ever "
-            "recorded, so there is no risk to divide the move by."),
+        "r_title": r_title,
+        # WHOSE P&L the money cells print (2026-11-06, venue_pnl): "etoro"
+        # (eToro's own figure), "etoro_quote", "estimate" (the mark's), or
+        # "" for a row eToro does not carry. The words go under the P&L
+        # wherever the figure is not eToro's own; the title says why.
+        "pnl_source": venue["source"] if venue is not None else "",
+        "pnl_at": venue["at"] if venue is not None else None,
+        "pnl_words": venue["words"] if venue is not None else "",
+        "pnl_title": venue["title"] if venue is not None else "",
+        "venue_pnl": venue,
         "strategy": getattr(row, "strategy", None),
         "opened_at": row.opened_at,
         "trade_id": getattr(row, "trade_id", None),
@@ -1898,7 +1961,7 @@ def _live_row(row, stops, levs=None, worlds=None):
     }
 
 
-def _live_open_book(user, portfolio):
+def _live_open_book(user, portfolio, *, union=None):
     """Every open position, both books, marked to live quotes, with R.
 
     views_command._open_book is the platform's one union-and-mark: it reads
@@ -1911,13 +1974,42 @@ def _live_open_book(user, portfolio):
     Returns (rows, n_priced, unrealized, deployed). unrealized and deployed
     are None when nothing could be priced: an unpriced book is unknown, not
     flat.
+
+    eToro's OWN P&L (2026-11-06): an open eToro row prints the figure
+    portfolio.services.venue_pnl answers (_live_row), and `unrealized` is
+    then the sum of what the rows PRINT, so the strip and the rows under it
+    cannot disagree. `deployed` stays the notional at the marks. The
+    objects are never written: `union` (the _open_book 4-tuple a caller
+    already holds, to hand on to live_book_value untouched) or the read
+    here goes to the caller exactly as the marks priced it.
     """
     from .views_command import _open_book
-    objects, n_priced, unrealized, deployed = _open_book(user, portfolio)
-    stops, worlds = _stop_and_world_maps(objects)
+    objects, n_priced, unrealized, deployed = (
+        _open_book(user, portfolio) if union is None else union)
+    stops, worlds, venues = _stop_and_world_maps(objects, user=user)
     levs = _leverage_map(objects)
-    return (objects, [_live_row(r, stops, levs, worlds) for r in objects],
-            n_priced, unrealized, deployed)
+    rows = [_live_row(r, stops, levs, worlds, venues) for r in objects]
+    if venues:
+        from portfolio.services import shown_unrealized
+        unrealized = shown_unrealized(rows)
+    return (objects, rows, n_priced, unrealized, deployed)
+
+
+def _shown_mark_source(row):
+    """The source of the P&L a live row PRINTS, in open_by_world's words
+    (2026-11-06): eToro's own figure or an eToro quote's side is never the
+    venue's stale last print, so the "stale" words describe the figure
+    shown; an estimate keeps its mark's source and age."""
+    src = row.get("pnl_source") or ""
+    return src if src in ("etoro", "etoro_quote") else row.get("mark_source")
+
+
+#: What the open P&L figures on the pages are (2026-11-06): eToro's own
+#: figure where its holdings list the position, an estimate otherwise.
+SHOWN_PNL_WORDS = ("eToro's own profit or loss for each eToro position its "
+                   "holdings list (read in the last 15 minutes); elsewhere "
+                   "an estimate from the position's mark, said under the "
+                   "row. Never read off the stored column.")
 
 
 def _closed_stats(closed_positions):
@@ -1957,9 +2049,11 @@ def _closed_stats(closed_positions):
     }
 
 
-LIVE_PNL_TITLE = ("Open P&L of the real-money book alone, each row at its "
-                  "venue's own rate; paper and demo are shown apart and never "
-                  "added. UNREALIZED P&L beside it is both books.")
+LIVE_PNL_TITLE = ("Open P&L of the real-money book alone: eToro's own figure "
+                  "for each eToro position its holdings list (read in the "
+                  "last 15 minutes), the venue's rate otherwise; paper and "
+                  "demo are shown apart and never added. UNREALIZED P&L "
+                  "beside it is both books.")
 
 
 def _live_apart_words(split):
@@ -2034,6 +2128,19 @@ def _live_page(request, template, context, live_only):
     return render(request, template, context)
 
 
+def _shown_or_book(user, book, venues=None):
+    """portfolio.services.shown_book, fenced (2026-11-06): the book value as
+    the page prints it, or live_book_value's own when that cannot be read —
+    a VALUE cell must render either way."""
+    try:
+        from portfolio.services import shown_book
+        return shown_book(user, book, venues)
+    except Exception as e:  # noqa: BLE001 — the marks' value stands
+        logger.warning("The shown book value is unreadable, the marks' "
+                       "stands: %s", e, exc_info=True)
+        return book
+
+
 def _capital_or_none(user):
     """capital_summary, fenced: a page must render even when the pools
     cannot be read — None keys already render as em-dashes."""
@@ -2100,8 +2207,15 @@ def _render_portfolio(request, live_only):
     # AssetBotTrades that every interactive path (bots, TAKE TRADE,
     # LONG/SHORT) actually writes — the taken trade used to be invisible on
     # this page by construction.
+    #
+    # The union is read here and handed to BOTH readers (2026-11-06): the
+    # rows print eToro's own P&L on an eToro row (_live_open_book), while
+    # live_book_value below — the gate denominator's formula — is given the
+    # union exactly as the marks priced it.
+    from .views_command import _open_book
+    union = _open_book(request.user, portfolio)
     _objects, open_rows, n_priced, unrealized, deployed = _live_open_book(
-        request.user, portfolio)
+        request.user, portfolio, union=union)
     closed_positions = unified_closed_positions(request.user, portfolio)
     stats = _closed_stats(closed_positions)
 
@@ -2120,15 +2234,24 @@ def _render_portfolio(request, live_only):
     from dashboard.position_summary import open_by_world
     by_world = open_by_world({"world": r["world"], "pnl": r["unrealized_pnl"],
                               "r": r["r_raw"],
-                              "mark_source": r["mark_source"],
+                              "mark_source": _shown_mark_source(r),
                               "mark_age_s": r["mark_age_s"]}
                              for r in open_rows)
     live_world = by_world["live"]
     # TOTAL VALUE, measured on this read. The union `_live_open_book` already
     # performed is handed straight over, so the strip's headline and the table
     # under it are two readings of ONE re-pricing rather than two of their own.
-    book = live_book_value(request.user, portfolio,
-                           book=(_objects, n_priced, unrealized, deployed))
+    book = live_book_value(request.user, portfolio, book=union)
+    # ...and PRINTED with the open P&L inside it at eToro's own figure for
+    # an eToro position its holdings list, as the rows under it print
+    # (2026-11-06, the review: the rows read eToro's figure while TOTAL
+    # VALUE still held the mark's). A display copy (services.shown_book):
+    # FREE and the shares follow the value printed; ALLOCATED and EXPOSURE
+    # are the book's own, and `book` is not handed on.
+    from portfolio.services import SHOWN_VALUE_WORDS
+    shown = _shown_or_book(request.user, book, {
+        r["trade_id"]: r["venue_pnl"] for r in open_rows
+        if r.get("venue_pnl") is not None})
 
     # 30d Sharpe / Sortino approximation, from the snapshot series.
     cutoff_30d = _tz.now().date() - timedelta(days=30)
@@ -2161,16 +2284,15 @@ def _render_portfolio(request, live_only):
                    if n_open else "No open positions in either book.")
     strip = {
         "value": _live_cell(
-            _live_num(book.value, "{:,.2f}"),
+            _live_num(shown.value, "{:,.2f}"),
             # The sub-label carries the currency AND, when the total left rows
             # out, that it is short of the whole book — the one place on this
             # page where a partial sum could otherwise pass for a complete one.
             sub=(f"{portfolio.currency} · partial" if book.partial
                  else portfolio.currency),
-            title=(f"Cash plus everything open across both books, marked to "
-                   f"live quotes on this read — not the stored "
-                   f"current_value column, which only an hourly task on the "
-                   f"legacy book ever wrote. {book.coverage}")),
+            title=(f"{SHOWN_VALUE_WORDS} Measured on this read — not the "
+                   f"stored current_value column, which only an hourly task "
+                   f"on the legacy book ever wrote. {book.coverage}")),
         "cash": _live_cell(
             _live_num(portfolio.cash_available, "{:,.2f}"),
             sub=(f"{cash_pct:.1f}% of the book" if cash_pct is not None
@@ -2185,18 +2307,18 @@ def _render_portfolio(request, live_only):
         # an operator is fully committed when most of the book is idle.
         "allocated": _live_cell(
             _live_num(book.allocated, "{:,.2f}"),
-            sub=(f"{book.allocated_pct:.1f}% of the book"
-                 if book.allocated_pct is not None
+            sub=(f"{shown.allocated_pct:.1f}% of the book"
+                 if shown.allocated_pct is not None
                  else "share unknown — the book could not be valued"),
             title="Capital the open positions actually tie up, margin-aware "
                   "— the same number the risk gates size against, not the "
                   "notional they carry."),
         "free": _live_cell(
-            _live_num(book.free, "{:,.2f}"),
-            tone=("down" if (book.free_pct is not None and book.free_pct < 10)
-                  else ""),
-            sub=(f"{book.free_pct:.1f}% left to deploy"
-                 if book.free_pct is not None
+            _live_num(shown.free, "{:,.2f}"),
+            tone=("down" if (shown.free_pct is not None
+                             and shown.free_pct < 10) else ""),
+            sub=(f"{shown.free_pct:.1f}% left to deploy"
+                 if shown.free_pct is not None
                  else "share unknown — the book could not be valued"),
             title="What is left after the open book. Never negative: more "
                   "margin than the book is worth is a margin call, not a "
@@ -2212,8 +2334,7 @@ def _render_portfolio(request, live_only):
         "unrealized": _live_cell(
             _live_num(unrealized), tone=_live_tone(unrealized),
             sub="across open positions",
-            title=(f"Marked to live quotes, never read off the stored "
-                   f"column. {priced_note}")),
+            title=f"{SHOWN_PNL_WORDS} {priced_note}"),
         # THE REAL BOOK ALONE (2026-10-14): the same figure the cockpit
         # strip's PORTFOLIO cell prints on every page, in the same words.
         "unrealized_live": _live_cell(
@@ -2619,7 +2740,7 @@ def _pos_committed_pct(committed, trade):
     return _pos_fmt(float(committed) / capital * 100, 1)
 
 
-def _position_card_details(user, positions, *, orcs=False):
+def _position_card_details(user, positions, *, orcs=False, venues=None):
     """One dict per position with everything the hover card shows that the
     ROW cannot carry — aligned with `positions`, same order.
 
@@ -2627,6 +2748,14 @@ def _position_card_details(user, positions, *, orcs=False):
     its line under the symbol and the dwell card's lines (bot_program.
     orcs.notes.for_trades: no query when no row carries the Orc stamp,
     nothing while the orcs switch is OFF). A failed read adds nothing.
+
+    `venues` (the open book only, 2026-11-06): {trade id: the P&L the row
+    prints, portfolio.services.venue_pnl}. The card floats over the row,
+    so an OPEN eToro row's card prints that same figure: its P&L and
+    percentage, the net now, and the value now as the entry's notional
+    moved by it — never a second, contradicting P&L. Distances, progress
+    and the price move are the price's and stay so. A closed row's card
+    keeps its booking.
 
     The positions table renders portfolio.services.UnifiedPosition, a
     __slots__-bound shape that deliberately exposes only the columns the
@@ -2747,6 +2876,12 @@ def _position_card_details(user, positions, *, orcs=False):
         target = _pos_num(p.take_profit)
         istop = _pos_num(_initial_stop(trade)) if trade else None
         pnl = _pos_num(p.unrealized_pnl)
+        pnl_pct = p.unrealized_pnl_pct
+        venue = ((venues or {}).get(getattr(p, "trade_id", None))
+                 if getattr(p, "status", "") in ("OPEN", "CLOSE_PENDING")
+                 else None)
+        if venue is not None:
+            pnl, pnl_pct = _pos_num(venue["pnl_usd"]), venue["pnl_pct"]
 
         stop_pct, stop_through = _pos_distance(mark, stop, is_long)
         target_pct, target_through = _pos_distance(mark, target, not is_long)
@@ -2793,6 +2928,12 @@ def _position_card_details(user, positions, *, orcs=False):
                        getattr(getattr(p, "instrument", None), "asset_class", "")) or ""
         notional = qty_abs * entry * vpu if (entry and qty_abs) else None
         value_now = qty_abs * mark * vpu if (mark and qty_abs) else None
+        if venue is not None and venue["source"] != "estimate":
+            # eToro's figure (or its quote's side): what the position is
+            # worth now is its cost moved by that figure, in the direction
+            # the position profits — never the mark's notional beside it.
+            value_now = (None if pnl is None or notional is None else
+                         notional + (pnl if is_long else -pnl))
         # On a levered class qty x entry is exposure, not capital committed
         # — see _POS_LEVERED_CLASSES. The margin is the broker's number and
         # nothing here records it, so the card dashes it and names the
@@ -2856,7 +2997,7 @@ def _position_card_details(user, positions, *, orcs=False):
             # out of; "48% of the pool" is the sentence an operator sizes by.
             "committed_pct": _pos_committed_pct(committed, trade),
             "pnl": _pos_fmt(pnl, 2),
-            "pnl_pct": _pos_fmt(p.unrealized_pnl_pct, 2),
+            "pnl_pct": _pos_fmt(pnl_pct, 2),
             "risk": _pos_fmt(risk, 2) if risk else "",
             # ── The money block. Every one of these is "" when the platform
             # does not have it — the card renders "" as an em-dash, and a
@@ -2986,8 +3127,7 @@ def _render_positions(request, live_only, *, deep_link=None):
         "unrealized": _live_cell(
             _live_num(unrealized), tone=_live_tone(unrealized),
             sub="mark-to-market",
-            title=(f"Marked to live quotes, never read off the stored "
-                   f"column. {priced_note}")),
+            title=f"{SHOWN_PNL_WORDS} {priced_note}"),
         "exposure": _live_cell(
             _live_num(deployed, "{:,.2f}"), sub="notional capital deployed",
             title=f"At live marks. {priced_note}"),
@@ -3068,11 +3208,15 @@ def _render_positions(request, live_only, *, deep_link=None):
     # unfiltered book, and so does Close all (its own endpoint).
     from .position_views import build_view
     positions_url = reverse("positions_list")
+    # The card floats over the row: it prints the row's own figure, eToro's
+    # on an eToro row (2026-11-06), never a second, contradicting P&L.
+    open_venues = {r["trade_id"]: r["venue_pnl"] for r in open_rows
+                   if r.get("venue_pnl") is not None}
     open_view = build_view(
         request.GET if tab == "open" else {},
         list(zip(open_rows,
                  _position_card_details(request.user, open_objects,
-                                        orcs=True))),
+                                        orcs=True, venues=open_venues))),
         keep={"tab": "open"}, base_url=positions_url)
     closed_view = build_view(
         request.GET if tab == "history" else {},
@@ -3212,6 +3356,16 @@ def _render_positions(request, live_only, *, deep_link=None):
         from bot_program.etoro_used import mark_holdings
         mark_holdings(request.user, broker["positions"]["rows"],
                       broker["positions"]["at"])
+        # eToro's OWN P&L per position (2026-11-06): its list carries no
+        # mark and no value (the stored row keeps EtoroTrader's constant
+        # zeros, which Morgul and /treasury/ read as they are), so the panel
+        # prints each position's own net profit, signed, or a dash where
+        # eToro sent none — never the constant 0.00 in green.
+        for row in broker["positions"]["rows"]:
+            if isinstance(row, dict):
+                net = _as_float(row.get("net_profit"))
+                row["net_profit_t"] = (None if net is None
+                                       else f"{net:+,.2f}")
     elif broker and broker.get("positions"):
         claimed = {
             str(s).upper()
@@ -4461,7 +4615,7 @@ def _chart_positions(user, instrument):
     from bot_program.models import AssetBotTrade
     from portfolio.models import Position
     from portfolio.risk_gate import _position_books
-    from portfolio.services import value_per_unit
+    from portfolio.services import PNL_ESTIMATE, value_per_unit, venue_pnls
 
     def _f(v):
         return float(v) if v is not None else None
@@ -4544,9 +4698,21 @@ def _chart_positions(user, instrument):
             # is not recorded.
             "venue": "",
         })
-    for t in AssetBotTrade.objects.filter(
-            config__user=user, symbol=instrument.symbol,
-            status__in=("OPEN", "CLOSE_PENDING")):
+    bot_rows = list(AssetBotTrade.objects.filter(
+        config__user=user, symbol=instrument.symbol,
+        status__in=("OPEN", "CLOSE_PENDING")))
+    # eToro's OWN P&L on an open eToro row (2026-11-06, the operator's
+    # report: an open eToro forex row read a gain on Sauron and a small loss
+    # in the eToro app): the figure the positions page prints
+    # (portfolio.services.venue_pnl), and the words where it is an
+    # estimate. Nothing is read when no row here is eToro's.
+    venues = {}
+    try:
+        venues = venue_pnls(user, bot_rows)
+    except Exception:  # noqa: BLE001 — the marks' figures stand
+        logger.warning("[instrument] eToro's own P&L unreadable",
+                       exc_info=True)
+    for t in bot_rows:
         side = "long" if t.side == "BUY" else "short"
         tag = t.rule_name or "bot"
         meta = t.metadata or {}
@@ -4570,6 +4736,11 @@ def _chart_positions(user, instrument):
             paper=bool(t.paper)))
         pnl, pnl_pct = _pnl(side, entry, qty, vpu, row_mark)
         initial = _f(meta.get("initial_stop_loss")) or stop
+        r_now = _r_now(side, entry, initial, row_mark)
+        venue = venues.get(t.pk)
+        if venue is not None and venue["source"] != PNL_ESTIMATE:
+            pnl, pnl_pct = venue["pnl_usd"], venue["pnl_pct"]
+            r_now = None if venue["r"] is None else round(venue["r"], 2)
         soft = _f((meta.get("care") or {}).get("soft_stop"))
         th = meta.get("thesis") or {}
         try:
@@ -4590,7 +4761,10 @@ def _chart_positions(user, instrument):
             "mark_wait": words.get("mark_wait", ""),
             "mark_title": words.get("mark_title", ""),
             "rule": tag, "entry_text": _txt(entry), "stop_text": _txt(stop),
-            "tp_text": _txt(tp), "r_now": _r_now(side, entry, initial, row_mark),
+            "tp_text": _txt(tp), "r_now": r_now,
+            # whose figure the P&L is, where it is not eToro's own
+            "pnl_words": venue["words"] if venue is not None else "",
+            "pnl_title": venue["title"] if venue is not None else "",
             "age_s": _age(t.opened_at), "leverage": lev,
             "soft_stop": soft, "soft_stop_text": _txt(soft),
             "thesis": ({"verdict": th.get("verdict"),

@@ -500,7 +500,116 @@ def close_advice(request):
     if not isinstance(model, bool):
         return JsonResponse({"error": "model must be true or false"},
                             status=400)
-    return JsonResponse(advise(request.user, ids, use_model=model))
+    answer = advise(request.user, ids, use_model=model)
+    try:
+        _venue_figures(request.user, answer)
+    except Exception:  # noqa: BLE001 — the brain's own figures stand
+        logger.warning("[close-advice] eToro's own P&L unreadable; the "
+                       "card prints the brain's figures", exc_info=True)
+    return JsonResponse(answer)
+
+
+def _venue_figures(user, answer) -> None:
+    """THE CARD PRINTS THE FIGURE THE ROW PRINTS (2026-11-06), in place.
+
+    The operator's report, 2026-11-06: an open eToro forex row read a gain
+    on Sauron and a small loss in the eToro app. The review of that change:
+    "Should I close?" still printed the mark's P&L and R beside a row that
+    prints eToro's figure, and said nothing where its figure was an
+    estimate.
+
+    So for each open eToro row the card's "Profit or loss" is
+    portfolio.services.venue_pnl's figure — eToro's own while its fresh
+    holdings list the position, else its quote's closing side, else the
+    mark's estimate — with the words under it, and its "R now" is that
+    figure over the risk the row opened with while it is not the
+    estimate. The selection's total is re-summed from the cards.
+
+    A split, not a change of the decision: brain.close_advice (a decision
+    tree, guarded by tests/test_venue_pnl.py) is not touched. The verdict,
+    the reasons and what the AI was sent are the brain's, measured at the
+    price the card shows; when its R differs from the one printed, the
+    card says what the read measured ("r_now_said"). Display only.
+    """
+    from bot_program.models import AssetBotTrade
+    from bot_program.venue_mark import age_words
+    from brain.close_advice import DASH, KIND_POSITION
+    from brain.position_review import OPEN_BOT_STATUSES
+    from dashboard.position_summary import money
+    from portfolio.services import (PNL_ESTIMATE, PNL_ETORO,
+                                    PNL_ETORO_QUOTE, venue_pnls)
+
+    held = [p for p in answer.get("positions") or []
+            if p.get("kind") == KIND_POSITION]
+    if not held:
+        return
+    trades = list(AssetBotTrade.objects.filter(
+        pk__in=[p["trade_id"] for p in held], config__user=user,
+        status__in=OPEN_BOT_STATUSES))
+    venues = venue_pnls(user, trades)
+    if not venues:
+        return
+    for p in held:
+        venue = venues.get(p["trade_id"])
+        if venue is None:
+            continue
+        n = p.setdefault("numbers", {})
+        pnl = venue["pnl_usd"]
+        ccy = venue["ccy"] or n.get("ccy") or ""
+        n["pnl"] = pnl
+        n["pnl_text"] = money(pnl, ccy, signed=True)
+        n["pnl_ccy"] = ccy
+        n["pnl_source"] = venue["source"]
+        n["pnl_title"] = venue["title"]
+        n["pnl_said"] = (
+            "eToro's own figure, read %s ago" % (
+                age_words(venue["age_s"]) or "recently")
+            if venue["source"] == PNL_ETORO else venue["words"])
+        if venue["source"] == PNL_ESTIMATE:
+            continue
+        read_r = n.get("r_now_text") or DASH
+        r = venue["r"]
+        n["r_now"] = r
+        n["r_now_text"] = DASH if r is None else "{:+.2f}R".format(r)
+        if read_r != DASH and read_r != n["r_now_text"]:
+            n["r_now_said"] = ("Sauron's verdict and its reasons read the "
+                               "price shown: %s" % read_r)
+
+    # The selection's money, as brain.close_advice._summary adds it — every
+    # figure measured and in one currency, else not added up — over the
+    # figures the cards now print. Capital freed and the counts are the
+    # brain's own.
+    s = answer.get("summary") or {}
+    figures = [(p.get("numbers") or {}).get("pnl") for p in held]
+    ccys = sorted({(p.get("numbers") or {}).get("pnl_ccy")
+                   or (p.get("numbers") or {}).get("ccy") or ""
+                   for p in held} - {""})
+    pnl, note = None, ""
+    if any(f is None for f in figures):
+        note = ("Not added up: %d of the %d positions have no measured "
+                "profit or loss." % (sum(1 for f in figures if f is None),
+                                     len(held)))
+    elif len(ccys) > 1:
+        note = ("Not added up: the positions are in different currencies "
+                "(%s)." % ", ".join(ccys))
+    else:
+        pnl = round(sum(figures), 2)
+        guessed = [p["symbol"] for p in held
+                   if (p.get("numbers") or {}).get("pnl_source")
+                   in (PNL_ESTIMATE, PNL_ETORO_QUOTE)
+                   and (p.get("numbers") or {}).get("pnl_said")]
+        if guessed:
+            note = ("Includes %s for %s, not eToro's own figure%s: see %s."
+                    % ("an estimate" if len(guessed) == 1 else "estimates",
+                       ", ".join(guessed[:6])
+                       + (" and %d more" % (len(guessed) - 6)
+                          if len(guessed) > 6 else ""),
+                       "" if len(guessed) == 1 else "s",
+                       "its card" if len(guessed) == 1 else "their cards"))
+    s["pnl"] = pnl
+    s["pnl_text"] = money(pnl, ccys[0] if len(ccys) == 1 else "",
+                          signed=True)
+    s["pnl_note"] = note
 
 
 @login_required

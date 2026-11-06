@@ -643,6 +643,42 @@ def build_summary(trade, now=None):
         mark = _num(row.current_price) if row is not None else None
         pnl = _num(row.unrealized_pnl) if row is not None else None
         pnl_pct = _num(row.unrealized_pnl_pct) if row is not None else None
+        # eToro's OWN P&L (2026-11-06, the operator's report: an open eToro
+        # forex row read a gain on Sauron and a small loss in the eToro
+        # app): the figure the positions page prints for an open eToro row
+        # (portfolio.services.venue_pnl) — eToro's own while its holdings
+        # list the position, else an estimate, said so under the figure.
+        # The price below stays the mark's: it describes the price.
+        venue = None
+        if kind != "working":
+            try:
+                from portfolio.services import venue_pnl
+                venue = venue_pnl(trade, row=row, now=now)
+            except Exception:  # noqa: BLE001 — the mark's figure stands
+                logger.exception("[position page] eToro's P&L unread for #%s",
+                                 trade.id)
+        pnl_ccy = mark_ccy
+        if venue is not None:
+            pnl, pnl_pct = _num(venue["pnl_usd"]), _num(venue["pnl_pct"])
+            pnl_ccy = venue["ccy"] or mark_ccy
+        pnl_said = ""
+        if venue is not None and venue["source"] == "etoro":
+            from bot_program.venue_mark import age_words
+            pnl_said = "eToro's own figure, read %s ago" % (
+                age_words(venue["age_s"]) or "recently")
+        elif venue is not None:
+            pnl_said = venue["words"]
+        # WHAT THE NOTES BELOW SPEAK OF (2026-11-06, the review): while the
+        # figure is eToro's own, or its quote's closing side, it does not
+        # read the price shown — so a stale or missing price says so of the
+        # price alone, and the figure is in dollars whatever the row's own
+        # marks are in.
+        venue_basis = ""
+        if venue is not None and pnl is not None:
+            venue_basis = {
+                "etoro": "it is eToro's own figure",
+                "etoro_quote": "it is computed at eToro's own quote",
+            }.get(venue["source"], "")
         # WHEN THE PRICE SHOWN WAS READ (2026-10-08): the row's own mark
         # time (venue_mark.resolve — the venue's stamp for a real row, the
         # quote's time for a quote), never the LiveQuote's when the price
@@ -674,10 +710,12 @@ def build_summary(trade, now=None):
         else:
             summary.update(
                 big_label="Profit or loss now",
-                big_value=money(pnl, mark_ccy, signed=True),
+                big_value=money(pnl, pnl_ccy, signed=True),
                 big_tone="up" if pnl > 0 else "down" if pnl < 0 else "",
-                big_sub=("%s of the position" % percent(pnl_pct)
-                         if pnl_pct is not None else ""))
+                big_sub=" · ".join(x for x in (
+                    ("%s of the position" % percent(pnl_pct)
+                     if pnl_pct is not None else ""), pnl_said) if x),
+                big_title=venue["title"] if venue is not None else "")
 
         facts.append(_fact(
             "Order price" if kind == "working" else "Entry price",
@@ -788,7 +826,14 @@ def build_summary(trade, now=None):
                 "The market for %s is shut right now%s. The price does not "
                 "move until then." % (
                     sym, ("; it opens again in " + when) if when else ""))})
-        if waiting and kind != "working":
+        if waiting and kind != "working" and venue_basis:
+            notes.append({"tone": "warn", "text": (
+                "No price has come in from the venue for %s yet. The "
+                "platform's own quote for it is a different instrument (a "
+                "futures contract or a cash index), so no price is shown. "
+                "The profit or loss above does not need it: %s."
+                % (sym, venue_basis))})
+        elif waiting and kind != "working":
             notes.append({"tone": "warn", "text": (
                 "No price has come in from the venue for %s yet. The "
                 "platform's own quote for it is a different instrument (a "
@@ -800,16 +845,32 @@ def build_summary(trade, now=None):
             if shut:
                 text = ("The last price came in %s ago, which is normal "
                         "while the market is shut." % duration_words(age))
+            elif venue_basis:
+                text = ("The price is stale: the last one came in %s ago. "
+                        "The profit or loss above does not read it: %s."
+                        % (duration_words(age), venue_basis))
             else:
                 text = ("The price is stale: the last one came in %s ago, so "
                         "the profit or loss may be out of date."
                         % duration_words(age))
             notes.append({"tone": "warn", "text": text})
+        elif mark is None and not waiting and kind != "working" \
+                and venue_basis:
+            notes.append({"tone": "warn", "text": (
+                "No live price has come in for %s yet, so no price is "
+                "shown. The profit or loss above does not need it: %s."
+                % (sym, venue_basis))})
         elif mark is None and not waiting and kind != "working":
             notes.append({"tone": "warn", "text": (
                 "No live price has come in for %s yet, so the profit or loss "
                 "cannot be shown." % sym)})
-        if raw_ccy:
+        if raw_ccy and pnl_ccy != raw_ccy:
+            # The figure above is in dollars (eToro's own, 2026-11-06): only
+            # the size is in the pair's quote currency.
+            notes.append({"tone": "info", "text": (
+                "This position was opened before Sauron stored a conversion "
+                "rate, so its size is shown in %s, not %s." % (raw_ccy, ccy))})
+        elif raw_ccy:
             notes.append({"tone": "info", "text": (
                 "This position was opened before Sauron stored a conversion "
                 "rate, so its profit or loss and its size are shown in %s, "
