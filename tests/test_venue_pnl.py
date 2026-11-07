@@ -788,6 +788,16 @@ class ThePositionPageNotesTests(_Case):
         super().setUp()
         self.t = _row(self.cfg)
         _held(self.user, [_holding()])
+        # THE MARKET IS PINNED OPEN (2026-11-07): these notes are about a
+        # stale price beside eToro's own figure, not about the market's
+        # hours. Unpinned, a run on a weekend found the forex market shut
+        # and read the shut-market note in their place, so the suite went
+        # red every Saturday and Sunday. tests/test_position_page.py covers
+        # the shut-market note itself.
+        pin = mock.patch("core.exchange_status.market_status_for",
+                         return_value={"is_open": True})
+        pin.start()
+        self.addCleanup(pin.stop)
 
     def _notes(self, trade=None):
         from dashboard.position_summary import build_summary
