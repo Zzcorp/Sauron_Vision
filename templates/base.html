@@ -1091,7 +1091,7 @@
                     {% endcomment %}
                     <span class="ip-label">BOT</span>
                     <span class="ip-count" data-sv-live="hb-bot-state" data-sv-live-key="hb-bot-state">{% if panel_bot %}<span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}" title="{{ panel_bot.reason }}">{{ panel_bot.state }}</span>{% else %}<span class="sv-unknown" title="The bot program's state could not be read — this cell claims nothing">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live · {{ panel_bot.paper }} paper · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live · {% if panel_bot.live_demo %}{{ panel_bot.live_demo }} on demo · {% endif %}{{ panel_bot.paper }} paper · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">BOT PROGRAM &middot; IS IT RUNNING? <span class="sv-live-chip" data-sv-live-status></span></div>
                         <div data-sv-live="hb-bot-detail">

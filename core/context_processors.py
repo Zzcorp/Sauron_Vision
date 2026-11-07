@@ -665,6 +665,86 @@ def _is_manual_config(cfg):
     return cfg.name == MANUAL_CONFIG_NAME and not cfg.symbols
 
 
+#: The account flags that put a broker in its rehearsal world, by the name
+#: broker_router.broker_name_for_symbol gives the broker (2026-11-07, the
+#: Operations Center OC0). eToro and Saxo through capital_truth.broker_env,
+#: the platform's one reading of an account row's world; IBKR's port too
+#: (an unknown port is NOT demo); OANDA's practice and Alpaca's paper
+#: endpoints. A route the router hands to the simulator (no keys, a
+#: Binance testnet, a class with no venue) is not a demo ACCOUNT: a
+#: live-mode config is refused there by the engine and stays counted, so
+#: the armed pill never under-counts real money.
+_DEMO_ACCOUNTS = {
+    "etoro": ("etoro_account", lambda a: _broker_env(a) == "paper"),
+    "saxo": ("saxo_account", lambda a: _broker_env(a) == "paper"),
+    "ibkr": ("ibkr_account", lambda a: getattr(a, "env", None) == "paper"),
+    "oanda": ("oanda_account", lambda a: bool(getattr(a, "practice", False))),
+    "alpaca": ("alpaca_account", lambda a: bool(getattr(a, "paper", False))),
+}
+
+
+def _broker_env(acct):
+    from bot_program.capital_truth import broker_env
+    return broker_env(acct)
+
+
+def config_worlds(user, configs):
+    """{config id: "live" | "demo" | "paper"} — the money world each config
+    trades in, read from the ACCOUNT its symbols route to (2026-11-07, the
+    Operations Center OC0: a live-mode bot on an eToro demo account was
+    counted as armed with real funds).
+
+    A paper-mode config is "paper" (the router short-circuits it to the
+    simulator). A live-mode config is "demo" only when EVERY symbol routes
+    to an account flagged as its broker's demo world; anything else — a
+    real account, a route the router hands to the simulator, a config with
+    no symbol, a route that cannot be read — is "live": counted as real
+    money, never under-counted. The route is broker_router's own reader
+    (broker_name_for_symbol, which builds no client and sends nothing),
+    asked once per asset class with a symbol of that class; the classes
+    come from one read of the instruments. Display only."""
+    out = {}
+    live = [c for c in configs if (getattr(c, "mode", "") or "") == "live"]
+    for c in configs:
+        if (getattr(c, "mode", "") or "") != "live":
+            out[c.id] = "paper"
+    if not live:
+        return out
+    try:
+        from bot_program.engine import broker_router
+        from instruments.models import Instrument
+        symbols = {s for c in live for s in (c.symbols or []) if s}
+        classes = dict(Instrument.objects.filter(symbol__in=symbols)
+                       .values_list("symbol", "asset_class")) if symbols else {}
+    except Exception as e:  # noqa: BLE001 — unread routes count as real
+        logger.debug("config worlds unreadable: %s", e)
+        return {**out, **{c.id: "live" for c in live}}
+
+    route_world = {}
+
+    def world_of_route(cfg, symbol):
+        # The router defaults a symbol with no Instrument row to crypto,
+        # and so does broker_name_for_symbol: one representative per class.
+        key = classes.get(symbol) or "crypto"
+        if key not in route_world:
+            try:
+                name = broker_router.broker_name_for_symbol(user, symbol, cfg)
+                attr, is_demo = _DEMO_ACCOUNTS.get(name, (None, None))
+                acct = getattr(user, attr, None) if attr else None
+                route_world[key] = ("demo" if acct is not None
+                                    and is_demo(acct) else "live")
+            except Exception as e:  # noqa: BLE001 — unread is real money
+                logger.debug("route of %s unreadable: %s", symbol, e)
+                route_world[key] = "live"
+        return route_world[key]
+
+    for c in live:
+        syms = [s for s in (c.symbols or []) if s]
+        worlds = {world_of_route(c, s) for s in syms}
+        out[c.id] = "demo" if worlds == {"demo"} else "live"
+    return out
+
+
 def _bot_truth(user, book):
     """What the BOT cell says — the state of the bot PROGRAM right now.
 
@@ -709,8 +789,20 @@ def _bot_truth(user, book):
     manual_config_ids = {c.id for c in manual_configs}
     configs = [c for c in all_configs if c.id not in manual_config_ids]
     enabled = [c for c in configs if c.enabled]
-    n_live = sum(1 for c in enabled if c.mode == "live")
-    n_paper = len(enabled) - n_live
+    n_live_mode = sum(1 for c in enabled if c.mode == "live")
+    n_paper = len(enabled) - n_live_mode
+    # THE WORLD OF A LIVE-MODE BOT IS ITS ACCOUNT'S (2026-11-07, the
+    # Operations Center OC0). `live` counted every enabled live-mode config
+    # as armed with real funds, and the topbar's red pill printed it: a bot
+    # on an eToro DEMO account read as real money. `live` now counts the
+    # configs whose symbols route to a REAL account (or whose route cannot
+    # be read: never under-counted); `live_demo` the ones on a demo
+    # account; `live_mode` both, the config column as it is. Display only:
+    # nothing that trades reads these.
+    worlds = config_worlds(user, enabled) if n_live_mode else {}
+    n_live = sum(1 for c in enabled
+                 if c.mode == "live" and worlds.get(c.id) != "demo")
+    n_live_demo = n_live_mode - n_live
 
     # A component row that does not exist is not "on": guarded_task treats a
     # missing key as OFF and skips, so the honest reading of both states is
@@ -752,6 +844,9 @@ def _bot_truth(user, book):
             "name": cfg.name,
             "asset_class": cfg.asset_class,
             "mode": cfg.mode,
+            # The money world, from the account (paper for a paper-mode
+            # config; a disabled live-mode one is not routed: "").
+            "world": worlds.get(cfg.id, "paper" if cfg.mode != "live" else ""),
             "enabled": cfg.enabled,
             "shadow": is_shadow(cfg),
             "open": open_by_config.get(cfg.id, 0),
@@ -831,12 +926,28 @@ def _bot_truth(user, book):
                   f"{cadence / 60:.0f} min schedule.")
     elif n_live:
         state, tone = "LIVE", "gold"
-        reason = f"{n_live} bot(s) armed with real funds."
+        reason = (f"{n_live} bot(s) armed with real funds"
+                  + (f" · {n_live_demo} on a DEMO account" if n_live_demo
+                     else "") + ".")
+    elif n_live_demo:
+        # Live mode, every one of them on a broker's demo account:
+        # simulated money at a broker, never "real funds" (2026-11-07).
+        state, tone = "DEMO", ""
+        reason = (f"{n_live_demo} bot(s) in live mode on a DEMO account: "
+                  f"simulated money at the broker"
+                  + (f" · {n_paper} on the paper venue" if n_paper else "")
+                  + ".")
     else:
         state, tone = "PAPER", ""
         reason = f"{len(enabled)} bot(s) armed on the paper venue."
 
-    if state in ("LIVE", "PAPER"):
+    if n_live_demo and state not in ("LIVE", "DEMO"):
+        # Whatever the program's state, a live-mode bot on a demo account
+        # is said to be one (2026-11-07): the pill does not count it.
+        reason += (f" Live mode: {n_live} on a REAL account · {n_live_demo} "
+                   f"on a DEMO account.")
+
+    if state in ("LIVE", "PAPER", "DEMO"):
         if halted:
             reason += (f" {len(halted)} of {len(enabled)} behind a circuit "
                        f"breaker.")
@@ -915,7 +1026,10 @@ def _bot_truth(user, book):
         "reason": reason,
         "configs": len(configs),
         "enabled": len(enabled),
+        # REAL-account bots only (2026-11-07): the topbar's armed pill.
         "live": n_live,
+        "live_demo": n_live_demo,
+        "live_mode": n_live_mode,
         "paper": n_paper,
         "shadow": len(shadowed),
         "halted": len(halted),
