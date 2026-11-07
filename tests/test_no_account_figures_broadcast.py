@@ -364,8 +364,10 @@ class TheAILedgerAPIIsStaffOnlyTests(_Case):
         body = resp.content.decode()
         # The figures these rows carry (the page's own script holds
         # "0123456789abcdef", so FIGURES' "12345" cannot be looked for).
+        # Times are cut out first, as in assertNoFigure (2026-11-07).
+        bare = _ISO_STAMP.sub("<time>", body)
         for figure in ("98765", "98,765", "6543", "6,543"):
-            self.assertNotIn(figure, body)
+            self.assertNotIn(figure, bare)
         self.assertNotIn("Closing frees", body)
         self.assertNotIn("VETO", body)
         self.assertIn("close_advisor", body)
