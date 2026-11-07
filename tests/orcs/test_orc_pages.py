@@ -396,9 +396,14 @@ class TheStaffTests(_Pages):
         Orc.objects.filter(pk=self.orc.pk).update(r_money=Decimal("321.5"),
                                                   spend_today_usd=Decimal(
                                                       "0.75"))
+        from tests.test_no_account_figures_broadcast import _ISO_STAMP
         for html in (_main(self.page()), _main(self.detail())):
+            # Times are cut out before the scan (2026-11-07): a journal
+            # line's <time datetime="...T10:08:50.759034..."> holds "0.75"
+            # in its seconds, which turned this test red by chance.
+            bare = _ISO_STAMP.sub("<time>", html)
             for word in ("321.5", "0.75", "cost_usd", "tokens_in"):
-                self.assertNotIn(word, html)
+                self.assertNotIn(word, bare)
 
     def test_the_route_probe_counts_them_switched_off_never_missing(self):
         """The forge reads the probe's "missing": OFF, the Orc pages' 404
