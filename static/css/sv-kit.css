@@ -497,9 +497,14 @@ body:not(.light-mode) .sr-signal .sr-sym, body:not(.light-mode) .sr-pop-sym { co
 /* The quote card's symbol: mono ink-1, not the Eye (a symbol is not live). */
 .dh-pop-title { font-family: var(--sv-font-mono); font-weight: 600; text-shadow: none; }
 body:not(.light-mode) .dh-pop-title { color: var(--sv-ink-1); }
-/* The card's facts: a label and its value never touch. */
-.sr-pop-grid > div { gap: 8px; min-width: 0; }
-.sr-pop-v { min-width: 0; overflow-wrap: anywhere; }
+/* The card's facts: a label and its value never touch, and a value never
+   splits inside a word for want of room beside its label (2026-11-07:
+   anywhere printed a rule name as "trend_breakou" over "t_cr…"). A value
+   wraps at its spaces beside the label; one whose longest word cannot sit
+   there takes the line under it, whole and right-aligned; a word breaks
+   only when even that line is too short for it. */
+.sr-pop-grid > div { gap: 0 8px; min-width: 0; flex-wrap: wrap; }
+.sr-pop-v { flex: 1 1 min-content; min-width: 0; overflow-wrap: break-word; word-break: normal; }
 body:not(.light-mode) .sr-pop-grid > div { border-bottom-color: var(--sv-line-1); }
 /* The watchlist's sparkline: jade when the day is up (coral down stays). */
 .wl-spark svg path { stroke: var(--sv-up); }

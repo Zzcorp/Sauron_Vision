@@ -20,6 +20,8 @@ protective action, REAL the only solid red.
     edge, and no other dialog does (2026-11-07).
   * THE SIGNAL CARD: TAKE TRADE / ADD in the signal's side (a bearish
     signal is a SELL), PASS a neutral ghost (it dismisses; it loses nothing).
+    Its RULE value breaks between words or after an underscore when it
+    must, never inside a word, and stays in its cell (2026-11-07).
   * THE QUOTE CARD: LONG jade, SHORT coral, outlines, no gradient slabs.
   * CLOSE, RETRY CLOSE, CLOSE ALL, turn off, all off, Cancel a withdrawal:
     neutral outlines (.btn-danger), never a red fill — turning off and
@@ -385,11 +387,46 @@ PROBE = r"""(function () {
                  shadow: c.boxShadow };
     }
     function all(sel) { return Array.prototype.map.call(document.querySelectorAll(sel), paint); }
+    // The card's RULE value as the browser breaks it, the card opened as a
+    // click opens it (pinned, shown: a hover card is display: none where
+    // the browser reports no hover, as a headless one does): each
+    // character's box, grouped by the line it sits on; the ink's edges
+    // against its cell's.
+    function rule(pop) {
+        var cell = Array.prototype.filter.call(pop.querySelectorAll('.sr-pop-grid > div'), function (d) {
+            var k = d.querySelector('.sr-pop-k');
+            return k && k.textContent.trim().toLowerCase() === 'rule';
+        })[0];
+        var v = cell && cell.querySelector('.sr-pop-v');
+        if (!v) return null;
+        var was = pop.className;
+        pop.classList.add('sv-pinned', 'show');
+        try {
+            var range = document.createRange(), lines = [], top = null, n;
+            var walk = document.createTreeWalker(v, NodeFilter.SHOW_TEXT);
+            while ((n = walk.nextNode())) {
+                for (var i = 0; i < n.data.length; i++) {
+                    range.setStart(n, i); range.setEnd(n, i + 1);
+                    var r = range.getClientRects()[0];
+                    if (!r) continue;
+                    if (top === null || r.top > top + r.height / 2) { lines.push(''); top = r.top; }
+                    lines[lines.length - 1] += n.data.charAt(i);
+                }
+            }
+            range.selectNodeContents(v);
+            var ink = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
+            return { text: v.textContent, lines: lines, size: getComputedStyle(v).fontSize,
+                     ink: [ink.left, ink.right], cell: [box.left, box.right],
+                     width: pop.getBoundingClientRect().width };
+        } finally {
+            pop.className = was;
+        }
+    }
     var out = { rail: [] };
     Array.prototype.forEach.call(document.querySelectorAll('.sr-popup'), function (pop) {
         var dir = pop.querySelector('.sr-pop-dir');
         out.rail.push({ dir: dir ? dir.className : '', act: paint(pop.querySelector('.sr-pop-btn-act')),
-                        pass: paint(pop.querySelector('.sr-pop-btn-pass')) });
+                        pass: paint(pop.querySelector('.sr-pop-btn-pass')), rule: rule(pop) });
     });
     out.quoteLong = all('.dh-pop .sr-pop-btn-act, .wl-pop .sr-pop-btn-act');
     out.quoteShort = all('.dh-pop .sr-pop-btn-short, .wl-pop .sr-pop-btn-short');
@@ -450,6 +487,8 @@ class MoneyControlsMeasuredTests(TestCase):
         eth = _quote("ETHUSD", 2600).instrument
         _signal(eth, direction="bearish", entry=2600, stop=2700, target=2400,
                 rule="s1a_down")
+        # A rule name longer than the card's RULE column (synthetic).
+        _signal(inst, direction="bullish", rule="trend_breakout_crossover")
         _trade(user)
         _legacy(user)
         _component("s1a_on_switch", is_enabled=True)
@@ -482,6 +521,24 @@ class MoneyControlsMeasuredTests(TestCase):
                     self.assertEqual(act["img"], "none")
                 self.assertTrue(is_neutral(pas["color"]), pas)
                 self.assertFalse(is_red(pas["bg"], 0.05), pas)
+
+    def test_a_long_rule_name_never_splits_inside_a_word(self):
+        """S1a's 11 px labels narrowed the card's RULE value, and
+        overflow-wrap: anywhere then split a long name mid-word
+        ("trend_breakou" over "t_cr…", 2026-11-07). At 1440 it breaks only
+        between words or after an underscore when it must, keeps every
+        character and its 11 px, and stays in its cell."""
+        got = [c["rule"] for c in self.got["/command/"]["rail"]
+               if c["rule"] and c["rule"]["text"].startswith("trend_breakout_")]
+        self.assertEqual(len(got), 1, self.got["/command/"]["rail"])
+        rule = got[0]
+        self.assertEqual("".join(rule["lines"]), rule["text"], rule)
+        for line, after in zip(rule["lines"], rule["lines"][1:]):
+            self.assertTrue(line.endswith(("_", " ", "-")) or after.startswith(" "),
+                            "the rule name splits inside a word: %r" % rule["lines"])
+        self.assertGreaterEqual(float(rule["size"][:-2]), 11, rule)
+        self.assertGreaterEqual(rule["ink"][0], rule["cell"][0] - 0.5, rule)
+        self.assertLessEqual(rule["ink"][1], rule["cell"][1] + 0.5, rule)
 
     def test_the_quote_card_long_is_jade_and_short_is_coral_outlines(self):
         cmd = self.got["/command/"]
