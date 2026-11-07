@@ -35,6 +35,7 @@ staff only.
 
 Run with:  python manage.py test tests.test_no_account_figures_broadcast
 """
+import re
 from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
@@ -44,6 +45,15 @@ from django.test import TestCase
 from django.utils import timezone
 
 #: Every account figure seeded below, as a prompt could print it.
+#: An ISO-8601 time (2026-11-07T08:36:45.345654+00:00) is never an account
+#: figure, but its microseconds can spell one of the FIGURES below
+#: (".345654" holds "3456"), which turned a clean text red now and then
+#: (2026-11-07, a full-suite run). Times are cut out before the search; no
+#: figure is written as a time, so nothing a test guards is hidden by it.
+_ISO_STAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+    r"(?:Z|[+-]\d{2}:?\d{2})?")
+
 FIGURES = ("98765", "98,765", "12345", "12,345", "4321", "4,321",
            "87654", "87,654", "23456", "23,456", "3456", "3,456",
            "6543", "6,543", "6542", "6,542", "55555", "55,555", "44444",
@@ -121,8 +131,9 @@ def _eod_digest():
 class _Case(TestCase):
 
     def assertNoFigure(self, text):
+        bare = _ISO_STAMP.sub("<time>", text)
         for figure in FIGURES:
-            self.assertNotIn(figure, text, f"{figure!r} in {text[:3000]!r}")
+            self.assertNotIn(figure, bare, f"{figure!r} in {text[:3000]!r}")
 
 
 class TheBroadcastPromptsCarryNoAccountMoneyTests(_Case):
