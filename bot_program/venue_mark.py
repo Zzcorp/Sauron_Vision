@@ -346,12 +346,17 @@ def quote_stand_in(symbol, quote=None, *, carrier="") -> str:
     YF_SYMBOL_MAP, the one record of what Yahoo quotes for each symbol) —
     or "" when it is the same instrument. A quote the row's own venue wrote
     (its source is the carrier's key) is the venue's rate, whatever the
-    symbol."""
+    symbol. THE ONE VENUE-SOURCE RULE (the eToro feed spec, F1:
+    market_data.venue_quotes.is_venue_source), read EXACTLY as before: the
+    source equals the carrier, in any case, untrimmed — an OANDA row's
+    "oanda_stream" quote is not "oanda"'s own write, and "etoro_ws" is not
+    "etoro" (tests/feed/test_venue_source_one_rule.py)."""
     try:
-        if quote is not None and carrier and \
-                str(getattr(quote, "source", "") or "").lower() == \
-                str(carrier).lower():
-            return ""
+        if quote is not None and carrier:
+            from market_data.venue_quotes import EXACT, is_venue_source
+            if is_venue_source(getattr(quote, "source", ""), carrier,
+                               reading=EXACT):
+                return ""
         from market_data.public_feed import yf_stand_in
         return yf_stand_in(symbol)
     except Exception:  # noqa: BLE001 — a dict read; kept total
