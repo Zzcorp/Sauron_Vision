@@ -14,3 +14,7 @@ class BotProgramConfig(AppConfig):
         # THE ORCS (bot_program/orcs/lifecycle.py): the receiver that ends
         # an idea when its last leg closes. No query for a row with no Orc.
         from .orcs import lifecycle  # noqa: F401
+        # THE FEED'S HARM COUNTERS (the eToro feed spec, F1,
+        # bot_program/feed_harms.py): the receiver that counts how each
+        # real exit was booked. No query and no write on a save's path.
+        from . import feed_harms  # noqa: F401

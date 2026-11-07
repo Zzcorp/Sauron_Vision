@@ -98,6 +98,8 @@ from typing import NamedTuple, Optional
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from bot_program import feed_fence
+
 logger = logging.getLogger(__name__)
 
 #: A venue mark older than this is not preferred over the platform's quote.
@@ -540,6 +542,13 @@ def for_booking(trade, quote, *, now=None) -> Optional[Mark]:
     now = now or timezone.now()
     mk = resolve(trade, quote, now=now)
     if bookable(mk, trade, now=now):
+        if mk.source == QUOTE and not getattr(trade, "paper", True):
+            # THE HARM COUNTER (the eToro feed spec, F1, bot_program
+            # .feed_harms): the quote's source noted on the row object, in
+            # memory and never saved, so the booking's save is counted as
+            # an exit at an outside quote when it is one. Through the
+            # fence: never the answer.
+            feed_fence.count("booking", "note_booking_quote", trade, quote)
         return mk
     if mk.source == QUOTE and not getattr(trade, "paper", True):
         vm = last(trade, now=now)
