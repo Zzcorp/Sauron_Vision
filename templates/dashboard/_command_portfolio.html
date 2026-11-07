@@ -1,110 +1,143 @@
+{% load oc_dash sauron_tags %}
 {# PORTFOLIO tab — strategic snapshot enriched with sparkline + donut. #}
+{# Rendered without the request (views_command._fragment). REAL, DEMO and PAPER money is never added (2026-11-07, OC0): the strip leads with REAL, every world has its own row below it, and every statistic says its window. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
 {# Every cell here used to print a 0 when it had nothing to measure: a 0.0% #}
 {# win rate over no trades reads as "everything lost", a 0.00 profit factor #}
-{# as a broken engine, and a 0.00% max drawdown as "never lost money". An #}
-{# em-dash says the one true thing — not measured. #}
+{# as a broken engine, and a 0.00% max drawdown as "never lost money". A #}
+{# dash says the one true thing — not measured — and its title says why. #}
 <div class="oc-strip">
-    <div class="oc-strip-cell">
-        <span class="oc-strip-label">PORTFOLIO VALUE</span>
+    <div class="oc-strip-cell" title="{{ book_value_title|default:book_coverage }}">
+        {# THE PLATFORM BOOK, NAMED (2026-11-07): the platform's own book, in mixed currencies, never converted, no currency sign — not a balance. eToro's own equity is at the top of the page. #}
+        <span class="oc-strip-label">{{ book_label }}</span>
         {# `book_value_text` — the LIVE union, which the view has always #}
         {# computed for this cell. It rendered `portfolio.current_value`, #}
         {# the stored column an hourly task writes, while the cash share #}
         {# directly beneath it was live: one cell quoting two different #}
         {# books, disagreeing with itself the moment a fill landed. #}
-        <span class="oc-strip-value" title="{{ book_value_title|default:book_coverage }}">{{ book_value_text }}</span>
-        {# The share is an em-dash when it could not be measured, and an #}
-        {# em-dash does not take a percent sign. #}
-        <span class="oc-strip-sub">{{ portfolio.currency }} · cash {% if cash_pct == "—" %}&mdash;{% else %}{{ cash_pct }}%{% endif %}</span>
+        <span class="oc-strip-value">{% if book_value_text == "—" %}<span class="sv-unknown" title="{{ why.not_measured }}">—</span>{% dash_note "—" why.not_measured %}{% else %}{{ book_value_text }}{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">({{ book_currency }}) · cash {% if cash_pct == "—" %}<span title="{{ why.not_measured }}">&mdash;</span>{% dash_note "—" why.not_measured %}{% else %}{{ cash_pct }}%{% endif %} of it</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{{ book_words }}</span>
+    </div>
+    <div class="oc-strip-cell" title="Each world's open P&L, the sum of its own rows: eToro's own figure on an eToro row its holdings list (read in the last 15 minutes), an estimate from the row's mark elsewhere (≈). Never added.">
+        <span class="oc-strip-label">UNREALIZED P&amp;L · <span class="sv-world sv-world--live">REAL</span></span>
+        {# Polarity colour only on a figure eToro states (spec §5.3): r.tone is set for eToro's own, never for an estimate. #}
+        {% with r=unrealized_by_world.0 %}<span class="oc-strip-value {% if r.tone == 'up' %}up{% elif r.tone == 'down' %}down{% endif %}" data-oc-money title="{{ r.why|default:r.title }}">{{ r.text }}</span>{% dash_note r.text r.why %}{% endwith %}
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% for r in unrealized_by_world %}{% if not forloop.first %}{{ r.name }} <span data-oc-money title="{{ r.why|default:r.title }}">{{ r.text }}</span>{% dash_note r.text r.why %} · {% endif %}{% endfor %}{{ open_positions_total }} open, both books · never added</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">UNREALIZED P&amp;L</span>
-        <span class="oc-strip-value {% if total_unrealized > 0 %}up{% elif total_unrealized < 0 %}down{% endif %}">{% if total_unrealized is not None %}{{ total_unrealized|floatformat:2 }}{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub" title="eToro's own profit or loss for each eToro position its holdings list (read in the last 15 minutes); elsewhere an estimate from the position's mark, said under the row.">{{ open_positions_total }} open · both books, eToro's own figure on its positions</span>
+        <span class="oc-strip-label">WIN RATE · REAL · LIFETIME</span>
+        <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}<span title="{{ why.nothing_closed }}">—</span>{% dash_note "—" why.nothing_closed %}{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{{ n_winning }}W / {{ n_losing }}L · {{ n_closed }} graded{% if n_ungraded %} · {{ n_ungraded }} unpriced{% endif %} · lifetime</span>
     </div>
-    <div class="oc-strip-cell">
-        <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{{ n_winning }}W / {{ n_losing }}L · {{ n_closed }} graded{% if n_ungraded %} · {{ n_ungraded }} unpriced{% endif %}</span>
-    </div>
-    <div class="oc-strip-cell">
-        <span class="oc-strip-label">PROFIT FACTOR</span>
-        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% elif profit_factor > 0 %}down{% endif %}">{% if profit_factor is not None %}{{ profit_factor }}{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">avg win {{ avg_win|default_if_none:"—" }} · avg loss {{ avg_loss|default_if_none:"—" }}</span>
+    <div class="oc-strip-cell" title="The profit factor is the gross wins over the gross losses. The payoff, beside it, is the average win over the average loss: what this cell printed as its profit factor until 2026-11-07.">
+        <span class="oc-strip-label">PROFIT FACTOR · REAL · LIFETIME</span>
+        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% elif profit_factor > 0 %}down{% endif %}">{% if profit_factor is not None %}{{ profit_factor }}{% elif n_closed %}<span title="{{ why.no_loss }}">—</span>{% dash_note "—" why.no_loss %}{% else %}<span title="{{ why.nothing_closed }}">—</span>{% dash_note "—" why.nothing_closed %}{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">gross wins over gross losses · payoff {% if payoff is not None %}{{ payoff }}{% else %}<span title="{% if n_closed %}{{ why.no_loss }}{% else %}{{ why.nothing_closed }}{% endif %}">—</span>{% if n_closed %}{% dash_note "—" why.no_loss %}{% else %}{% dash_note "—" why.nothing_closed %}{% endif %}{% endif %} · avg win <span data-oc-money title="{% if avg_win is None %}{{ why.no_win }}{% endif %}">{% if avg_win is not None %}{{ stats_by_world.live.avg_win_text }}{% else %}—{% endif %}</span>{% if avg_win is None %}{% dash_note "—" why.no_win %}{% endif %} · avg loss <span data-oc-money title="{% if avg_loss is None %}{{ why.no_loss }}{% endif %}">{% if avg_loss is not None %}{{ stats_by_world.live.avg_loss_text }}{% else %}—{% endif %}</span>{% if avg_loss is None %}{% dash_note "—" why.no_loss %}{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">SHARPE 30D</span>
-        <span class="oc-strip-value {% if sharpe_30d and sharpe_30d > 0 %}up{% elif sharpe_30d and sharpe_30d < 0 %}down{% endif %}">{% if sharpe_30d is not None %}{{ sharpe_30d }}{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{% if sortino_30d is not None %}sortino {{ sortino_30d }}{% else %}needs 5+ daily snapshots{% endif %}</span>
+        <span class="oc-strip-value {% if sharpe_30d and sharpe_30d > 0 %}up{% elif sharpe_30d and sharpe_30d < 0 %}down{% endif %}">{% if sharpe_30d is not None %}{{ sharpe_30d }}{% else %}<span title="{{ why.snapshot_few }}">—</span>{% dash_note "—" why.snapshot_few %}{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if sortino_30d is not None %}sortino {{ sortino_30d }}{% else %}needs 5+ daily snapshots{% endif %}{% if snapshot_date %} · snapshot {{ snapshot_date|date:"Y-m-d" }}{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">MAX DRAWDOWN</span>
-        <span class="oc-strip-value {% if max_drawdown %}down{% endif %}">{% if max_drawdown is not None %}{{ max_drawdown|floatformat:2 }}%{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{% if max_drawdown is not None %}all-time low watermark{% else %}no snapshot to measure from{% endif %}</span>
+        <span class="oc-strip-value {% if max_drawdown %}down{% endif %}">{% if max_drawdown is not None %}{{ max_drawdown|floatformat:2 }}%{% else %}<span title="{{ why.snapshot_none }}">—</span>{% dash_note "—" why.snapshot_none %}{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if max_drawdown is not None %}low watermark · snapshot {{ snapshot_date|date:"Y-m-d" }}{% else %}no snapshot to measure from{% endif %}</span>
+    </div>
+</div>
+
+{# ── 1.5 Lifetime, each world apart (2026-11-07, OC0) ──────────────── #}
+{# Database aggregates over every close, grouped by the rows' own stamps and read into worlds by world_of: what the tab computed by loading every close there ever was, world by world, never added. #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Closed positions · lifetime · each world apart</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">profit factor = gross wins over gross losses · payoff = avg win over avg loss</span>
+    </div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>world</th><th>closed</th><th>win rate</th><th>avg win</th><th>avg loss</th><th>profit factor</th><th>payoff</th></tr></thead>
+        <tbody>
+        {% for s in stats_rows %}
+            <tr class="oc-world-row">
+                <td>{% if s.world %}{% money_world s.world %}{% else %}<span class="sv-world" title="Recorded by hand or imported: states no venue">NO VENUE</span>{% endif %}</td>
+                <td>{{ s.n_graded }}{% if s.n_unknown %} · {{ s.n_unknown }} unpriced{% endif %}</td>
+                <td>{% if s.win_rate is not None %}{{ s.win_rate }}%{% else %}<span title="{{ why.nothing_closed }}">—</span>{% dash_note "—" why.nothing_closed %}{% endif %}</td>
+                <td data-oc-money title="{% if s.avg_win is None %}{% if s.n_graded %}{{ why.no_win }}{% else %}{{ why.nothing_closed }}{% endif %}{% endif %}">{% if s.avg_win is not None %}{{ s.avg_win_text }}{% else %}—{% endif %}</td>{% if s.avg_win is None %}{% if s.n_graded %}{% dash_note "—" why.no_win %}{% else %}{% dash_note "—" why.nothing_closed %}{% endif %}{% endif %}
+                <td data-oc-money title="{% if s.avg_loss is None %}{% if s.n_graded %}{{ why.no_loss }}{% else %}{{ why.nothing_closed }}{% endif %}{% endif %}">{% if s.avg_loss is not None %}{{ s.avg_loss_text }}{% else %}—{% endif %}</td>{% if s.avg_loss is None %}{% if s.n_graded %}{% dash_note "—" why.no_loss %}{% else %}{% dash_note "—" why.nothing_closed %}{% endif %}{% endif %}
+                <td>{% if s.profit_factor is not None %}{{ s.profit_factor }}{% else %}<span title="{% if s.n_graded %}{{ why.no_loss }}{% else %}{{ why.nothing_closed }}{% endif %}">—</span>{% if s.n_graded %}{% dash_note "—" why.no_loss %}{% else %}{% dash_note "—" why.nothing_closed %}{% endif %}{% endif %}</td>
+                <td>{% if s.payoff is not None %}{{ s.payoff }}{% else %}<span title="{% if s.n_graded %}{{ why.no_loss }}{% else %}{{ why.nothing_closed }}{% endif %}">—</span>{% if s.n_graded %}{% dash_note "—" why.no_loss %}{% else %}{% dash_note "—" why.nothing_closed %}{% endif %}{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
     </div>
 </div>
 
 {# ── 2. Equity curve sparkline ────────────────────────────────────── #}
 <div class="card" style="margin-bottom:18px;">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">Equity curve · last 30 days</span>
+        <span class="card-title">Equity curve · the platform book · last 30 daily snapshots (23:30 UTC)</span>
         <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-            {% if equity_points %}low {{ equity_min|floatformat:0 }} · high {{ equity_max|floatformat:0 }} · {{ equity_points|length }} pts{% endif %}
+            {% if equity_points %}low {{ equity_min|floatformat:2 }} · high {{ equity_max|floatformat:2 }} · {{ equity_points|length }} pts · {{ book_currency }}{% endif %}
         </span>
     </div>
     {# Gradient id namespaced by chart_id: this partial and the portfolio #}
     {# page both used a literal "oc-spark-grad", and both render into the #}
     {# Command Centre, so one curve's wash resolved against the other's. #}
-    {% include "_partials/chart_line.html" with points=equity_points min=equity_min max=equity_max chart_id="ocEquitySpark" fill=1 unit="account equity" when="last 30 days" empty="No portfolio snapshots yet — equity curve fills as daily snapshots accumulate." %}
+    {% include "_partials/chart_line.html" with points=equity_points min=equity_min max=equity_max chart_id="ocEquitySpark" fill=1 unit="the platform book" when="last 30 daily snapshots" empty="No portfolio snapshots yet — the curve fills as daily snapshots accumulate." %}
 </div>
 
 {# ── 3. Allocation donut + winners/losers ─────────────────────────── #}
 {# data-sv-reveal: the motion layer rises this grid's cards as the page is scrolled (static/js/sv-motion.js); the donut card excludes itself. #}
 <div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
-        <div class="card-header"><span class="card-title">Allocation</span></div>
+        <div class="card-header"><span class="card-title">Allocation · marked notional (all worlds) and cash typed on /setup/</span></div>
         {% if allocation %}
-            {% include "_partials/chart_donut.html" with rows=allocation tones="cash=muted" label="Share of portfolio value by asset class" %}
+            {% include "_partials/chart_donut.html" with rows=allocation tones="cash=muted" label="share of marked notional (all worlds) and cash typed on /setup/" %}
         {% else %}
-            <p class="oc-empty">No open positions — allocation will fill once positions open.</p>
+            <p class="oc-empty">No open positions: the allocation fills once positions open.</p>
         {% endif %}
     </div>
 
     <div class="card oc-expandable">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Top 5 winners / losers</span>
+            <span class="card-title">Top 5 winners / losers · lifetime · each in its own world</span>
             <button class="oc-expand-btn" aria-expanded="false">+</button>
         </div>
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>symbol</th><th>side</th><th>P&amp;L</th></tr></thead>
+            <thead><tr><th>symbol</th><th>side</th><th>P&amp;L</th><th>closed</th></tr></thead>
             <tbody>
-                {% for p in best_trades|slice:":3" %}
+                {% for p in best_trades %}
                     <tr>
-                        <td><strong>{{ p.instrument.symbol }}</strong></td>
+                        <td><strong>{{ p.symbol }}</strong> {% if p.world %}{% money_world p.world "compact" %}{% else %}<span class="sv-world" title="Recorded by hand: states no venue">NO VENUE</span>{% endif %}</td>
                         <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
-                        <td class="up">+{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown">(&mdash;)</span>{% endif %}</td>
+                        <td class="up" data-oc-money>{{ p.text }}</td>
+                        <td style="font-size:11px;">{{ p.closed_at|date:"Y-m-d" }}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="3" class="oc-empty">No closed trades yet.</td></tr>
+                    <tr><td colspan="4" class="oc-empty">No winning close yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
         </div>
+        {% if best_trades|length < 5 and best_trades %}<p class="oc-empty" style="padding:4px 0;">{{ best_trades|length }} winning close{{ best_trades|length|pluralize:"s" }} in all.</p>{% endif %}
         <div class="oc-expand-target">
             <strong style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px;">Worst 5</strong>
             <div class="table-wrapper">
             <table class="sv-perf-table" style="margin-top:6px;">
                 <tbody>
-                    {% for p in worst_trades|slice:":5" %}
+                    {% for p in worst_trades %}
                         <tr>
-                            <td><strong>{{ p.instrument.symbol }}</strong></td>
+                            <td><strong>{{ p.symbol }}</strong> {% if p.world %}{% money_world p.world "compact" %}{% else %}<span class="sv-world" title="Recorded by hand: states no venue">NO VENUE</span>{% endif %}</td>
                             <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
-                            <td class="down">{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown">(&mdash;)</span>{% endif %}</td>
+                            <td class="down" data-oc-money>{{ p.text }}</td>
+                            <td style="font-size:11px;">{{ p.closed_at|date:"Y-m-d" }}</td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="3" class="oc-empty">No losing closed trades.</td></tr>
+                        <tr><td colspan="4" class="oc-empty">No losing closed trades.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -116,37 +149,36 @@
 {# ── 4. Open positions table ──────────────────────────────────────── #}
 <div class="card">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">Open positions</span>
+        <span class="card-title">Open positions{% if open_positions_total > 20 %} · the newest 20 of {{ open_positions_total }}{% endif %}</span>
         <a href="{% url 'positions_list' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all positions →</a>
     </div>
-    {% if open_positions %}
+    {% if open_table %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>unreal %</th><th>book</th><th class="nowrap">action</th></tr></thead>
+            <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>unreal %</th><th>book</th><th class="nowrap oc-col-act">action</th></tr></thead>
             <tbody>
                 {# eToro's own P&L on an eToro row (2026-11-06, portfolio.services.ShownRow): the words say where it is an estimate. #}
-                {# A row with no quote shows dashes, not zeros: floatformat #}
-                {# renders None as an empty cell, which reads as a layout bug. #}
-                {% for p in open_positions %}
+                {# The platform's row keys (bot-<id>, pos-<id>, as on /positions/) on every mark, P&L and P&L-words cell, for F4 and F7 to patch in place; never flashed (data-sv-noflash). #}
+                {% for t in open_table %}{% with p=t.row %}
                     <tr data-sv-position-row>
-                        <td class="nowrap"><strong>{{ p.instrument.symbol }}</strong></td>
+                        <td class="nowrap"><strong>{{ t.symbol }}</strong> {% if t.world %}{% money_world t.world "compact" %}{% else %}<span class="sv-world" title="Recorded by hand: states no venue">NO VENUE</span>{% endif %}</td>
                         <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
-                        <td>{{ p.quantity|floatformat:4 }}</td>
-                        <td>{{ p.entry_price|floatformat:4 }}</td>
-                        <td>{% if p.current_price is not None %}{{ p.current_price|floatformat:4 }}{% else %}—{% endif %}</td>
-                        <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}"{% if p.pnl_title %} title="{{ p.pnl_title }}"{% endif %}>{% if p.unrealized_pnl is not None %}{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% endif %}{% else %}—{% endif %}{% if p.pnl_words %}<span class="pnl-pct sv-muted" style="display:block;font-size:.7em;">{{ p.pnl_words }}</span>{% endif %}</td>
-                        <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{% if p.unrealized_pnl_pct is not None %}{{ p.unrealized_pnl_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
+                        <td>{{ t.qty_text }}</td>
+                        <td>{% px p.entry_price t.asset_class t.symbol %}</td>
+                        <td data-sv-live-key="{{ t.key }}.last" data-sv-noflash data-mark-source="{{ t.mark_source }}"{% if t.mark_at %} data-sv-at="{{ t.mark_at|date:'c' }}"{% endif %}>{% if p.current_price is not None %}{% px p.current_price t.asset_class t.symbol %}{% if t.mark_words %}<span class="pnl-pct sv-muted" style="display:block;font-size:.7em;">{{ t.mark_words }}</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ why.no_price }}">—</span>{% dash_note "—" why.no_price %}{% endif %}</td>
+                        <td class="oc-mini-pnl {% if p.venue_pnl.source == 'etoro' %}{% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}{% endif %}" data-sv-live-key="{{ t.key }}.pnl" data-sv-noflash{% if p.pnl_title %} title="{{ p.pnl_title }}"{% elif p.unrealized_pnl is None %} title="{{ why.no_price }}"{% endif %}><span data-oc-money{% if p.unrealized_pnl is None %} title="{{ why.no_price }}"{% endif %}>{{ t.pnl_text }}</span>{% if p.unrealized_pnl is None %}{% dash_note "—" why.no_price %}{% endif %}{% if p.unrealized_pnl is not None and p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% endif %}{% if p.pnl_words %}<span class="pnl-pct sv-muted" data-sv-live-key="{{ t.key }}.pnlsrc" data-sv-noflash style="display:block;font-size:.7em;">{{ p.pnl_words }}</span>{% endif %}</td>
+                        <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{% if p.unrealized_pnl_pct is not None %}{{ p.unrealized_pnl_pct|floatformat:2 }}%{% else %}<span title="{{ why.no_pct }}">—</span>{% dash_note "—" why.no_pct %}{% endif %}</td>
                         <td><span class="badge badge-medium">{% if p.source == 'bot' %}bot{% else %}portfolio{% endif %}</span></td>
-                        {# Only the bot book has a close path — a portfolio row has nothing anywhere in the platform that could flatten it. #}
-                        <td class="nowrap">
+                        {# Only the bot book has a close path — a portfolio row has nothing anywhere in the platform that could flatten it. The column sticks to the right, never scrolled off. #}
+                        <td class="nowrap oc-col-act">
                             {% if p.trade_id %}
                                 <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY{% else %}CLOSE{% endif %}</button>
                             {% else %}
-                                <span class="sv-unknown">&mdash;</span>
+                                <span class="sv-unknown" title="{{ why.no_close_path }}">&mdash;</span>{% dash_note "—" why.no_close_path %}
                             {% endif %}
                         </td>
                     </tr>
-                {% endfor %}
+                {% endwith %}{% endfor %}
             </tbody>
         </table>
         </div>
@@ -154,3 +186,5 @@
         <p class="oc-empty">No open positions.</p>
     {% endif %}
 </div>
+<p class="oc-stamp">read {{ read_at|date:"H:i:s" }} UTC · on demand: re-read when this tab is opened and on fills</p>
+{% dash_legend %}

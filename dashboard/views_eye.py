@@ -40,19 +40,54 @@ def eye_partial(request):
     return render(request, "dashboard/_eye_body.html", context)
 
 
-def _build_eye_context(user) -> dict:
-    """Aggregate everything the Eye needs into a single context dict."""
+def _build_eye_context(user, *, for_command=False) -> dict:
+    """Aggregate everything the Eye needs into a single context dict.
+
+    `for_command` (2026-11-07, the Operations Center OC0): the LIVE tab of
+    /command/ draws this body too. There the 24 h P&L is per world and
+    carries no percentage of the limits book, the recent fills (which the
+    body never prints) are not read, and the footer says when the body was
+    read rather than "auto-refresh every 10s" (true on /eye/, false on
+    /command/, which re-reads the tab on fills only)."""
+    from .views_command import WHY
+    now = timezone.now()
+    rule_control, rule_unread = _rule_control_counts(user)
+    bot_health = _bot_health(user)
     ctx = {
-        "now": timezone.now(),
+        "now": now,
+        "eye_on_command": for_command,
+        "why": WHY,
+        # "Active bots" counted every config beside an ENABLED count that
+        # disagreed: the configs and the enabled ones, both said.
+        "bot_counts": {"n": len(bot_health),
+                       "on": sum(1 for b in bot_health if b["enabled"])},
         "theme_exposure": _theme_exposure(user),
         "open_positions": _open_positions(user),
-        "gate_events": _recent_gate_events(user),
-        "recent_fills": _recent_fills(user),
-        "rule_control": _rule_control_summary(user),
-        "bot_health": _bot_health(user),
-        "pnl_24h": _pnl_24h(user),
+        "gate_events": _dated(_recent_gate_events(user), now),
+        "rule_control": rule_control,
+        "rule_control_unread": rule_unread,
+        "bot_health": bot_health,
+        "pnl_24h": _pnl_24h(user, with_pct=not for_command),
     }
+    if not for_command:
+        ctx["recent_fills"] = _recent_fills(user)
     return ctx
+
+
+def _dated(events, now):
+    """Each gate decision with the time it was taken, dated when it was not
+    today (2026-11-07: "H:i:s" over sixty hours of decisions read as one
+    afternoon)."""
+    today = now.date()
+    for ev in events:
+        at = getattr(ev, "created_at", None)
+        if at is None:
+            ev.when_text = ""
+        elif at.date() == today:
+            ev.when_text = at.strftime("%H:%M:%S")
+        else:
+            ev.when_text = at.strftime("%Y-%m-%d %H:%M")
+    return events
 
 
 # ── Theme exposure ───────────────────────────────────────────────────────
@@ -138,6 +173,7 @@ def _open_positions(user) -> list:
     out = []
     try:
         from bot_program.models import AssetBotTrade
+        from dashboard.position_summary import quantity, world_of
         rows = (AssetBotTrade.objects
                 .filter(config__user=user, status__in=("OPEN", "CLOSE_PENDING"))
                 .select_related("config")
@@ -153,6 +189,9 @@ def _open_positions(user) -> list:
                 "symbol": t.symbol,
                 "side": t.side,
                 "qty": t.qty,
+                # A quantity as a person counts it: 1,000, never
+                # 1000.00000000 (2026-11-07, the Operations Center OC0).
+                "qty_text": quantity(t.qty),
                 "entry_price": t.entry_price,
                 "stop_loss": t.stop_loss,
                 "take_profit": t.take_profit,
@@ -161,6 +200,13 @@ def _open_positions(user) -> list:
                 "score": t.composite_score,
                 "rule": t.rule_name,
                 "paper": t.paper,
+                # THE ROW'S OWN WORLD (2026-11-07): a dict with no metadata
+                # read as live in world_of, and the money_world chip printed
+                # an eToro DEMO row as REAL MONEY. The stamps ride with the
+                # row, and the world is read off them, the one rule.
+                "metadata": t.metadata or {},
+                "world": world_of(t),
+                "key": f"bot-{t.id}",
                 "kind": "asset",
             })
     except Exception:
@@ -171,12 +217,16 @@ def _open_positions(user) -> list:
         legacy = (BotTrade.objects
                   .filter(config__user=user, exit_price__isnull=True)
                   .order_by("-id")[:50])
+        from dashboard.position_summary import quantity, world_of
         for t in legacy:
+            paper = getattr(t, "paper", True)
             out.append({
                 "asset_class": "crypto",
                 "symbol": t.symbol,
                 "side": t.side,
                 "qty": t.qty,
+                "qty_text": quantity(t.qty),
+                "world": world_of({"paper": paper, "metadata": {}}),
                 "entry_price": t.entry_price,
                 "stop_loss": getattr(t, "stop_loss", None),
                 "take_profit": getattr(t, "take_profit", None),
@@ -236,6 +286,11 @@ def _recent_fills(user, limit: int = 30) -> list:
 # ── Rule control state ────────────────────────────────────────────────────
 
 def _rule_control_summary(user) -> dict:
+    """The three counts, as they always were (see _rule_control_counts)."""
+    return _rule_control_counts(user)[0]
+
+
+def _rule_control_counts(user):
     """The three rule-control numbers in the Eye's pill row, counted apart.
 
     They used to share one `try/except Exception: pass`, and the middle one
@@ -263,11 +318,15 @@ def _rule_control_summary(user) -> dict:
     expected rather than a bug.
     """
     out = {"paused_rules": 0, "reduced_rules": 0, "live_actions_24h": 0}
+    # (counts, the keys that could not be read): a counter left at 0 by a
+    # failure is no figure, and the panel prints a dash with its reason for
+    # it (2026-11-07, the Operations Center OC0); the counts keep their 0
+    # for every reader that sums them.
     try:
         from signals.models import RuleControl, RuleAction
     except Exception:  # noqa: BLE001
         logger.info("[eye] rule-control models unavailable — panel left at 0")
-        return out
+        return out, set(out)
 
     now = timezone.now()
     counters = (
@@ -281,12 +340,14 @@ def _rule_control_summary(user) -> dict:
          lambda: RuleAction.objects.filter(
              applied_at__gte=now - timedelta(hours=24)).count()),
     )
+    unread = set()
     for key, count in counters:
         try:
             out[key] = count()
         except Exception:  # noqa: BLE001
             logger.exception("[eye] rule-control counter %s failed", key)
-    return out
+            unread.add(key)
+    return out, unread
 
 
 # ── Bot health ───────────────────────────────────────────────────────────
@@ -297,8 +358,15 @@ def _bot_health(user) -> list:
     out = []
     try:
         from bot_program.models import AssetBotConfig, AssetBotTrade
+        # One grouped count for every config's open rows (2026-11-07): a
+        # query per config cost the Eye and the LIVE tab one read per bot.
+        open_by = dict(AssetBotTrade.objects
+                       .filter(config__user=user,
+                               status__in=("OPEN", "CLOSE_PENDING"))
+                       .values("config_id").annotate(n=Count("id"))
+                       .order_by().values_list("config_id", "n"))
         for cfg in AssetBotConfig.objects.filter(user=user).order_by("asset_class", "name"):
-            open_n = AssetBotTrade.objects.filter(config=cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
+            open_n = open_by.get(cfg.id, 0)
             out.append({
                 "name": cfg.name, "asset_class": cfg.asset_class,
                 "mode": cfg.mode, "enabled": cfg.enabled,
@@ -323,7 +391,7 @@ def _bot_health(user) -> list:
 
 # ── 24h aggregate P&L ────────────────────────────────────────────────────
 
-def _pnl_24h(user) -> dict:
+def _pnl_24h(user, with_pct=True) -> dict:
     """Realised P&L over the trailing day, in money AND as a share of the book.
 
     A gain of 250 is a different day on a 1,000 book than on a 100,000 one,
@@ -335,12 +403,24 @@ def _pnl_24h(user) -> dict:
     since = timezone.now() - timedelta(hours=24)
     total = Decimal("0")
     by_class: dict = {}
+    # PER WORLD (2026-11-07, the Operations Center OC0): REAL, DEMO and
+    # PAPER are never added. The same one read, grouped by the rows' own
+    # stamps too; each group's world is world_of's (the platform's one
+    # rule), applied here to the stamps, never a second rule in SQL. The
+    # currency is the config's (a close books its P&L in it).
+    by_world: dict = {}
+    by_world_class: dict = {}
     try:
+        from django.db.models.fields.json import KeyTextTransform
         from bot_program.models import AssetBotTrade
+        from dashboard.position_summary import money, world_of
         rows = (AssetBotTrade.objects
                 .filter(config__user=user, status="CLOSED",
                         closed_at__gte=since)
-                .values("asset_class")
+                .annotate(w_broker=KeyTextTransform("broker", "metadata"),
+                          w_env=KeyTextTransform("broker_env", "metadata"))
+                .values("asset_class", "paper", "w_broker", "w_env",
+                        "config__base_currency")
                 # Sum SKIPS NULLs, Count does not — so a class holding
                 # one unmeasured exit would divide a real total by a count
                 # that includes a trade contributing nothing to it. The
@@ -348,23 +428,55 @@ def _pnl_24h(user) -> dict:
                 # the other is kept so the page can say how many are not
                 # in the figure.
                 .annotate(s=Sum("pnl"), n=Count("id"),
-                          measured=Count("pnl")))
+                          measured=Count("pnl"))
+                .order_by())
         for r in rows:
             v = r["s"] or Decimal("0")
-            by_class[r["asset_class"]] = {
-                "pnl": v, "count": r["n"],
-                "measured": r["measured"],
-                "unmeasured": r["n"] - r["measured"]}
+            info = by_class.setdefault(r["asset_class"], {
+                "pnl": Decimal("0"), "count": 0, "measured": 0,
+                "unmeasured": 0})
+            info["pnl"] += v
+            info["count"] += r["n"]
+            info["measured"] += r["measured"]
+            info["unmeasured"] += r["n"] - r["measured"]
             total += v
+            world = world_of({"paper": r["paper"],
+                              "metadata": {"broker": r["w_broker"],
+                                           "broker_env": r["w_env"]}})
+            ccy = (r["config__base_currency"] or "USD").strip().upper()
+            for key, book in (((world, ccy), by_world),
+                              ((world, ccy, r["asset_class"]),
+                               by_world_class)):
+                slot = book.setdefault(key, {"pnl": 0.0, "n": 0,
+                                             "measured": 0})
+                if r["s"] is not None:
+                    slot["pnl"] += float(r["s"])
+                slot["n"] += r["n"]
+                slot["measured"] += r["measured"]
     except Exception:
-        pass
+        logger.warning("[eye] the 24 h P&L is unreadable", exc_info=True)
+
+    order = {"live": 0, "demo": 1, "paper": 2, "": 3}
+
+    def _rows(book, with_class):
+        out = []
+        for key, slot in sorted(book.items(),
+                                key=lambda kv: (order.get(kv[0][0], 9),) + kv[0][1:]):
+            pnl = round(slot["pnl"], 2) if slot["measured"] else None
+            out.append({"world": key[0], "ccy": key[1],
+                        "asset_class": key[2] if with_class else "",
+                        "pnl": pnl, "n": slot["n"],
+                        "unmeasured": slot["n"] - slot["measured"],
+                        "text": money(pnl, key[1], signed=True)})
+        return out
 
     base = None
-    try:
-        from portfolio.risk_gate import book_value, limits_book
-        base = book_value(limits_book())
-    except Exception as e:  # noqa: BLE001 — a missing book is not a 500
-        logger.debug("[eye] book value unavailable for the 24h pct: %s", e)
+    if with_pct:
+        try:
+            from portfolio.risk_gate import book_value, limits_book
+            base = book_value(limits_book())
+        except Exception as e:  # noqa: BLE001 — a missing book is not a 500
+            logger.debug("[eye] book value unavailable for the 24h pct: %s", e)
 
     pct = (round(float(total) / base * 100, 2)
            if base not in (None, 0) else None)
@@ -372,4 +484,6 @@ def _pnl_24h(user) -> dict:
         info["pct"] = (round(float(info["pnl"]) / base * 100, 2)
                        if base not in (None, 0) else None)
     return {"total": total, "by_class": by_class, "pct": pct,
-            "book_value": base}
+            "book_value": base,
+            "by_world": _rows(by_world, False),
+            "by_world_class": _rows(by_world_class, True)}

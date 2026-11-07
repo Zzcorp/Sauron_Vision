@@ -1,9 +1,10 @@
-{% load sauron_tags %}
+{% load sauron_tags oc_dash %}
 {# BOTS tab — per-AssetBotConfig overview with health + cooldown. #}
+{# Rendered without the request (views_command._fragment). Each bot's world is its ACCOUNT's (a live-mode bot on an eToro demo account is DEMO), its health is its own heartbeat against the tick's cadence, and the two bot forms are drawn only for the users their endpoint accepts, with their CSRF token (2026-11-07, OC0). #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
 {# With no bot configured there is no population to count enabled, live or #}
-{# alive members of, and a red "0" under ALIVE 6H reads as "your bots died" #}
+{# alive members of, and a red "0" under ALIVE reads as "your bots died" #}
 {# rather than "you have none". The colour keys off n_configs for that. #}
 {# data-sv-count: the motion layer counts each tally up from 0 on reveal (static/js/sv-motion.js); the rendered text is the fallback. #}
 <div class="oc-strip">
@@ -14,53 +15,51 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ENABLED</span>
-        <span class="oc-strip-value {% if n_configs and n_enabled %}up{% endif %}" data-sv-count="{{ n_enabled }}">{{ n_enabled }}</span>
+        <span class="oc-strip-value {% if n_configs and n_enabled %}up{% endif %}" data-sv-count="{{ n_enabled }}"{% if not n_configs %} title="{{ why.no_configs }}"{% endif %}>{{ n_enabled }}</span>{% dash_note n_enabled why.no_configs %}
         <span class="oc-strip-sub">currently scanning</span>
     </div>
-    <div class="oc-strip-cell">
-        <span class="oc-strip-label">LIVE-MODE</span>
-        <span class="oc-strip-value {% if n_configs and n_live %}up{% endif %}" data-sv-count="{{ n_live }}">{{ n_live }}</span>
-        <span class="oc-strip-sub">real-money bots</span>
+    <div class="oc-strip-cell" title="Enabled live-mode bots whose symbols route to a REAL account (or whose route cannot be read: never under-counted); DEMO: those on a broker's demo account. The world is the account's, not the config's mode.">
+        <span class="oc-strip-label">REAL-MONEY BOTS</span>
+        <span class="oc-strip-value {% if n_configs and n_live %}up{% endif %}" data-sv-count="{{ n_live }}"{% if not n_configs %} title="{{ why.no_configs }}"{% endif %}>{{ n_live }}</span>{% dash_note n_live why.no_configs %}
+        <span class="oc-strip-sub">DEMO {% if n_configs %}{{ n_live_demo }}{% else %}<span title="{{ why.no_configs }}">—</span>{% dash_note "—" why.no_configs %}{% endif %} · world: its account</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">ALIVE 6H</span>
-        <span class="oc-strip-value {% if not n_configs %}{% elif n_alive %}up{% else %}down{% endif %}" data-sv-count="{{ n_alive }}">{{ n_alive }}</span>
-        <span class="oc-strip-sub">{% if n_configs %}recent trade activity{% else %}no bots to watch{% endif %}</span>
+        <span class="oc-strip-label">ALIVE NOW</span>
+        <span class="oc-strip-value {% if not n_configs %}{% elif n_alive %}up{% else %}down{% endif %}" data-sv-count="{{ n_alive }}"{% if not n_configs %} title="{{ why.no_configs }}"{% endif %}>{{ n_alive }}</span>{% dash_note n_alive why.no_configs %}
+        <span class="oc-strip-sub">{% if n_configs %}enabled, own tick on time · every {{ cadence_min }} min{% else %}no bots to watch{% endif %}</span>
     </div>
 </div>
 
 {# ── 2. Per-bot health + activity table ─────────────────────────── #}
 <div class="card" style="margin-bottom:18px;">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">Bot configurations</span>
+        <span class="card-title">Bot configurations · world: its account · health: its own tick</span>
         <a href="{% url 'asset_bots_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">full asset-bot dashboard →</a>
     </div>
     {% if rows %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr>
-            <th>health</th><th>asset</th><th>name</th><th>mode</th>
-            <th>open</th><th>opens 24h</th><th>closes 24h</th><th>P&amp;L 24h</th>
-            <th>cooldown</th><th>last activity</th><th>action</th>
+            <th>health</th><th>asset</th><th>name</th><th>world</th>
+            <th>open</th><th>opens 24h</th><th>closes 24h</th><th>P&amp;L 24 h</th>
+            <th>cooldown</th><th>last tick</th>{% if can_operate %}<th>action</th>{% endif %}
         </tr></thead>
         <tbody>
         {% for r in rows %}
             <tr>
                 <td>
-                    {% if r.config.enabled %}
-                        {% if r.is_alive %}
-                            <span title="Recent activity (within 6h)" style="display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-family:var(--font-mono);font-size:11px;">
-                                <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);"></span>
-                                ALIVE
-                            </span>
-                        {% else %}
-                            <span title="No trade activity in last 6h — may be in cooldown / waiting" style="display:inline-flex;align-items:center;gap:6px;color:#ffb000;font-family:var(--font-mono);font-size:11px;">
-                                <span style="width:8px;height:8px;border-radius:50%;background:#ffb000;"></span>
-                                IDLE
-                            </span>
-                        {% endif %}
+                    {% if r.health == 'ALIVE' %}
+                        <span title="{{ r.health_title }}" style="display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-family:var(--font-mono);font-size:11px;">
+                            <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);"></span>
+                            ALIVE
+                        </span>
+                    {% elif r.health == 'IDLE' %}
+                        <span title="{{ r.health_title }}" style="display:inline-flex;align-items:center;gap:6px;color:#ffb000;font-family:var(--font-mono);font-size:11px;">
+                            <span style="width:8px;height:8px;border-radius:50%;background:#ffb000;"></span>
+                            IDLE
+                        </span>
                     {% else %}
-                        <span title="Disabled" style="display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+                        <span title="{{ r.health_title }}" style="display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
                             <span style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);"></span>
                             OFF
                         </span>
@@ -69,26 +68,27 @@
                 <td><span class="badge badge-medium">{{ r.config.get_asset_class_display }}</span></td>
                 <td><strong>{{ r.config.name }}</strong></td>
                 <td>
-                    {% money_world r.config.mode %}
+                    {% money_world r.world %}
                 </td>
                 <td>{{ r.open_count }}</td>
                 <td>{{ r.opens_24h }}</td>
                 <td>{{ r.closed_24h }}</td>
-                {# Nothing closed in 24h is not a break-even day: floatformat #}
-                {# on a None sum leaves the cell blank, a "0.00" claims flat. #}
-                <td class="{% if r.pnl_24h > 0 %}up{% elif r.pnl_24h < 0 %}down{% endif %}">{% if r.pnl_24h is not None %}{{ r.pnl_24h|floatformat:2 }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                {# Nothing closed in 24h is not a break-even day: a dash, its reason named. Each world's money apart, in the config's currency. #}
+                <td>{% for c in r.pnl_cells %}<span class="{% if c.pnl > 0 %}up{% elif c.pnl < 0 %}down{% endif %}" data-oc-money>{{ c.text }}</span>{% if r.pnl_cells|length > 1 %} {{ c.name }}{% endif %}{% if not forloop.last %} · {% endif %}{% empty %}<span style="color:var(--text-muted);" title="{{ why.nothing_24h }}">—</span>{% dash_note "—" why.nothing_24h %}{% endfor %}</td>
                 <td>
                     {% if r.cooldown_remaining_min > 0 %}
                         <span style="color:#ffb000;font-family:var(--font-mono);font-size:11px;">
                             {{ r.cooldown_remaining_min }}m
                         </span>
                     {% else %}
-                        <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">—</span>
+                        <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;" title="{{ why.no_cooldown }}">—</span>{% dash_note "—" why.no_cooldown %}
                     {% endif %}
                 </td>
                 <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-                    {% if r.last_activity %}{{ r.last_activity|timesince }} ago{% else %}—{% endif %}
+                    {% if r.tick_text %}<span title="{{ r.health_title }}">{{ r.tick_text }}</span>{% else %}<span title="{{ why.no_tick }}">—</span>{% dash_note "—" why.no_tick %}{% endif %}
                 </td>
+                {# The two forms post to an endpoint that refuses everyone but a superuser (views_admin_hq._admin_only): drawn for no one else. Their words, PIN and endpoints are unchanged. #}
+                {% if can_operate %}
                 <td style="display:flex;gap:6px;">
                     <form method="post" action="{% url 'hq_toggle_asset_bot' %}" style="display:inline;">
                         {% csrf_token %}
@@ -102,6 +102,7 @@
                         <button class="btn btn-sm" type="submit">▶ Tick</button>
                     </form>
                 </td>
+                {% endif %}
             </tr>
         {% endfor %}
         </tbody>
@@ -131,3 +132,5 @@
         <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Multi-method ensemble · weight multipliers</div>
     </a>
 </div>
+<p class="oc-stamp">read {{ read_at|date:"H:i:s" }} UTC · on demand: re-read when this tab is opened and on fills</p>
+{% dash_legend %}

@@ -46,6 +46,12 @@ logger = logging.getLogger(__name__)
 #: The vocabulary a stage, a cluster and the beat speak on the page.
 STAGE_STATES = ("live", "stale", "off", "quiet", "broken")
 
+#: No figure here (2026-11-07, the Operations Center OC0, spec §5.7): a
+#: metric that has nothing to count is this string, with its reason in the
+#: metric's words, never a 0 and never null (both painters print
+#: String(metric[0]), and String(null) is "null").
+DASH = "—"
+
 #: A quote younger than this is "a live price" for the SEE tile.
 FRESH_QUOTE_S = 15 * 60
 #: The bot tick beats every 5 min; a heartbeat older than this is the
@@ -214,7 +220,10 @@ def _see_metrics(now, start):
     out = [[news, "news items scraped today"],
            [fresh, "instruments with a price under 15 min old"]]
     if age is None:
-        out.append([0, "live quotes stored — none yet"])
+        # No quote stored is no figure, never "0 min" (2026-11-07, the
+        # Operations Center OC0): the dash is the string, its reason the
+        # words; both painters print it as it is (fmt("—") is "—").
+        out.append([DASH, "min since the newest live quote — none stored yet"])
     else:
         out.append([int(age // 60), "min since the newest live quote"])
     return out
@@ -261,23 +270,54 @@ def _decide_metrics(user, now, start):
     if ages:
         out.append([int(min(ages) // 60), "min since the freshest bot tick"])
     else:
-        out.append([0, "bot ticks recorded — no heartbeat yet"])
+        out.append([DASH, "min since the freshest bot tick — no heartbeat yet"])
     return out
 
 
 def _act_metrics(user, now, start):
+    """ACT's counts in ONE query, grouped by the rows' own world stamps.
+
+    "open now, live money" counted `paper=False`, and an eToro DEMO row is
+    paper=False (2026-11-07, the Operations Center OC0): the open rows are
+    split by dashboard.position_summary.world_of — the platform's one
+    world rule, applied in Python to each group's stamps (paper, the
+    broker, its world), never a second rule in SQL. Only the rows a count
+    can touch are grouped: opened or closed today, open now, or pending."""
+    from django.db.models.fields.json import KeyTextTransform
     from bot_program.asset_models import AssetBotTrade
+    from dashboard.position_summary import world_of
     open_now = Q(status__in=("OPEN", "CLOSE_PENDING"))
-    agg = AssetBotTrade.objects.filter(config__user=user).aggregate(
-        opened=Count("id", filter=Q(opened_at__gte=start)),
-        closed=Count("id", filter=Q(status="CLOSED", closed_at__gte=start)),
-        open_live=Count("id", filter=open_now & Q(paper=False)),
-        open_paper=Count("id", filter=open_now & Q(paper=True)),
-        pending=Count("id", filter=Q(status="CLOSE_PENDING")),
-        errors=Count("id", filter=Q(status="ERROR", opened_at__gte=start)),
-        graded=Count("id", filter=Q(status="CLOSED", closed_at__gte=start,
-                                    realized_r__isnull=False)),
-    )
+    rows = (AssetBotTrade.objects
+            .filter(Q(config__user=user)
+                    & (Q(opened_at__gte=start) | Q(closed_at__gte=start)
+                       | open_now))
+            .annotate(w_broker=KeyTextTransform("broker", "metadata"),
+                      w_env=KeyTextTransform("broker_env", "metadata"))
+            .values("paper", "w_broker", "w_env")
+            .annotate(
+                opened=Count("id", filter=Q(opened_at__gte=start)),
+                closed=Count("id", filter=Q(status="CLOSED",
+                                            closed_at__gte=start)),
+                open_n=Count("id", filter=open_now),
+                pending=Count("id", filter=Q(status="CLOSE_PENDING")),
+                errors=Count("id", filter=Q(status="ERROR",
+                                            opened_at__gte=start)),
+                graded=Count("id", filter=Q(status="CLOSED",
+                                            closed_at__gte=start,
+                                            realized_r__isnull=False)))
+            .order_by())
+    agg = {"opened": 0, "closed": 0, "open_real": 0, "open_demo": 0,
+           "open_paper": 0, "open_none": 0, "pending": 0, "errors": 0,
+           "graded": 0}
+    for r in rows:
+        world = world_of({"paper": r["paper"],
+                          "metadata": {"broker": r["w_broker"],
+                                       "broker_env": r["w_env"]}})
+        key = {"live": "open_real", "demo": "open_demo",
+               "paper": "open_paper"}.get(world, "open_none")
+        agg[key] += r["open_n"]
+        for k in ("opened", "closed", "pending", "errors", "graded"):
+            agg[k] += r[k]
     return agg
 
 
@@ -297,11 +337,11 @@ def _watch_metrics(user, now, comp_states):
         out.append([int(summary.get("guards") or 0), "Morgul guards ran"])
         out.append([len(findings), "guard findings standing"])
     else:
-        out.append([0, "Morgul guards ran — no run recorded"])
+        out.append([DASH, "Morgul guards ran — no run recorded"])
         out.append([0, "guard findings standing"])
     reading = account_equity(user)
     if reading is None:
-        out.append([0, "broker readings — none landed yet"])
+        out.append([DASH, "min since the broker's reading — none landed yet"])
     else:
         out.append([int(reading["age_seconds"] // 60),
                     "min since the broker's reading"])
@@ -516,19 +556,36 @@ def day_live_payload(user, now=None) -> dict:
                                     [0, "trades closed today"]]
         graded_today = 0
     else:
+        # Real and demo apart (2026-11-07, the Operations Center OC0): the
+        # open rows' worlds by world_of, a DEMO row never "live money".
         stages["act"]["metrics"] = [
             [act["opened"], "trades opened today"],
             [act["closed"], "trades closed today"],
-            [act["open_live"], "open now, live money"],
+            [act["open_real"], "open now, real money"],
+            [act["open_demo"], "open now, demo"],
             [act["open_paper"], "open now, paper"],
             [act["pending"], "closes pending at the venue"],
             [act["errors"], "orders in ERROR today"],
         ]
+        if act["open_none"]:
+            stages["act"]["metrics"].append(
+                [act["open_none"], "open now, stating no venue"])
         graded_today = int(act["graded"] or 0)
         if act["pending"]:
             stages["act"]["note"] = (
                 f"{act['pending']} close(s) the venue has not confirmed — "
                 f"retried every 5 min, counted as exposure until it does.")
+        # ACT CAN READ "OFF" BESIDE TRADES (the map, 5.16): its state is its
+        # scheduled tasks', its counts are the book's (a hand-taken trade
+        # opens with every bot task off). Said in its words, not hidden.
+        counted = any(act[k] for k in ("opened", "closed", "open_real",
+                                       "open_demo", "open_paper", "pending"))
+        if stages["act"]["state"] == "off" and counted:
+            stages["act"]["words"] = ("switched off; its scheduled tasks are "
+                                      "off, these counts are the book's")
+            stages["act"]["note"] = " ".join(n for n in (
+                "Its scheduled tasks are off; these counts are the book's.",
+                stages["act"]["note"]) if n)
 
     stages["watch"]["metrics"] = _group(
         "WATCH metrics", lambda: _watch_metrics(user, now, comp_states),

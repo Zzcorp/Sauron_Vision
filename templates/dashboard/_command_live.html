@@ -1,62 +1,79 @@
+{% load oc_dash sauron_tags %}
 {% comment %}
 LIVE tab — Operations Center enrichment + Eye body partial.
 Layered rendering:
-  1. Top strip: brain regime · gate ratio · deployed/cash split
+  1. Top strip: brain regime · gate ratio · deployed per world
   2. Recent fills (24h) + Brain top concerns side-by-side
   3. Original Eye body (theme exposure, open positions, etc.)
+Rendered without the request (dashboard.views_command._fragment): no
+context processor runs here. Every dash carries its reason, and the foot
+lists them (core/templatetags/oc_dash.py). REAL, DEMO and PAPER money is
+never added; R is a ratio and is said to be "all worlds · R only".
 {% endcomment %}
 
-{# ── 1. Top strip — 8 cells: regime · gate · exposure · session pulse #}
+{# ── 1. Top strip — regime · gate · exposure · session pulse #}
 <div class="oc-strip">
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ brain.regime_title|default:why.no_report }}">
         <span class="oc-strip-label">REGIME</span>
-        <span class="oc-strip-value oc-regime-{{ brain_regime }}">{{ brain_regime|default:"unknown"|upper }}</span>
-        <span class="oc-strip-sub">conf {{ brain_regime_conf|default:"0"|floatformat:2 }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · {{ brain_age_str }} ago</span>
+        {% if brain.report %}
+        <span class="oc-strip-value oc-regime-{{ brain_regime }}">{{ brain_regime|upper }}</span>
+        <span class="oc-strip-sub">conf {{ brain_regime_conf }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · report {{ brain_age_str }}</span>
+        {% else %}
+        <span class="oc-strip-value">{% dash why.no_report %}</span>
+        <span class="oc-strip-sub">trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span></span>
+        {% endif %}
     </div>
     <div class="oc-strip-cell">
         {# No accept rate: the gate logs every reject and only a 10% sample of #}
         {# its allows, so a ratio of the two is not a rate anybody measured. #}
         <span class="oc-strip-label">GATE 24H</span>
-        <span class="oc-strip-value">{% if gate_asked %}{{ gate_n_reject }}{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">refused · {{ gate_n_allow }} allow logged (sampled)</span>
+        <span class="oc-strip-value">{% if gate_asked %}{{ gate_n_reject }}{% else %}{% dash why.gate_not_asked %}{% endif %}</span>
+        <span class="oc-strip-sub">refused · {{ gate_n_allow }} allow logged (sampled) · 24 h</span>
     </div>
-    <div class="oc-strip-cell" title="Notional of both books at live marks, against the cash typed on /setup/ — the platform's own arithmetic, not eToro's.">
-        <span class="oc-strip-label">DEPLOYED</span>
-        <span class="oc-strip-value">{{ live_deployed|floatformat:0 }}</span>
-        <span class="oc-strip-sub">{{ live_deployed_pct }}% · cash {{ live_cash_pct }}%</span>
+    {# DEPLOYED, per world, in USD (2026-11-07): the notional at the marks, REAL first, never added; its share of the typed cash is gone (a mixed-currency ratio of mixed worlds). #}
+    <div class="oc-strip-cell" title="The notional of the open rows at their marks, in USD (price x quantity x the row's USD per unit), each world apart and never added. The platform's own arithmetic, not eToro's.">
+        <span class="oc-strip-label">DEPLOYED · <span class="sv-world sv-world--live">REAL</span></span>
+        {% if live_deployed %}
+        {% with d=live_deployed.0 %}<span class="oc-strip-value" data-oc-money title="{{ d.why }}">{{ d.text }}</span>{% dash_note d.text d.why %}{% endwith %}
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% for d in live_deployed %}{% if not forloop.first %}{{ d.name }} <span data-oc-money title="{{ d.why }}">{{ d.text }}</span>{% dash_note d.text d.why %} · {% endif %}{% endfor %}at the marks · never added</span>
+        {% else %}
+        <span class="oc-strip-value">{% dash why.not_measured %}</span>
+        {% endif %}
     </div>
     {# eToro's OWN used margin, available and total from the sync's cells (2026-10-31, bot_program.etoro_used): the live world as eToro states it. The line under it is etoro_used's cell_t, the total with its own age when it is older than the cells; it wraps (oc-strip-sub--wrap, as on /positions/ and /portfolio/): on one line the ellipsis cut the total and the age at every width. #}
     {% if live_etoro %}
     <div class="oc-strip-cell" title="{{ live_etoro.title }}">
         <span class="oc-strip-label"><span class="sv-venue {{ live_etoro.venue_class }}">{{ live_etoro.world_word }}</span> ETORO USED</span>
-        <span class="oc-strip-value">{{ live_etoro.used_t }}</span>
+        <span class="oc-strip-value"{% if live_etoro.used_t == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_etoro.used_t }}</span>{% dash_note live_etoro.used_t why.not_measured %}
         <span class="oc-strip-sub oc-strip-sub--wrap">{{ live_etoro.cell_t }}</span>
     </div>
     {% endif %}
+    {# OPEN POS counts every row of every world (a count may be totalled beside its split; money never). #}
     <div class="oc-strip-cell">
         <span class="oc-strip-label">OPEN POS</span>
-        <span class="oc-strip-value">{{ live_opens }}</span>
-        <span class="oc-strip-sub">{{ live_bots_enabled }}/{{ live_bots_total }} bots enabled</span>
+        <span class="oc-strip-value"{% if live_opens == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_opens }}</span>{% dash_note live_opens why.not_measured %}
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% for s in live_open_split %}{{ s.n }} {{ s.name|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}</span>
+        <span class="oc-strip-sub">{{ live_bots_total }} configs · {{ live_bots_enabled }} enabled</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">24H R</span>
-        <span class="oc-strip-value {% if live_24h_sum_r > 0 %}up{% elif live_24h_sum_r < 0 %}down{% endif %}">{% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R</span>
-        <span class="oc-strip-sub">{{ live_24h_n }} closed · {{ live_24h_win_rate }}% win</span>
+        <span class="oc-strip-value {% if live_24h_sum_r > 0 %}up{% elif live_24h_sum_r < 0 %}down{% endif %}">{% if live_24h_sum_r == "—" %}{% if live_24h_n %}{% dash why.ungraded %}{% else %}{% dash why.nothing_24h %}{% endif %}{% else %}{% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R{% endif %}</span>
+        <span class="oc-strip-sub">{{ live_24h_n }} closed · {% if live_24h_win_rate == "—" %}win rate <span title="{% if live_24h_n %}{{ why.ungraded }}{% else %}{{ why.nothing_24h }}{% endif %}">—</span>{% if live_24h_n %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_24h %}{% endif %}{% else %}{{ live_24h_win_rate }}% win{% endif %} · all worlds · R only</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">W / L 24H</span>
         <span class="oc-strip-value"><span class="up">{{ live_24h_wins }}</span> / <span class="down">{{ live_24h_losses }}</span></span>
-        <span class="oc-strip-sub">trade tally last 24h</span>
+        <span class="oc-strip-sub">trade tally · 24 h · all worlds</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">RULES</span>
-        <span class="oc-strip-value">{{ live_rules_active }}</span>
-        <span class="oc-strip-sub">{{ live_rules_paused }} paused · {{ live_rules_research }} research</span>
+        <span class="oc-strip-value"{% if live_rules_active == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_rules_active }}</span>{% dash_note live_rules_active why.not_measured %}
+        <span class="oc-strip-sub">{{ live_rules_paused }} paused · {{ live_rules_research }} research · platform-wide</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CONCERNS</span>
         <span class="oc-strip-value {% if brain_top_concerns %}down{% endif %}">{{ brain_top_concerns|length }}</span>
-        <span class="oc-strip-sub">flagged by brain</span>
+        <span class="oc-strip-sub">flagged by the brain{% if brain.report %} · report {{ brain_age_str }}{% endif %}</span>
     </div>
 </div>
 
@@ -65,29 +82,30 @@ Layered rendering:
 <div class="grid grid-3" style="gap:14px;margin:14px 0 18px 0;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Session pulse · last {{ live_24h_spark|length }} closes</span>
+            <span class="card-title">Session pulse · last {{ live_24h_spark|length }} closes · 24 h</span>
             {% if live_24h_spark %}
                 <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-                    Σ {% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R
+                    Σ {% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R · all worlds · R only
                 </span>
             {% endif %}
         </div>
         {# Wins scaled against the max and losses against the MIN, so a −3R #}
         {# loss and a +3R win drew the same length in opposite directions — #}
         {# two different rulers on one axis. One peak now scales both sides. #}
-        {% include "_partials/chart_bars.html" with bars=live_24h_bars max=live_24h_spark_peak signed=1 short=1 ends=1 axis_start="oldest" axis_mid=live_24h_n axis_end="newest" unit="realized R per close" when="last 24 hours" empty="No graded closes in last 24h." %}
+        {# Each bar names its world (2026-11-07): R from any world, said so. #}
+        {% include "_partials/chart_bars.html" with bars=live_24h_bars max=live_24h_spark_peak signed=1 short=1 ends=1 axis_start="oldest" axis_mid=live_24h_n axis_end="newest" unit="realized R per close, all worlds" when="last 24 hours" empty="No graded closes in last 24h." %}
     </div>
 
     <div class="card" style="border-left:2px solid var(--accent);">
-        <div class="card-header"><span class="card-title">Best 24h</span></div>
+        <div class="card-header"><span class="card-title">Best 24h · all worlds · R only</span></div>
         {% if live_24h_best %}
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;">
-                <strong style="font-family:var(--font-display);font-size:18px;color:var(--accent);">{{ live_24h_best.config.symbol }}</strong>
+                <strong style="font-family:var(--font-display);font-size:18px;color:var(--accent);">{{ live_24h_best.config.symbol }} {% money_world live_24h_best.world "compact" %}</strong>
                 <span class="up" style="font-family:var(--font-mono);font-weight:700;font-size:16px;">+{{ live_24h_best.realized_r|floatformat:2 }}R</span>
             </div>
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);line-height:1.6;">
-                {{ live_24h_best.config.rule_name|default:"—"|truncatechars:32 }}<br>
-                {{ live_24h_best.outcome|default:"—" }} · {{ live_24h_best.closed_at|date:"H:i" }}
+                {% if live_24h_best.config.rule_name %}{{ live_24h_best.config.rule_name|truncatechars:32 }}{% else %}{% dash why.no_rule %}{% endif %}<br>
+                {% if live_24h_best.outcome %}{{ live_24h_best.outcome }}{% else %}{% dash why.no_outcome %}{% endif %} · {{ live_24h_best.closed_at|date:"Y-m-d H:i" }} UTC
             </div>
         {% else %}
             <p class="oc-empty">No graded winner yet.</p>
@@ -95,18 +113,18 @@ Layered rendering:
     </div>
 
     <div class="card" style="border-left:2px solid var(--accent-red);">
-        <div class="card-header"><span class="card-title">Worst 24h</span></div>
+        <div class="card-header"><span class="card-title">Worst 24h · all worlds · R only</span></div>
         {% if live_24h_worst %}
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;">
-                <strong style="font-family:var(--font-display);font-size:18px;color:var(--text-primary);">{{ live_24h_worst.config.symbol }}</strong>
+                <strong style="font-family:var(--font-display);font-size:18px;color:var(--text-primary);">{{ live_24h_worst.config.symbol }} {% money_world live_24h_worst.world "compact" %}</strong>
                 <span class="down" style="font-family:var(--font-mono);font-weight:700;font-size:16px;">{{ live_24h_worst.realized_r|floatformat:2 }}R</span>
             </div>
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);line-height:1.6;">
-                {{ live_24h_worst.config.rule_name|default:"—"|truncatechars:32 }}<br>
-                {{ live_24h_worst.outcome|default:"—" }} · {{ live_24h_worst.closed_at|date:"H:i" }}
+                {% if live_24h_worst.config.rule_name %}{{ live_24h_worst.config.rule_name|truncatechars:32 }}{% else %}{% dash why.no_rule %}{% endif %}<br>
+                {% if live_24h_worst.outcome %}{{ live_24h_worst.outcome }}{% else %}{% dash why.no_outcome %}{% endif %} · {{ live_24h_worst.closed_at|date:"Y-m-d H:i" }} UTC
             </div>
         {% else %}
-            <p class="oc-empty">No graded loser — clean session.</p>
+            <p class="oc-empty">No graded loser: a clean session.</p>
         {% endif %}
     </div>
 </div>
@@ -115,16 +133,16 @@ Layered rendering:
 <div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Recent fills (24h)</span>
+            <span class="card-title">Recent fills · 24 h · all worlds · R only</span>
             <a href="{% url 'eye_fills' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all fills →</a>
         </div>
         {% if live_recent_fills %}
             {% for t in live_recent_fills %}
                 <div class="oc-mini-row">
-                    <span class="oc-mini-sym">{{ t.symbol }}</span>
+                    <span class="oc-mini-sym">{{ t.symbol }} {% money_world t.world "compact" %}</span>
                     <span class="oc-mini-side {{ t.side }}">{{ t.side }}</span>
-                    <span class="oc-mini-meta">{{ t.rule_name|default:"—"|truncatechars:20 }} · {{ t.outcome|default:"—" }}</span>
-                    <span class="oc-mini-pnl {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}R</span>
+                    <span class="oc-mini-meta">{% if t.rule_name %}{{ t.rule_name|truncatechars:20 }}{% else %}{% dash why.no_rule %}{% endif %} · {% if t.outcome %}{{ t.outcome }}{% else %}{% dash why.no_outcome %}{% endif %}</span>
+                    <span class="oc-mini-pnl {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{% if t.realized_r is not None %}{{ t.realized_r|floatformat:2 }}R{% else %}{% dash why.ungraded %}{% endif %}</span>
                 </div>
             {% endfor %}
         {% else %}
@@ -134,7 +152,7 @@ Layered rendering:
 
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Brain top concerns</span>
+            <span class="card-title">Brain top concerns{% if brain.report %} · report {{ brain_age_str }}{% endif %}</span>
             <a href="{% url 'brain_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">brain →</a>
         </div>
         {% if brain_top_concerns %}
@@ -142,7 +160,7 @@ Layered rendering:
                 {% for c in brain_top_concerns %}
                     <li>
                         <strong style="color:var(--accent);text-transform:uppercase;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;">{{ c.kind }}</strong>
-                        · {% if show_text %}{{ c.text|truncatechars:120 }}{% else %}&mdash;{% endif %}
+                        · {% if show_text %}{{ c.text|truncatechars:120 }}{% else %}{% dash why.staff_only %}{% endif %}
                         {% if c.severity %}<span style="color:var(--text-muted);font-size:11px;">(severity {{ c.severity|floatformat:2 }})</span>{% endif %}
                     </li>
                 {% endfor %}
@@ -156,3 +174,4 @@ Layered rendering:
 {# ── 3. Eye body content (theme exposure, open positions, etc.) ────── #}
 {# The open-positions table below carries the per-trade CLOSE control; it lives in the shared partial so this tab and /eye/ cannot disagree about what is open or how to flatten it. #}
 {% include "dashboard/_eye_body.html" %}
+{% dash_legend %}

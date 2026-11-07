@@ -1,25 +1,40 @@
-{% load sauron_tags %}
-{# Sauron's Eye body partial — fetched via HTMX every 10s. #}
+{% load sauron_tags oc_dash %}
+{# Sauron's Eye body partial — fetched via HTMX every 10s on /eye/; on /command/'s LIVE tab, read on fills only (eye_on_command). #}
+{# Every dash carries its reason (core/templatetags/oc_dash.py, 2026-11-07); /command/ lists them at its foot. #}
 
 {# ── Top stat strip ───────────────────────────────── #}
 <div class="grid grid-4" style="margin-bottom: 24px;">
     <div class="stat-box fade-in-up delay-1">
         <div class="stat-label">Open Positions</div>
         <div class="stat-value">{{ open_positions|length }}</div>
+        {# The Eye lists the bot rows; a row recorded by hand is on the OPEN POS count above and not here: it has no close path (2026-11-07, the two counts agree in words). #}
+        {% if eye_on_command %}<div class="stat-sub" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ eye_bot_rows }} bot rows{% if eye_legacy_rows %} · {{ eye_legacy_rows }} of the old crypto bot{% endif %}{% if eye_hand_rows %} · {{ eye_hand_rows }} recorded by hand, not listed: no close path{% endif %}</div>{% endif %}
     </div>
     <div class="stat-box fade-in-up delay-2">
         <div class="stat-label">P&amp;L 24h</div>
+        {% if eye_on_command %}
+        {# PER WORLD, NO SHARE OF THE LIMITS BOOK (2026-11-07, OC0): REAL, DEMO and PAPER apart, each in its currency, never added. #}
+        <div class="stat-value" style="font-size:15px;line-height:1.5;">
+            {% for row in pnl_24h.by_world %}
+            <div>{% money_world row.world "compact" %} <span data-oc-money title="{% if row.text == '—' %}{{ why.not_measured }}{% else %}{{ row.n }} close(s) in 24 h{% endif %}">{{ row.text }}</span>{% dash_note row.text why.not_measured %}</div>
+            {% empty %}
+            <div>{% dash why.nothing_24h %}</div>
+            {% endfor %}
+        </div>
+        {% else %}
         <div class="stat-value {% if pnl_24h.total > 0 %}up{% elif pnl_24h.total < 0 %}down{% endif %}">
             {{ pnl_24h.total|floatformat:2 }}{% if pnl_24h.pct is not None %} <span class="pnl-pct">({% if pnl_24h.pct > 0 %}+{% endif %}{{ pnl_24h.pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown" title="The book value these limits are a percentage of has never been set">(&mdash;)</span>{% endif %}
         </div>
+        {% endif %}
     </div>
     <div class="stat-box fade-in-up delay-3">
-        <div class="stat-label">Gate events (recent)</div>
+        <div class="stat-label">Gate events · the last 30, any age</div>
         <div class="stat-value">{{ gate_events|length }}</div>
     </div>
     <div class="stat-box fade-in-up delay-4">
-        <div class="stat-label">Active bots</div>
-        <div class="stat-value">{{ bot_health|length }}</div>
+        {# It counted every config as "Active bots" beside an ENABLED count that disagreed (2026-11-07). #}
+        <div class="stat-label">Bot configs</div>
+        <div class="stat-value">{{ bot_counts.n }} <span style="font-size:13px;color:var(--text-muted);">configs · {{ bot_counts.on }} enabled</span></div>
     </div>
 </div>
 
@@ -112,25 +127,26 @@
         {% if open_positions %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>SL</th><th>TP</th><th>Mode</th><th class="nowrap">Action</th></tr></thead>
+            {# The World column is the row's own (its stamps, world_of): a DEMO row is DEMO, never REAL MONEY (2026-11-07). Quantities as a person counts them, prices in the instrument's own decimals, and the action column sticks to the right edge, never scrolled off. #}
+            <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>SL</th><th>TP</th><th>World</th><th class="nowrap oc-col-act">Action</th></tr></thead>
             <tbody>
             {% for p in open_positions %}
                 <tr data-sv-position-row>
                     <td><span class="badge badge-medium">{{ p.asset_class }}</span></td>
                     <td><strong>{{ p.symbol }}</strong></td>
                     <td><span class="badge badge-{% if p.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ p.side }}</span></td>
-                    <td>{{ p.qty }}</td>
-                    <td>{{ p.entry_price|floatformat:4 }}</td>
-                    <td style="color:var(--text-muted);">{{ p.stop_loss|floatformat:4|default:"—" }}</td>
-                    <td style="color:var(--text-muted);">{{ p.take_profit|floatformat:4|default:"—" }}</td>
+                    <td>{{ p.qty_text }}</td>
+                    <td>{% px p.entry_price p.asset_class p.symbol %}</td>
+                    <td style="color:var(--text-muted);">{% if p.stop_loss %}{% px p.stop_loss p.asset_class p.symbol %}{% else %}{% dash why.no_stop %}{% endif %}</td>
+                    <td style="color:var(--text-muted);">{% if p.take_profit %}{% px p.take_profit p.asset_class p.symbol %}{% else %}{% dash why.no_target %}{% endif %}</td>
                     <td>{% money_world p %}</td>
                     {# Until this column existed a position could only leave the book by stop, target, or the kill switch flattening everything. #}
-                    <td class="nowrap">
+                    <td class="nowrap oc-col-act">
                         {% if p.kind == 'asset' %}
                             <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}</button>
                         {% else %}
                             {# Legacy crypto BotTrade rows: no per-trade close path exists for them, and a button that cannot act is worse than none. #}
-                            <span class="sv-unknown">&mdash;</span>
+                            <span class="sv-unknown" title="{{ why.no_close_path_bot }}">&mdash;</span>{% dash_note "—" why.no_close_path_bot %}
                         {% endif %}
                     </td>
                 </tr>
@@ -146,17 +162,18 @@
     {# Gate events #}
     <div class="card fade-in-up">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">⌬ Recent Gate Decisions</span>
+            <span class="card-title">⌬ Recent Gate Decisions · the last 30, any age</span>
             <a href="{% url 'eye_gate_events' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">history →</a>
         </div>
         {% if gate_events %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>When</th><th>Decision</th><th>Trade</th><th>Reason</th></tr></thead>
+            {# A decision taken today prints its time; an older one its date too (2026-11-07: "H:i:s" over sixty hours read as one afternoon). UTC. #}
+            <thead><tr><th>When (UTC)</th><th>Decision</th><th>Trade</th><th>Reason</th></tr></thead>
             <tbody>
             {% for ev in gate_events %}
                 <tr>
-                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ ev.created_at|date:"H:i:s" }}</td>
+                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ ev.when_text }}</td>
                     <td><span class="gate-{{ ev.decision }}">{{ ev.decision|upper }}</span></td>
                     <td>{{ ev.asset_class }}/{{ ev.symbol }} {{ ev.side }}{% if ev.right %} {{ ev.right }}{% endif %}</td>
                     <td style="font-size:11px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.reason }}">{{ ev.reason }}</td>
@@ -204,8 +221,18 @@
     <div class="card fade-in-up">
         <div class="card-header"><span class="card-title">▲ 24h P&amp;L · Rule Control</span></div>
         <div style="margin-bottom: 14px;">
-            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">P&amp;L by asset class</div>
-            {% if pnl_24h.by_class %}
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">P&amp;L by asset class{% if eye_on_command %} · each world apart · 24 h{% endif %}</div>
+            {% if eye_on_command %}
+                {# Per world, in each config's currency, never added and never a share of the limits book (2026-11-07, OC0). #}
+                {% for row in pnl_24h.by_world_class %}
+                    <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
+                        <span>{% money_world row.world "compact" %} {{ row.asset_class }}</span>
+                        <span><span data-oc-money title="{% if row.text == '—' %}{{ why.not_measured }}{% else %}{{ row.n }} close(s){% endif %}">{{ row.text }}</span>{% dash_note row.text why.not_measured %} <span style="color:var(--text-muted);font-size:10px;">({{ row.n }})</span></span>
+                    </div>
+                {% empty %}
+                    <p class="eye-empty">No closed trades in last 24h.</p>
+                {% endfor %}
+            {% elif pnl_24h.by_class %}
                 {% for ac, info in pnl_24h.by_class.items %}
                     <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
                         <span>{{ ac }}</span>
@@ -221,21 +248,27 @@
 
         <div>
             <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Rule control state</div>
+            {# A counter that could not be read is no figure: a dash with its reason, never the 0 it is left at (2026-11-07). #}
             <div style="display:flex;gap:14px;flex-wrap:wrap;">
                 <span class="eye-stat-pill pill-{% if rule_control.paused_rules %}over{% else %}ok{% endif %}">
-                    paused: {{ rule_control.paused_rules }}
+                    paused: {% if "paused_rules" in rule_control_unread %}{% dash why.rule_unread %}{% else %}{{ rule_control.paused_rules }}{% endif %}
                 </span>
                 <span class="eye-stat-pill pill-{% if rule_control.reduced_rules %}near{% else %}ok{% endif %}">
-                    reduced: {{ rule_control.reduced_rules }}
+                    reduced: {% if "reduced_rules" in rule_control_unread %}{% dash why.rule_unread %}{% else %}{{ rule_control.reduced_rules }}{% endif %}
                 </span>
                 <span class="eye-stat-pill pill-ok">
-                    actions/24h: {{ rule_control.live_actions_24h }}
+                    actions/24h: {% if "live_actions_24h" in rule_control_unread %}{% dash why.rule_unread %}{% else %}{{ rule_control.live_actions_24h }}{% endif %}
                 </span>
             </div>
         </div>
     </div>
 </div>
 
+{% if eye_on_command %}
+{# The LIVE tab is re-read on fills and on a gate refusal, never on a timer: "Auto-refresh every 10s" was /eye/'s, and false here (2026-11-07). #}
+<p class="oc-stamp">read {{ now|date:"H:i:s" }} UTC · refreshed on fills</p>
+{% else %}
 <p style="text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
     Auto-refresh every 10s · {{ now|date:"Y-m-d H:i:s" }}
 </p>
+{% endif %}

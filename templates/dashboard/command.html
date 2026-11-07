@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static oc_dash sauron_tags %}
 {% block title %}Operations Center — Sauron Vision{% endblock %}
 {% block page_title %}◉ OPERATIONS CENTER{% endblock %}
 
@@ -15,42 +15,73 @@
         {% comment %}Once a broker figure exists on this page, the existing
         number has to say WHICH book it is — an unlabelled value beside a
         labelled one reads as the same fact twice, and these are different
-        facts: this is the platform's own book, the thing the risk gates
-        divide by; the line below is what IBKR reports holding.{% endcomment %}
-        <div class="oc-hero-label">PORTFOLIO VALUE{% if broker %} <span class="oc-hero-lbl-sub">· PLATFORM BOOK</span>{% endif %}</div>
+        facts: this is the platform's own book, the thing the paper limits
+        divide by; the line below is what the broker reports holding.
+        THE PLATFORM BOOK, NAMED (2026-11-07, the Operations Center OC0):
+        cash typed on /setup/ plus the REAL and DEMO notional plus paper's
+        P&L, in mixed currencies, never converted — not a balance, and it
+        wears no currency sign. With no broker on the page there is nothing
+        to tell it from, and it keeps its old name; its words say what it
+        holds either way.{% endcomment %}
+        <div class="oc-hero-label">{% if broker %}PLATFORM BOOK{% else %}PORTFOLIO VALUE{% endif %}</div>
         <div class="oc-hero-value" title="{{ hero.value_title }}">
-            <span class="oc-hero-amount" data-oc-hero="value">{{ hero.value }}</span>
+            <span class="oc-hero-amount" data-oc-hero="value" title="{% if hero.value == '—' %}{{ why.not_measured }}{% endif %}">{{ hero.value }}</span>{% dash_note hero.value why.not_measured %}
             <span class="oc-hero-ccy" data-oc-hero="currency">{{ hero.currency }}</span>
         </div>
-        <div class="oc-hero-delta" title="{{ hero.delta_title }}">
-            <span data-oc-hero="delta" class="{{ hero.delta_tone }}">{{ hero.delta }}</span>
-            <span class="oc-hero-delta-unit">· 24h</span>
+        <div class="oc-hero-words" data-oc-hero="value_words">{{ hero.value_words }}</div>
+        {# TODAY's snapshot, written at 23:30 UTC: a dash until then, its reason named, yesterday's change and date beside it (2026-11-07; it read "· 24h"). #}
+        <div class="oc-hero-delta">
+            <span data-oc-hero="delta" class="{{ hero.delta_tone }}" title="{{ hero.delta_title }}">{{ hero.delta }}</span>{% dash_note hero.delta hero.delta_title %}
+            <span class="oc-hero-delta-unit">· today's snapshot</span>
+            <span class="oc-hero-delta-prev">yesterday <span data-oc-hero="prev_delta" title="{{ hero.prev_title }}">{{ hero.prev_delta }}</span>{% dash_note hero.prev_delta hero.prev_title %}</span>
         </div>
         {% if broker %}
         <div class="oc-hero-brokerline">
             {% include "_partials/broker_account.html" %}
         </div>
         {% endif %}
+        {# THREE WORLDS, NEVER ADDED (2026-11-07): the open P&L of REAL, DEMO and PAPER, each the sum of its own rows (position_summary.open_by_world, the band's split), an estimate starting with ≈. #}
+        <div class="oc-hero-worlds">
+            <div class="oc-hero-world"><span class="sv-world sv-world--live" title="Real money: orders at the broker">REAL</span>
+                <span class="oc-hero-world-v" data-oc-money data-oc-hero="world_live" title="{{ hero.world_live_title }}">{{ hero.world_live }}</span>{% dash_note hero.world_live hero.world_live_title %}
+                <span class="oc-hero-world-sub" data-oc-hero="world_live_words">{{ hero.world_live_words }}</span></div>
+            <div class="oc-hero-world"><span class="sv-world sv-world--demo" title="A broker's demo account: simulated money">DEMO</span>
+                <span class="oc-hero-world-v" data-oc-money data-oc-hero="world_demo" title="{{ hero.world_demo_title }}">{{ hero.world_demo }}</span>{% dash_note hero.world_demo hero.world_demo_title %}
+                <span class="oc-hero-world-sub" data-oc-hero="world_demo_words">{{ hero.world_demo_words }}</span></div>
+            <div class="oc-hero-world"><span class="sv-world sv-world--paper" title="Simulated by the platform: no money moves">PAPER</span>
+                <span class="oc-hero-world-v" data-oc-money data-oc-hero="world_paper" title="{{ hero.world_paper_title }}">{{ hero.world_paper }}</span>{% dash_note hero.world_paper hero.world_paper_title %}
+                <span class="oc-hero-world-sub" data-oc-hero="world_paper_words">{{ hero.world_paper_words }}</span></div>
+            <div class="oc-hero-world-note">open P&amp;L · each world apart, never added{% if hero.world_none %} · <span data-oc-hero="world_none_words">{{ hero.world_none_words }}</span>{% endif %}</div>
+        </div>
     </div>
 
     <div class="oc-hero-mid">
         <div class="oc-hero-strip">
             <div class="oc-hero-stat">
                 <span class="oc-hero-stat-label">REGIME</span>
-                <span class="oc-hero-stat-value {{ hero.regime_class }}" data-oc-hero="regime">{{ hero.regime }}</span>
-                <span class="oc-hero-stat-sub" data-oc-hero="regime_conf">{{ hero.regime_conf }}</span>
+                <span class="oc-hero-stat-value {{ hero.regime_class }}" data-oc-hero="regime" title="{{ hero.regime_title }}">{{ hero.regime }}</span>{% dash_note hero.regime hero.regime_title %}
+                <span class="oc-hero-stat-sub"><span data-oc-hero="regime_conf" title="{% if hero.regime_conf == '—' %}{{ why.no_report }}{% else %}the report's confidence{% endif %}">{{ hero.regime_conf }}</span>{% dash_note hero.regime_conf why.no_report %} · <span data-oc-hero="regime_age">{{ hero.regime_age }}</span></span>
             </div>
             <div class="oc-hero-stat">
                 <span class="oc-hero-stat-label">BRAIN TRUST</span>
-                <span class="oc-hero-stat-value {{ hero.trust_class }}" data-oc-hero="trust">{{ hero.trust }}</span>
+                <span class="oc-hero-stat-value {{ hero.trust_class }}" data-oc-hero="trust" title="{{ hero.trust_title }}">{{ hero.trust }}</span>
+                <span class="oc-hero-stat-sub" data-oc-hero="trust_age">{{ hero.trust_age }}</span>
             </div>
         </div>
     </div>
 
     <div class="oc-hero-right">
-        <span class="oc-hero-pill {{ hero.mode_class }}" data-oc-hero="mode_label">{{ hero.mode_label }}</span>
+        {# Not the REAL marker (2026-11-07): the topbar's red pill is, counting bots on a REAL account. This says the configs' mode, in ink. #}
+        <span class="oc-hero-pill {{ hero.mode_class }}" data-oc-hero="mode_label" title="The bot configs' mode. Whether real money is armed is the topbar's red pill: it counts bots on a REAL account.">{{ hero.mode_label }}</span>
         <span class="oc-hero-clock" id="ocClock">{{ now_utc|date:"H:i:s" }} UTC</span>
         <span class="oc-hero-ws" id="ocWsStatus" title="Live data feed">⟂ WS</span>
+        {# The exits the page lacked (2026-11-07): machine health, the whole book and CLOSE ALL, the kill switch (where its PIN is asked), the brokers. Links only: the actions stay on their pages. #}
+        <nav class="oc-hero-links" aria-label="Elsewhere">
+            <a href="{% url 'oculus_dashboard' %}">Oculus ›</a>
+            <a href="{% url 'positions_list' %}">All positions · Close all ›</a>
+            {% if can_operate %}<a href="{% url 'admin_dashboard' %}#flattenForm">Kill switch, with your PIN ›</a>{% endif %}
+            <a href="{% url 'brokers_page' %}">Brokers ›</a>
+        </nav>
     </div>
 </div>
 
@@ -94,8 +125,9 @@ under the localStorage key the section names.
                     <span class="day-tile-title">{{ st.title }}</span>
                 </span>
                 <span class="day-tile-nums">
-                    <span class="day-tile-num" data-day-tile-m="0"><b>—</b><small>{{ st.count }} scheduled tasks</small></span>
-                    <span class="day-tile-num" data-day-tile-m="1"><b>—</b><small>{{ st.pace }}</small></span>
+                    {# The dash before the first reading carries its reason; the painter replaces it, title and all, with the number (sv-day-live.js setNum). #}
+                    <span class="day-tile-num" data-day-tile-m="0"><b><span title="{{ why.first_poll }}">—</span></b><small>{{ st.count }} scheduled tasks</small></span>{% dash_note "—" why.first_poll %}
+                    <span class="day-tile-num" data-day-tile-m="1"><b><span title="{{ why.first_poll }}">—</span></b><small>{{ st.pace }}</small></span>
                 </span>
                 <span class="day-tile-words" data-day-tile-words="">reading…</span>
             </button>
@@ -117,7 +149,7 @@ under the localStorage key the section names.
         <div class="day-clock" id="dayClock" aria-label="The 24-hour UTC day: the daily tasks on their minute, the US session, the night of learning, and now.">
             <div class="day-clock-head">
                 <span class="day-k">THE 24-HOUR DAY · UTC</span>
-                <span class="day-clock-now-text" id="dayClockNowText">—</span>
+                <span class="day-clock-now-text" id="dayClockNowText"><span title="{{ why.first_poll }}">—</span></span>{% dash_note "—" why.first_poll %}
             </div>
             <div class="day-clock-track" id="dayClockTrack">
                 <div class="day-clock-band day-clock-night" style="left:8.333%;width:20.833%" title="The night of learning, 02:00–07:00 UTC"><span>NIGHT OF LEARNING</span></div>
@@ -151,7 +183,8 @@ under the localStorage key the section names.
 {# swap:120ms on the tab buttons only: the swap delay is what lets the old body #}
 {# fade out under .htmx-swapping (static/css/sv-motion.css) before the new one #}
 {# fades in. The body's own load trigger and the live refresh keep no delay. #}
-<div class="oc-tabs" id="ocTabs" role="tablist">
+{# data-oc-metrics-url: the page's own poll reads it (2026-11-07): no template tag inside the script, which tests/js/command_metrics.test.js runs under node as the page ships it. #}
+<div class="oc-tabs" id="ocTabs" role="tablist" data-oc-metrics-url="{% url 'command_tab_metrics' %}">
     <button type="button"
             class="oc-tab {% if active_tab == 'live' %}active{% endif %}"
             data-tab="live" data-ws-events="fill,gate_reject,position_change,regime_shift" role="tab"
@@ -163,8 +196,8 @@ under the localStorage key the section names.
             <span class="oc-tab-label">LIVE</span>
         </span>
         <span class="oc-tab-metric" data-oc-metric="live" title="{{ tab_metrics.live.title }}">
-            <span class="oc-tab-metric-primary">{{ tab_metrics.live.primary }}</span>
-            <span class="oc-tab-metric-secondary {{ tab_metrics.live.tone }}">{{ tab_metrics.live.secondary }}</span>
+            <span class="oc-tab-metric-primary" title="{{ tab_metrics.live.primary_title }}">{{ tab_metrics.live.primary }}</span>{% dash_note tab_metrics.live.primary tab_metrics.live.primary_title %}
+            <span class="oc-tab-metric-secondary {{ tab_metrics.live.tone }}" title="{{ tab_metrics.live.secondary_title }}">{{ tab_metrics.live.secondary }}</span>{% dash_note tab_metrics.live.secondary tab_metrics.live.secondary_title %}
         </span>
     </button>
 
@@ -179,8 +212,8 @@ under the localStorage key the section names.
             <span class="oc-tab-label">PORTFOLIO</span>
         </span>
         <span class="oc-tab-metric" data-oc-metric="portfolio" title="{{ tab_metrics.portfolio.title }}">
-            <span class="oc-tab-metric-primary">{{ tab_metrics.portfolio.primary }}</span>
-            <span class="oc-tab-metric-secondary {{ tab_metrics.portfolio.tone }}">{{ tab_metrics.portfolio.secondary }}</span>
+            <span class="oc-tab-metric-primary" title="{{ tab_metrics.portfolio.primary_title }}">{{ tab_metrics.portfolio.primary }}</span>{% dash_note tab_metrics.portfolio.primary tab_metrics.portfolio.primary_title %}
+            <span class="oc-tab-metric-secondary {{ tab_metrics.portfolio.tone }}" title="{{ tab_metrics.portfolio.secondary_title }}">{{ tab_metrics.portfolio.secondary }}</span>{% dash_note tab_metrics.portfolio.secondary tab_metrics.portfolio.secondary_title %}
         </span>
     </button>
 
@@ -195,8 +228,8 @@ under the localStorage key the section names.
             <span class="oc-tab-label">HISTORY</span>
         </span>
         <span class="oc-tab-metric" data-oc-metric="history" title="{{ tab_metrics.history.title }}">
-            <span class="oc-tab-metric-primary">{{ tab_metrics.history.primary }}</span>
-            <span class="oc-tab-metric-secondary {{ tab_metrics.history.tone }}">{{ tab_metrics.history.secondary }}</span>
+            <span class="oc-tab-metric-primary" title="{{ tab_metrics.history.primary_title }}">{{ tab_metrics.history.primary }}</span>{% dash_note tab_metrics.history.primary tab_metrics.history.primary_title %}
+            <span class="oc-tab-metric-secondary {{ tab_metrics.history.tone }}" title="{{ tab_metrics.history.secondary_title }}">{{ tab_metrics.history.secondary }}</span>{% dash_note tab_metrics.history.secondary tab_metrics.history.secondary_title %}
         </span>
     </button>
 
@@ -211,8 +244,8 @@ under the localStorage key the section names.
             <span class="oc-tab-label">BOTS</span>
         </span>
         <span class="oc-tab-metric" data-oc-metric="bots" title="{{ tab_metrics.bots.title }}">
-            <span class="oc-tab-metric-primary">{{ tab_metrics.bots.primary }}</span>
-            <span class="oc-tab-metric-secondary {{ tab_metrics.bots.tone }}">{{ tab_metrics.bots.secondary }}</span>
+            <span class="oc-tab-metric-primary" title="{{ tab_metrics.bots.primary_title }}">{{ tab_metrics.bots.primary }}</span>{% dash_note tab_metrics.bots.primary tab_metrics.bots.primary_title %}
+            <span class="oc-tab-metric-secondary {{ tab_metrics.bots.tone }}" title="{{ tab_metrics.bots.secondary_title }}">{{ tab_metrics.bots.secondary }}</span>{% dash_note tab_metrics.bots.secondary tab_metrics.bots.secondary_title %}
         </span>
     </button>
 </div>
@@ -321,6 +354,153 @@ under the localStorage key the section names.
         new MutationObserver(paintWs).observe(document.body,
             {attributes: true, attributeFilter: ['class']});
     } catch (e) { /* no observer: the initial paint still stands */ }
+})();
+</script>
+
+<script>
+/* ── THE PAGE'S OWN POLL: the tab heads and the hero ───────────────
+   These were computed once, at page render, and no fragment endpoint
+   recomputed them — so the four numbers this tab bar exists to show sat
+   frozen at whatever they were when the page was opened, however many
+   fills landed afterwards. Absolute values from the server, never
+   client-side deltas: one missed message and a delta drifts forever.
+
+   QUIET WHEN NOBODY READS IT (2026-11-07, the Operations Center OC0).
+   It sent no X-Requested-With and is not under /api/, so the idle lock
+   counted every poll as a human: it stamped the session every 45 s and
+   the server's idle backstop never fired while /command/ was open; and,
+   locked, it was redirected to /locked/, followed the redirect, failed to
+   read JSON and polled on. Now it says it is a script (the lock answers
+   it 423 and never stamps the session for it), it stops on a 423 and on a
+   redirect, it schedules nothing while the tab is hidden, and it resumes
+   when the tab is shown and on sv:pin-unlocked (the contract the ring's
+   live layer already follows). tests/js/command_metrics.test.js runs
+   this script, as shipped, under node. */
+(function () {
+    "use strict";
+    var bar = document.getElementById('ocTabs');
+    var METRICS_URL = (bar && bar.getAttribute('data-oc-metrics-url')) || '';
+    var FALLBACK_MS = 45000;
+    var EVENT_DELAY_MS = 800;
+    var reduceMotion = !!(window.matchMedia && window.matchMedia(
+        '(prefers-reduced-motion: reduce)').matches);
+    var stopped = false, inflight = false, timer = null, eventTimer = null;
+    var refreshTimer = null;
+
+    function setTone(el, tone) {
+        if (!el) return;
+        el.classList.remove('up', 'down');
+        if (tone === 'up' || tone === 'down') el.classList.add(tone);
+    }
+
+    function setGroupClass(el, prefix, cls) {
+        if (!el) return;
+        Array.prototype.slice.call(el.classList).forEach(function (c) {
+            if (c.indexOf(prefix) === 0) el.classList.remove(c);
+        });
+        if (cls) el.classList.add(cls);
+    }
+
+    /* A changed value says so with a neutral outline, never a wash of
+       Eye green: the heads flashed green on a loss too (spec §5.6). */
+    function setText(el, text) {
+        if (!el || typeof text === 'undefined' || text === null) return;
+        if (el.textContent === String(text)) return;
+        el.textContent = String(text);
+        if (reduceMotion) return;
+        el.classList.remove('oc-changed');
+        void el.offsetWidth;              /* restart the keyframe */
+        el.classList.add('oc-changed');
+    }
+
+    /* A dash's reason rides with it: a cell that turns into a dash after a
+       poll carries the title that says why. */
+    function setTitle(el, title) {
+        if (!el || typeof title !== 'string') return;
+        el.setAttribute('title', title);
+    }
+
+    function applyMetrics(data) {
+        var tabs = (data && data.tabs) || {};
+        document.querySelectorAll('[data-oc-metric]').forEach(function (box) {
+            var m = tabs[box.getAttribute('data-oc-metric')];
+            if (!m) return;
+            var prim = box.querySelector('.oc-tab-metric-primary');
+            setText(prim, m.primary);
+            setTitle(prim, m.primary_title);
+            var sec = box.querySelector('.oc-tab-metric-secondary');
+            setText(sec, m.secondary);
+            setTitle(sec, m.secondary_title);
+            setTone(sec, m.tone);
+            box.setAttribute('title', m.title || '');
+        });
+
+        var hero = (data && data.hero) || {};
+        document.querySelectorAll('[data-oc-hero]').forEach(function (el) {
+            var key = el.getAttribute('data-oc-hero');
+            setText(el, hero[key]);
+            setTitle(el, hero[key + '_title']);
+        });
+        setTone(document.querySelector('[data-oc-hero="delta"]'),
+                hero.delta_tone);
+        setGroupClass(document.querySelector('[data-oc-hero="regime"]'),
+                      'oc-regime-', hero.regime_class);
+        setGroupClass(document.querySelector('[data-oc-hero="trust"]'),
+                      'oc-trust-', hero.trust_class);
+        setGroupClass(document.querySelector('[data-oc-hero="mode_label"]'),
+                      'pill-', hero.mode_class);
+    }
+
+    function clearTimer() {
+        if (timer) { window.clearTimeout(timer); timer = null; }
+    }
+
+    /* The next poll, while the tab is visible and the poll not stopped;
+       nothing at all is scheduled otherwise. */
+    function schedule() {
+        clearTimer();
+        if (stopped || document.hidden || !METRICS_URL) return;
+        timer = window.setTimeout(function () {
+            timer = null;
+            fetchMetrics();
+        }, FALLBACK_MS);
+    }
+
+    function fetchMetrics() {
+        if (stopped || inflight || document.hidden || !METRICS_URL) return;
+        clearTimer();
+        inflight = true;
+        fetch(METRICS_URL, {
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest',
+                       'Accept': 'application/json' }
+        })
+            .then(function (r) {
+                /* 423 is the idle lock; a redirect is a session that ended
+                   or a lock page: either way the poll stops, and the last
+                   reading stands, until sv:pin-unlocked. */
+                var type = (r.headers && r.headers.get &&
+                            r.headers.get('content-type')) || '';
+                if (r.status === 423 || r.redirected || !/json/i.test(type)) {
+                    stopped = true;
+                    throw new Error('HTTP ' + r.status + ' ' + type);
+                }
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(applyMetrics)
+            .catch(function () { /* keep the last known values on screen */ })
+            .then(function () { inflight = false; schedule(); });
+    }
+
+    function scheduleMetrics() {
+        if (stopped || document.hidden) return;
+        if (eventTimer) window.clearTimeout(eventTimer);
+        eventTimer = window.setTimeout(function () {
+            eventTimer = null;
+            fetchMetrics();
+        }, EVENT_DELAY_MS);
+    }
 
     function refreshActiveTab() {
         var active = document.querySelector('.oc-tab.active');
@@ -339,94 +519,12 @@ under the localStorage key the section names.
 
     /* Throttle: don't refresh more than once per 800ms even if many
        events come in. */
-    var refreshTimer = null;
     function scheduleRefresh() {
-        if (refreshTimer) return;
-        refreshTimer = setTimeout(function() {
+        if (refreshTimer || stopped || document.hidden) return;
+        refreshTimer = window.setTimeout(function () {
             refreshTimer = null;
             refreshActiveTab();
-        }, 800);
-    }
-
-    /* ── Tab-bar + hero readouts ────────────────────────────────
-       These were computed once, at page render, and no fragment
-       endpoint recomputed them — so the four numbers this tab bar
-       exists to show sat frozen at whatever they were when the page
-       was opened, however many fills landed afterwards. Absolute
-       values from the server, never client-side deltas: one missed
-       message and a delta drifts forever. */
-    var METRICS_URL = "{% url 'command_tab_metrics' %}";
-    var FALLBACK_MS = 45000;
-    var reduceMotion = window.matchMedia(
-        '(prefers-reduced-motion: reduce)').matches;
-
-    function setTone(el, tone) {
-        if (!el) return;
-        el.classList.remove('up', 'down');
-        if (tone === 'up' || tone === 'down') el.classList.add(tone);
-    }
-
-    function setGroupClass(el, prefix, cls) {
-        if (!el) return;
-        Array.prototype.slice.call(el.classList).forEach(function (c) {
-            if (c.indexOf(prefix) === 0) el.classList.remove(c);
-        });
-        if (cls) el.classList.add(cls);
-    }
-
-    function setText(el, text) {
-        if (!el || typeof text === 'undefined' || text === null) return;
-        if (el.textContent === text) return;
-        el.textContent = text;
-        if (reduceMotion) return;
-        el.classList.remove('oc-changed');
-        void el.offsetWidth;              /* restart the keyframe */
-        el.classList.add('oc-changed');
-    }
-
-    function applyMetrics(data) {
-        var tabs = (data && data.tabs) || {};
-        document.querySelectorAll('[data-oc-metric]').forEach(function (box) {
-            var m = tabs[box.getAttribute('data-oc-metric')];
-            if (!m) return;
-            setText(box.querySelector('.oc-tab-metric-primary'), m.primary);
-            var sec = box.querySelector('.oc-tab-metric-secondary');
-            setText(sec, m.secondary);
-            setTone(sec, m.tone);
-            box.setAttribute('title', m.title || '');
-        });
-
-        var hero = (data && data.hero) || {};
-        document.querySelectorAll('[data-oc-hero]').forEach(function (el) {
-            setText(el, hero[el.getAttribute('data-oc-hero')]);
-        });
-        setTone(document.querySelector('[data-oc-hero="delta"]'),
-                hero.delta_tone);
-        setGroupClass(document.querySelector('[data-oc-hero="regime"]'),
-                      'oc-regime-', hero.regime_class);
-        setGroupClass(document.querySelector('[data-oc-hero="trust"]'),
-                      'oc-trust-', hero.trust_class);
-        setGroupClass(document.querySelector('[data-oc-hero="mode_label"]'),
-                      'pill-', hero.mode_class);
-    }
-
-    function fetchMetrics() {
-        fetch(METRICS_URL, { credentials: 'same-origin' })
-            .then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            })
-            .then(applyMetrics)
-            .catch(function () { /* keep the last known values on screen */ });
-    }
-
-    var metricsTimer = null;
-    function scheduleMetrics() {
-        if (metricsTimer) clearTimeout(metricsTimer);
-        metricsTimer = setTimeout(function () {
-            metricsTimer = null;
-            fetchMetrics();
-        }, 800);
+        }, EVENT_DELAY_MS);
     }
 
     /* Map: event_type → which tab(s) care about it. The tab buttons
@@ -467,15 +565,38 @@ under the localStorage key the section names.
         }
     });
 
+    /* Hidden: nothing scheduled, nothing sent. Shown again: read now, then
+       every FALLBACK_MS — unless the lock or a redirect stopped the poll. */
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            clearTimer();
+            if (eventTimer) { window.clearTimeout(eventTimer); eventTimer = null; }
+            return;
+        }
+        fetchMetrics();
+    });
+
+    /* The idle lock unlocks in place (static/js/idle-lock.js never
+       reloads) and announces it: the poll that a 423 stopped resumes. */
+    document.addEventListener('sv:pin-unlocked', function () {
+        stopped = false;
+        fetchMetrics();
+    });
+
     /* Slow fallback. The socket announces fills; it says nothing about a
        daily snapshot landing, a bot toggled from another screen or a rule
-       being paused — and it may be down entirely. Skipped while the tab is
-       in the background, where nobody is reading the numbers anyway. */
-    setInterval(function () {
-        if (!document.hidden) fetchMetrics();
-    }, FALLBACK_MS);
+       being paused — and it may be down entirely. The page rendered the
+       values just now, so the first poll waits FALLBACK_MS. */
+    schedule();
 })();
 </script>
+
+{# THE PAGE'S FOOT (2026-11-07, OC0): when it was read, what refreshes it, and what each dash above means. The tab bodies carry their own. #}
+<div class="oc-page-foot">
+    <p class="oc-stamp">read {{ now_utc|date:"H:i:s" }} UTC · the heads and the hero refresh every 45 s and on fills, only while this tab is visible; this page's own poll stops while the tab is hidden or locked.</p>
+    {% dash_legend %}
+</div>
+{% endblock content %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/sv-day-scheme.css' %}">
@@ -515,7 +636,7 @@ under the localStorage key the section names.
         font-size: 21px; font-weight: 600; color: var(--text-primary);
         letter-spacing: .5px; font-variant-numeric: tabular-nums;
     }
-    .oc-hero-ccy { font-size: 12px; color: var(--text-muted); letter-spacing: 1.5px; }
+    .oc-hero-ccy { font-size: 12px; color: var(--text-muted); letter-spacing: 1.5px; white-space: nowrap; }
     .oc-hero-delta {
         font-family: var(--font-mono); font-size: 24px; font-weight: 700;
         letter-spacing: .5px; line-height: 1.15; margin-top: 2px;
@@ -573,6 +694,57 @@ under the localStorage key the section names.
     }
     .oc-hero-clock { color: var(--text-muted); }
     .oc-hero-ws { color: var(--text-muted); cursor: help; }
+
+    /* THE BOOK'S WORDS, THE THREE WORLDS, THE EXITS (OC0) */
+    .oc-hero-words {
+        font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+        color: var(--text-muted); max-width: 520px;
+    }
+    .oc-hero-delta-prev { font-size: 12px; color: var(--text-muted); margin-left: 8px; font-weight: 400; }
+    .oc-hero-worlds { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    .oc-hero-world {
+        display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+        font-family: var(--font-mono); font-size: 12px;
+    }
+    .oc-hero-world-v { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .oc-hero-world-sub, .oc-hero-world-note { color: var(--text-muted); font-size: 11px; }
+    .oc-hero-links {
+        display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+        font-family: var(--font-mono); font-size: 11px;
+    }
+    .oc-hero-links a { color: var(--text-secondary); text-decoration: none; }
+    .oc-hero-links a:hover { color: var(--accent); }
+    .oc-hero-right { flex-wrap: wrap; justify-content: flex-end; }
+    /* The bots' MODE, in ink: the topbar's red pill is the one REAL marker. */
+    .oc-hero-pill.pill-mode {
+        background: transparent; color: var(--text-secondary);
+        border: 1px solid var(--border);
+    }
+
+    /* CLOSE IS NEVER SCROLLED OFF (OC0): the action column sticks to the
+       right edge of its sideways-scrolling table, over the row's own
+       ground. The words, the dialog and the PIN are unchanged. */
+    .table-wrapper .oc-col-act {
+        position: sticky; right: 0; z-index: 1;
+        background: var(--bg-card);
+        box-shadow: -8px 0 8px -8px rgba(0,0,0,0.45);
+    }
+
+    /* WHAT A DASH MEANS HERE (OC0): the reasons drawn above, listed. */
+    .oc-page-foot { margin-top: 18px; }
+    .oc-stamp, .oc-dash-legend {
+        font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    }
+    .oc-stamp { text-align: center; margin: 10px 0; }
+    .oc-dash-legend { margin: 10px 0 4px; }
+    .oc-dash-legend-head {
+        display: block; letter-spacing: 1.5px; text-transform: uppercase;
+        margin-bottom: 4px;
+    }
+    .oc-dash-legend ul { margin: 0; padding-left: 18px; columns: 2 320px; }
+    .oc-dash-legend li { line-height: 1.6; }
+    .oc-strip-sub--wrap { white-space: normal; }
+    .oc-world-row td { white-space: nowrap; }
 
     /* TAB BAR — data-rich */
     .oc-tabs {
@@ -645,9 +817,11 @@ under the localStorage key the section names.
     /* A readout that changes without a page reload has to say so, or the
        operator cannot tell a live number from a stale one. Colour only —
        nothing moves, nothing reflows. */
+    /* A neutral outline, never a wash of Eye green (2026-11-07, spec
+       §5.6): the heads flashed green on a loss too. */
     @keyframes oc-changed {
-        from { background: rgba(0,232,104,0.22); }
-        to   { background: transparent; }
+        from { box-shadow: 0 0 0 1px var(--text-muted); }
+        to   { box-shadow: 0 0 0 1px transparent; }
     }
     .oc-changed {
         animation: oc-changed 1.1s ease-out;
@@ -783,5 +957,4 @@ under the localStorage key the section names.
     .oc-mini-pnl.up { color: var(--accent); }
     .oc-mini-pnl.down { color: #ff5e5e; }
 </style>
-{% endblock %}
-{% endblock %}
+{% endblock extra_css %}

@@ -1,4 +1,6 @@
+{% load oc_dash sauron_tags %}
 {# HISTORY tab — closed-trade analytics, decay alerts, with rich charts. #}
+{# Rendered without the request (views_command._fragment). R is a ratio: it is counted across worlds and said to be "all worlds · R only"; money is split by world, each in its currency, never added (2026-11-07, OC0). #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
 {# Win rate and total R are over the GRADED closes only. A close with no #}
@@ -9,17 +11,17 @@
         <span class="oc-strip-label">CLOSED 90D</span>
         {# data-sv-count: the motion layer counts this up from 0 on reveal (static/js/sv-motion.js); the rendered text is the fallback. #}
         <span class="oc-strip-value" data-sv-count="{{ n_closed }}">{{ n_closed }}</span>
-        <span class="oc-strip-sub">{{ n_wins }} wins · {{ n_graded }} graded</span>
+        <span class="oc-strip-sub">{{ n_wins }} wins · {{ n_graded }} graded · 90 d · all worlds</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{% if win_rate is not None %}90d, graded closes{% else %}no graded closes in 90d{% endif %}</span>
+        <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}<span title="{% if n_closed %}{{ why.ungraded }}{% else %}{{ why.nothing_90d }}{% endif %}">—</span>{% if n_closed %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_90d %}{% endif %}{% endif %}</span>
+        <span class="oc-strip-sub">{% if win_rate is not None %}90 d, graded closes, all worlds{% else %}no graded closes in 90 d{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">TOTAL R</span>
-        <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{% if total_r is not None %}{{ total_r }}R{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">summed across all rules</span>
+        <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{% if total_r is not None %}{{ total_r }}R{% else %}<span title="{% if n_closed %}{{ why.ungraded }}{% else %}{{ why.nothing_90d }}{% endif %}">—</span>{% if n_closed %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_90d %}{% endif %}{% endif %}</span>
+        <span class="oc-strip-sub">summed across all rules · 90 d · all worlds · R only</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">DECAY ALERTS</span>
@@ -30,20 +32,21 @@
 
 {# ── 2. Cumulative R curve + Rolling 30d win rate (side by side) ──── #}
 {# data-sv-reveal: the motion layer rises a grid's cards as the page is scrolled (static/js/sv-motion.js); the chart cards exclude themselves. #}
+{# ONE POINT PER DAY (2026-11-07): the curve drew one point per close, 10,139 of them at six months. #}
 <div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Cumulative R · last 90d</span>
+            <span class="card-title">Cumulative R · last 90 d · per day · all worlds · R only</span>
             <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-                {% if cum_r_points %}low {{ cum_r_min|floatformat:2 }} · high {{ cum_r_max|floatformat:2 }}{% endif %}
+                {% if cum_r_points %}low {{ cum_r_min|floatformat:2 }} · high {{ cum_r_max|floatformat:2 }} · {{ cum_r_points|length }} days{% endif %}
             </span>
         </div>
-        {% include "_partials/chart_line.html" with points=cum_r_points min=cum_r_min max=cum_r_max chart_id="ocCumR" fill=1 unit="cumulative R" when="last 90 days" empty="No closed bot trades yet." %}
+        {% include "_partials/chart_line.html" with points=cum_r_points min=cum_r_min max=cum_r_max chart_id="ocCumR" fill=1 unit="cumulative R at each day's end" when="last 90 days" empty="No closed bot trades yet." %}
     </div>
 
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Rolling 30d win-rate</span>
+            <span class="card-title">Rolling 30d win-rate · all worlds</span>
             <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
                 {% if win_rate_points %}{{ win_rate_points|length }} days · current {{ win_rate_points|last }}%{% endif %}
             </span>
@@ -51,31 +54,28 @@
         {# The 50% marker was stroked rgba(255,255,255,0.06) — invisible on a #}
         {# white card, so in light mode the curve had no reference at all. #}
         {# The partial strokes it from --border and names it in the caption. #}
-        {% include "_partials/chart_line.html" with points=win_rate_points min=0 max=100 chart_id="ocWr" ref=50 ref_label="50% — break-even" unit="rolling 30-day win rate, %" when="one point per day" empty="Rolling win-rate fills as more days accumulate." %}
+        {% include "_partials/chart_line.html" with points=win_rate_points min=0 max=100 chart_id="ocWr" ref=50 ref_label="50%, break-even" unit="rolling 30-day win rate, %" when="one point per day" empty="Rolling win-rate fills as more days accumulate." %}
     </div>
 </div>
 
 {# ── 3. Day-of-week heatmap + Top rules by Sharpe ─────────────────── #}
 <div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
-        <div class="card-header"><span class="card-title">Day-of-week performance</span></div>
+        <div class="card-header"><span class="card-title">Day-of-week performance · 90 d · all worlds · R only</span></div>
         {% if dow_max_n > 0 %}
             <div class="oc-heatmap">
                 {% for d in dow_stats %}
-                    {# The tint was a literal rgba(0,232,104,…) / rgba(255,94,94,…): #}
-                    {# the dark-mode green and red, unchanged by a theme swap. #}
-                    {# color-mix keeps the same "darkness = trade count" ramp #}
-                    {# while taking its hue from the tokens. #}
+                    {# THE SHADE IS |AVG R|, WITH A FLOOR (2026-11-07, spec §5.6): under 0.05R a weekday is neutral whatever its count — -0.004R over 37 trades was the darkest red. The count is text, never shade. The tint takes its hue from the tokens (color-mix). #}
                     <div class="oc-heatmap-cell"
-                         style="background: {% if d.avg_r > 0 %}color-mix(in srgb, var(--accent) {% widthratio d.n dow_max_n 35 %}%, var(--bg-card)){% elif d.avg_r < 0 %}color-mix(in srgb, var(--accent-red) {% widthratio d.n dow_max_n 35 %}%, var(--bg-card)){% else %}var(--bg-card){% endif %};">
+                         style="background: {% if d.tone == 'up' %}color-mix(in srgb, var(--accent) {{ d.shade }}%, var(--bg-card)){% elif d.tone == 'down' %}color-mix(in srgb, var(--accent-red) {{ d.shade }}%, var(--bg-card)){% else %}var(--bg-card){% endif %};">
                         <div class="dow-label">{{ d.label }}</div>
                         <div class="dow-n">{{ d.n }}</div>
-                        <div class="dow-r" style="color: {% if d.avg_r > 0 %}var(--accent){% elif d.avg_r < 0 %}var(--accent-red){% else %}var(--text-muted){% endif %};">{% if d.n %}{{ d.avg_r }}R{% else %}—{% endif %}</div>
+                        <div class="dow-r {% if d.tone == 'up' %}up{% elif d.tone == 'down' %}down{% endif %}" style="color: {% if d.tone == 'up' %}var(--accent){% elif d.tone == 'down' %}var(--accent-red){% else %}var(--text-muted){% endif %};">{% if d.n %}{{ d.avg_r }}R{% else %}<span title="{{ why.no_weekday }}">—</span>{% dash_note "—" why.no_weekday %}{% endif %}</div>
                     </div>
                 {% endfor %}
             </div>
             <p style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:8px;">
-                Cell darkness = trade count · color = avg R sign
+                The number is the count of closes · the shade is |avg R|, neutral under 0.05R · the colour is its sign
             </p>
         {% else %}
             <p class="oc-empty">No closed trades yet.</p>
@@ -83,7 +83,7 @@
     </div>
 
     <div class="card">
-        <div class="card-header"><span class="card-title">Top 5 rules by Sharpe</span></div>
+        <div class="card-header"><span class="card-title">Top 5 rules by Sharpe · 90 d</span></div>
         {% if top_rules_sharpe %}
             <div class="table-wrapper">
             <table class="sv-perf-table">
@@ -100,6 +100,7 @@
                 </tbody>
             </table>
             </div>
+            {% if n_rules_ranked < 5 %}<p class="oc-empty" style="padding:4px 0;">{{ n_rules_ranked }} rule{{ n_rules_ranked|pluralize }} with 5 or more graded closes in 90 d.</p>{% endif %}
         {% else %}
             <p class="oc-empty">Need ≥5 closed trades per rule for Sharpe.</p>
         {% endif %}
@@ -107,25 +108,28 @@
 </div>
 
 {# ── 4. Per-rule × asset_class table ──────────────────────────────── #}
+{# THE P&L SPLIT BY WORLD (2026-11-07): each world's money in its currency, never added; the most active rules first. #}
 <div class="card" style="margin-bottom:18px;">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">Per rule × asset_class · 90d</span>
+        <span class="card-title">Per rule × asset_class · 90d · P&amp;L by world</span>
         <a href="{% url 'bot_performance_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">full track record →</a>
     </div>
     {% if by_rule %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>rule</th><th>asset</th><th>n</th><th>avg R</th><th>total P&amp;L</th></tr></thead>
+            <thead><tr><th>rule</th><th>asset</th><th>n</th><th>avg R</th><th>P&amp;L <span class="sv-world sv-world--live">REAL</span></th><th>P&amp;L <span class="sv-world sv-world--demo">DEMO</span></th><th>P&amp;L <span class="sv-world sv-world--paper">PAPER</span></th>{% if by_rule_none %}<th>P&amp;L NO VENUE</th>{% endif %}</tr></thead>
             <tbody>
                 {% for r in by_rule %}
                     <tr>
                         <td><strong>{{ r.rule_name|truncatechars:32 }}</strong></td>
                         <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
                         <td>{{ r.n }}</td>
-                        {# Avg/Sum over a rule whose closes are all ungraded #}
-                        {# come back None, which floatformat renders blank. #}
-                        <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{% if r.avg_r is not None %}{{ r.avg_r|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td class="{% if r.total_pnl > 0 %}up{% elif r.total_pnl < 0 %}down{% endif %}">{% if r.total_pnl is not None %}{{ r.total_pnl|floatformat:2 }}{% else %}—{% endif %}</td>
+                        {# Avg over a rule whose closes are all ungraded #}
+                        {# comes back None, which floatformat renders blank. #}
+                        <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{% if r.avg_r is not None %}{{ r.avg_r|floatformat:2 }}{% else %}<span title="{{ why.ungraded }}">—</span>{% dash_note "—" why.ungraded %}{% endif %}</td>
+                        {% for w in r.worlds %}{% if w.world or by_rule_none %}
+                        <td data-oc-money{% if w.text == "—" %} title="{{ why.nothing_closed }}"{% endif %}>{{ w.text }}</td>{% dash_note w.text why.nothing_closed %}
+                        {% endif %}{% endfor %}
                     </tr>
                 {% endfor %}
             </tbody>
@@ -154,7 +158,7 @@
                     <td class="down">{{ a.recent_avg_r|floatformat:2 }}</td>
                     <td>{{ a.baseline_avg_r|floatformat:2 }}</td>
                     <td style="font-family:var(--font-mono);font-size:11px;">{{ a.triggers|join:", " }}</td>
-                    <td style="font-size:11px;">{{ a.detected_at|date:"m-d H:i" }}</td>
+                    <td style="font-size:11px;">{{ a.detected_at|date:"Y-m-d H:i" }}</td>
                 </tr>
             {% endfor %}
         </tbody>
@@ -165,23 +169,23 @@
 
 {# ── 6. Recent closed trades (last 30) ────────────────────────────── #}
 <div class="card">
-    <div class="card-header"><span class="card-title">Recent closed trades</span></div>
+    <div class="card-header"><span class="card-title">Recent closed trades · the last 30 · 90 d</span></div>
     {% if recent_closed %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>closed</th><th>symbol</th><th>side</th><th>rule</th><th>R</th><th>P&amp;L</th><th>outcome</th></tr></thead>
+            <thead><tr><th>closed (UTC)</th><th>symbol</th><th>side</th><th>rule</th><th>R</th><th>P&amp;L</th><th>outcome</th></tr></thead>
             <tbody>
                 {% for t in recent_closed %}
                     <tr>
-                        <td style="font-family:var(--font-mono);font-size:11px;">{{ t.closed_at|date:"m-d H:i" }}</td>
-                        <td><strong>{{ t.symbol }}</strong></td>
+                        <td style="font-family:var(--font-mono);font-size:11px;">{{ t.closed_at|date:"Y-m-d H:i" }}</td>
+                        <td><strong>{{ t.symbol }}</strong> {% money_world t.world "compact" %}</td>
                         <td><span class="oc-mini-side {{ t.side }}">{{ t.side }}</span></td>
-                        <td style="font-size:11px;">{{ t.rule_name|default:"—"|truncatechars:24 }}</td>
+                        <td style="font-size:11px;">{% if t.rule_name %}{{ t.rule_name|truncatechars:24 }}{% else %}<span title="{{ why.no_rule }}">—</span>{% dash_note "—" why.no_rule %}{% endif %}</td>
                         {# An ungraded close renders a bare "R" without this — #}
                         {# floatformat turns None into the empty string. #}
-                        <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{% if t.realized_r is not None %}{{ t.realized_r|floatformat:2 }}R{% else %}—{% endif %}</td>
-                        <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{% if t.pnl is not None %}{{ t.pnl|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td style="font-size:11px;color:var(--text-muted);">{{ t.outcome|default:"—" }}</td>
+                        <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{% if t.realized_r is not None %}{{ t.realized_r|floatformat:2 }}R{% else %}<span title="{{ why.ungraded }}">—</span>{% dash_note "—" why.ungraded %}{% endif %}</td>
+                        <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}" data-oc-money{% if t.pnl is None %} title="{{ why.not_measured }}"{% endif %}>{{ t.pnl_text }}</td>{% if t.pnl is None %}{% dash_note "—" why.not_measured %}{% endif %}
+                        <td style="font-size:11px;color:var(--text-muted);">{% if t.outcome %}{{ t.outcome }}{% else %}<span title="{{ why.no_outcome }}">—</span>{% dash_note "—" why.no_outcome %}{% endif %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -191,3 +195,5 @@
         <p class="oc-empty">No recent closed trades.</p>
     {% endif %}
 </div>
+<p class="oc-stamp">read {{ read_at|date:"H:i:s" }} UTC · on demand: re-read when this tab is opened and on fills</p>
+{% dash_legend %}
