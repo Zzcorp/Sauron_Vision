@@ -108,6 +108,10 @@ STACKING. Every branch touches `core/wall_facts.py` TESTS_GREEN, so merging one 
 - "Améliorer oculus système aussi svp" and "Magnifique attaque" (the approval of the preview and the go-ahead to build).
 - "Je n'ai pas activé les orcs encore": the Orcs turn-on sheet stands; he will run it.
 
+**2026-11-07**
+- "Do the same for the opération center please": the Operations Center (/command/, his home) gets the Oculus treatment: map, screenshots, design as his trading desk in the new style (boundary: machine health stays in the Oculus), French proposal and mock, stages OC0 (truth and cost, today's look, no approval needed) to OC3 (live with F4/F7). Workflow opscenter-improve-design (run wf_ce86da72-281), outputs in scratchpad `opscenter/`, to be copied to `handoff/plans/opscenter/`.
+- "ok pour l'ordre des blocs de l'Oculus": the Oculus block order of `plans/oculus/plan_fr.md` is approved (status line, needs you, the cycle, money safety, prices and requests, what acts, AI, the last hour, then the slow cycles below, then the forge and the not-measured list). Decided for him under "fais au mieux": the slow cycles' explanations sit one click away, as proposed; he may ask for them always open. O1 follows S1a; O2a follows O1; O2b follows O2a.
+
 **2026-11-05**
 - "Le dev des orcs full et conseil": build O2a to O2d, the council of war included, with the spec's §4 defaults (my recommendations in the French plan).
 - He opened a position himself in the eToro app; Sauron does not manage it (Morgul's Drift on it is expected).
