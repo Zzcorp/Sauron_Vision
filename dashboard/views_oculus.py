@@ -34,7 +34,9 @@ Read-only: it places no orders, writes no rows and flips no switch. It
 carries no form and no POST; an action is a link to the page that holds
 it. No broker and no model is called to draw it. Every count names its
 window, and every stored reading (the forge's scan and plan, the probe,
-three ten-minute aggregates) prints its age.
+three ten-minute aggregates, the broker equity cell behind the desk's
+governor) prints its age; each is keyed by the build, since the cache
+outlives a deploy.
 Fenced like /shares/ and /personas/ — a page that 500s because one table
 is mid-migration hides the nine panels that were healthy.
 

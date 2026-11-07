@@ -162,7 +162,7 @@
             {% else %}
               <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.value }}</td>
             {% endif %}
-            <td class="ocu-l">{{ f.label }}{% if f.currency %} ({{ f.currency }}){% endif %} <span class="ocu-win">· {{ f.window }}</span>
+            <td class="ocu-l">{{ f.label }}{% if f.currency %} ({{ f.currency }}){% endif %} <span class="ocu-win">· {{ f.when }}</span>
               {% if f.alert %}<span class="ocu-alert {{ f.alert_level }}">{% if f.alert_level == "danger" %}⨯{% else %}⚠{% endif %} {{ f.alert_words }}</span>{% endif %}
               {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
             </td>
@@ -184,7 +184,7 @@
       {% for v in c.venues %}
       <div class="ocu-venue">
         <div class="ocu-venue-head">{% if v.venue == 'live' %}THE DESK · LIVE VENUE{% else %}THE DESK · PAPER VENUE{% endif %}{% if v.currency %} · IN {{ v.currency }}{% endif %}</div>
-        {% if v.reason %}<p class="ocu-note">the desk: {{ v.reason }}</p>{% endif %}
+        {% if v.reason %}<p class="ocu-note">the desk: {{ v.reason }}{% if v.equity %} · {{ v.equity.words }}{% endif %}</p>{% endif %}
         {% if v.facts %}
         <table class="ocu-facts">
           {% for f in v.facts %}
@@ -198,7 +198,7 @@
             {% else %}
               <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.value }}</td>
             {% endif %}
-            <td class="ocu-l">{{ f.label }} <span class="ocu-win">· {{ f.window }}</span>
+            <td class="ocu-l">{{ f.label }} <span class="ocu-win">· {{ f.when }}</span>
               {% if f.alert %}<span class="ocu-alert {{ f.alert_level }}">{% if f.alert_level == "danger" %}⨯{% else %}⚠{% endif %} {{ f.alert_words }}</span>{% endif %}
               {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
             </td>
@@ -298,10 +298,12 @@
             <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.value }}</td>
           {% endif %}
           <td class="ocu-l">
-            {{ f.label }} <span class="ocu-win">· {{ f.window }}</span>
+            {{ f.label }} <span class="ocu-win">· {{ f.when }}</span>
             {% if f.alert %}<span class="ocu-alert {{ f.alert_level }}">{% if f.alert_level == "danger" %}⨯{% else %}⚠{% endif %} {{ f.alert_words }}</span>{% endif %}
             {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
-            {% if f.age %}{% ifchanged f.age.words %}<span class="ocu-qual">{{ f.age.words }}</span>{% endifchanged %}{% endif %}
+            {% comment %} A stored reading counted "now" prints its age in the window's place, above;
+               one counted over a longer window prints it here, once per reading. {% endcomment %}
+            {% if f.age and f.window != "now" %}{% ifchanged f.age.words %}<span class="ocu-qual">{{ f.age.words }}</span>{% endifchanged %}{% endif %}
           </td>
         </tr>
         {% endfor %}

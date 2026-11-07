@@ -58,12 +58,19 @@ staff GET. Now:
 * ONE AGGREGATE PER TABLE, STILL ONE FENCE PER FACT. Each table's facts
   read one shared `aggregate(Count(filter=Q(...)))` (`_Once`); if it fails,
   each fact's own fence reports it and each is named.
-* THE FORGE ONCE PER BUILD. The guard scan is stored per image sha (no
-  sha: ten minutes), the migration plan ten minutes, and both print how
-  old they are; the probe prints its own stored time.
+* THE FORGE ONCE PER BUILD. The guard scan is stored per image (no sha:
+  ten minutes), the migration plan ten minutes, and both print how old
+  they are; the probe prints its own stored time, and a tally older than
+  the image is a dash. Every stored reading is keyed by the build (sha and
+  build time, `_build_id`): Redis keeps its data across a deploy.
 * EVERY COUNT NAMES ITS WINDOW (`WINDOWS`), every code constant says so,
+  a stored reading prints its age where its window would read "now",
   money keeps its cents, and amber is data (`alert_when`): a value is
-  painted only past its stated threshold, with its words, and a dash never.
+  painted only past its stated threshold, read on the value as computed
+  (never the rounded one), with its words, and a dash never.
+* LATE MEANS PAST THE LAST PASS. A flag or a call that fell due since its
+  resolver's last scheduled pass waits for the next one and is not late
+  (`_last_pass`); only what fell due before it and is still open is.
 * THE BOOK IN THREE WORLDS. REAL, DEMO and PAPER by the platform's one
   world rule (dashboard.position_summary.world_of) with the desk's own
   risk arithmetic, never summed; the desk's two venues stay beside them,
@@ -73,10 +80,12 @@ staff GET. Now:
 No broker call and no model call is made to draw this page.
 """
 import logging
+import math
 import operator
 import time
 from contextvars import ContextVar
-from datetime import datetime, time as dtime, timedelta
+from datetime import (datetime, time as dtime, timedelta,
+                      timezone as dt_timezone)
 
 from django.db.models import (Case, Count, DateTimeField, DurationField,
                               ExpressionWrapper, F, IntegerField, Max, Min,
@@ -106,28 +115,43 @@ CONSTANT = "constant"
 #: unstamped checkout, and the backtests' tolerant Python sum.
 STORED_TTL = 10 * 60
 
-#: Where the forge keeps its two readings, per image sha. With a sha the
-#: guard scan never expires — the code cannot change without a new image —
-#: and the migration plan lasts STORED_TTL. An unstamped checkout uses
-#: FORGE_UNSTAMPED in place of the sha and both last STORED_TTL.
-FORGE_GUARDS_KEY = "oculus:forge:guards:{sha}"
-FORGE_MIGRATIONS_KEY = "oculus:forge:migrations:{sha}"
+#: EVERY STORED READING IS KEYED BY THE BUILD (2026-11-07, review): its
+#: `{build}` is `_build_id()`, the image's sha and build time. Redis keeps
+#: its data across a deploy (deploy/docker-compose.yml runs it with an
+#: appendonly volume), so a key without the build handed the next image
+#: the previous one's readings — a dict the new code could not read, or
+#: an old counting rule's number under a new label.
+#:
+#: Where the forge keeps its two readings. With a stamped image the guard
+#: scan never expires — the code cannot change without a new image — and
+#: the migration plan lasts STORED_TTL. An unstamped checkout uses
+#: FORGE_UNSTAMPED in place of the build and both last STORED_TTL.
+FORGE_GUARDS_KEY = "oculus:forge:guards:{build}"
+FORGE_MIGRATIONS_KEY = "oculus:forge:migrations:{build}"
 FORGE_UNSTAMPED = "unstamped"
 
-#: Where `manage.py probe_routes` leaves its tally (PROBE_KEY there).
+#: Where `manage.py probe_routes` leaves its tally (PROBE_KEY there), for
+#: seven days (its PROBE_TTL).
 PROBE_KEY = "forge:route_probe"
 
 #: The backtests' "signals a run could not simulate", kept STORED_TTL and
 #: re-counted at once when the set of complete runs changes.
-UNSIMULATED_KEY = "oculus:slow:unsimulated"
+UNSIMULATED_KEY = "oculus:slow:unsimulated:{build}"
 
 #: THE TWO ALL-TIME AGGREGATES KEPT TEN MINUTES (§7.2 point 6, 2026-11-06):
 #: the tables this page reads whole with no index for its filter —
 #: AgentPrediction (prediction_type) and DeskPlan (mode). Measured at the
 #: six-month scale, the page missed its budget without them. Each prints
 #: when it was counted; their strips stay live.
-PREDICTIONS_KEY = "oculus:slow:predictions"
-DESK_PASSES_KEY = "oculus:slow:desk_passes"
+PREDICTIONS_KEY = "oculus:slow:predictions:{build}"
+DESK_PASSES_KEY = "oculus:slow:desk_passes:{build}"
+
+#: What each stored aggregate holds. A stored dict that lacks one of these
+#: keys was written by other code and is counted again, never read into a
+#: KeyError dash.
+_CALLS_KEYS = ("right", "wrong", "awaiting", "not_due", "open_at_pass",
+               "unsettled", "agents")
+_PASSES_KEYS = ("shadow", "live")
 
 #: The cycles a login that is not staff reads as a header and the
 #: STAFF_ONLY caveat, never as numbers (2026-09-28). /health/'s rule, as
@@ -256,6 +280,7 @@ class _Render:
         self.staff = staff
         self.components = _Once(_read_components)
         self.budgets = {}
+        self.equity = {}
 
 
 _RENDER = ContextVar("oculus_render", default=None)
@@ -303,14 +328,16 @@ class _Reading:
     """A stored figure and when it was stored (§5.1). A builder returns one
     instead of a bare number when what it reports was written by someone
     else, earlier: the page prints the figure WITH its age, or not at all.
+    `stale` marks a reading past its writer's own freshness bound.
     """
 
-    __slots__ = ("value", "at", "words")
+    __slots__ = ("value", "at", "words", "stale")
 
-    def __init__(self, value, at, words):
+    def __init__(self, value, at, words, stale=False):
         self.value = value
         self.at = at
         self.words = words
+        self.stale = stale
 
 
 #: alert_when's comparisons, as data: ("<", 0) reads "below zero".
@@ -377,16 +404,26 @@ def _fact(label, builder, *, note="", qualifier="", tone="plain",
     `alert_when`, e.g. ("<", 0), is the threshold past which the value is
     painted (§5.3): amber for "warn" (⚠), coral for "danger" (⨯), always
     with `alert_words`. It is data, never template logic, and a dash never
-    crosses it.
+    crosses it. It reads the value as the builder computed it, never the
+    rounded one (2026-11-07, review): a budget of -0.004 is past the
+    ceiling though it prints at the cent, and the cell keeps the sign the
+    threshold saw ("-0.00" beside its amber; a zero that is not below zero
+    prints no sign).
+
+    `when` is what the page prints after the label: the window, or — for
+    a stored reading counted "now" — the reading's age in its place,
+    since "now" above "probed 6 d ago" says two things at once (§5.1).
     """
     age = None
     why = hint = ""
+    raw = None
     try:
         value = builder()
         if isinstance(value, _Reading):
             age = {"seconds": max(0, int(time.time() - value.at)),
-                   "words": value.words}
+                   "words": value.words, "stale": bool(value.stale)}
             value = value.value
+        raw = value
         value = _coerce(value, kind)
         if value is None:
             why, hint = (none_why or "nothing to measure yet"), fix
@@ -398,13 +435,19 @@ def _fact(label, builder, *, note="", qualifier="", tone="plain",
         why, hint = _why(exc)
         hint = hint or fix
     alert = bool(value is not None and alert_when is not None
-                 and _ALERT_OPS[alert_when[0]](value, alert_when[1]))
-    return {"label": label, "value": value,
-            "display": money_text(value) if (kind == "money"
-                                             and value is not None) else "",
+                 and _ALERT_OPS[alert_when[0]](
+                     float(raw) if kind == "money" else raw, alert_when[1]))
+    display = ""
+    if kind == "money" and value is not None:
+        if value == 0:
+            value = -0.0 if float(raw) < 0 else 0.0
+        display = money_text(value)
+    shown = CONSTANT if kind == "constant" else window
+    return {"label": label, "value": value, "display": display,
             "note": note, "qualifier": qualifier, "tone": tone,
-            "kind": kind, "currency": currency,
-            "window": CONSTANT if kind == "constant" else window,
+            "kind": kind, "currency": currency, "window": shown,
+            "when": (age["words"] if age is not None and shown == "now"
+                     else shown),
             "alert_when": alert_when, "alert": alert,
             "alert_level": alert_level if alert else "",
             "alert_words": alert_words if alert else "",
@@ -434,7 +477,7 @@ def _text_fact(label, builder, *, note="", qualifier="", tone="plain",
         why, hint = _why(exc)
     return {"label": label, "value": value, "display": "", "note": note,
             "qualifier": qualifier, "tone": tone, "text": True,
-            "kind": "text", "currency": "", "window": "now",
+            "kind": "text", "currency": "", "window": "now", "when": "now",
             "alert_when": None,
             "alert": False, "alert_level": "", "alert_words": "",
             "age": None, "why": why, "fix": hint}
@@ -602,11 +645,45 @@ def _withheld(key, title, question):
 
 # ── stored readings ─────────────────────────────────────────────────────
 
-def _stored(key, compute, timeout, verb, *, at_build=False, fingerprint=None):
+def _build_id():
+    """The image this process runs, as every stored reading is keyed
+    (2026-11-07, review): its sha and its build time — a rebuild of the
+    same sha (a pull that brought nothing, an uncommitted edit) is another
+    image — or FORGE_UNSTAMPED for a checkout nobody stamped."""
+    from core.build_stamp import built_at, git_sha
+    sha = git_sha()
+    if not sha:
+        return FORGE_UNSTAMPED
+    return f"{sha}@{built_at() or 'unknown'}"
+
+
+def _epoch(stamp_text):
+    """The build stamp's ISO instant as seconds since the epoch, or None
+    when there is none or it cannot be read (core.build_stamp's parse)."""
+    if not stamp_text:
+        return None
+    try:
+        when = datetime.fromisoformat(str(stamp_text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt_timezone.utc)
+    return when.timestamp()
+
+
+def _holds(value, keys):
+    """Does a stored aggregate carry every key this code reads from it?"""
+    return not keys or (isinstance(value, dict)
+                        and all(k in value for k in keys))
+
+
+def _stored(key, compute, timeout, verb, *, at_build=False, fingerprint=None,
+            expect=()):
     """A reading kept in the cache, returned with its age (§5.1).
 
     The value under `key` if it is there (and, with `fingerprint`, if it
-    was stored for the same one); otherwise `compute()` is run and stored
+    was stored for the same one, and, with `expect`, if it is a dict that
+    carries each of those keys); otherwise `compute()` is run and stored
     for `timeout` seconds (None: until the cache is cleared). A cache that
     cannot be read or written never costs the page: the value is computed
     and printed as counted now. A compute that raises is not stored and
@@ -620,7 +697,8 @@ def _stored(key, compute, timeout, verb, *, at_build=False, fingerprint=None):
         hit = None
     if (isinstance(hit, dict) and "value" in hit
             and isinstance(hit.get("at"), (int, float))
-            and (fingerprint is None or hit.get("fp") == fingerprint)):
+            and (fingerprint is None or hit.get("fp") == fingerprint)
+            and _holds(hit["value"], expect)):
         value, at = hit["value"], hit["at"]
     else:
         value, at = compute(), time.time()
@@ -663,6 +741,62 @@ def _budget(user, venue):
     if once is None:
         once = render.budgets[key] = _Once(lambda: _desk_budget(user, venue))
     return once()
+
+
+def _read_equity(user):
+    """When the broker's equity cell was read: {"at" (epoch), "words",
+    "stale"}, or None when there is no cell. capital_truth.account_equity
+    reads the sync's stored columns, never the broker. Past the bound the
+    governor's own reading calls `stale` (TRACKING_FRESH_SECONDS) the words
+    say so: a governor computed from a three-day-old cell is not "now"."""
+    from bot_program.capital_truth import (TRACKING_FRESH_SECONDS,
+                                           account_equity)
+    reading = account_equity(user)
+    if not reading or reading.get("at") is None:
+        return None
+    seconds = max(0, int(reading.get("age_seconds") or 0))
+    stale = seconds > TRACKING_FRESH_SECONDS
+    words = f"equity read {_ago(seconds)}"
+    if stale:
+        words += (f" — stale (a reading is fresh for "
+                  f"{TRACKING_FRESH_SECONDS // 60} min)")
+    return {"at": reading["at"].timestamp(), "words": words, "stale": stale}
+
+
+def _equity(user):
+    """_read_equity, once per render (the governor's fact and the desk's
+    reason line print the same reading); None when it cannot be read."""
+    render = _RENDER.get()
+    try:
+        if render is None:
+            return _read_equity(user)
+        key = getattr(user, "pk", None)
+        once = render.equity.get(key)
+        if once is None:
+            once = render.equity[key] = _Once(lambda: _read_equity(user))
+        return once()
+    except Exception as exc:  # noqa: BLE001 — no age is printed, never a 500
+        _warn_once("book.equity reading", exc)
+        return None
+
+
+#: What budget_for writes when the governor's reading raised, with the
+#: exception's message inside the brackets.
+_GOVERNOR_UNREADABLE = "governor unreadable ("
+
+
+def _desk_reason(reason):
+    """The desk's reason line as budget_for wrote it, except an unreadable
+    governor's cause (2026-11-07, review): budget_for puts the exception's
+    message in the brackets, and this page names a failure's kind, never
+    its message (_why) — a database error carries SQL text. The cause is in
+    the desk's log; what follows it (the currencies set aside) is kept."""
+    reason = reason or ""
+    if not reason.startswith(_GOVERNOR_UNREADABLE):
+        return reason
+    _head, sep, tail = reason.rpartition(") — 1.00")
+    return ("governor unreadable — 1.00 (the cause is in the desk's log)"
+            + (tail if sep else ""))
 
 
 def _venue_facts(user, venue):
@@ -710,10 +844,23 @@ def _venue_facts(user, venue):
         # The governor exists on the live venue only — a drawdown brake on a
         # simulation would throttle a book that cannot lose anything.
         dd = b.get("drawdown_pct")
+        # The broker's equity cell the governor rests on, when the desk had
+        # one (no reading: drawdown_pct is None and 1.00 is its default).
+        equity = _equity(user) if dd is not None else None
+
+        def _governor():
+            if b.get("governor") is None:
+                return None
+            # FLOORED, never rounded up (2026-11-07, review): 0.998 is 99,
+            # not 100, which the qualifier keeps for its two meanings.
+            value = math.floor(round(float(b["governor"]) * 100, 6))
+            if equity is None:
+                return value
+            return _Reading(value, equity["at"], equity["words"],
+                            stale=equity["stale"])
+
         facts.append(_fact(
-            "drawdown governor (×100)",
-            lambda: (None if b.get("governor") is None
-                     else round(float(b["governor"]) * 100)),
+            "drawdown governor (×100)", _governor,
             tone="caution",
             qualifier='100 means TWO things: no drawdown, or no equity '
                       'reading at all. The floor is 40.',
@@ -767,6 +914,7 @@ def _world_split(user):
 
     worlds = {w: {"world": w, "word": WORLD_WORDS[w], "n_open": 0,
                   "n_close_pending": 0, "unmeasured": 0, "risk": {},
+                  "n_by_ccy": {}, "unmeasured_by_ccy": {},
                   "n_live_venue": 0, "risk_live_venue": {},
                   "carriers": set()}
               for w in _WORLD_ORDER}
@@ -783,11 +931,15 @@ def _world_split(user):
             slot["n_live_venue"] += 1
         carrier = str((row.metadata or {}).get("broker") or "").strip().lower()
         slot["carriers"].add(carrier)
+        # the currency as book_risk reads it: the config's, USD when blank
+        ccy = row.ccy or "USD"
+        slot["n_by_ccy"][ccy] = slot["n_by_ccy"].get(ccy, 0) + 1
         risk = _risk_at_stop(row)
         if risk is None:
             slot["unmeasured"] += 1
+            slot["unmeasured_by_ccy"][ccy] = (slot["unmeasured_by_ccy"]
+                                              .get(ccy, 0) + 1)
             continue
-        ccy = row.ccy or "USD"
         slot["risk"][ccy] = slot["risk"].get(ccy, 0.0) + risk
         if not row.paper:
             slot["risk_live_venue"][ccy] = (slot["risk_live_venue"]
@@ -798,23 +950,34 @@ def _world_split(user):
 def _world_facts(world, currency):
     """One world's column. `currency` is the desk's for the venue the
     world's rows sit on, printed first; any other currency gets a line of
-    its own, never added to it."""
+    its own, never added to it.
+
+    A world that holds open rows none of which has a readable opening stop
+    has no risk to print (2026-11-07, review): its line is a named dash,
+    never 0.00, a sum over no measured row that reads as a measured zero.
+    A world with nothing open keeps its measured 0.00."""
     w = world["world"]
     facts = [_fact("open positions", lambda: world["n_open"],
                    qualifier=('real money at the broker' if w == "live" else
                               "simulated money at a broker's demo account"
                               if w == "demo" else
                               "the platform's own simulator"))]
+    arithmetic = ("qty × |entry − opening stop|, the desk's own arithmetic, "
+                  "pending closes included")
+    if world["n_open"] and not world["risk"]:
+        facts.append(_fact(
+            'risk at the stops', lambda: None, kind="money",
+            qualifier=arithmetic,
+            none_why="no row in this world has a readable opening stop"))
     currencies = sorted(world["risk"], key=lambda c: (c != currency, c))
-    if not currencies:
+    if not currencies and not world["n_open"]:
         currencies = [currency or ""]
     for i, ccy in enumerate(currencies):
         label = 'risk at the stops' if i == 0 else f'risk at the stops, in {ccy}'
         facts.append(_fact(
             label, (lambda c=ccy: world["risk"].get(c, 0.0)), kind="money",
             currency=ccy,
-            qualifier=('qty × |entry − opening stop|, the desk\'s own '
-                       'arithmetic, pending closes included' if i == 0
+            qualifier=(arithmetic if i == 0
                        else 'another currency: never added to the line above')))
     facts.append(_fact(
         "positions with no measured stop", lambda: world["unmeasured"],
@@ -833,36 +996,92 @@ def _world_facts(world, currency):
 def _demo_sentence(worlds, live):
     """What the desk's live venue counts that the REAL column does not.
 
-    Measured, not assumed: the desk's own count and risk on its live venue,
-    minus the REAL rows (and any row stamped for the paper carrier) that
-    sit on it. Today that leaves the broker's demo rows. When the desk
-    stops counting them (C1–C3) the same arithmetic gives 0 and the
-    sentence says the desk counts REAL rows only.
+    THE COUNT is measured from the desk's own: its live venue's open rows
+    minus the REAL rows and any row stamped for the paper carrier that sit
+    on it. Today that leaves the broker's demo rows. When the desk stops
+    counting them (C1–C3) it is 0 and the sentence says the desk counts
+    REAL rows only, by itself.
+
+    THE RISK is the DEMO world's own (every demo row is paper=False, so on
+    the desk's live venue), read under the currency rule the desk applied
+    (2026-11-07, review). With a currency, book_risk adds only the rows in
+    it: their risk is the figure, and a demo row in another currency is
+    named as counted and left out of that budget — never 0.00 in the
+    desk's currency. With none (no live config enabled: the kill switch,
+    the brake and `bot off` disable them all and leave the rows open) the
+    desk adds every row whatever its currency, and the demo risk is printed
+    per currency, never subtracted from that mixed total, which held the
+    REAL rows' risk too. A demo row with no readable stop is counted and
+    named, never priced.
     """
     from .position_summary import BROKER_NAMES
 
     by = {w["world"]: w for w in worlds}
+    demo = by["demo"]
     ccy = live.get("currency") or ""
     not_demo_n = by["live"]["n_open"] + by["paper"]["n_live_venue"]
-    not_demo_risk = (by["live"]["risk"].get(ccy, 0.0)
-                     + by["paper"]["risk_live_venue"].get(ccy, 0.0))
     n = max(0, int(live.get("n_open") or 0) - not_demo_n)
-    risk = round(max(0.0, float(live.get("book_risk") or 0.0)
-                     - not_demo_risk), 2)
-    counted = {"n": n, "risk": risk, "currency": ccy}
+    counted = {"n": n, "currency": ccy, "risk": 0.0 if ccy else None,
+               "risk_by_currency": {}, "aside": {}, "unmeasured": 0}
     if n == 0:
         return counted, "The desk's live venue counts REAL rows only."
-    carriers = {c for c in by["demo"]["carriers"] if c}
+
+    def _in_budget(c):
+        return not ccy or c == ccy
+
+    def _first(c):   # the desk's currency first, then the others by name
+        return (c != ccy, c)
+
+    in_budget = {c: round(r, 2) for c, r in demo["risk"].items()
+                 if _in_budget(c)}
+    aside = {c: {"n": k,
+                 "risk": (round(demo["risk"][c], 2) if c in demo["risk"]
+                          else None),
+                 "unmeasured": demo["unmeasured_by_ccy"].get(c, 0)}
+             for c, k in demo["n_by_ccy"].items() if not _in_budget(c)}
+    unmeasured = sum(k for c, k in demo["unmeasured_by_ccy"].items()
+                     if _in_budget(c))
+    if ccy:   # nothing of demo in its currency is a measured 0.00
+        risk = in_budget.get(ccy, None if demo["n_by_ccy"].get(ccy) else 0.0)
+    else:     # the desk mixed every currency: no one figure is true
+        risk = None
+    counted.update({"risk": risk, "risk_by_currency": in_budget,
+                    "aside": aside, "unmeasured": unmeasured})
+
+    carriers = {c for c in demo["carriers"] if c}
     who = (BROKER_NAMES.get(next(iter(carriers)), "")
            if len(carriers) == 1 else "")
     rows = _rows_word(n, f"{who} DEMO row".strip(),
                       f"{who} DEMO rows".strip())
-    stops = "its stop" if n == 1 else "their stops"
-    sentence = (f"The desk's live venue counts {rows} ({money_text(risk)} "
-                f"{ccy} at {stops}) as live; the REAL MONEY column above "
-                f"does not. C1–C3 (real-only limits, planned) takes demo "
-                f"out of the desk.").replace("  ", " ")
-    return counted, sentence
+    money = " and ".join(f"{money_text(in_budget[c])} {c}"
+                         for c in sorted(in_budget, key=_first))
+    apart = ", never added" if len(in_budget) > 1 else ""
+    tail = " C1–C3 (real-only limits, planned) takes demo out of the desk."
+    if in_budget and not aside and not unmeasured:
+        stops = "its stop" if n == 1 else "their stops"
+        return counted, (f"The desk's live venue counts {rows} ({money} at "
+                         f"{stops}{apart}) as live; the REAL MONEY column "
+                         f"above does not.{tail}")
+    parts = [f"The desk's live venue counts {rows} as live; the REAL MONEY "
+             f"column above does not."]
+    if in_budget:
+        where = f"in its {ccy} budget" if ccy else "in its budget"
+        parts.append(f"At their stops {where}: {money}{apart}.")
+    if unmeasured:
+        parts.append(f"{_rows_word(unmeasured)} with no readable stop: "
+                     f"counted, never priced.")
+    for c in sorted(aside, key=_first):
+        k, r, u = aside[c]["n"], aside[c]["risk"], aside[c]["unmeasured"]
+        said = []
+        if r is not None:
+            said.append(f"{money_text(r)} {c} at "
+                        f"{'its stop' if k == 1 else 'their stops'}")
+        if u:
+            said.append(f"{u} with no readable stop")
+        priced = f" ({', '.join(said)})" if said else ""
+        parts.append(f"{_rows_word(k)} in {c}{priced}: counted, and left out "
+                     f"of its {ccy} budget.")
+    return counted, " ".join(parts) + tail
 
 
 def _paper_sentence(live, paper):
@@ -953,15 +1172,19 @@ def _cycle_book(user):
                             "parts": ("book", venue),
                             "why": f"venue unreadable: {why}", "fix": fix})
         entry = {"venue": venue, "facts": facts, "reason": "",
-                 "currency": "", "not_summed": {}, "n_other_currency": 0}
+                 "currency": "", "not_summed": {}, "n_other_currency": 0,
+                 "equity": None}
         try:
             b = _budget(user, venue)
             budgets[venue] = b
-            entry.update({"reason": b.get("reason") or "",
+            entry.update({"reason": _desk_reason(b.get("reason")),
                           "currency": b.get("currency") or "",
                           "not_summed": dict(b.get("not_summed") or {}),
                           "n_other_currency": int(
                               b.get("n_other_currency") or 0)})
+            if venue == "live" and b.get("drawdown_pct") is not None:
+                # the equity cell the governor in this reason rests on
+                entry["equity"] = _equity(user)
         except Exception as exc:  # noqa: BLE001 — named once, as book.<venue>
             _warn_once(f"book.{venue} desk", exc)
         venues.append(entry)
@@ -1082,6 +1305,87 @@ def _beat_words(entry):
     return f"{words} {getattr(settings, 'CELERY_TIMEZONE', '') or 'UTC'}"
 
 
+def _pass_words(entry):
+    """"it runs at 23:15 UTC", read from the beat entry, fenced."""
+    try:
+        from core.day_of_sauron import read_schedule
+        if (read_schedule()[0].get(entry) or {}).get("schedule") is None:
+            return f"no beat entry runs {entry}"
+        return f"it runs at {_beat_words(entry)}"
+    except Exception as exc:  # noqa: BLE001 — words, never the page
+        _warn_once(f"{entry} schedule", exc)
+        return "its beat entry's time"
+
+
+def _last_fire(schedule, at):
+    """The latest instant at or before `at` when a beat schedule fires, or
+    None when this cannot place it.
+
+    A crontab over every day of the month and every month is laid out over
+    the week, as core.component_digest reads it (Celery numbers the days
+    from Sunday, 0), in the beat's own time zone. Anything else — an
+    interval, a restricted day of the month — is None, and the caller
+    judges it by its widest gap.
+    """
+    from zoneinfo import ZoneInfo
+
+    from celery.schedules import crontab
+    from django.conf import settings
+
+    if not isinstance(schedule, crontab):
+        return None
+    if len(schedule.month_of_year) < 12 or len(schedule.day_of_month) < 31:
+        return None
+    marks = [d * 1440 + h * 60 + m for d in schedule.day_of_week
+             for h in schedule.hour for m in schedule.minute]
+    if not marks:
+        return None
+    tz = ZoneInfo(getattr(settings, "CELERY_TIMEZONE", "") or "UTC")
+    local = at.astimezone(tz).replace(second=0, microsecond=0)
+    here = (local.isoweekday() % 7) * 1440 + local.hour * 60 + local.minute
+    back = min((here - mark) % (7 * 1440) for mark in marks)
+    return local - timedelta(minutes=back)
+
+
+def _last_pass(entry, now):
+    """The last pass of the beat entry `entry` that should have finished by
+    `now` (2026-11-07, review): its last scheduled run, given the floor the
+    system map gives every row to finish (views_day.STALE_FLOOR_S).
+
+    LATE MEANS PAST THE LAST PASS. A flag or a call that fell due before it
+    and is still open is late: that pass should have taken it, so its
+    resolver is off, late or failing on it. One that fell due after it
+    waits for the next pass and is not late — counting it late lit "the
+    resolver is late" about fourteen hours a day with the 23:15 resolver on
+    time. A schedule this cannot place is judged one widest gap back, where
+    a pass surely ran; no beat entry at all means no pass will come, and
+    everything due is late now.
+    """
+    from core.day_of_sauron import read_schedule, widest_gap
+
+    from .views_day import STALE_FLOOR_S
+
+    schedule = (read_schedule()[0].get(entry) or {}).get("schedule")
+    if schedule is None:
+        return now
+    at = now - timedelta(seconds=STALE_FLOOR_S)
+    fired = _last_fire(schedule, at)
+    if fired is not None:
+        return fired
+    gap = widest_gap(schedule)
+    return at - timedelta(seconds=gap) if gap else now
+
+
+def _cut_off(entry, now):
+    """_last_pass, fenced: a schedule that cannot be read leaves the old
+    rule (everything past its due date is late) rather than a dash."""
+    try:
+        return _last_pass(entry, now)
+    except Exception as exc:  # noqa: BLE001
+        _warn_once(f"{entry} last pass", exc)
+        return now
+
+
 def _flag_not_due(now, horizons=()):
     """An unresolved flag whose horizon has not passed, as one database
     condition: the resolver's own rule (opportunity_scanner
@@ -1116,6 +1420,7 @@ def _cycle_scan():
 
     now = timezone.now()
     week = now - timedelta(days=7)
+    last_pass = _cut_off("resolve-opportunity-flags", now)
 
     def _read_setups():
         armed = disarmed = 0
@@ -1142,9 +1447,14 @@ def _cycle_scan():
             unresolved=Count("id", filter=unresolved),
             not_due=Count("id", filter=unresolved
                           & _flag_not_due(now, horizons)),
+            # not due yet at the resolver's last pass: that pass could not
+            # take them, so they are either not due or waiting, never late
+            open_at_pass=Count("id", filter=unresolved
+                               & _flag_not_due(last_pass, horizons)),
             no_price=Count("id", filter=Q(outcome="expired")))
 
     flags = _Once(_read_flags)
+    resolver = _pass_words("resolve-opportunity-flags")
 
     try:
         when = _beat_words("scan-opportunities")
@@ -1178,11 +1488,18 @@ def _cycle_scan():
                   tone="inert",
                   qualifier="inside their horizon: the resolver's own "
                             "not_due, the healthiest thing a flag can be"),
+            _fact('detections due, waiting for the resolver',
+                  lambda: flags()["open_at_pass"] - flags()["not_due"],
+                  tone="inert",
+                  qualifier="past their horizon since the resolver's last "
+                            f"pass ({resolver}): its next pass resolves "
+                            "them, and that is not late"),
             _fact('detections past due, unresolved',
-                  lambda: flags()["unresolved"] - flags()["not_due"],
+                  lambda: flags()["unresolved"] - flags()["open_at_pass"],
                   tone="caution", window="all time",
-                  qualifier='past their horizon and still unresolved: if the '
-                            'resolver is off, they never will be',
+                  qualifier="due before the resolver's last pass and still "
+                            "unresolved: it is off, late or failing on them, "
+                            "and if it is off they never will be",
                   alert_when=(">", 0), alert_words='the resolver is late'),
             _fact('detections graded "no price"', lambda: flags()["no_price"],
                   window="all time",
@@ -1412,10 +1729,11 @@ def _cycle_allocation():
         applied=Count("id", filter=Q(applied_at__isnull=False)),
         expired=Count("id", filter=Q(state="expired"))))
     passes = _Once(lambda: _stored(
-        DESK_PASSES_KEY, lambda: DeskPlan.objects.aggregate(
+        DESK_PASSES_KEY.format(build=_build_id()),
+        lambda: DeskPlan.objects.aggregate(
             shadow=Count("id", filter=Q(mode="shadow")),
             live=Count("id", filter=Q(mode="live"))),
-        STORED_TTL, "desk passes counted"))
+        STORED_TTL, "desk passes counted", expect=_PASSES_KEYS))
     strip = _Once(lambda: _series(DeskPlan, "created_at"))
 
     return {
@@ -1577,7 +1895,8 @@ def _cycle_backtests():
         b = bots()
         fingerprint = [b["complete"], b["newest"],
                        b["newest_at"].isoformat() if b["newest_at"] else None]
-        return _stored(UNSIMULATED_KEY, _signals_no_run_could_price,
+        return _stored(UNSIMULATED_KEY.format(build=_build_id()),
+                       _signals_no_run_could_price,
                        STORED_TTL, "counted", fingerprint=fingerprint)
 
     return {
@@ -1632,18 +1951,31 @@ def _cycle_trust():
     now = timezone.now()
     base = AgentPrediction.objects.filter(prediction_type="direction")
     awaiting = Q(was_correct__isnull=True, evaluated_at__isnull=True)
+    # The nightly grader of every agent's calls but the Mind's, which grades
+    # its own hourly: the older pass, so a call is never called late before
+    # the grader that takes it has had its pass.
+    grader = "resolve-pending-calibrations"
 
-    calls = _Once(lambda: _stored(
-        PREDICTIONS_KEY, lambda: base.aggregate(
+    def _read_calls():
+        last_pass = _cut_off(grader, now)
+        return base.aggregate(
             right=Count("id", filter=Q(was_correct=True)),
             wrong=Count("id", filter=Q(was_correct=False)),
             awaiting=Count("id", filter=awaiting),
             not_due=Count("id", filter=awaiting
                           & Q(expected_resolution_at__gt=now)),
+            # due after the grader's last pass: waiting, not late (a call
+            # with no due date is never taken by any pass: late)
+            open_at_pass=Count("id", filter=awaiting
+                               & Q(expected_resolution_at__gt=last_pass)),
             unsettled=Count("id", filter=Q(was_correct__isnull=True,
                                            evaluated_at__isnull=False)),
-            agents=Count("agent", distinct=True)),
-        STORED_TTL, "these counts counted"))
+            agents=Count("agent", distinct=True))
+
+    calls = _Once(lambda: _stored(
+        PREDICTIONS_KEY.format(build=_build_id()), _read_calls,
+        STORED_TTL, "counted", expect=_CALLS_KEYS))
+    graded_at = _pass_words(grader)
 
     def _v(key):
         return lambda: _part(calls, key)
@@ -1661,11 +1993,18 @@ def _cycle_trust():
             _fact('calls not due yet', _v("not_due"), tone="inert",
                   qualifier='their due date is ahead: the market has not '
                             'been asked yet'),
+            _fact('calls due, waiting for the grader',
+                  lambda: _part(calls, "open_at_pass", minus="not_due"),
+                  tone="inert",
+                  qualifier="due since the nightly grader's last pass "
+                            f"({graded_at}): its next pass grades them, and "
+                            "that is not late"),
             _fact('calls past due, ungraded',
-                  lambda: _part(calls, "awaiting", minus="not_due"),
+                  lambda: _part(calls, "awaiting", minus="open_at_pass"),
                   tone="caution", window="all time",
-                  qualifier='past their due date, or with none, and never '
-                            'graded: no grader reaches them',
+                  qualifier="due before the nightly grader's last pass, or "
+                            "with no due date, and never graded: no grader "
+                            "reaches them",
                   alert_when=(">", 0), alert_words='nobody is grading'),
             _fact('calls the market could not settle', _v("unsettled"),
                   tone="inert", window="all time",
@@ -1684,30 +2023,47 @@ def _cycle_trust():
     }
 
 
-def _probe(field):
+#: Why a probe tally is not on the page when none is stored: probe_routes
+#: has never run, the cache was flushed, or its seven days ran out. Not a
+#: deploy: Redis keeps its data across one (an appendonly volume).
+PROBE_MISSING = "no probe stored: never run, cleared, or older than 7 days"
+
+#: Why it is not on the page when the stored one ran before this image.
+PROBE_BEFORE_BUILD = "no probe since this build"
+
+
+def _probe(field, built=None):
     """One count from the probe's stored tally, with its age (§5.1).
 
-    `manage.py probe_routes` leaves it in the cache; a deploy or a Redis
-    flush clears it. Not there is a dash that says so — never "0 pages
-    raise" — and a tally with no time is not printed either."""
+    `manage.py probe_routes` leaves it in the cache for seven days. Not
+    there is a dash that says so — never "0 pages raise" — and a tally
+    with no time is not printed either.
+
+    DATED AGAINST THE BUILD (2026-11-07, review). `built` is when this
+    image was built (seconds since the epoch, None when unstamped). Redis
+    keeps its data across a deploy, so the previous image's tally survives
+    one; it describes the previous image's pages, and the forge exists to
+    catch the pages a deploy broke. A tally older than the build is a dash
+    until probe_routes runs on this one."""
     from django.core.cache import cache
+    fix = "manage.py probe_routes"
     try:
         stored = cache.get(PROBE_KEY)
     except Exception as exc:  # noqa: BLE001
         _warn_once("forge probe", exc)
         raise _Unmeasured("the cache could not be read") from exc
     if not isinstance(stored, dict):
-        raise _Unmeasured("no probe since the cache was cleared",
-                          "manage.py probe_routes")
+        raise _Unmeasured(PROBE_MISSING, fix)
+    at = stored.get("at")
+    timed = not isinstance(at, bool) and isinstance(at, (int, float))
+    if timed and built is not None and at < built:
+        raise _Unmeasured(PROBE_BEFORE_BUILD, fix)
     if stored.get("state") != "ran":
         raise _Unmeasured(
             "the last probe could not run "
-            f"({stored.get('why') or 'no reason stored'})",
-            "manage.py probe_routes")
-    at = stored.get("at")
-    if isinstance(at, bool) or not isinstance(at, (int, float)):
-        raise _Unmeasured("the stored probe carries no time",
-                          "manage.py probe_routes")
+            f"({stored.get('why') or 'no reason stored'})", fix)
+    if not timed:
+        raise _Unmeasured("the stored probe carries no time", fix)
     value = int((stored.get("counts") or {}).get(field, 0))
     return _Reading(value, at, f"probed {_ago(time.time() - at)}")
 
@@ -1740,9 +2096,11 @@ def _cycle_forge(staff=True):
 
     ONCE PER BUILD (2026-11-06). The scan and the plan ran on every staff
     GET; their answers change per image. The scan is stored under the
-    image's sha until the cache is cleared (no sha: STORED_TTL), the plan
-    STORED_TTL because `migrate` can run on the same image, and each prints
-    when it was checked.
+    image (its sha and build time, `_build_id`: a same-sha rebuild is
+    another image) until the cache is cleared (unstamped: STORED_TTL), the
+    plan STORED_TTL because `migrate` can run on the same image, and each
+    prints when it was checked. The probe's tally counts only when it ran
+    on this image.
     """
     if not staff:
         return _withheld("forge", 'The forge',
@@ -1751,7 +2109,8 @@ def _cycle_forge(staff=True):
     from core.build_stamp import stamp
 
     st = stamp()
-    sha = st["sha"] or FORGE_UNSTAMPED
+    build = _build_id()
+    built = _epoch(st["built_at"])
 
     def _pending_migrations():
         from django.db import connection
@@ -1810,7 +2169,7 @@ def _cycle_forge(staff=True):
                   none_why="the image carries no build time",
                   fix="deploy/dc stamps it at build time"),
             _fact('migrations pending',
-                  lambda: _stored(FORGE_MIGRATIONS_KEY.format(sha=sha),
+                  lambda: _stored(FORGE_MIGRATIONS_KEY.format(build=build),
                                   _pending_migrations, STORED_TTL,
                                   "plan checked"),
                   tone="caution",
@@ -1824,7 +2183,7 @@ def _cycle_forge(staff=True):
                             'the public page shows; tests/test_wall_facts '
                             'fails when it drifts'),
             _fact('guarded tasks with no switch',
-                  lambda: _stored(FORGE_GUARDS_KEY.format(sha=sha),
+                  lambda: _stored(FORGE_GUARDS_KEY.format(build=build),
                                   _unregistered_guards,
                                   None if st["sha"] else STORED_TTL,
                                   "scan checked", at_build=bool(st["sha"])),
@@ -1838,17 +2197,17 @@ def _cycle_forge(staff=True):
             # test touches (measured 2026-09-23); the suite cannot see a page
             # that renders 500. `manage.py probe_routes` GETs every
             # argument-free route as a superuser and leaves its tally in
-            # the cache; these two read it, with its age. Never run is a
-            # dash — the probe is a human's command and this lane only
-            # reports.
+            # the cache; these two read it, with its age. Never run on this
+            # image is a dash — the probe is a human's command and this lane
+            # only reports.
             _fact('pages that raise, at the last probe',
-                  lambda: _probe("broken"), tone="caution",
+                  lambda: _probe("broken", built), tone="caution",
                   qualifier='5xx or a raise on a GET as a superuser; a dash '
-                            'means probe_routes has not run since the cache '
-                            'was last cleared, never that no page raises',
+                            'means no probe of this build is stored, never '
+                            'that no page raises',
                   alert_when=(">", 0), alert_words='a page raises on a GET'),
             _fact('pages answering 404, at the last probe',
-                  lambda: _probe("missing"), tone="caution",
+                  lambda: _probe("missing", built), tone="caution",
                   qualifier='a route wired to nothing that answers — the '
                             'defect that hid for a day on 2026-09-13',
                   alert_when=(">", 0), alert_words='a route answers 404'),
@@ -1860,7 +2219,8 @@ def _cycle_forge(staff=True):
             'latest — the image has neither git nor guaranteed network. '
             'That was already all that was missing on 13 September. The '
             'scan and the plan are read once per build and stored; each '
-            'prints when it was checked.'),
+            'prints when it was checked. A probe counts only when it ran on '
+            'this build: the cache outlives a deploy.'),
         "series": [],
     }
 
@@ -1977,6 +2337,16 @@ def oculus(user=None) -> dict:
                         degraded.append(name_)
                         not_measured.append(_not_measured_row(
                             name_, ("book", venue["venue"], fact["label"]),
+                            fact.get("why"), fact.get("fix")))
+            # The worlds by their words (REAL MONEY, DEMO, PAPER), apart
+            # from the desk's venues (live, paper) that sit below them.
+            for world in cycle.get("worlds", []):
+                for fact in world.get("facts", []):
+                    if fact.get("value") is UNMEASURED:
+                        name_ = f"book.{world['word']}.{fact['label']}"
+                        degraded.append(name_)
+                        not_measured.append(_not_measured_row(
+                            name_, ("book", world["word"], fact["label"]),
                             fact.get("why"), fact.get("fix")))
             for row in cycle.pop("missing", []):
                 degraded.append(row["name"])

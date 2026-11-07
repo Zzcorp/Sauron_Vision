@@ -957,12 +957,20 @@ What it does that no single page could:
 
 4. **Every count names its window, and amber needs a threshold.** Each
    count says what it is counted over: `now`, `7 d`, `30 d` or
-   `all time`; a code constant says `constant`. A value turns amber (⚠)
-   or coral (⨯) only past its stated threshold, with its words — a budget
-   below zero, a late resolver, a call nobody grades — and a dash never
-   does. "Not due yet" is not late: detections inside their horizon (the
-   resolver's own `not_due`), signals still live and calls whose due date
-   is ahead are counted apart from the late ones.
+   `all time`; a code constant says `constant`; a stored reading counted
+   `now` prints its age there instead (`probed 3 h ago`). A value turns
+   amber (⚠) or coral (⨯) only past its stated threshold, with its
+   words — a budget below zero, a late resolver, a call nobody grades —
+   and a dash never does. The threshold reads the value as computed, not
+   as rounded: a budget of −0.004 prints `-0.00` with its amber, and a
+   governor of 0.998 prints 99, never the 100 that means "no drawdown".
+   "Not due yet" is not late, and neither is "due, waiting for the next
+   pass": detections inside their horizon (the resolver's own `not_due`),
+   signals still live and calls whose due date is ahead are counted
+   apart, and so is what fell due since the resolver's last scheduled
+   pass (the flags' at 23:15 UTC, the calls' grader at 03:30 UTC, read
+   from the beat, given five minutes to finish). Only what fell due
+   before that pass and is still open is late, in amber.
 
 **The book, in three money worlds.** REAL MONEY, DEMO and PAPER side by
 side, never summed — there is no total. The split is
@@ -972,36 +980,59 @@ False, `broker_env` "paper") is simulated money and never counts as
 REAL. Each world prints its open positions, its risk at the stops (the
 desk's own `book_risk` arithmetic, per currency, never added across
 currencies), the positions with no readable stop and, for REAL, the
-closes pending at the venue. Below sits **what the desk sizes with**:
+closes pending at the venue. A world with open rows none of which has a
+readable stop prints a dash for its risk, named at the foot, never 0.00.
+Below sits **what the desk sizes with**:
 its two venues, live and paper, exactly as `capital_desk.budget_for`
 answers them, with its reason (the governor's "100" says which of its two
-meanings it is), its currency and what it left aside. The desk's live
-venue is `paper=False`, so it still counts the demo rows: a sentence
-says how many, and their risk, measured from the desk's own count. When
+meanings it is), its currency and what it left aside. The governor and
+the reason print the age of the broker equity cell they rest on
+(`equity read 3 d ago`, and `stale` past an hour); an unreadable
+governor's cause stays in the desk's log, never on the page. The desk's
+live venue is `paper=False`, so it still counts the demo rows: a sentence
+says how many, from the desk's own count, and their risk from the DEMO
+rows themselves, under the desk's currency rule — in its currency, with
+any demo row in another currency named as left out of its budget, and
+per currency when no live config is enabled (after the kill switch, the
+brake or `bot off` the desk adds every row whatever its currency). When
 C1–C3 takes demo out of the desk the same sentence reads "counts REAL
 rows only" by itself. The paper venue divides by the paper AND the live
 pools, and the page says so in numbers. Money keeps its cents.
 
 **What is stored, and how it is dated.** The page counts at load, except
-these readings, each printed with its age:
+these readings, each printed with its age. Redis keeps its data across
+a deploy (the compose file runs it with an appendonly volume), so every
+key the page stores carries the build, `<build>` = the image's sha and
+build time: a new image, a same-sha rebuild included, reads afresh.
 
-- the forge's guard scan, once per image (`oculus:forge:guards:<sha>`;
+- the forge's guard scan, once per image (`oculus:forge:guards:<build>`;
   an unstamped image keeps it ten minutes): "scan checked at this build";
-- the forge's migration plan, ten minutes (`oculus:forge:migrations:<sha>`),
-  because `migrate` can run on the same image;
+- the forge's migration plan, ten minutes
+  (`oculus:forge:migrations:<build>`), because `migrate` can run on the
+  same image;
 - the backtests' "signals a run could not simulate", ten minutes
-  (`oculus:slow:unsimulated`), counted again at once when a run completes;
+  (`oculus:slow:unsimulated:<build>`), counted again at once when a run
+  completes;
 - the confidence counts and the desk passes' lifetime counts, ten minutes
-  each (`oculus:slow:predictions`, `oculus:slow:desk_passes`): the two
-  whole-table reads with no index for their filter;
+  each (`oculus:slow:predictions:<build>`,
+  `oculus:slow:desk_passes:<build>`): the two whole-table reads with no
+  index for their filter;
 - the probe's two counts, which are `manage.py probe_routes`' own tally
-  with its own time: after a deploy or a cache flush they are a dash
-  that says "no probe since the cache was cleared".
+  with its own time (kept seven days): a tally older than this build is
+  a dash that says "no probe since this build" — the forge exists to
+  catch the pages a deploy broke — and no tally at all is a dash that
+  says "no probe stored: never run, cleared, or older than 7 days". The
+  probe only GETs, as a superuser; after a deploy, fill the two counts
+  with `./deploy/dc exec -T web python manage.py probe_routes`;
+- the governor's broker equity cell, which the sync writes: its age.
 
 A cache that cannot be read never costs the page: it counts instead.
-Clearing the cache (a deploy does) makes the next GET count everything
-afresh. A warm render reads about 27 queries for staff and 26 for any
-other login (the budgets are tested).
+A warm render (the readings above in place) reads 27 queries for staff
+and 26 for any other login; a login whose broker account is keyed adds
+the desk governor's two reads (the withdrawals and the equity history).
+A cold render (none in place: the first GET of a build, then one GET
+every ten minutes, when four readings expire) reads five more for staff
+and three more for any other login. Both are tested.
 
 Each panel is fenced on its own: a cycle whose table is mid-migration is
 reported **dead**, never dropped — a vanished panel reads as "there is no
