@@ -14,8 +14,10 @@ protective action, REAL the only solid red.
     the number face; a fixed width, so a ticking price never moves a button;
     a stale ticket dashed and its price muted; the REAL chip in the middle.
   * TAKE TRADE: the confirm is never green on a SELL (S1a makes it neutral:
-    the side's colours arrive with the dialog's markup in S2.1); a REAL or
-    funding dialog carries the REAL red top edge.
+    the side's colours arrive with the dialog's markup in S2.1), and a
+    "danger" confirm is the same neutral outline, never the loss coral; a
+    dialog that takes the trading PIN (real money) carries the REAL red top
+    edge, and no other dialog does (2026-11-07).
   * THE SIGNAL CARD: TAKE TRADE / ADD in the signal's side (a bearish
     signal is a SELL), PASS a neutral ghost (it dismisses; it loses nothing).
   * THE QUOTE CARD: LONG jade, SHORT coral, outlines, no gradient slabs.
@@ -27,7 +29,12 @@ protective action, REAL the only solid red.
     autocomplete; /brokers/' world boxes stay plain checkboxes; /setup/
     keeps "blank = no cap" in words; CLOSE ALL keeps "whole book".
   * EVERY PRICE AND P&L CELL: a flash is a background wash, never the
-    text's colour; count-ups run on counts only.
+    text's colour; count-ups run on counts only; the bottom band's lists
+    keep their state colours (a loss, an alarm, a gold count).
+  * WHOSE MONEY, everywhere it is said: every LIVE / REAL label is the
+    REAL chip, never the loss coral (2026-11-07).
+  * ON A PHONE: every button keeps the 44 px tap floor, CLOSE and Close
+    all 48 px.
 
 Display only: nothing here posts, trades or calls a broker. The measured
 class renders synthetic pages through the test client and computes the
@@ -57,6 +64,28 @@ OVERLAY = "static/css/sv-overlay.css"
 
 def kit_rule(selector):
     return block(read(KIT), selector)
+
+
+def kit_value(selector, prop, rel=KIT):
+    """What the last top-level rule naming `selector` (alone or in a list)
+    gives `prop` in a sheet: the cascade's answer for rules of one weight."""
+    got = None
+    for prelude, body, ctx in rules(read(rel)):
+        if ctx or selector not in [s.strip() for s in prelude.split(",")]:
+            continue
+        for p, v in decls(body):
+            if p == prop:
+                got = v
+    return got
+
+
+#: The dialogs that take the trading PIN, which only real money asks for
+#: (2026-11-07): the LIVE ticket's PIN step (base.html renders .sz-pin only
+#: when the ticket is live) and an SV.overlay confirm given a secretLabel
+#: (a live close, CLOSE ALL over live rows, arming or resuming a live bot).
+#: These, and only these, carry the REAL red edge.
+REAL_DIALOGS = (':where(body:not(.light-mode)) .sv-dialog:has(.sz-pin)',
+                ':where(body:not(.light-mode)) .sv-dialog:has([data-role="secret-wrap"])')
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -108,9 +137,64 @@ class TakeTradeDialogLookTests(SimpleTestCase):
             self.assertNotIn("--sv-eye", value)
             self.assertNotIn("--accent", value)
 
-    def test_a_real_or_funding_dialog_carries_the_real_edge(self):
-        danger = kit_rule(".sv-dialog.sv-dialog--danger")
-        self.assertEqual(danger["border-top"], "3px solid var(--sv-real)")
+    def test_a_danger_confirm_is_the_same_neutral_strong_outline(self):
+        """is-danger rides every SV.overlay.confirm({danger: true}) (CLOSE,
+        RETRY CLOSE, CLOSE n POSITIONS, Pause, Disarm, a delete), every
+        LIVE ticket on either side and the funding ticket (base.html), and
+        the close-advice dialog's confirm. Painted coral, it said loss and
+        SELL on a close and on a LIVE BUY (review, 2026-11-07). It is the
+        neutral-strong outline every confirm wears; the side's colours
+        arrive with the dialog's own markup (S2.1)."""
+        rule = kit_rule(".sv-dialog-btn.sv-dialog-btn--go.is-danger")
+        self.assertEqual(rule["background"], "transparent")
+        self.assertEqual(rule["color"], "var(--sv-ink-1)")
+        self.assertEqual(rule["border-color"], "var(--sv-ink-1)")
+        for value in rule.values():
+            for hue in ("--sv-down", "--accent-red", "--sv-real", "--sv-up", "--sv-eye",
+                        "--accent"):
+                self.assertNotIn(hue, value)
+
+    def test_a_real_money_dialog_carries_the_real_edge(self):
+        """A dialog that moves real money carries the REAL red as a 3 px top
+        edge. Updated deliberately on 2026-11-07 (review of S1a): the edge
+        sat on .sv-dialog.sv-dialog--danger, which plan §7 read as "the
+        ticket is live or funding", but every SV.overlay.confirm({danger:
+        true}) sets that class too (Delete preset, Pause, a paper close),
+        the lost-answer dialog always sets it, and a funding ticket is
+        paper (base.html: funding requires !live). Solid red there meant
+        danger, which plan §3.9 forbids. The edge now marks the dialogs that
+        take the trading PIN, which only real money asks for. What the test
+        guards is unchanged: a REAL dialog carries the REAL edge."""
+        for sel in REAL_DIALOGS:
+            with self.subTest(selector=sel):
+                self.assertEqual(kit_value(sel, "border-top"), "3px solid var(--sv-real)")
+
+    def test_no_rule_puts_the_real_edge_on_a_danger_dialog_alone(self):
+        """Solid red is REAL money, never danger or delete (plan §3.9): no
+        rule paints --sv-real on a dialog but the PIN-taking ones, and a
+        danger dialog's own border is the dialog's line in the dark theme
+        (the coral wash it took from sv-overlay.css read as a loss)."""
+        for rel in (KIT, SAURON, OVERLAY):
+            for prelude, body, ctx in rules(read(rel)):
+                if "--sv-real" not in body:
+                    continue
+                for sel in prelude.split(","):
+                    if ".sv-dialog" in sel:
+                        with self.subTest(file=rel, selector=sel.strip()):
+                            self.assertIn(sel.strip(), REAL_DIALOGS)
+        self.assertEqual(kit_value(":where(body:not(.light-mode)) .sv-dialog--danger",
+                                   "border-color"), "var(--sv-line-2)")
+
+    def test_the_real_edge_reads_the_trading_pin_s_own_markup(self):
+        """The two markers mean real money: the ticket renders its PIN step
+        only when live, a funding ticket is never live, and the overlay
+        draws its secret field only for a secretLabel (the trading PIN)."""
+        base = read("templates/base.html")
+        self.assertIn("var funding = !p.sufficient && closable.length > 0 && !live;", base)
+        self.assertIn("var pinHtml = live\n        ? '<fieldset class=\"sz-block sz-pin\">", base)
+        overlay = read("static/js/sv-overlay.js")
+        self.assertIn("var secretHtml = opts.secretLabel", overlay)
+        self.assertIn('\'<label class="sv-dialog-confirm-text" data-role="secret-wrap">\'', overlay)
 
     def test_the_dialog_keeps_its_words_and_steps(self):
         base = read("templates/base.html")
@@ -435,3 +519,292 @@ class MoneyControlsMeasuredTests(TestCase):
             self.assertFalse(is_red(side["bg"], 0.05) or is_green(side["bg"], 0.05), side)
         for chip in tk["tkVenue"]:
             self.assertEqual(chip["bg"], rgb_of("#CC3A40"))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Measured: the review of 2026-11-07
+# ══════════════════════════════════════════════════════════════════════════
+
+REAL, INK1 = rgb_of("#CC3A40"), rgb_of("#E9EFED")
+LINE2, LINE3 = rgb_of("#26322F"), rgb_of("#36443F")
+WARN, GOLD = rgb_of("#F29B38"), rgb_of("#D6BC5E")
+CLEAR = "rgba(0, 0, 0, 0)"
+
+#: The overlay's own dialogs come from sv-overlay.js, loaded into the page
+#: (SV.overlay.confirm as the pages call it). The ticket, the funding ticket
+#: and the lost answer are built as base.html builds them, with the classes
+#: TakeTradeDialogLookTests pins.
+DIALOG_PROBE = r"""(async function () {
+    await new Promise(function (ok, bad) {
+        var s = document.createElement('script');
+        s.src = %(overlay)s;
+        s.onload = ok;
+        s.onerror = function () { bad(new Error('sv-overlay.js did not load')); };
+        document.head.appendChild(s);
+    });
+    function paint(dlg) {
+        var c = getComputedStyle(dlg), go = getComputedStyle(dlg.querySelector('.sv-dialog-btn--go'));
+        return { top: c.borderTopWidth, topColor: c.borderTopColor, side: c.borderLeftColor,
+                 title: getComputedStyle(dlg.querySelector('.sv-dialog-title')).color,
+                 goColor: go.color, goBorder: go.borderTopColor, goBg: go.backgroundColor,
+                 goImg: go.backgroundImage };
+    }
+    var out = {};
+    var asks = {
+        danger: { danger: true, title: 'Close this position?', confirmLabel: 'CLOSE POSITION' },
+        liveClose: { danger: true, title: 'Close this position?', secretLabel: 'Trading PIN',
+                     confirmLabel: 'CLOSE LIVE POSITION' },
+        armLive: { title: 'Arm the bot LIVE', secretLabel: 'Your trading PIN', confirmLabel: 'Arm LIVE' },
+        plain: { title: 'Save the preset?', confirmLabel: 'Save' }
+    };
+    Object.keys(asks).forEach(function (k) {
+        var before = document.querySelectorAll('.sv-dialog').length;
+        SV.overlay.confirm(asks[k]);
+        var all = document.querySelectorAll('.sv-dialog');
+        if (all.length !== before + 1) throw new Error('no dialog for ' + k);
+        out[k] = paint(all[all.length - 1]);
+        all[all.length - 1].remove();
+    });
+    var foot = function (go) {
+        return '<div class="sv-dialog-foot"><button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>'
+             + '<button type="button" class="sv-dialog-btn sv-dialog-btn--go' + go + '" data-role="ok">OK</button></div>';
+    };
+    var head = '<div class="sv-dialog-head"><span class="sv-dialog-title">BUY BTCUSD</span></div>';
+    var built = {
+        liveTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger">' + head
+            + '<div class="sv-dialog-body"><fieldset class="sz-block sz-pin"><legend>Trading PIN</legend>'
+            + '<input type="password" inputmode="numeric" autocomplete="off"></fieldset></div>' + foot(' is-danger') + '</div>',
+        fundingTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger">' + head
+            + '<div class="sv-dialog-body"></div>' + foot(' is-danger') + '</div>',
+        paperTicket: '<div class="sv-dialog sz-dialog">' + head + '<div class="sv-dialog-body"></div>' + foot('') + '</div>',
+        lostAnswer: '<div class="sv-dialog sv-dialog--danger" data-sv-persist="">'
+            + '<div class="sv-dialog-head"><span class="sv-dialog-title">The order may have gone</span></div>'
+            + '<div class="sv-dialog-body"></div><div class="sv-dialog-foot">'
+            + '<button type="button" class="sv-dialog-btn sv-dialog-btn--go">Close</button></div></div>'
+    };
+    Object.keys(built).forEach(function (k) {
+        var wrap = document.createElement('div');
+        wrap.innerHTML = built[k];
+        var dlg = wrap.firstChild;
+        document.body.appendChild(dlg);
+        out[k] = paint(dlg);
+        dlg.remove();
+    });
+    return JSON.stringify(out);
+})()""" % {"overlay": json.dumps((ROOT / "static/js/sv-overlay.js").as_uri())}
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class DialogsMeasuredTests(TestCase):
+    """The confirm dialogs as the browser paints them (2026-11-07): every
+    confirm, "danger" or not, is the neutral-strong outline; the REAL red
+    top edge sits on the dialogs that take the trading PIN (the LIVE
+    ticket, a live close, arming a live bot) and on no other: not a paper
+    close, not the funding ticket (paper), not the lost answer."""
+
+    @classmethod
+    def setUpTestData(cls):
+        user = get_user_model().objects.create_user("s1a_dialogs", password="x", is_staff=True)
+        client = Client()
+        client.force_login(user)
+        pages = {"/command/": _get(client, "/command/")}
+        cls.got = _measure(pages, ((1440, 900),), DIALOG_PROBE,
+                           "sv-s1a-dialogs-")[("/command/", 1440)]
+
+    def test_every_confirm_is_the_neutral_strong_outline(self):
+        for name, d in sorted(self.got.items()):
+            with self.subTest(dialog=name):
+                self.assertEqual(d["goColor"], INK1, d)
+                self.assertEqual(d["goBorder"], INK1, d)
+                self.assertEqual(d["goBg"], CLEAR, d)
+                self.assertEqual(d["goImg"], "none", d)
+                self.assertEqual(d["title"], INK1, d)
+
+    def test_the_real_edge_is_on_the_dialogs_that_take_the_trading_pin(self):
+        for name in ("liveTicket", "liveClose", "armLive"):
+            with self.subTest(dialog=name):
+                d = self.got[name]
+                self.assertEqual((d["top"], d["topColor"]), ("3px", REAL), d)
+
+    def test_no_other_dialog_wears_red(self):
+        for name in ("danger", "fundingTicket", "paperTicket", "lostAnswer", "plain"):
+            with self.subTest(dialog=name):
+                d = self.got[name]
+                self.assertEqual(d["top"], "1px", d)
+                self.assertEqual(d["topColor"], LINE2, d)
+                self.assertEqual(d["side"], LINE2, d)
+
+
+SHELL_MARKS_PROBE = r"""(function () {
+    var out = {};
+    function paint(e) {
+        var c = getComputedStyle(e);
+        return { color: c.color, bg: c.backgroundColor, border: c.borderTopColor,
+                 edge: c.borderLeftColor, edgeW: c.borderLeftWidth };
+    }
+    // The bottom band's lists: a value, a gain, a loss, an alarm, a gold count.
+    var dd = document.createElement('div');
+    dd.className = 'ip-dropdown';
+    dd.innerHTML = '<div class="ip-dd-grid">' + ['', 'up', 'down', 'red', 'gold'].map(function (k) {
+        return '<div class="ip-dd-cell"><span class="dk">K</span><span class="dv ' + k + '">1.00</span></div>';
+    }).join('') + '</div>';
+    document.body.appendChild(dd);
+    out.dv = {};
+    Array.prototype.forEach.call(dd.querySelectorAll('.dv'), function (e) {
+        out.dv[e.className.replace('dv', '').trim() || 'plain'] = getComputedStyle(e).color;
+    });
+    dd.remove();
+    out.pageRed = Array.prototype.map.call(document.querySelectorAll('.ip-dd-cell .dv.red'),
+                                           function (e) { return getComputedStyle(e).color; });
+    // Whose money, wherever it is said.
+    var host = document.querySelector('.page-content') || document.body;
+    var t = document.createElement('div');
+    t.innerHTML = '<span class="sv-adv-world is-live">REAL MONEY</span><span class="pos-pop-venue is-live">LIVE</span>'
+        + '<span class="hq-tag hq-tag--live">LIVE MONEY</span><span class="hq-brk hq-brk--live">eToro<small>LIVE</small></span>'
+        + '<span class="ib-env ib-env--live">LIVE</span><span class="bk-env bk-env--live">eToro · LIVE</span>'
+        + '<div class="hq-acct hq-acct--live">acct</div>'
+        + '<span class="sr-stage sr-stage-bearish">TRADEABLE</span><span class="sr-stage sr-stage-high">PAUSED</span>';
+    host.appendChild(t);
+    out.marks = {};
+    Array.prototype.forEach.call(t.children, function (e) { out.marks[e.className] = paint(e); });
+    out.brkSmall = getComputedStyle(t.querySelector('.hq-brk--live small')).color;
+    t.remove();
+    return JSON.stringify(out);
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class ShellMoneyMarksMeasuredTests(TestCase):
+    """What the review of 2026-11-07 found, as the browser computes it: the
+    bottom band's lists keep their state colours; every LIVE / REAL label
+    is the REAL chip, not the loss coral; the rail's stage chips mean what
+    they say. /positions/ loads the close advice's own sheet, after the
+    kit, so its world chip is measured where that sheet applies."""
+
+    @classmethod
+    def setUpTestData(cls):
+        user = get_user_model().objects.create_user("s1a_marks", password="x", is_staff=True)
+        _quote("BTCUSD", 60600)
+        _trade(user)
+        client = Client()
+        client.force_login(user)
+        pages = {"/positions/": _get(client, "/positions/")}
+        cls.got = {url: got for (url, _w), got in
+                   _measure(pages, ((1440, 900),), SHELL_MARKS_PROBE, "sv-s1a-marks-").items()}
+
+    def test_the_band_s_lists_keep_their_state_colours(self):
+        """A value is ink-1 (never the Eye); a gain jade, a loss coral; an
+        alarm (OFF, overdue, HALTED, a negative free pool, the drawdown)
+        keeps the red class's colour; a gold count its gold. The kit's
+        value colour outweighed all of them (review, 2026-11-07)."""
+        got = self.got["/positions/"]
+        self.assertEqual(got["dv"], {"plain": INK1, "up": UP, "down": DOWN, "red": DOWN,
+                                     "gold": GOLD})
+        self.assertTrue(got["pageRed"])
+        for c in got["pageRed"]:
+            self.assertEqual(c, DOWN)
+
+    def test_every_live_label_is_the_real_chip(self):
+        """--accent-red is the loss coral since S1a: a REAL label that read
+        it printed real money in the colour of a loss (plan §3.10: the REAL
+        family moves to --sv-real)."""
+        marks = self.got["/positions/"]["marks"]
+        for cls in ("sv-adv-world is-live", "pos-pop-venue is-live", "hq-tag hq-tag--live",
+                    "hq-brk hq-brk--live", "ib-env ib-env--live", "bk-env bk-env--live"):
+            with self.subTest(label=cls):
+                self.assertEqual(marks[cls]["bg"], REAL, marks[cls])
+                self.assertEqual(marks[cls]["color"], "rgb(255, 255, 255)", marks[cls])
+        self.assertEqual(self.got["/positions/"]["brkSmall"], "rgb(255, 255, 255)")
+        acct = marks["hq-acct hq-acct--live"]
+        self.assertEqual((acct["edgeW"], acct["edge"]), ("2px", REAL))
+
+    def test_the_rail_s_stage_chips_say_what_they_mean(self):
+        """TRADEABLE (a live stage: real money can move) is the strong
+        neutral outline, never the loss coral; PAUSED and REDUCED wear the
+        warning amber, never DEMO's gold outline (plan §3.9)."""
+        marks = self.got["/positions/"]["marks"]
+        trade = marks["sr-stage sr-stage-bearish"]
+        self.assertEqual((trade["color"], trade["border"]), (INK1, LINE3))
+        self.assertEqual(marks["sr-stage sr-stage-high"]["color"], WARN)
+
+
+PHONE_PROBE = r"""(function () {
+    function shown(e) {
+        var r = e.getBoundingClientRect();
+        if (!r.width || !r.height) return false;
+        for (var a = e; a; a = a.parentElement) {
+            var c = getComputedStyle(a);
+            if (c.display === 'none' || c.visibility === 'hidden') return false;
+        }
+        return true;
+    }
+    function h(e) { return Math.round(e.getBoundingClientRect().height); }
+    return JSON.stringify({
+        buttons: Array.prototype.filter.call(document.querySelectorAll('.btn'), shown).map(function (e) {
+            return { h: h(e), text: e.textContent.trim().slice(0, 24), cls: e.className };
+        }),
+        close: Array.prototype.filter.call(document.querySelectorAll('[data-sv-close-trade], #svCloseAll'), shown)
+            .map(function (e) { return { h: h(e), text: e.textContent.trim().slice(0, 24) }; })
+    });
+})()"""
+
+
+def _measure_phone(pages, probe, tmp_prefix, width=390, height=844):
+    """_measure at a phone's viewport, with the viewport meta counting."""
+    import shutil
+    import tempfile
+    from tests.test_close_advice import _Chrome
+    from tests.test_ui_s0_fixes import _offline
+    tmp = tempfile.mkdtemp(prefix=tmp_prefix)
+    try:
+        chrome = _Chrome(CHROME)
+        try:
+            sid = chrome.page(width, height, True)
+            got = {}
+            for i, (url, markup) in enumerate(sorted(pages.items())):
+                path = pathlib.Path(tmp) / ("page%d.html" % i)
+                path.write_text(_offline(markup), encoding="utf-8")
+                chrome.open(sid, path.as_uri())
+                got[url] = json.loads(chrome.eval(sid, probe))
+            return got
+        finally:
+            chrome.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class PhoneTapFloorMeasuredTests(TestCase):
+    """At 390 px every button keeps the phone tier's 44 px tap floor, and
+    CLOSE and Close all their 48 px, where a miss costs most
+    (sv-responsive.css). The kit's small button height (28 px), at a
+    button's weight, had pulled every .btn-sm under it: the per-row CLOSE
+    and every /ops/ switch (review, 2026-11-07)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.test_ops_cockpit import _component
+        user = get_user_model().objects.create_user("s1a_phone", password="x", is_staff=True,
+                                                    is_superuser=True)
+        _quote("BTCUSD", 60600)
+        _trade(user)
+        _component("s1a_phone_on", is_enabled=True)
+        _component("s1a_phone_off", is_enabled=False)
+        client = Client()
+        client.force_login(user)
+        pages = {url: _get(client, url) for url in ("/positions/", "/ops/")}
+        cls.got = _measure_phone(pages, PHONE_PROBE, "sv-s1a-phone-")
+
+    def test_every_button_keeps_the_44px_tap_floor(self):
+        for url, got in sorted(self.got.items()):
+            self.assertTrue(got["buttons"], url)
+            for b in got["buttons"]:
+                with self.subTest(url=url, button=b["text"]):
+                    self.assertGreaterEqual(b["h"], 44, b)
+
+    def test_close_and_close_all_keep_48px(self):
+        close = self.got["/positions/"]["close"]
+        self.assertGreaterEqual(len(close), 2, close)
+        for b in close:
+            with self.subTest(button=b["text"]):
+                self.assertGreaterEqual(b["h"], 48, b)

@@ -87,7 +87,20 @@ COMPONENTS = {
     "empty state": 'class="sv-empty-state"',
     "popover": 'class="sv-popover"',
     "real-money dialog": "sv-dialog sv-dialog--danger",
+    # A real-money dialog takes the trading PIN, which is what gives it the
+    # REAL edge (2026-11-07).
+    "the real-money dialog's PIN step": 'class="sv-dialog-confirm-text" data-role="secret-wrap"',
     "number rules": 'data-kit="numbers"',
+    # The signal rail's components as the merge of main restyled them
+    # (review of the merge, 2026-11-07), inert: no filter bar holds them.
+    "rail filter chips": 'data-kit="rail-chips"',
+    "a pressed filter": 'class="rf-chip" aria-pressed="true"',
+    "the side filters": 'data-f-key="side" data-f-val="short"',
+    "the stage chips": "sr-stage sr-stage-bearish",
+    "the paused stage": "sr-stage sr-stage-high",
+    "the departures' tags": "sr-gone-tag sr-gone-tag-target_reached",
+    "TICKET by side": "sr-gone-btn sr-gone-btn-ticket",
+    "BRING BACK": "↺ BRING BACK",
 }
 
 
@@ -161,6 +174,12 @@ class DesignKitContentTests(TestCase):
                 self.assertNotRegex(tag, r"\bdata-sv-")
         self.assertNotIn("<form", self.page)
         self.assertNotIn("<script", self.page)
+        # The rail's samples are out of every filter bar and host, so the
+        # rail's script neither reads nor presses them (2026-11-07).
+        for hook in ("data-f-kind", "data-sv-fhost", "data-f-toggle", "data-sv-gone",
+                     "data-sv-row", "data-sv-unpass", "data-sv-list"):
+            with self.subTest(hook=hook):
+                self.assertNotIn(hook, self.page)
 
     def test_the_view_reads_no_data(self):
         src = (ROOT / "dashboard" / "views_design_kit.py").read_text(encoding="utf-8")
@@ -238,6 +257,10 @@ KIT_PROBE = r"""(function () {
     out.buy = paint('.btn-buy'); out.sell = paint('.btn-sell'); out.stop = paint('.btn-stop');
     out.primary = paint('.btn-primary'); out.danger = paint('.btn-danger');
     out.dialog = paint('.sv-dialog--danger');
+    out.ticketLong = paint('.sr-gone-row[data-side="long"] .sr-gone-btn-ticket');
+    out.ticketShort = paint('.sr-gone-row[data-side="short"] .sr-gone-btn-ticket');
+    out.stageTrade = paint('.sr-stage-bearish'); out.stagePaused = paint('.sr-stage-high');
+    out.pressed = paint('.rf-chip[aria-pressed="true"]');
     return JSON.stringify(out);
 })()"""
 
@@ -290,3 +313,17 @@ class DesignKitMeasuredTests(TestCase):
         self.assertEqual(got["primary"]["color"], rgb(PALETTE["--sv-bg-0"]))
         self.assertEqual(got["dialog"]["top"], "3px")
         self.assertEqual(got["dialog"]["border"], rgb(PALETTE["--sv-real"]))
+
+    def test_the_rail_samples_wear_the_kit(self):
+        """▶ TICKET in its signal's side, TRADEABLE the strong neutral,
+        PAUSED the warning amber, a pressed filter on bg-3 with the Eye's
+        edge (2026-11-07)."""
+        got = self.got[1440]
+        self.assertEqual((got["ticketLong"]["color"], got["ticketLong"]["border"]),
+                         (rgb(PALETTE["--sv-up"]), rgb(PALETTE["--sv-up"])))
+        self.assertEqual((got["ticketShort"]["color"], got["ticketShort"]["border"]),
+                         (rgb(PALETTE["--sv-down"]), rgb(PALETTE["--sv-down"])))
+        self.assertEqual(got["stageTrade"]["color"], rgb(PALETTE["--sv-ink-1"]))
+        self.assertEqual(got["stagePaused"]["color"], rgb(PALETTE["--sv-warn"]))
+        self.assertEqual((got["pressed"]["bg"], got["pressed"]["border"]),
+                         (rgb(PALETTE["--sv-bg-3"]), rgb(PALETTE["--sv-eye"])))

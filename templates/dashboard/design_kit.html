@@ -211,6 +211,17 @@ The layout below is this page's own and takes tokens only.
       </div>
     </section>
 
+    {# ── The signal rail's own components (railfilters, on the kit since the merge of 2026-11-07). Inert: no filter bar or host holds them, so the rail's script neither reads nor presses them, and no button calls the ticket. ── #}
+    <section class="sv-panel" aria-labelledby="dkRail">
+      <div class="sv-panel-head"><span class="sv-panel-title" id="dkRail">Signal rail</span><span class="sv-panel-meta">filters · stages · what left the rail</span></div>
+      <div class="sv-panel-body dk-stack">
+        <div class="dk-row" data-kit="rail-chips"><button type="button" class="rf-chip" aria-pressed="true">All <b>17</b></button><button type="button" class="rf-chip" aria-pressed="false">Forex <b>7</b></button><button type="button" class="rf-chip" data-f-key="side" data-f-val="long" aria-pressed="false">Long</button><button type="button" class="rf-chip" data-f-key="side" data-f-val="short" aria-pressed="false">Short</button></div>
+        <div class="dk-row" data-kit="rail-stages"><span class="sr-stage sr-stage-bearish">TRADEABLE</span><span class="sr-stage sr-stage-medium">PAPER ONLY</span><span class="sr-stage sr-stage-low">WATCHED</span><span class="sr-stage sr-stage-high">PAUSED</span></div>
+        <div class="dk-row" data-kit="rail-tags"><span class="sr-gone-tag sr-gone-tag-stop_crossed">stop crossed</span><span class="sr-gone-tag sr-gone-tag-target_reached">target reached</span><span class="sr-gone-tag sr-gone-tag-taken">taken</span><span class="sr-gone-tag sr-gone-tag-chased">chased</span></div>
+        <div class="dk-row" data-kit="rail-buttons"><div class="sr-gone-row" data-side="long"><button type="button" class="sr-gone-btn sr-gone-btn-ticket">▶ TICKET</button></div><div class="sr-gone-row" data-side="short"><button type="button" class="sr-gone-btn sr-gone-btn-ticket">▶ TICKET</button></div><button type="button" class="sr-gone-btn">↺ BRING BACK</button></div>
+      </div>
+    </section>
+
     {# ── The number rules ── #}
     <section class="sv-panel" aria-labelledby="dkNumbers">
       <div class="sv-panel-head"><span class="sv-panel-title" id="dkNumbers">Number rules</span><span class="sv-panel-meta">the qty and src_name filters</span></div>
@@ -243,6 +254,8 @@ The layout below is this page's own and takes tokens only.
         <div class="sv-dialog-body">
           <p class="sv-dialog-msg">Executes immediately on the LIVE venue: real funds move at the broker.</p>
           <div class="sv-dialog-facts"><div class="sv-dialog-fact"><span class="lbl">Units</span><span>20,000</span></div><div class="sv-dialog-fact"><span class="lbl">At the stop</span><span class="down">-117.80</span></div></div>
+          {# The trading PIN, as SV.overlay draws it for a real-money confirm: what makes this a real-money dialog, and what gives it the REAL edge. #}
+          <label class="sv-dialog-confirm-text" data-role="secret-wrap">Trading PIN<input type="password" class="sv-pin-field" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Trading PIN (synthetic, does nothing)"></label>
         </div>
         <div class="sv-dialog-foot"><button type="button" class="sv-dialog-btn">Cancel</button><button type="button" class="sv-dialog-btn sv-dialog-btn--go">Buy 20,000 EURUSD</button></div>
       </div>

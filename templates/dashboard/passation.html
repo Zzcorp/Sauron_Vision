@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% load static %}
 {% block title %}Sauron Vision — Handover{% endblock %}
+{% comment %}
+The letter keeps its own faces (2026-11-07): the shell stopped loading
+Rajdhani, Share Tech Mono and the full Orbitron (UI plan S1a, §4.1), and
+the letter fell back to the system faces, its title mixing the wordmark
+subset's Orbitron letters with fallback ones. It loads them itself, from
+Google Fonts, until the brand pages get their own work (S2.7).
+{% endcomment %}
+{% block extra_css %}<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&amp;family=Rajdhani:wght@400;500;600;700&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">{% endblock %}
 {% block content %}
 {% comment %}
 THE HANDOVER LETTER (2026-09-28, core/passation.py). Served only after

@@ -95,13 +95,15 @@
 .sv-world--demo { color: var(--sv-demo); border-color: var(--sv-demo); }
 .sv-world--paper { color: var(--sv-paper); border-color: var(--sv-paper); }
 
-/* The LIVE label in dense cells is the REAL chip in small. */
+/* The LIVE label in dense cells is the REAL chip in small. Light mode keeps
+   today's red word (frozen, plan §15; 2026-11-07). */
 .sv-venue--live {
     display: inline-block;
     padding: 0 4px;
     border-radius: var(--sv-radius-chip);
     line-height: 1.35;
 }
+:where(body.light-mode) .sv-venue--live { color: var(--accent-red); background: transparent; }
 .ip-cat .ip-pnl .sv-venue {
     font-family: var(--sv-font-sans);
     font-size: var(--sv-fs-micro);
@@ -455,16 +457,31 @@ body:not(.light-mode) .ticker-item .t-badge { background: transparent; color: va
 }
 body:not(.light-mode) .ip-cat .ip-label { color: var(--sv-ink-3); }
 /* The band keeps its 60 px: the cell's lines sit tight at 11 px (S1b turns
-   it into the 32 px status bar of single-line cells). */
-.ip-cat { gap: 1px; padding-top: 2px; padding-bottom: 2px; }
+   it into the 32 px status bar of single-line cells). At the 11 px floor
+   its cells grew by a third and hid two of them behind the arrow at
+   1920 px (review, 2026-11-07): a sub-line is words, so Inter (rule 5;
+   the mono's 0.6 em is wider), and a cell's sides take the spacing
+   scale's 8, as the shared table's cells do. Measured with the faces:
+   1920 shows all 14 cells again, and 1280 and 1440 hide no more than
+   main did. */
+.ip-cat { gap: 1px; padding-top: 2px; padding-bottom: 2px; padding-left: var(--sv-sp-3); padding-right: var(--sv-sp-3); }
+.ip-cat .ip-sub { font-family: var(--sv-font-sans); }
 .ip-cat .ip-label, .ip-cat .ip-sub, .ip-cat .ip-pnl, .ip-cat .ip-pnl .sv-venue { line-height: 1.15; }
 body:not(.light-mode) .ip-cat .ip-sub { color: var(--sv-ink-3); }
 body:not(.light-mode) .ip-cat { border-right-color: var(--sv-line-1); }
 body:not(.light-mode) .ip-cat:hover { background: var(--sv-bg-3); }
+/* PORTFOLIO's apart groups (paper, demo) at full strength: dimmed to 85 %
+   the PAPER label fell to 4.35:1 on a hovered cell (2026-11-07). */
+body:not(.light-mode) .ip-cat .ip-pnl-apart { opacity: 1; }
 .ip-dd-cell .dk { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
 .ip-dd-cell .dv { font-family: var(--sv-font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
 body:not(.light-mode) .ip-dd-cell .dk { color: var(--sv-ink-3); }
-body:not(.light-mode) .ip-dd-cell .dv { color: var(--sv-ink-1); }
+/* A value is ink-1, never the Eye; at a class's weight (:where), so the
+   states keep theirs: a gain jade, a loss coral, an alarm its red class
+   (OFF, overdue, HALTED, a negative free pool, the drawdown), a count its
+   gold. At (0,3,1) this outweighed them all and printed every one of them
+   white (review, 2026-11-07). */
+:where(body:not(.light-mode)) .ip-dd-cell .dv { color: var(--sv-ink-1); }
 .ip-dd-head { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
 body:not(.light-mode) .ip-dd-head { color: var(--sv-ink-3); border-bottom-color: var(--sv-line-1); }
 
@@ -532,8 +549,43 @@ body:not(.light-mode) .rail-head .rh-held:hover { background: var(--sv-bg-4); }
 body:not(.light-mode) .um-avatar { background: var(--sv-bg-4); color: var(--sv-ink-1); }
 
 /* A value nobody measured is the em-dash in ink-3, at full strength: dimmed
-   to 65 % it fell under 4.5:1 on the cards. */
-.sv-unknown { opacity: 1; }
+   to 65 % it fell under 4.5:1 on the cards. Light mode keeps today's 65 %
+   (frozen, plan §15). */
+body:not(.light-mode) .sv-unknown { opacity: 1; }
+
+/* The rail's TAKEN card on hover: a breath of the taken gold on bg-3. At
+   14 % its ages and rule fell to 4.1:1 and its BULL badge to 3.9; at 4 %
+   every word on it is 4.6:1 or more (tests/test_design_tokens computes
+   it). (2026-11-07) */
+body:not(.light-mode) .sr-signal-wrap.sr-acted .sr-signal:hover { background: color-mix(in srgb, var(--sr-taken) 4%, var(--sv-bg-3)); }
+
+/* A gain is jade wherever a shell sheet prints one: the Horde's strip and
+   tones, and the close advice's cards (its sheet loads after this one, so
+   the dark scope's weight carries it). They kept the Eye, beside the
+   band's jade (review, 2026-11-07). */
+body:not(.light-mode) .hd-tab-r.up,
+body:not(.light-mode) .hd-tone-up,
+body:not(.light-mode) .sv-adv-card .up { color: var(--sv-up); }
+
+/* Whose money, wherever else the shell or a page says it (2026-11-07). The
+   REAL family reads --sv-real by name (plan §3.10): these labels read
+   --accent-red, which is the loss coral since S1a, and printed real money
+   in the colour of a loss. Each is the REAL chip now, white on the only
+   solid red (4.94:1); the account card's edge is the REAL edge. Light
+   mode keeps today's red words (frozen). */
+body:not(.light-mode) .sv-adv-world.is-live,
+body:not(.light-mode) .pos-pop-venue.is-live,
+body:not(.light-mode) .hq-tag.hq-tag--live,
+body:not(.light-mode) .hq-brk.hq-brk--live,
+body:not(.light-mode) .ib-env.ib-env--live,
+body:not(.light-mode) .bk-env.bk-env--live {
+    color: var(--sv-real-ink);
+    background: var(--sv-real);
+    border-color: var(--sv-real);
+}
+body:not(.light-mode) .hq-brk.hq-brk--live small { color: var(--sv-real-ink); opacity: 1; }
+body:not(.light-mode) .bk-env.bk-env--live { padding: 0 4px; border-radius: var(--sv-radius-chip); }
+body:not(.light-mode) .hq-acct.hq-acct--live { border-left-color: var(--sv-real); }
 
 
 /* ══ §7 Overlays: one family ═════════════════════════════════════════════
@@ -547,6 +599,15 @@ body:not(.light-mode) {
     --pop-bg-2: var(--sv-bg-3);
     --pop-border: var(--sv-line-2);
     --pop-shadow: var(--sv-shadow-pop);
+}
+/* Light mode, frozen (plan §15): sv-overlay.css computes these on :root
+   from --bg-card, --bg-card-hover and --border, and light mode inherited
+   the old dark root's values, never its own. The re-pointed root would
+   change them, so they are restated at today's values (2026-11-07). */
+body.light-mode {
+    --pop-bg: #0a1a14;
+    --pop-bg-2: #0e2218;
+    --pop-border: #133020;
 }
 :root { --pop-radius: var(--sv-radius-card); }
 
@@ -581,11 +642,21 @@ body:not(.light-mode) .sr-popup.sv-pinned { border-color: var(--sv-eye); }
 body:not(.light-mode) .ip-dropdown .ip-dd-head { background: var(--sv-bg-2); }
 body:not(.light-mode) .sr-pop-one { border-color: color-mix(in srgb, var(--accent-gold-ink) 45%, transparent); }
 
-/* The dialog: bg-2, the dialog shadow; its head carries the subject. A REAL
-   or funding dialog (.sv-dialog--danger) carries the REAL red as a 3 px top
-   edge; its title stays ink-1, because coral is a loss, not real money. */
+/* The dialog: bg-2, the dialog shadow; its head carries the subject.
+   A dialog that takes the trading PIN moves real money: the LIVE ticket
+   (its PIN step, .sz-pin, is drawn only when live) and an SV.overlay
+   confirm given a secretLabel (a live close, CLOSE ALL over live rows,
+   arming or resuming a live bot). It carries the REAL red as a 3 px top
+   edge, and no other dialog does (review, 2026-11-07). .sv-dialog--danger
+   is set on every confirm({danger: true}) (Delete preset, Pause, a paper
+   close), on the paper funding ticket and on the lost answer: solid red
+   there said danger, which it never means (plan §3.9). A danger dialog
+   keeps the dialog's own line and an ink-1 title: coral is a loss, not a
+   danger. Light mode keeps today's (frozen). */
 body:not(.light-mode) .sv-dialog { box-shadow: var(--sv-shadow-dialog); }
-.sv-dialog.sv-dialog--danger { border-top: 3px solid var(--sv-real); }
+:where(body:not(.light-mode)) .sv-dialog--danger { border-color: var(--sv-line-2); }
+:where(body:not(.light-mode)) .sv-dialog:has(.sz-pin),
+:where(body:not(.light-mode)) .sv-dialog:has([data-role="secret-wrap"]) { border-top: 3px solid var(--sv-real); }
 body:not(.light-mode) .sv-dialog--danger .sv-dialog-title { color: var(--sv-ink-1); }
 .sv-dialog-title { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
 .sv-dialog-fact { font-family: var(--sv-font-mono); }
@@ -593,7 +664,10 @@ body:not(.light-mode) .sv-dialog--danger .sv-dialog-title { color: var(--sv-ink-
 
 /* The dialog's buttons: Cancel neutral; the confirm neutral-strong (an ink
    outline), so a SELL is never confirmed in green: the side's colours come
-   with the dialog's own markup (S2.1). A funding confirm keeps coral words. */
+   with the dialog's own markup (S2.1). A "danger" confirm (is-danger) is
+   the same outline: it rides every LIVE ticket on either side, the funding
+   ticket, CLOSE, CLOSE n POSITIONS, Pause and Disarm, and coral there said
+   loss and SELL, on a LIVE BUY too (review, 2026-11-07). */
 .sv-dialog-btn {
     font-family: var(--sv-font-sans);
     font-size: var(--sv-fs-small);
@@ -612,8 +686,8 @@ body:not(.light-mode) .sv-dialog--danger .sv-dialog-title { color: var(--sv-ink-
     border: 1.5px solid var(--sv-ink-1);
 }
 .sv-dialog-btn.sv-dialog-btn--go:hover { background: var(--sv-bg-3); }
-.sv-dialog-btn.sv-dialog-btn--go.is-danger { color: var(--sv-down); border-color: var(--sv-down); background: transparent; }
-.sv-dialog-btn.sv-dialog-btn--go.is-danger:hover { background: var(--sv-down-wash); }
+.sv-dialog-btn.sv-dialog-btn--go.is-danger { color: var(--sv-ink-1); border-color: var(--sv-ink-1); background: transparent; }
+.sv-dialog-btn.sv-dialog-btn--go.is-danger:hover { background: var(--sv-bg-3); }
 
 /* The menu: 32 px items on bg-2. */
 .sv-menu-item { min-height: var(--sv-row); font-size: var(--sv-fs-base); }
@@ -708,6 +782,23 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
 .btn.btn-stop::before { content: "■"; position: static; line-height: 1; }
 .btn.btn-stop:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); border-color: var(--sv-ink-1); }
 .btn.btn-icon { width: var(--sv-ctl-sm); min-height: var(--sv-ctl-sm); height: var(--sv-ctl-sm); padding: 0; }
+/* Disabled reads as disabled on every variant (§7: bg-2, ink-4, line-1):
+   the variants above meet sauron.css's disabled look at its weight and
+   came after it, so a disabled BUY kept its jade (review, 2026-11-07). */
+.btn:is(.btn-buy, .btn-sell, .btn-stop, .btn-secondary):is([disabled], .disabled) {
+    background: var(--sv-bg-2); color: var(--sv-ink-4); border-color: var(--sv-line-1);
+}
+
+/* On a phone the tap floor holds (sv-responsive.css: 44 px, CLOSE and
+   Close all 48 px, where a miss costs most). The size heights above sit at
+   a button's weight, over the phone sheet's single class, so they are
+   lifted here at the same weight; a kit field keeps the 16 px under which
+   iOS zooms the page on focus (review, 2026-11-07). */
+@media (max-width: 768px) {
+    .btn.btn-sm, .btn.btn-lg, .btn.btn-icon { min-height: 44px; }
+    .btn[data-sv-close-trade], .btn.btn-sm[data-sv-close-trade] { min-height: 48px; }
+    .sv-input { font-size: 16px; }
+}
 
 
 /* ══ §7 Chips: five styles instead of ten ════════════════════════════════
@@ -790,6 +881,18 @@ body:not(.light-mode) .sr-signal .sr-badge-bearish,
 body:not(.light-mode) .sr-pop-dir.sr-pop-dir-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); border-color: transparent; }
 /* An asset class is a neutral outline (COMMODITY is not red). */
 body:not(.light-mode) .wl-class { color: var(--sv-ink-2); background: transparent; border: 1px solid var(--sv-line-3); }
+/* The pages' asset-class badges too, and MEDIUM (review, 2026-11-07):
+   --accent-blue is the chart's first slot now, 4.49:1 on its wash over a
+   card; FOREX in DEMO's gold and COMMODITY in the loss coral said what
+   they are not (plan §7: the class chips stop using red, gold and blue).
+   The ring is drawn inside, so no badge changes size. */
+body:not(.light-mode) .badge-stock,
+body:not(.light-mode) .badge-forex,
+body:not(.light-mode) .badge-commodity,
+body:not(.light-mode) .badge-crypto,
+body:not(.light-mode) .badge-index,
+body:not(.light-mode) .badge-etf { color: var(--sv-ink-2); background: transparent; box-shadow: inset 0 0 0 1px var(--sv-line-3); }
+body:not(.light-mode) .badge-medium { color: var(--sv-ink-2); background: color-mix(in srgb, var(--sv-ink-2) 10%, transparent); }
 /* Counts are bubbles, not alarms: the bell's and the drawer's numbers. */
 body:not(.light-mode) .notif-badge,
 body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: var(--sv-ink-1); font-family: var(--sv-font-mono); }
@@ -819,7 +922,13 @@ body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: va
    2026-11-07): the side in jade or coral on its wash, as on the rail's
    cards; a tag is an outline in its tone: a loss coral, a target reached
    jade (a gain, not the Eye), TAKEN the taken family's gold (it carries no
-   side, sauron.css --sr-taken), chased, paused or demoted gold. */
+   side, sauron.css --sr-taken). The stage chip's tones mean other things
+   (dashboard/signal_surface.py): "bearish" is TRADEABLE, a live stage
+   where real money can move, and "high" is PAUSED or REDUCED. TRADEABLE is
+   the strong neutral outline (brightness, not a hue: coral would say a
+   loss); PAUSED and REDUCED the warning amber, as are a departure that was
+   chased, paused or demoted, which main drew in the same tone (gold is
+   DEMO's). (Review of the merge, 2026-11-07.) */
 .sr-stage, .sr-gone-tag, .sr-gone-l1 .sr-badge {
     font-family: var(--sv-font-sans); font-weight: 600;
     letter-spacing: var(--sv-track-label);
@@ -831,15 +940,15 @@ body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: va
 :where(body:not(.light-mode)) .sr-gone-tag-stop_crossed,
 :where(body:not(.light-mode)) .sr-gone-tag-closed_stop,
 :where(body:not(.light-mode)) .sr-gone-tag-rule_losing,
-:where(body:not(.light-mode)) .sr-gone-tag-rule_losing_live,
-:where(body:not(.light-mode)) .sr-stage-bearish { color: var(--sv-down); border-color: color-mix(in srgb, var(--sv-down) 45%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag-rule_losing_live { color: var(--sv-down); border-color: color-mix(in srgb, var(--sv-down) 45%, transparent); }
 :where(body:not(.light-mode)) .sr-gone-tag-target_reached,
 :where(body:not(.light-mode)) .sr-gone-tag-closed_target { color: var(--sv-up); border-color: color-mix(in srgb, var(--sv-up) 45%, transparent); }
 :where(body:not(.light-mode)) .sr-gone-tag-taken { color: var(--sr-taken); border-color: var(--sr-taken-edge); }
+:where(body:not(.light-mode)) .sr-stage-bearish { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
 :where(body:not(.light-mode)) .sr-gone-tag-chased,
 :where(body:not(.light-mode)) .sr-gone-tag-rule_paused,
 :where(body:not(.light-mode)) .sr-gone-tag-rule_demoted,
-:where(body:not(.light-mode)) .sr-stage-high { border-color: color-mix(in srgb, var(--accent-gold-ink) 45%, transparent); }
+:where(body:not(.light-mode)) .sr-stage-high { color: var(--sv-warn); border-color: color-mix(in srgb, var(--sv-warn) 50%, transparent); }
 
 
 /* ══ §7 Data ═════════════════════════════════════════════════════════════
@@ -985,8 +1094,11 @@ body:not(.light-mode) .pop-spark svg path { filter: none; }
 /* The PIN field: a password in mono at .3em; its label says what it unlocks. */
 .sv-pin-field { font-family: var(--sv-font-mono); letter-spacing: .3em; text-align: left; }
 
-/* Fields across the shell: the well, the line, the Eye's ring on focus. */
-body:not(.light-mode) :is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select) {
+/* Fields across the shell: the well, the line, the Eye's ring on focus. At
+   a field's own weight (:where), so a component's state wins over it: the
+   idle lock's filled PIN boxes had lost their edge to this rule's (0,2,2)
+   (review, 2026-11-07). */
+:where(body:not(.light-mode)) :is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select) {
     background-color: var(--sv-bg-0); border-color: var(--sv-line-2); color: var(--sv-ink-1);
 }
 :is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select):focus {

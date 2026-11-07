@@ -140,15 +140,43 @@ LIGHT_TODAY = {
     "--success": "#00e868", "--warning": "#d89020",
 }
 
+#: The shorthand aliases (sauron.css, the 294 call sites' vocabulary) and
+#: the overlay's surfaces, as light mode computes them on origin/main
+#: ede54d0 (2026-11-07). They are custom properties computed on :root from
+#: the dark root, and inherited as values: light mode never redefined them,
+#: so it computed the dark root's colours for them. Frozen means those, not
+#: the new dark tokens (review, 2026-11-07).
+LIGHT_ALIASES_TODAY = {
+    "--text": "#daf0e6", "--text2": "#7aaa8a", "--text3": "#3a6850",
+    "--bg": "#060e0a", "--bg2": "#081410", "--bg3": "#0a1a14",
+    "--bg-alt": "#081410", "--bg-elev": "#0e2218", "--bg-darker": "#030806",
+    "--accent-green": "#00e868", "--down": "#d03030", "--purple": "#8840d0",
+    "--gold": "#d8b020", "--blue": "#30a0e8",
+}
+LIGHT_OVERLAY_TODAY = {"--pop-bg": "#0a1a14", "--pop-bg-2": "#0e2218", "--pop-border": "#133020"}
+#: The kit's own derived tokens: computed on :root from the dark palette,
+#: so light mode must derive them again from its own.
+DERIVED = ("--sv-up-wash", "--sv-down-wash", "--sv-paper", "--sv-danger", "--sv-grid")
+
 #: The ambient layers of base.html, none displayed on a work page.
 AMBIENT = (".grid-bg", ".eye-glow-shadow", ".globe-eye-bg",
            ".globe-circuits-bg", "#particles-canvas", "#caustics-canvas",
            ".se-cs-paragraph")
 
 #: The world-marker family (§3.5): the only selectors that may paint a
-#: solid fill in --sv-real, the only solid red on the platform.
+#: solid fill in --sv-real, the only solid red on the platform. The LIVE /
+#: REAL labels of the close advice, the position card's fallback, the
+#: accounts grid and the broker env chips joined on 2026-11-07 (review):
+#: they read --accent-red, the loss coral since S1a, and plan §3.10 moves
+#: the REAL family to --sv-real by name.
 WORLD_MARKERS = (".sv-world--live", ".sv-armed-pill", ".tk-venue--live",
-                 ".sv-row--live", ".sv-venue--live")
+                 ".sv-row--live", ".sv-venue--live",
+                 ".sv-adv-world.is-live", ".pos-pop-venue.is-live", ".hq-tag--live",
+                 ".hq-brk--live", ".ib-env--live", ".bk-env--live", ".hq-acct--live")
+#: The dialogs that take the trading PIN (real money) carry the REAL edge;
+#: the edge sat on .sv-dialog--danger, every "danger" confirm, until the
+#: review of 2026-11-07.
+REAL_DIALOGS = (".sv-dialog:has(.sz-pin)", '.sv-dialog:has([data-role="secret-wrap"])')
 
 
 # ── reading the sheets ───────────────────────────────────────────────────
@@ -354,6 +382,31 @@ class FaceTests(SimpleTestCase):
                              "fonts.gstatic.com", "fontawesome", "rsms.me"):
                     self.assertNotIn(host, text)
 
+    def test_a_page_that_names_a_retired_face_loads_it_itself(self):
+        """The shell stopped loading Rajdhani, Share Tech Mono and the full
+        Orbitron (§4.1). A page under base.html that names one in its own
+        styles (not as a var() fallback) loads it itself, from Google Fonts:
+        /passation/'s letter fell back to the system faces, and "TO
+        GANDALF" mixed the wordmark subset's eight Orbitron letters with
+        fallback ones (review, 2026-11-07)."""
+        retired = {"Rajdhani": "Rajdhani", "Share Tech Mono": "Share+Tech+Mono",
+                   "Orbitron": "Orbitron"}
+        offenders, named = [], 0
+        for path in sorted((ROOT / "templates").rglob("*.html")):
+            text = path.read_text(encoding="utf-8")
+            if '{% extends "base.html" %}' not in text:
+                continue
+            links = re.findall(r'href="https://fonts\.googleapis\.com/css2\?([^"]+)"', text)
+            for face, family in retired.items():
+                if not re.search(r"""font-family:\s*['"]%s['"]""" % face, text):
+                    continue
+                named += 1
+                if not any(re.search(r"(^|&|amp;)family=%s(:|&|$)" % re.escape(family), l)
+                           for l in links):
+                    offenders.append("%s names %s" % (path.relative_to(ROOT), face))
+        self.assertGreater(named, 0)
+        self.assertEqual(offenders, [])
+
     def test_the_faces_are_tokens_with_their_fallbacks(self):
         root = block(read(TOKENS), ":root")
         self.assertEqual(root["--sv-font-sans"],
@@ -458,6 +511,50 @@ class LightModeFrozenTests(SimpleTestCase):
         self.assertEqual(light["--sv-ink-1"].lower(), "#1a2a1a")
         self.assertEqual(light["--sv-bg-1"].lower(), "#ffffff")
 
+    def test_light_mode_derives_the_kit_s_washes_from_its_own_palette(self):
+        """--sv-up-wash, --sv-paper and the rest are computed where they are
+        declared: on :root, from the dark palette. Light mode declares them
+        again, the same expressions, so they read its own colours (a light
+        .sv-world--paper was the dark ink-3; review, 2026-11-07)."""
+        root, light = block(read(TOKENS), ":root"), block(read(TOKENS), "body.light-mode")
+        for name in DERIVED:
+            with self.subTest(token=name):
+                self.assertEqual(light.get(name), root[name])
+
+    def test_light_mode_restates_the_shorthand_aliases_and_the_overlay(self):
+        """The aliases (--text, --down, --bg3…) and the overlay's surfaces
+        (--pop-bg…) are computed on :root and inherited as values: light
+        mode computed the old dark root's colours for them, and S1a's dark
+        root would have changed them (--down #d03030 to the coral: 5.06:1 on
+        a white card to 2.77). Restated at today's values (2026-11-07)."""
+        light = {}
+        for prelude, body, ctx in rules(read(SAURON)):
+            if prelude == "body.light-mode" and not ctx:
+                light.update(decls(body))
+        for name, want in LIGHT_ALIASES_TODAY.items():
+            with self.subTest(token=name):
+                self.assertEqual(light.get(name, "").lower(), want)
+        kit = block(read(KIT), "body.light-mode")
+        for name, want in LIGHT_OVERLAY_TODAY.items():
+            with self.subTest(token=name):
+                self.assertEqual(kit.get(name, "").lower(), want)
+
+    def test_the_kit_s_light_exceptions_are_scoped_to_the_dark_theme(self):
+        """Rules that would recolour light mode wear the dark scope: the
+        unknown dash at full strength, the LIVE label as a chip, the band's
+        counts in ink, a bullish chip on its wash (2026-11-07)."""
+        kit = strip_comments(read(KIT))
+        for sel in (".sv-unknown", ".badge-bullish"):
+            with self.subTest(selector=sel):
+                self.assertRegex(kit, r"body:not\(\.light-mode\)\)?\s+%s\s*\{" % re.escape(sel))
+                self.assertNotRegex(kit, r"(^|\}|,)\s*%s\s*\{" % re.escape(sel))
+        css = read(SAURON)
+        self.assertEqual(block(css, ".badge-bullish")["background"], "var(--accent-dim)")
+        self.assertEqual(block(css, ":where(body.light-mode) .ip-cat .ip-count")["color"],
+                         "var(--accent)")
+        self.assertEqual(block(read(KIT), ":where(body.light-mode) .sv-venue--live"),
+                         {"color": "var(--accent-red)", "background": "transparent"})
+
 
 class RealIsTheOnlySolidRedTests(SimpleTestCase):
 
@@ -473,11 +570,17 @@ class RealIsTheOnlySolidRedTests(SimpleTestCase):
                         continue
                     if prop not in ("background", "background-color", "background-image",
                                     "box-shadow", "border-top", "border-top-color",
-                                    "border-color", "border", "outline-color"):
+                                    "border-color", "border", "outline-color",
+                                    "border-left", "border-left-color"):
                         continue
                     sels = [s.strip() for s in prelude.split(",")]
                     for s in sels:
-                        if not any(m in s for m in WORLD_MARKERS + (".sv-dialog--danger",)):
+                        # Updated deliberately (2026-11-07, review): the REAL
+                        # edge's exception is the PIN-taking dialogs, no
+                        # longer every .sv-dialog--danger (a delete, a pause,
+                        # a paper close); the guard is the same: nothing
+                        # outside the REAL family paints --sv-real.
+                        if not any(m in s for m in WORLD_MARKERS + REAL_DIALOGS):
                             offenders.append("%s: %s { %s: %s }" % (rel, s, prop, value))
         self.assertEqual(offenders, [])
 
@@ -522,6 +625,41 @@ class PolarityTests(SimpleTestCase):
                 for prop, value in decls(body):
                     if prop == "color" and re.fullmatch(r"var\(--accent\)", value):
                         offenders.append("%s { color: %s }" % (sel.strip(), value))
+        self.assertEqual(offenders, [])
+
+    def test_no_shell_sheet_paints_a_gain_in_the_eye(self):
+        """The same rule across every sheet base.html links and the close
+        advice's own (review, 2026-11-07: the Horde's strip printed +5.78R
+        in the Eye beside the band's jade). A sheet the kit does not own
+        keeps its rule; the kit names that selector, in the dark theme, and
+        paints it jade."""
+        base = read(BASE)
+        sheets = ["static/css/" + s for s in
+                  re.findall(r"""\{% static 'css/([\w.-]+\.css)' %\}""", base)
+                  if s not in ("sv-tokens.css", "sv-kit.css", "sauron.css")]
+        sheets.append("static/css/sv-close-advice.css")
+        gain = re.compile(r"[.-](up|bullish|long|BUY)(?![\w-])")
+        kit = {}
+        for prelude, body, ctx in rules(read(KIT)):
+            for sel in prelude.split(","):
+                for prop, value in decls(body):
+                    if prop == "color":
+                        kit[sel.strip()] = value
+        offenders = []
+        for rel in sheets:
+            for prelude, body, ctx in rules(read(rel)):
+                if prelude.startswith("@") or "light-mode" in prelude:
+                    continue
+                for sel in prelude.split(","):
+                    sel = sel.strip()
+                    if not gain.search(sel.split(":")[0]):
+                        continue
+                    for prop, value in decls(body):
+                        if prop == "color" and value == "var(--accent)":
+                            fixed = "var(--sv-up)" in (kit.get("body:not(.light-mode) " + sel),
+                                                       kit.get(":where(body:not(.light-mode)) " + sel))
+                            if not fixed:
+                                offenders.append("%s: %s { color: %s }" % (rel, sel, value))
         self.assertEqual(offenders, [])
 
 
@@ -599,6 +737,26 @@ class RailFiltersOnTheKitTests(SimpleTestCase):
             with self.subTest(selector=sel):
                 self.assertEqual(self.value(css, self.DARK + sel, "background"), "var(--sv-bg-2)")
 
+    def test_the_stage_chips_take_no_meaning_the_palette_forbids(self):
+        """The rail's stage chip (2026-11-07, review of the merge): its tone
+        "bearish" is TRADEABLE, "real money can move on this"
+        (dashboard/signal_surface.py), drawn in the loss coral; "high" is
+        PAUSED or REDUCED, drawn as DEMO's gold outline. TRADEABLE is the
+        strong neutral outline (ink-1 on a line-3 border: brightness, not a
+        hue); PAUSED and REDUCED the warning amber (plan §3.9)."""
+        css = read(KIT)
+        self.assertEqual(self.value(css, self.WHERE + ".sr-stage-bearish", "color"), "var(--sv-ink-1)")
+        self.assertEqual(self.value(css, self.WHERE + ".sr-stage-bearish", "border-color"),
+                         "var(--sv-line-3)")
+        self.assertEqual(self.value(css, self.WHERE + ".sr-stage-high", "color"), "var(--sv-warn)")
+        self.assertIn("var(--sv-warn)", self.value(css, self.WHERE + ".sr-stage-high", "border-color"))
+        for sel in (".sr-stage-bearish", ".sr-stage-high"):
+            for prelude, body, ctx in rules(css):
+                if any(s.strip().endswith(sel) for s in prelude.split(",")):
+                    with self.subTest(selector=prelude):
+                        for bad in ("--sv-down", "--accent-red", "--accent-gold", "--sv-demo"):
+                            self.assertNotIn(bad, body)
+
 
 class AmbientSourceTests(SimpleTestCase):
 
@@ -612,6 +770,95 @@ class AmbientSourceTests(SimpleTestCase):
         script = _script_with("getElementById('particles-canvas')")
         for gone in ("TICKERS", "tickerPrice", "fillText", "EUR/USD", "base:67500"):
             self.assertNotIn(gone, script)
+
+
+def mix(a, b, share):
+    """color-mix(in srgb, a share, b) as a hex string."""
+    x, y = hex_rgb(a), hex_rgb(b)
+    return "#%02x%02x%02x" % tuple(round(x[i] * share + y[i] * (1 - share)) for i in range(3))
+
+
+class ReviewFixesTests(SimpleTestCase):
+    """The review of S1a (2026-11-07), on the sheets."""
+
+    def test_a_taken_card_s_hover_keeps_every_word_at_4_5_to_1(self):
+        """The rail's TAKEN card took 14 % of the taken gold over bg-3 on
+        hover: its ages and rule fell to 4.1:1, its BULL badge to 3.9. The
+        dark theme's hover is a breath of the gold, every text on it at
+        4.5:1 or more, computed here as the browser mixes it."""
+        rule = block(read(KIT), "body:not(.light-mode) .sr-signal-wrap.sr-acted .sr-signal:hover")
+        m = re.fullmatch(r"color-mix\(in srgb, var\(--sr-taken\) (\d+)%, var\(--sv-bg-3\)\)",
+                         rule["background"])
+        self.assertTrue(m, rule)
+        ground = mix(PALETTE["--sv-demo"], PALETTE["--sv-bg-3"], int(m.group(1)) / 100)
+        texts = {"ink-3 (age, rule, venue)": (PALETTE["--sv-ink-3"], ground),
+                 "ink-2 (who)": (PALETTE["--sv-ink-2"], ground),
+                 "BULL badge": (PALETTE["--sv-up"], mix(PALETTE["--sv-up"], ground, .12)),
+                 "BEAR badge": (PALETTE["--sv-down"], mix(PALETTE["--sv-down"], ground, .12)),
+                 "TAKEN tag": (PALETTE["--sv-demo"], mix(PALETTE["--sv-demo"], ground, .18))}
+        for name, (fg, bg) in texts.items():
+            with self.subTest(text=name):
+                self.assertGreaterEqual(contrast(fg, bg), 4.5)
+
+    def test_the_band_s_apart_groups_print_at_full_strength(self):
+        """At 85 % the PAPER label on a hovered PORTFOLIO cell was 4.35:1."""
+        self.assertEqual(block(read(KIT), "body:not(.light-mode) .ip-cat .ip-pnl-apart"),
+                         {"opacity": "1"})
+        self.assertLess(contrast(mix(PALETTE["--sv-ink-3"], PALETTE["--sv-bg-3"], .85),
+                                 PALETTE["--sv-bg-3"]), 4.5)
+
+    def test_the_blue_chips_are_neutral_ink(self):
+        """--accent-blue is the chart's first slot now (#3987E5): on its own
+        12 % wash over a card it is 4.49:1. A severity or an asset class is
+        not a series: the chips print in ink-2 (plan §3.6, §7)."""
+        kit = read(KIT)
+        for sel in (".badge-medium", ".badge-stock"):
+            with self.subTest(selector=sel):
+                self.assertEqual(RailFiltersOnTheKitTests.value(
+                    kit, "body:not(.light-mode) " + sel, "color"), "var(--sv-ink-2)")
+        wash = mix("#30a0e8", PALETTE["--sv-bg-1"], .12)
+        self.assertLess(contrast(PALETTE["--sv-cat-1"], wash), 4.5)
+        self.assertGreater(contrast(PALETTE["--sv-ink-2"], wash), 4.5)
+
+    def test_the_band_s_cells_fit_more_at_the_11px_floor(self):
+        """The band's words rose to 11 px and their cells grew by a third:
+        at 1920 px two cells hid behind the arrow, where main showed all 14
+        (review, 2026-11-07). A cell's sub-line is words, so Inter (plan
+        rule 5; JetBrains Mono's 0.6 em is wider), and its sides take the
+        spacing scale's 8, as the shared table's cells do."""
+        kit = read(KIT)
+        sub = RailFiltersOnTheKitTests.value(kit, ".ip-cat .ip-sub", "font-family")
+        self.assertEqual(sub, "var(--sv-font-sans)")
+        for side in ("padding-left", "padding-right"):
+            self.assertEqual(RailFiltersOnTheKitTests.value(kit, ".ip-cat", side), "var(--sv-sp-3)")
+
+    def test_a_kit_field_keeps_16px_on_a_phone(self):
+        """iOS zooms the page on focus under 16 px (sv-responsive.css):
+        .sv-input takes the base size, 14 px on a phone, so it is named."""
+        self.assertEqual(block(read(KIT), ".sv-input", ("@media (max-width: 768px)",)),
+                         {"font-size": "16px"})
+
+    def test_a_disabled_variant_reads_disabled(self):
+        """The variants (BUY, SELL, stop, secondary) come after sauron.css's
+        disabled look at its weight, so a disabled BUY kept its jade: the
+        disabled look is restated after them."""
+        kit = read(KIT)
+        order = [p for p, b, c in rules(kit) if not c]
+        last_variant = max(i for i, p in enumerate(order) if ".btn.btn-buy" in p or ".btn.btn-stop" in p)
+        disabled = [i for i, p in enumerate(order) if "[disabled]" in p and ".btn-buy" in p]
+        self.assertTrue(disabled)
+        self.assertGreater(disabled[-1], last_variant)
+        rule = dict(decls([b for p, b, c in rules(kit) if not c][disabled[-1]]))
+        self.assertEqual((rule["background"], rule["color"], rule["border-color"]),
+                         ("var(--sv-bg-2)", "var(--sv-ink-4)", "var(--sv-line-1)"))
+
+    def test_the_dark_field_rule_yields_to_a_component_s_state(self):
+        """The field rule's weight (0,2,2) outweighed every component's own
+        state: the idle lock's filled PIN boxes lost their edge. At a
+        field's weight (:where), a component's state wins again."""
+        kit = strip_comments(read(KIT))
+        self.assertIn(":where(body:not(.light-mode)) :is(.form-input, .input, input[type=text]", kit)
+        self.assertNotRegex(kit, r"(^|\})\s*body:not\(\.light-mode\) :is\(\.form-input")
 
 
 def _script_with(marker):
@@ -708,6 +955,76 @@ class AmbientGuardNodeTests(SimpleTestCase):
                 self.assertRegex(got["clock"] or "", r"^\d\d:\d\d:\d\d UTC$")
 
 
+#: The code-stream's block of base.html (Ask Sauron's script), from its
+#: comment to its two loops, run alone with a stubbed page.
+CODE_STREAM_HARNESS = r"""
+const vm = require('vm');
+const fs = require('fs');
+const block = fs.readFileSync(process.argv[2], 'utf8');
+const out = {};
+for (const [hidden, reduced] of [[false, false], [true, false], [false, true]]) {
+  let timers = 0;
+  const para = () => ({ childNodes: [], appendChild(n) { this.childNodes.push(n); return n; },
+                        removeChild() {}, get firstChild() { return this.childNodes[0]; } });
+  const nodes = { seCsParaLeft: para(), seCsParaRight: para() };
+  const ctx = {
+    Math, Date, Promise, console,
+    window: { matchMedia: q => ({ matches: reduced && /reduce/.test(q) }) },
+    document: { getElementById: id => nodes[id] || null,
+                createElement: () => ({ appendChild() {}, set className(v) {}, textContent: '' }) },
+    getComputedStyle: () => ({ display: hidden ? 'none' : 'block' }),
+    setTimeout: () => { timers++; return timers; },
+  };
+  vm.createContext(ctx);
+  vm.runInContext('(function () {' + block + '})();', ctx);
+  out[(hidden ? 'hidden' : 'shown') + (reduced ? '+reduced' : '')] = { timers };
+}
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(NODE, "node is not on this machine")
+class CodeStreamGuardNodeTests(SimpleTestCase):
+    """The two code-stream paragraphs type fake log lines (fake R values,
+    fake prices) letter by letter, on timers. S1a hides them on work pages,
+    and they went on typing into the hidden nodes: 167 timer callbacks in
+    6 s on /command/ (review, 2026-11-07). Like the other ambient loops,
+    they start only where their layer is displayed and no reduced motion
+    is asked."""
+
+    START = "// ── Ambient code-stream"
+    END = "loop(streamRight, 1100);\n    }"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        base = read(BASE)
+        i = base.index(cls.START)
+        cls.block = base[i:base.index(cls.END, i) + len(cls.END)]
+        with tempfile.TemporaryDirectory() as tmp:
+            data = pathlib.Path(tmp) / "block.js"
+            data.write_text(cls.block, encoding="utf-8")
+            harness = pathlib.Path(tmp) / "harness.js"
+            harness.write_text(CODE_STREAM_HARNESS, encoding="utf-8")
+            done = subprocess.run([NODE, str(harness), str(data)], capture_output=True,
+                                  text=True, timeout=60)
+        if done.returncode:
+            raise AssertionError(done.stderr)
+        cls.got = json.loads(done.stdout)
+
+    def test_the_stream_types_where_it_shows(self):
+        self.assertEqual(self.got["shown"]["timers"], 2, self.got)
+
+    def test_no_timer_for_a_hidden_stream(self):
+        self.assertEqual(self.got["hidden"]["timers"], 0, self.got)
+
+    def test_no_timer_under_reduced_motion(self):
+        self.assertEqual(self.got["shown+reduced"]["timers"], 0, self.got)
+
+    def test_the_guard_reads_the_layer_s_display(self):
+        self.assertIn("getComputedStyle(streamLeft).display !== 'none'", self.block)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Measured: the shell as the browser computes it
 # ══════════════════════════════════════════════════════════════════════════
@@ -724,6 +1041,27 @@ SHELL_PROBE = r"""(async function () {
         + '<span class="up">+1</span><span class="down">-1</span><span class="sign-flat">0</span>'
         + '<span class="sv-world sv-world--live">REAL</span>';
     b.appendChild(probe);
+    // What the review of 2026-11-07 found, on chips and states the shell
+    // carries: put inside the page's content, like the pages print them.
+    var rv = document.createElement('div');
+    rv.innerHTML = '<span class="hd-tab-r up">+5.78R</span><span class="hd-tone-up">+1.0</span>'
+        + '<div class="sv-adv-card"><span class="up">+12.00</span></div>'
+        + '<span class="badge badge-medium">MEDIUM</span><span class="badge badge-stock">STOCK</span>'
+        + '<button type="button" class="btn btn-buy" disabled>Buy</button>'
+        + '<button type="button" class="btn btn-sell" disabled>Sell</button>'
+        + '<div class="il-card"><input type="password" class="has-val" value="1"></div>'
+        + '<div class="ip-cat"><span class="ip-pnl"><span class="ip-pnl-apart">PAPER</span></span></div>'
+        + '<span class="badge badge-bullish">BULL</span><span class="sv-venue sv-venue--live">LIVE</span>'
+        + '<span class="sv-unknown">—</span><span class="sv-world sv-world--paper">PAPER</span>'
+        + '<div class="ip-cat"><span class="ip-count">3</span></div>'
+        + '<span class="dh-chg up">+0.42%%</span><span class="sr-pop-dir sr-pop-dir-bullish">BULLISH</span>';
+    (document.querySelector('.page-content') || b).appendChild(rv);
+    function q(s) { return rv.querySelector(s); }
+    function look(s) { var c = getComputedStyle(q(s)); return { color: c.color, bg: c.backgroundColor, border: c.borderTopColor, opacity: c.opacity }; }
+    out.review = { hordeUp: look('.hd-tab-r.up').color, toneUp: look('.hd-tone-up').color,
+                   adviceUp: look('.sv-adv-card .up').color, medium: look('.badge-medium'),
+                   stock: look('.badge-stock'), buyOff: look('.btn-buy'), sellOff: look('.btn-sell'),
+                   pinFilled: look('.il-card input').border, apart: look('.ip-pnl-apart').opacity };
     out.controls = Array.prototype.map.call(probe.querySelectorAll('button, input, select, textarea'), function (e) {
         var c = getComputedStyle(e); return { tag: e.tagName, family: c.fontFamily, size: c.fontSize, color: c.color };
     });
@@ -809,14 +1147,35 @@ SHELL_PROBE = r"""(async function () {
     %(light)s.forEach(function (n) { out.light[n] = lcs.getPropertyValue(n).trim(); });
     out.lightUp = getComputedStyle(probe.querySelector('.up')).color;
     out.lightReal = getComputedStyle(probe.querySelector('.sv-world--live')).backgroundColor;
+    out.lightAliases = {};
+    %(aliases)s.forEach(function (n) { out.lightAliases[n] = lcs.getPropertyValue(n).trim(); });
+    out.lightEls = { bull: look('.badge-bullish'), live: look('.sv-venue--live'), unknown: look('.sv-unknown'),
+                     paper: look('.sv-world--paper'), count: look('.ip-count'),
+                     chg: look('.dh-chg.up'), dir: look('.sr-pop-dir-bullish') };
     b.classList.remove('light-mode');
     probe.remove();
+    rv.remove();
     return JSON.stringify(out);
-})()""" % {"ambient": json.dumps(list(AMBIENT)), "light": json.dumps(sorted(LIGHT_TODAY))}
+})()""" % {"ambient": json.dumps(list(AMBIENT)), "light": json.dumps(sorted(LIGHT_TODAY)),
+           "aliases": json.dumps(sorted(set(LIGHT_ALIASES_TODAY) | set(LIGHT_OVERLAY_TODAY)))}
 
 
 def rgb(h):
     return "rgb(%d, %d, %d)" % hex_rgb(h)
+
+
+def rgba_of(css_colour):
+    """(r, g, b, a) of a computed colour, rgb()/rgba() or the color(srgb …)
+    a color-mix() computes to, so two spellings of one colour compare
+    equal."""
+    m = re.fullmatch(r"color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: / ([\d.]+))?\)", css_colour)
+    if m:
+        r, g, b = (round(float(x) * 255) for x in m.group(1, 2, 3))
+        return (r, g, b, round(float(m.group(4) or 1), 3))
+    m = re.fullmatch(r"rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)", css_colour)
+    if not m:
+        raise AssertionError("not a colour: %r" % css_colour)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), round(float(m.group(4) or 1), 3))
 
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
@@ -896,6 +1255,51 @@ class ShellMeasuredTests(TestCase):
                 self.assertEqual(got["light"][name].lower(), want)
         self.assertEqual(got["lightUp"], rgb("#00994d"))
         self.assertEqual(got["lightReal"], rgb("#e83030"))
+
+    def test_light_mode_keeps_today_s_aliases_overlay_and_chips(self):
+        """Light mode as origin/main computes it (2026-11-07): the aliases
+        and the overlay's surfaces at their inherited values, a bullish chip
+        on its light wash, the band's counts in the light accent, LIVE as
+        a red word, the unknown dash at 65 %, PAPER in the light ink."""
+        for (url, width), got in sorted(self.got.items()):
+            if width != 1440:
+                continue
+            for name, want in sorted({**LIGHT_ALIASES_TODAY, **LIGHT_OVERLAY_TODAY}.items()):
+                with self.subTest(url=url, token=name):
+                    self.assertEqual(got["lightAliases"][name].lower(), want)
+            els = got["lightEls"]
+            with self.subTest(url=url, element="chips"):
+                self.assertEqual((els["bull"]["color"], els["bull"]["bg"]),
+                                 (rgb("#00994d"), rgb("#d0f0d8")))
+                self.assertEqual((els["live"]["color"], els["live"]["bg"]),
+                                 (rgb("#e83030"), "rgba(0, 0, 0, 0)"))
+                self.assertEqual(els["unknown"]["opacity"], "0.65")
+                self.assertEqual(els["paper"]["color"], rgb("#8aaa8a"))
+                self.assertEqual(els["count"]["color"], rgb("#00994d"))
+                # The washes behind a gain: the old Eye's green, as today.
+                self.assertEqual(rgba_of(els["chg"]["bg"]), (0, 232, 104, 0.08))
+                self.assertEqual(rgba_of(els["dir"]["bg"]), (0, 232, 104, 0.18))
+
+    def test_the_review_s_states_in_the_dark_theme(self):
+        """What the review of 2026-11-07 measured: a gain in the Horde's
+        strip and in the close advice is jade, never the Eye; the blue chips
+        are neutral ink (4.4:1 in the chart blue); a disabled BUY or SELL
+        reads disabled; an idle-lock box that holds a digit keeps its Eye
+        edge; the band's apart groups print at full strength."""
+        for (url, width), got in sorted(self.got.items()):
+            r = got["review"]
+            with self.subTest(url=url, width=width):
+                self.assertEqual(r["hordeUp"], rgb(PALETTE["--sv-up"]))
+                self.assertEqual(r["toneUp"], rgb(PALETTE["--sv-up"]))
+                self.assertEqual(r["adviceUp"], rgb(PALETTE["--sv-up"]))
+                for chip in ("medium", "stock"):
+                    self.assertEqual(r[chip]["color"], rgb(PALETTE["--sv-ink-2"]), chip)
+                for btn in ("buyOff", "sellOff"):
+                    self.assertEqual((r[btn]["color"], r[btn]["bg"], r[btn]["border"]),
+                                     (rgb(PALETTE["--sv-ink-4"]), rgb(PALETTE["--sv-bg-2"]),
+                                      rgb(PALETTE["--sv-line-1"])), btn)
+                self.assertEqual(r["pinFilled"], rgb(PALETTE["--sv-eye"]))
+                self.assertEqual(r["apart"], "1")
 
     def test_nothing_in_the_shell_is_under_11px(self):
         """The sidebar, the bars, the rail, the bottom band and every

@@ -50,6 +50,7 @@
     --sv-down-fill: #E5484D; /* down candles, bars, volume (at 35 %) */
     --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
     --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+    --sv-up-tint: var(--sv-up);  /* the base of sauron.css's own washes and glows behind a gain */
 
     /* ── §3.5 Whose money (the approved convention of 2026-09-30) ── */
     --sv-real: #CC3A40;      /* the only solid red fill: REAL chip, armed pill, row edge */
@@ -205,4 +206,17 @@ body.light-mode {
     --sv-cat-3: #6a5cc8;
     --sv-cat-4: #8a6a00;
     --sv-cat-5: #b03a68;
+    /* The derived tokens, declared again (2026-11-07): a custom property is
+       computed where it is declared, so on :root these took the dark
+       palette, and light mode inherited a jade wash and the dark ink-3 for
+       PAPER. Here they read the light palette above. */
+    --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
+    --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+    --sv-paper: var(--sv-ink-3);
+    --sv-danger: var(--sv-down);
+    --sv-grid: color-mix(in srgb, var(--sv-ink-1) 5%, transparent);
+    /* sauron.css's washes and glows behind a gain (the quote band's change,
+       a bullish badge, a sparkline's glow) were the dark Eye's green at a
+       low strength in both themes; light mode keeps that green. */
+    --sv-up-tint: #00e868;
 }

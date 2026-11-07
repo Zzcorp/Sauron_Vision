@@ -468,7 +468,7 @@
         tbody tr:hover { background: var(--bg-card-hover); }
 
         .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
-        .badge-bullish { background: var(--sv-up-wash, var(--accent-dim)); color: var(--sv-up, var(--accent)); }
+        .badge-bullish { background: var(--accent-dim); color: var(--accent); }
         .badge-bearish { background: var(--accent-red-dim); color: var(--accent-red); }
         .badge-neutral { background: rgba(90,138,106,0.2); color: var(--text-secondary); }
         .badge-critical { background: rgba(232,48,48,0.15); color: var(--accent-red); animation: badgePulse 2s infinite; }
@@ -1289,6 +1289,10 @@
             font-family: var(--sv-font-mono, var(--font-display)); line-height: 1.1;
             font-variant-numeric: tabular-nums;
         }
+        /* Light mode keeps today's accent on the counts (frozen, 2026-11-07),
+           at this rule's weight and before the tone rules below, which win
+           over it as they did. */
+        :where(body.light-mode) .ip-cat .ip-count { color: var(--accent); }
         .ip-cat .ip-sub { font-size: 9px; color: var(--text-secondary); }
         /* OPEN P&L is the band's headline figure and reads at the size of
            one: a step above the sibling counts, tabular so a swing from
@@ -1624,8 +1628,8 @@
             letter-spacing: 1.5px; padding: 2px 6px; border-radius: 3px;
         }
         .sr-signal .sr-badge-bullish {
-            background: color-mix(in srgb, var(--sv-up, #00e868) 12%, transparent); color: var(--sv-up, var(--accent));
-            border: 1px solid color-mix(in srgb, var(--sv-up, #00e868) 30%, transparent);
+            background: color-mix(in srgb, var(--sv-up-tint, #00e868) 12%, transparent); color: var(--sv-up, var(--accent));
+            border: 1px solid color-mix(in srgb, var(--sv-up-tint, #00e868) 30%, transparent);
         }
         .sr-signal .sr-badge-bearish {
             background: rgba(255,94,94,0.12); color: var(--accent-red);
@@ -1746,7 +1750,7 @@
             font-size: 9px; padding: 2px 6px;
             letter-spacing: 1.5px; border-radius: 2px;
         }
-        .sr-pop-dir.sr-pop-dir-bullish { background: color-mix(in srgb, var(--sv-up, #00e868) 18%, transparent); color: var(--sv-up, var(--accent)); }
+        .sr-pop-dir.sr-pop-dir-bullish { background: color-mix(in srgb, var(--sv-up-tint, #00e868) 18%, transparent); color: var(--sv-up, var(--accent)); }
         .sr-pop-dir.sr-pop-dir-bearish { background: rgba(232,48,48,0.18); color: var(--accent-red); }
         .sr-pop-title {
             font-size: 12px; line-height: 1.45; color: var(--text-secondary);
@@ -1874,7 +1878,7 @@
         .dh-pop-badge { width: 32px; height: 32px; border-radius: 50%; display: flex;
                         align-items: center; justify-content: center; font-size: 14px;
                         border: 1px solid var(--border); }
-        .dh-pop-badge.up { background: color-mix(in srgb, var(--sv-up, #00e868) 10%, transparent); color: var(--sv-up, var(--accent)); border-color: var(--sv-up, var(--accent)); }
+        .dh-pop-badge.up { background: color-mix(in srgb, var(--sv-up-tint, #00e868) 10%, transparent); color: var(--sv-up, var(--accent)); border-color: var(--sv-up, var(--accent)); }
         .dh-pop-badge.down { background: rgba(232,48,48,.1); color: var(--accent-red); border-color: var(--accent-red); }
         .dh-pop-badge.flat { color: var(--text-muted); }
         .dh-pop-big { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
@@ -2191,7 +2195,7 @@
             font-family: var(--font-mono); font-size: 10px; font-weight: 700;
             padding: 2px 6px; border-radius: 3px; min-width: 56px; text-align: center;
         }
-        .wl-chg.up { color: var(--sv-up, var(--accent)); background: color-mix(in srgb, var(--sv-up, #00e868) 10%, transparent); }
+        .wl-chg.up { color: var(--sv-up, var(--accent)); background: color-mix(in srgb, var(--sv-up-tint, #00e868) 10%, transparent); }
         .wl-chg.down { color: var(--accent-red); background: rgba(255,94,94,0.10); }
         /* Second line under the acronym — full name + asset-class chip. */
         .wl-rowname {
@@ -2271,10 +2275,10 @@
         .dh-val { color: var(--text-primary); font-weight: 700; font-size: 15px; letter-spacing: 0.5px; }
         .dh-chg { font-size: 12px; font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.5px;
                   padding: 2px 6px; border-radius: 3px; }
-        .dh-chg.up { color: var(--sv-up, var(--accent)); background: color-mix(in srgb, var(--sv-up, #00e868) 8%, transparent); }
+        .dh-chg.up { color: var(--sv-up, var(--accent)); background: color-mix(in srgb, var(--sv-up-tint, #00e868) 8%, transparent); }
         .dh-chg.down { color: var(--accent-red); background: rgba(232,48,48,0.08); }
         .dh-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-        .dh-dot.up { background: var(--sv-up, var(--accent)); box-shadow: 0 0 8px var(--accent), 0 0 16px color-mix(in srgb, var(--sv-up, #00e868) 30%, transparent); }
+        .dh-dot.up { background: var(--sv-up, var(--accent)); box-shadow: 0 0 8px var(--accent), 0 0 16px color-mix(in srgb, var(--sv-up-tint, #00e868) 30%, transparent); }
         .dh-dot.down { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red), 0 0 16px rgba(232,48,48,0.3); }
         .dh-dot.flat { background: var(--text-muted); }
         /* Popup — fixed position, anchored by JS to escape the scroll container */
@@ -2304,7 +2308,7 @@
         .dh-pop-badge { width: 32px; height: 32px; border-radius: 50%; display: flex;
                         align-items: center; justify-content: center; font-size: 14px;
                         border: 1px solid var(--border); }
-        .dh-pop-badge.up { background: color-mix(in srgb, var(--sv-up, #00e868) 10%, transparent); color: var(--sv-up, var(--accent)); border-color: var(--sv-up, var(--accent)); }
+        .dh-pop-badge.up { background: color-mix(in srgb, var(--sv-up-tint, #00e868) 10%, transparent); color: var(--sv-up, var(--accent)); border-color: var(--sv-up, var(--accent)); }
         .dh-pop-badge.down { background: rgba(232,48,48,.1); color: var(--accent-red); border-color: var(--accent-red); }
         .dh-pop-badge.flat { color: var(--text-muted); }
         .dh-pop-big { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
@@ -2779,7 +2783,7 @@
         .pop-spark svg { width: 100%; height: 34px; display: block; }
         .pop-spark svg path {
             fill: none; stroke: var(--sv-up, var(--accent)); stroke-width: 1.6;
-            filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sv-up, #00e868) 35%, transparent));
+            filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sv-up-tint, #00e868) 35%, transparent));
         }
         .pop-spark[data-up="0"] svg path {
             stroke: var(--accent-red);
@@ -3431,7 +3435,7 @@
         .oc-sparkline path {
             fill: none; stroke: var(--sv-up, var(--accent)); stroke-width: 1.5;
             stroke-linejoin: round; stroke-linecap: round;
-            filter: drop-shadow(0 0 4px color-mix(in srgb, var(--sv-up, #00e868) 40%, transparent));
+            filter: drop-shadow(0 0 4px color-mix(in srgb, var(--sv-up-tint, #00e868) 40%, transparent));
         }
         .oc-sparkline.bearish path {
             stroke: var(--accent-red);
@@ -5050,6 +5054,29 @@ button:focus-visible,
     /* Geometry */
     --radius-md:   8px;
     --se-panel-height: 420px;
+}
+/* Light mode, frozen (UI plan §15, 2026-11-07). The comment above is half
+   right: a var() here is resolved where the alias is DECLARED, on :root,
+   and the result inherits as a value. Light mode never redefined the
+   aliases, so it computed the old dark root's colours for them; S1a's
+   re-pointed root would have moved them (--down from #d03030 to the loss
+   coral, 5.06:1 on a white card to 2.77). They are restated here at the
+   values light mode computes on origin/main ede54d0. */
+body.light-mode {
+    --text: #daf0e6;
+    --text2: #7aaa8a;
+    --text3: #3a6850;
+    --bg: #060e0a;
+    --bg2: #081410;
+    --bg3: #0a1a14;
+    --bg-alt: #081410;
+    --bg-elev: #0e2218;
+    --bg-darker: #030806;
+    --accent-green: #00e868;
+    --down: #d03030;
+    --purple: #8840d0;
+    --gold: #d8b020;
+    --blue: #30a0e8;
 }
 
 /* ── The lead metric ─────────────────────────────────────────────────────

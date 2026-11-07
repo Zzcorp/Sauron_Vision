@@ -16,8 +16,10 @@ data-sv-rail-n, data-sv-gone-toggle, #hbSignalRows, .sv-pinned) join the
 inventory when that branch merges. They joined on 2026-11-07, when
 origin/main (railfilters, #90, and the rest of #89-#95) merged into this
 branch; data-sv-gone-toggle, named from an earlier draft, never landed
-(LEFT THE RAIL's chip is a data-f-toggle with data-f-key="gone"), so
-there is nothing by that name to record.
+under that name. LEFT THE RAIL landed as three hooks, recorded instead
+(review of the merge, 2026-11-07): the section of departures
+(data-sv-gone), the chip that toggles it, a data-f-toggle like the other
+toggling chips, and the host's own state (data-f-gone).
 
 How each kind is counted, per file (templates, scripts, the template tags):
   * a data attribute: every occurrence of the attribute's name, as a whole
@@ -57,6 +59,12 @@ DATA_ATTRS = (
     # railfilters' (2026-11-07, at its merge, as plan §11 says): the filter
     # hosts, the lists the filters order, the rail's counts.
     "data-sv-fhost", "data-sv-list", "data-sv-rail-n",
+    # LEFT THE RAIL, the hook plan §11 called data-sv-gone-toggle, as it
+    # landed (review of the merge, 2026-11-07): the section the departures
+    # sit in (data-sv-gone), the chips that toggle a filter, LEFT among
+    # them (data-f-toggle), and the host's own state that shows or hides
+    # the section (data-f-gone). Counted on origin/main ede54d0.
+    "data-sv-gone", "data-f-toggle", "data-f-gone",
 )
 
 IDS = (
@@ -218,6 +226,8 @@ def inventory():
 # #90), taking one .sv-age and one data-sv-at with them (base.html 4 -> 3
 # and 7 -> 6; the partial 1 and 1). Every other count is main's own, the
 # same as the S0 tip's or higher, and railfilters' hooks joined above.
+# LEFT THE RAIL's three hooks (data-sv-gone, data-f-toggle, data-f-gone)
+# joined on 2026-11-07 from the same tree, at the review of the merge.
 # A file may gain a hook; it may not lose one. Each hook below must also be
 # found somewhere (no hook is recorded at zero), so a hook renamed
 # everywhere at once fails too.
@@ -499,6 +509,16 @@ RECORDED = {
         'static/js/sv-instrument-live.js': 2,
         'templates/_partials/deal_ticket.html': 4,
     },
+    'data-f-gone': {
+        'static/js/sv-rail-filters.js': 2,
+        'templates/_partials/rail_host_attrs.html': 1,
+        'templates/base.html': 1,
+    },
+    'data-f-toggle': {
+        'static/js/sv-rail-filters.js': 1,
+        'templates/_partials/rail_sig_chips.html': 5,
+        'templates/_partials/rail_watch_chips.html': 2,
+    },
     'data-flash': {
         'static/js/sv-horde.js': 5,
     },
@@ -568,6 +588,10 @@ RECORDED = {
         'templates/base.html': 3,
         'templates/dashboard/admin_dashboard.html': 1,
         'templates/dashboard/backtest_list.html': 2,
+    },
+    'data-sv-gone': {
+        'static/js/sv-rail-filters.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
     },
     'data-sv-list': {
         'static/js/sv-rail-filters.js': 3,
@@ -737,6 +761,13 @@ class LiveHooksInventoryTests(SimpleTestCase):
         self.assertGreater(count_id(positions, "svCloseAll"), 0)
         self.assertEqual(count_id(positions.replace('id="svCloseAll"', 'id="svCloseEverything"'),
                                   "svCloseAll") + 1, count_id(positions, "svCloseAll"))
+        # LEFT THE RAIL's section (2026-11-07): its hook is counted alone,
+        # never inside the count it sits next to (data-sv-gone-n).
+        rail = (ROOT / "templates/_partials/signal_rail_items.html").read_text(encoding="utf-8")
+        self.assertEqual(count_data_attr(rail, "data-sv-gone"), 1)
+        self.assertEqual(count_data_attr(rail.replace("data-sv-gone ", "data-sv-left "),
+                                         "data-sv-gone"), 0)
+        self.assertEqual(count_data_attr('<b data-sv-gone-n>3</b>', "data-sv-gone"), 0)
 
     def test_counting_reads_through_django_tags_in_a_class(self):
         html = ('<span class="ip-x {% if a > 0 %}up{% elif a < 0 %}down{% endif %}">'

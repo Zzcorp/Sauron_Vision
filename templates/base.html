@@ -8202,13 +8202,17 @@ never nags. He never acts.{% endcomment %}
 
     // ── Ambient code-stream — fake "Sauron's current activity" feed ──
     // Two background paragraphs, each typing log lines letter-by-letter
-    // and fading out. Decoration only. Honors prefers-reduced-motion.
+    // and fading out. Decoration only. Honors prefers-reduced-motion, and
+    // starts only where its layer is displayed: sauron.css hides it on the
+    // work pages (UI plan §8, 2026-11-07), where it went on typing fake
+    // lines into hidden nodes on timers.
     var prefersReduced = window.matchMedia &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var streamLeft  = document.getElementById('seCsParaLeft');
     var streamRight = document.getElementById('seCsParaRight');
 
-    if (streamLeft && streamRight && !prefersReduced) {
+    if (streamLeft && streamRight && !prefersReduced &&
+        getComputedStyle(streamLeft).display !== 'none') {
         var TEMPLATES = [
             'brain.observe(<tag>regime</tag>=<num>{regime}</num>)',
             '[<ts>{ts}</ts>] gate.evaluate <tag>{rule}</tag> -> {decision}',
