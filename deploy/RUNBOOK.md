@@ -1003,6 +1003,73 @@ fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
 
 ---
 
+## The Operations Center (/command/)
+
+The home after login. It answers **what is my money doing, and what
+should I do now**; the Oculus answers whether the machine is turning. It
+places, closes and changes nothing by itself: its CLOSE buttons open the
+same dialog as /positions/, with the same PIN, and its bot forms post to
+the Admin HQ's endpoints.
+
+**Three worlds, never added.** Every row belongs to one world, read off
+its own stamps by `dashboard.position_summary.world_of` (the paper flag,
+then the broker and its environment):
+
+- **REAL**: an order at a broker, on a real account;
+- **DEMO**: a broker's demo account (an eToro row stamped
+  `broker_env: paper`): simulated money at a real venue;
+- **PAPER**: the platform's own simulator;
+- a hand-recorded row that states no venue is in none of them and is
+  said so (`recorded by hand: states no venue`).
+
+No cell adds or averages money across worlds. The hero prints one open
+P&L line per world; the LIVE head leads with `N REAL OPEN` and counts every
+world in its title; win rate, profit factor, averages and the P&L by class
+are per world. A bot's world is its **account's**, not its mode: a
+live-mode bot whose symbols route to an eToro demo account reads DEMO, and
+the topbar's red armed pill counts only the bots on a REAL account (a bot
+whose route cannot be read is counted, never left out). The hero's
+`bots: live mode` says the configs' mode only.
+
+**The platform book's words.** The big number is labelled
+`PLATFORM BOOK` when a broker is interfaced (`PORTFOLIO VALUE` with none)
+and is exactly: the cash typed on /setup/ (in the portfolio's currency) +
+the REAL and DEMO positions' notional (USD, hand-recorded rows too) +
+paper's open and realized P&L, not converted. It is not a balance, so it
+wears no currency sign and says `(EUR + USD, not converted)` when the two
+differ. eToro's own equity, with its age, sits beside it (the broker card).
+Its day change is today's snapshot, written at 23:30 UTC: a dash, said
+so, until then, with yesterday's change and its date beside it.
+
+**Each tab's window.**
+
+| Tab | Window | Notes |
+|---|---|---|
+| LIVE | now | each open row with its world, its mark's source and age, its P&L in its own currency (an estimate starts with `≈`); `Gate events · the last 30, any age`, dated when not today; the CLOSE column stays on screen |
+| PORTFOLIO | lifetime, per world | win rate, profit factor (gross wins over gross losses), payoff (average win over average loss), averages, the top five closes; Sharpe and Sortino over 30 days of daily snapshots (5 or more needed); max drawdown from the newest snapshot, dated |
+| HISTORY | 90 days | R only for the head (all worlds); per-rule P&L per world with its currency; the cumulative R line one point per day; the weekday map shaded by its average R (0.05R floor) |
+| BOTS | 24 hours | opens, closes and realized P&L per world, in the config's currency; health from each bot's own tick against the tick's cadence (ALIVE on time, IDLE late or not ticked yet, OFF disabled); the Toggle and Tick forms only for superusers, who alone may post them |
+
+**Dashes.** A `—` is never a zero: each has a title saying why, and the
+foot of the page lists every reason shown (`What a dash means here`). In
+the `/api/day/live/` payload a dash is the string `—` with its reason in
+the words.
+
+**What it reads, and how often.** One walk of the open book per request;
+the tabs are rendered without the shell. The tab heads and the hero
+re-read `/command/tab/metrics/` on fills and every 45 s while the tab is
+visible. That poll says it is a script (`X-Requested-With`), so it never
+holds the session open: when the idle lock engages it gets `423` and
+stops, it stops on a redirect, schedules nothing while the tab is hidden,
+and resumes when the tab is shown again or the PIN unlocks it. No broker
+and no model is called to draw the page.
+
+Nothing to run. `tests/test_command_truth.py` holds the page to these
+rules, and `tests/js/command_metrics.test.js` (run by it under node) to
+the poll's.
+
+---
+
 ## The alarm bot (critical problems only)
 
 The operator, 2026-09-28: the second keeper must not be flooded with
