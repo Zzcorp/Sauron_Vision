@@ -934,3 +934,37 @@ TWIN_REF_MARK = f":{TWIN_CALLER}:"
 #: shows it; nothing that routes reads the day row.
 FRONTIER_PER_DAY = 0
 FRONTIER_PER_DAY_KEY = "frontier_per_day"
+
+# ── O2c: honor, temperaments, Captains, the Emperor and the drums, in
+# shadow (2026-11-07, the O2 spec §1.3.2) ─────────────────────────────────
+# The journal's new words, the fence's caps and the new tables' allowed
+# values (bot_program/orcs/models.py: Captain, CaptainOrder, OrcWave,
+# OrcTemperamentGrade). Nothing reads them yet: each arrives with the O2c
+# commit that writes it, behind its own switch, OFF on arrival and turned
+# on only with the trading PIN (N2). Nothing here sends anything.
+
+#: OrcJournal.kind: the Skeptic's co-sign, journaled beside its item and
+#: never a gate (C.18); the third assignment, after O1a's and O1d's.
+JOURNAL_KINDS = JOURNAL_KINDS + ("skeptic",)
+#: OrcJournal.author: the Emperor's order on each living Orc (C.13). A
+#: model's words, never a fact: FACT_AUTHORS is unchanged (N5).
+AUTHORS = AUTHORS + ("emperor",)
+#: The fence's caps (N5): a temperament's lane texts in PS9 (C.5), a
+#: Captain's words (C.8), the Emperor's order (C.11) and the Skeptic's
+#: verdict (C.18).
+FENCE_CAPS = {**FENCE_CAPS, "temperament": 600, "captain": 280,
+              "emperor": 600, "skeptic": 280}
+#: CaptainOrder.kind (C.7, §4 Q15): no add (hold_fire), a tighten to a
+#: level of the menu, a cut that names an Orc, a cap on a same bet's legs
+#: (theme). Each graded, never applied (C.8, C.9).
+CAPTAIN_ORDER_KINDS = ("hold_fire", "tighten", "cut", "theme")
+#: CaptainOrder.mode: every O2c order is in shadow (C.8), one of MODES.
+ORDER_MODES = (MODE_SHADOW,)
+#: Captain.state (C.7): seated while its class has a living Orc; idle
+#: while it has none (never deleted, its record kept).
+CAPTAIN_SEATED, CAPTAIN_IDLE = "seated", "idle"
+CAPTAIN_STATES = (CAPTAIN_SEATED, CAPTAIN_IDLE)
+#: OrcWave.breaker["state"] (C.16): closed, a wave's W12 wakes may go;
+#: open, its deliveries are journaled only, as in O1, and it records why.
+WAVE_BREAKER_CLOSED, WAVE_BREAKER_OPEN = "closed", "open"
+WAVE_BREAKER_STATES = (WAVE_BREAKER_CLOSED, WAVE_BREAKER_OPEN)

@@ -11,6 +11,14 @@ O2a's, adds the probe pairs' table (OrcTierGrade, moved out of the O2 set
 on purpose), one CreateModel, reversible; its allowed values are tuples
 in constants.py, never `choices`.
 
+O2c (2026-11-07, the O2 spec §1.3.2): its own migration, right after
+O2b's, adds the Captain, its orders in shadow, the drums' waves and the
+temperaments' grade (moved out of the O2 set on purpose), and
+Orc.temperament: four CreateModel and one AddField, each reversible; its
+allowed values are tuples in constants.py, never `choices`; no money
+column but a wave's AI spend (USD, staff pages only). Nothing reads the
+tables yet.
+
 Run with:  python manage.py test tests.orcs.test_orc_models
 """
 from io import StringIO
@@ -29,11 +37,14 @@ O2A_TABLES = {"OrcIntent"}
 #: O2b's own table (the O2 spec §1.2.2, 2026-11-06): one row per probe
 #: pair, moved out of O2_TABLES on purpose.
 O2B_TABLES = {"OrcTierGrade"}
+#: O2c's own tables (the O2 spec §1.3.2, 2026-11-07): the Captain per
+#: (user, class), its orders in shadow, the drums' waves per user and the
+#: temperaments' grade, moved out of O2_TABLES on purpose.
+O2C_TABLES = {"Captain", "CaptainOrder", "OrcWave", "OrcTemperamentGrade"}
 #: The tables only later O2 commits write ship in their own migrations.
-O2_TABLES = {"OrcActionGrade", "Captain", "CaptainOrder", "OrcWave",
-             "OrcBattle", "OrcLesson", "OrcWeapon", "OrcTemperamentGrade"}
+O2_TABLES = {"OrcActionGrade", "OrcBattle", "OrcLesson", "OrcWeapon"}
 #: Every table the package defines today.
-DEFINED = O1_TABLES | O2A_TABLES | O2B_TABLES
+DEFINED = O1_TABLES | O2A_TABLES | O2B_TABLES | O2C_TABLES
 
 
 class TheMigrationTests(TestCase):
@@ -103,6 +114,35 @@ class TheMigrationTests(TestCase):
             self.assertTrue(op.reversible, type(op).__name__)
         self.assertEqual({op.name for op in mig.operations}, O2B_TABLES)
 
+    def test_o2c_ships_its_own_migration_right_after_o2bs(self):
+        """O2c (2026-11-07, the O2 spec §1.0 item 4, §1.3.2): one migration
+        right after O2b's (0050), its only bot_program dependency, with
+        four CreateModel (its tables) and one AddField (Orc.temperament),
+        each reversible; the field a column of default '' (on PostgreSQL a
+        change of the catalogue only, no table rewrite)."""
+        from importlib import import_module
+
+        from django.db import migrations
+        mig = import_module("bot_program.migrations.0051_orcs_o2c").Migration
+        others = [d for d in mig.dependencies if d[0] == "bot_program"]
+        self.assertEqual(others, [("bot_program", "0050_orcs_o2b")],
+                         "one migration, right after O2b's")
+        for op in mig.operations:
+            self.assertIsInstance(op, (migrations.CreateModel,
+                                       migrations.AddField),
+                                  type(op).__name__)
+            self.assertTrue(op.reversible, type(op).__name__)
+        created = {op.name for op in mig.operations
+                   if isinstance(op, migrations.CreateModel)}
+        self.assertEqual(created, O2C_TABLES)
+        added = {(op.model_name, op.name) for op in mig.operations
+                 if isinstance(op, migrations.AddField)}
+        self.assertEqual(added, {("orc", "temperament")})
+        [field] = [op.field for op in mig.operations
+                   if isinstance(op, migrations.AddField)]
+        self.assertEqual((field.default, field.null, field.blank,
+                          field.max_length), ("", False, True, 16))
+
     def test_makemigrations_finds_nothing_left(self):
         out = StringIO()
         try:
@@ -115,11 +155,13 @@ class TheMigrationTests(TestCase):
 
 class TheTablesTests(SimpleTestCase):
 
-    def test_the_tables_are_the_ones_o1_o2a_and_o2b_write(self):
+    def test_the_tables_are_the_ones_o1_o2a_o2b_and_o2c_write(self):
         """O1's tables, O2a's OrcIntent (changed on purpose on 2026-11-05:
-        OrcIntent left the O2 set with O2a's migration) and O2b's
+        OrcIntent left the O2 set with O2a's migration), O2b's
         OrcTierGrade (changed on purpose on 2026-11-06: it left the O2 set
-        with O2b's migration)."""
+        with O2b's migration) and O2c's four (changed on purpose on
+        2026-11-07: Captain, CaptainOrder, OrcWave and OrcTemperamentGrade
+        left the O2 set with O2c's migration)."""
         from bot_program.orcs import models as m
         defined = {name for name in dir(m)
                    if isinstance(getattr(m, name), type)
@@ -400,3 +442,274 @@ class TheTierGradeTableTests(SimpleTestCase):
                              model._meta.get_field("world").max_length)
         self.assertLessEqual(max(map(len, C.RUNG_LIMITS)),
                              model._meta.get_field("probe_rung").max_length)
+
+
+def _columns_problems(test, model, columns):
+    """Every concrete column of `model` but its key at the spec's type,
+    size and nullability, none with `choices` (the TheIntentTableTests
+    pattern)."""
+    fields = {f.name: f for f in model._meta.concrete_fields
+              if not f.primary_key}
+    test.assertEqual(set(fields), set(columns))
+    for name, (kind, size, null) in columns.items():
+        f = fields[name]
+        with test.subTest(model=model.__name__, field=name):
+            test.assertEqual(f.get_internal_type(), kind)
+            test.assertEqual(f.null, null)
+            if size is not None:
+                test.assertEqual(f.max_length, size)
+            test.assertFalse(f.choices)
+    return fields
+
+
+class TheO2cTablesTests(SimpleTestCase):
+    """O2c's tables (the O2 spec §1.3.2; O2c, 2026-11-07): every column of
+    the spec at its type, one Captain per (user, class), one wave per
+    (user, wave id), one temperament grade per (temperament, version,
+    venue, class, bar source), no money column but a wave's AI spend, and
+    their allowed values tuples in constants.py (§1.0 item 5). Nothing
+    reads them in this commit."""
+
+    #: name -> (internal type, max_length, null)
+    CAPTAIN = {
+        "user": ("ForeignKey", None, False),
+        "asset_class": ("CharField", 12, False),
+        "seated_at": ("DateTimeField", None, False),
+        "label": ("CharField", 60, False),
+        "state": ("CharField", 12, False),
+        "last_wake_at": ("DateTimeField", None, True),
+        "wakes_today": ("SmallIntegerField", None, False),
+        "counters_day": ("DateField", None, True),
+        "pending": ("JSONField", None, False),
+    }
+    ORDER = {
+        "captain": ("ForeignKey", None, False),
+        "kind": ("CharField", 12, False),
+        "scope": ("JSONField", None, False),
+        "level_id": ("CharField", 24, False),
+        "level": ("JSONField", None, False),
+        "words": ("CharField", 300, False),
+        "mode": ("CharField", 10, False),
+        "issued_at": ("DateTimeField", None, False),
+        "expires_at": ("DateTimeField", None, True),
+        "cause": ("JSONField", None, False),
+        "skeptic": ("JSONField", None, False),
+        "grade": ("JSONField", None, False),
+        "s_version": ("CharField", 8, False),
+    }
+    WAVE = {
+        "wave_id": ("CharField", 40, False),
+        "user": ("ForeignKey", None, False),
+        "kind": ("CharField", 16, False),
+        "symbols": ("JSONField", None, False),
+        "origin": ("CharField", 40, False),
+        "first_at": ("DateTimeField", None, False),
+        "last_at": ("DateTimeField", None, False),
+        "max_hop": ("SmallIntegerField", None, False),
+        "drums": ("IntegerField", None, False),
+        "reach": ("JSONField", None, False),
+        "w12_queued": ("IntegerField", None, False),
+        "w12_answered": ("IntegerField", None, False),
+        "cost_usd": ("DecimalField", None, False),
+        "breaker": ("JSONField", None, False),
+    }
+    TEMPERAMENT_GRADE = {
+        "temperament": ("CharField", 16, False),
+        "version": ("CharField", 8, False),
+        "venue": ("CharField", 8, False),
+        "asset_class": ("CharField", 12, False),
+        "bar_source": ("CharField", 12, False),
+        "n": ("IntegerField", None, False),
+        "mean": ("FloatField", None, True),
+        "se": ("FloatField", None, True),
+        "lb80": ("FloatField", None, True),
+        "ub80": ("FloatField", None, True),
+        "vs_control_mean": ("FloatField", None, True),
+        "block": ("IntegerField", None, False),
+        "at": ("DateTimeField", None, False),
+    }
+    #: the words a money column is spelled with
+    MONEY = ("usd", "money", "pnl", "cost", "balance", "amount", "equity",
+             "notional", "qty")
+
+    def _model(self, name):
+        from django.apps import apps
+        return apps.get_model("bot_program", name)
+
+    def _money(self, fields):
+        return {n for n in fields if any(w in n for w in self.MONEY)}
+
+    def test_the_captain_one_per_user_and_class(self):
+        from django.conf import settings
+        from django.db import models
+        model = self._model("Captain")
+        fields = _columns_problems(self, model, self.CAPTAIN)
+        self.assertEqual(fields["user"].related_model._meta.label,
+                         settings.AUTH_USER_MODEL)
+        self.assertEqual(fields["user"].remote_field.on_delete,
+                         models.CASCADE)
+        uniques = {tuple(c.fields) for c in model._meta.constraints}
+        self.assertIn(("user", "asset_class"), uniques)
+        self.assertEqual(fields["pending"].default, dict)
+        self.assertEqual(fields["state"].default, "seated")
+        self.assertEqual(self._money(fields), set(), "no money column")
+
+    def test_an_order_in_shadow_keeps_its_level_by_reference(self):
+        """CaptainOrder (§1.3.2, C.8, C.9): its level kept as the stored
+        reference {level_id, kind, tf, price, stop}, which C.9 grades and
+        PS11 shows (§1.3.2 lists only the id: A.30's rule, as OrcIntent's
+        level); its words capped as FENCE_CAPS["captain"] allows; mode
+        shadow; R and prices only."""
+        from django.db import models
+
+        from bot_program.orcs import constants as C
+        model = self._model("CaptainOrder")
+        fields = _columns_problems(self, model, self.ORDER)
+        self.assertEqual((fields["captain"].related_model.__name__,
+                          fields["captain"].remote_field.on_delete),
+                         ("Captain", models.CASCADE))
+        for name in ("scope", "level", "cause", "skeptic", "grade"):
+            self.assertEqual(fields[name].default, dict, name)
+        self.assertEqual(fields["mode"].default, C.MODE_SHADOW)
+        self.assertGreaterEqual(fields["words"].max_length,
+                                C.FENCE_CAPS["captain"])
+        self.assertEqual(self._money(fields), set(), "no money column")
+
+    def test_a_wave_is_one_per_user_and_wave_id(self):
+        """drums.wave_of names a wave by its kind, symbol and second with
+        no user, so the id alone is never unique: (user, wave_id) is. The
+        wave's AI spend is its only money, in USD (staff pages only)."""
+        from django.conf import settings
+        from django.db import models
+        model = self._model("OrcWave")
+        fields = _columns_problems(self, model, self.WAVE)
+        self.assertEqual((fields["user"].related_model._meta.label,
+                          fields["user"].remote_field.on_delete),
+                         (settings.AUTH_USER_MODEL, models.CASCADE))
+        self.assertFalse(fields["wave_id"].unique, "never unique alone")
+        uniques = {tuple(c.fields) for c in model._meta.constraints}
+        self.assertIn(("user", "wave_id"), uniques)
+        self.assertEqual((fields["cost_usd"].max_digits,
+                          fields["cost_usd"].decimal_places), (10, 6))
+        self.assertEqual(self._money(fields), {"cost_usd"})
+        self.assertEqual(fields["breaker"].default, dict)
+        self.assertEqual(fields["symbols"].default, list)
+        self.assertEqual(fields["reach"].default, list)
+
+    def test_one_temperament_grade_per_key(self):
+        model = self._model("OrcTemperamentGrade")
+        fields = _columns_problems(self, model, self.TEMPERAMENT_GRADE)
+        uniques = {tuple(c.fields) for c in model._meta.constraints}
+        self.assertIn(("temperament", "version", "venue", "asset_class",
+                       "bar_source"), uniques)
+        self.assertEqual(self._money(fields), set(), "R only")
+
+    def test_the_orc_carries_its_temperament(self):
+        """Orc.temperament (§1.3.2): a CharField of 16, blank, '' for
+        every Orc born before O2c or with its switch OFF (C.4)."""
+        from bot_program.orcs.models import Orc
+        f = Orc._meta.get_field("temperament")
+        self.assertEqual((f.get_internal_type(), f.max_length, f.blank,
+                          f.null, f.default), ("CharField", 16, True, False,
+                                               ""))
+        self.assertFalse(f.choices)
+
+    def test_the_reverse_accessors_are_named_apart(self):
+        """No new table is reached from a platform row through `.orc`,
+        `.orc_leg` or `.orcs` (N1.6, test item g): a Captain through
+        user.orc_captains, its orders through captain.orders, a wave
+        through user.orc_waves."""
+        names = {(m, f): self._model(m)._meta.get_field(f)
+                 .remote_field.related_name
+                 for m, f in (("Captain", "user"),
+                              ("CaptainOrder", "captain"),
+                              ("OrcWave", "user"))}
+        self.assertEqual(names, {("Captain", "user"): "orc_captains",
+                                 ("CaptainOrder", "captain"): "orders",
+                                 ("OrcWave", "user"): "orc_waves"})
+        self.assertFalse(set(names.values()) & {"orc", "orc_leg", "orcs"})
+
+    def test_the_allowed_values_are_tuples(self):
+        """§1.0 item 5: the orders' kinds and mode, the Captain's states and
+        the wave breaker's, tuples in constants.py; each fits its
+        column."""
+        from bot_program.orcs import constants as C
+        self.assertEqual(C.CAPTAIN_ORDER_KINDS, ("hold_fire", "tighten",
+                                                 "cut", "theme"))
+        self.assertEqual(C.ORDER_MODES, (C.MODE_SHADOW,))
+        self.assertTrue(set(C.ORDER_MODES) <= set(C.MODES))
+        self.assertEqual(C.CAPTAIN_STATES, ("seated", "idle"))
+        self.assertEqual(C.WAVE_BREAKER_STATES, ("closed", "open"))
+        for model, field, values in (
+                ("CaptainOrder", "kind", C.CAPTAIN_ORDER_KINDS),
+                ("CaptainOrder", "mode", C.ORDER_MODES),
+                ("Captain", "state", C.CAPTAIN_STATES),
+                ("OrcWave", "kind", C.DRUM_KINDS),
+                ("OrcTemperamentGrade", "venue", C.VENUES)):
+            with self.subTest(f"{model}.{field}"):
+                self.assertLessEqual(max(map(len, values)), self._model(
+                    model)._meta.get_field(field).max_length)
+
+    def test_the_journal_words_and_the_fence_caps(self):
+        """§1.3.2: JOURNAL_KINDS gains `skeptic` (the Skeptic's co-sign),
+        AUTHORS gains `emperor`; FACT_AUTHORS stays code's alone (the
+        Emperor's words are a model's, never a fact, N5); FENCE_CAPS gains
+        the temperament's lane texts, a Captain's, the Emperor's and the
+        Skeptic's words."""
+        from bot_program.orcs import constants as C
+        self.assertIn("skeptic", C.JOURNAL_KINDS)
+        self.assertEqual(len(C.JOURNAL_KINDS), len(set(C.JOURNAL_KINDS)))
+        self.assertIn("emperor", C.AUTHORS)
+        self.assertEqual(C.FACT_AUTHORS, ("code", "care", "reconcile",
+                                          "morgul"))
+        self.assertNotIn("emperor", C.FACT_AUTHORS)
+        for kind, cap in (("temperament", 600), ("captain", 280),
+                          ("emperor", 600), ("skeptic", 280)):
+            self.assertEqual(C.FENCE_CAPS[kind], cap, kind)
+        from bot_program.orcs.models import OrcJournal
+        self.assertLessEqual(max(map(len, C.JOURNAL_KINDS)),
+                             OrcJournal._meta.get_field("kind").max_length)
+        self.assertLessEqual(max(map(len, C.AUTHORS)),
+                             OrcJournal._meta.get_field("author").max_length)
+
+
+class TheO2cConstraintTests(TestCase):
+    """The database holds the uniques (O2c, 2026-11-07)."""
+
+    def setUp(self):
+        self.user = _user("orc_o2c_models")
+        self.other = _user("orc_o2c_models_b")
+
+    def test_one_captain_per_user_and_class(self):
+        from bot_program.orcs.models import Captain, CaptainOrder
+        cap = Captain.objects.create(user=self.user, asset_class="crypto")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Captain.objects.create(user=self.user, asset_class="crypto")
+        Captain.objects.create(user=self.user, asset_class="forex")
+        Captain.objects.create(user=self.other, asset_class="crypto")
+        order = CaptainOrder.objects.create(captain=cap, kind="hold_fire",
+                                            scope={"class": "crypto"})
+        self.assertEqual((order.mode, list(cap.orders.all())),
+                         ("shadow", [order]))
+        self.assertEqual((cap.state, cap.pending, cap.wakes_today),
+                         ("seated", {}, 0))
+
+    def test_one_wave_per_user_and_wave_id(self):
+        from bot_program.orcs.models import OrcWave
+        wave = "stop_hit:BTCUSD:20261022132700"
+        OrcWave.objects.create(user=self.user, wave_id=wave, kind="stop_hit")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            OrcWave.objects.create(user=self.user, wave_id=wave,
+                                   kind="stop_hit")
+        OrcWave.objects.create(user=self.other, wave_id=wave,
+                               kind="stop_hit")
+        self.assertEqual(OrcWave.objects.filter(wave_id=wave).count(), 2)
+
+    def test_one_temperament_grade_per_key(self):
+        from bot_program.orcs.models import OrcTemperamentGrade
+        key = {"temperament": "striker", "version": "t1", "venue": "paper",
+               "asset_class": "crypto", "bar_source": "etoro"}
+        OrcTemperamentGrade.objects.create(**key)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            OrcTemperamentGrade.objects.create(**key)
+        OrcTemperamentGrade.objects.create(**{**key, "venue": "live"})

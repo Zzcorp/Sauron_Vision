@@ -817,11 +817,13 @@ from .aragorn_models import (  # noqa: F401
 # THE ORCS (2026-10-16, bot_program/orcs): one trader agent per open
 # position, journaled by code (O1: no model, no order). O2a (2026-11-05)
 # adds OrcIntent, a model's proposals in shadow; O2b (2026-11-06) adds
-# OrcTierGrade, the probe pairs, graded in shadow.
+# OrcTierGrade, the probe pairs, graded in shadow; O2c (2026-11-07) adds
+# the Captain, its orders in shadow, the drums' waves and the
+# temperaments' grade, unread until the O2c commits that write them.
 from .orcs.models import (  # noqa: F401
     OrcSeat, Orc, OrcLeg, OrcWake, OrcJournal, OrcTrack, OrcGrade,
     OrcSetting, OrcDossierBlock, OrcDayBaseline, OrcDrum, OrcIntent,
-    OrcTierGrade,
+    OrcTierGrade, Captain, CaptainOrder, OrcWave, OrcTemperamentGrade,
 )
 # THE SHORTS MEASURED BY HAND (2026-10-31, bot_program/short_readback.py):
 # a hand-taken eToro short read back clean at its fill.

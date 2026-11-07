@@ -74,7 +74,14 @@ O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
     "models": ("OrcIntent", "OrcIntent.Meta", "OrcIntent.__str__",
                # O2b's probes (2026-11-06): the probe pairs' table
-               "OrcTierGrade", "OrcTierGrade.Meta", "OrcTierGrade.__str__"),
+               "OrcTierGrade", "OrcTierGrade.Meta", "OrcTierGrade.__str__",
+               # O2c's tables (2026-11-07, §1.3.2): the Captain, its orders
+               # in shadow, the drums' waves, the temperaments' grade
+               "Captain", "Captain.Meta", "Captain.__str__",
+               "CaptainOrder", "CaptainOrder.Meta", "CaptainOrder.__str__",
+               "OrcWave", "OrcWave.Meta", "OrcWave.__str__",
+               "OrcTemperamentGrade", "OrcTemperamentGrade.Meta",
+               "OrcTemperamentGrade.__str__"),
     # O2a's mind (2026-11-05)
     "switches": ("_component_on", "gate_code", "minds_on",
                  # O2a's queue (2026-11-05)
@@ -436,13 +443,26 @@ SURFACES = {
 #: included, and is allowed that one name. O2b's probes (2026-11-06,
 #: changed on purpose): OrcTierGrade, which keeps what each rung answered
 #: of a probe pair, joins it, and the registry's re-export of it is
-#: allowed beside OrcIntent's (N1.6).
+#: allowed beside OrcIntent's (N1.6). O2c's tables (2026-11-07, changed on
+#: purpose): CaptainOrder, which keeps a Captain's words, joins it, its
+#: re-export allowed the same way; and an import of one of these names
+#: through bot_program.models, the registry's path, is read as an import
+#: of the package (package_imports).
 SURFACE_ONLY = {"OrcIntent", "scheduler", "mandate", "validator", "mind",
-                "mind_gateway", "OrcTierGrade"}
+                "mind_gateway", "OrcTierGrade", "CaptainOrder"}
 REGISTRY = {("bot_program/models.py", "OrcIntent"),
-            ("bot_program/models.py", "OrcTierGrade")}
+            ("bot_program/models.py", "OrcTierGrade"),
+            ("bot_program/models.py", "CaptainOrder")}
 #: The reverse accessors from the platform's rows to the Orcs (test g).
-REVERSE = {"orc", "orc_leg", "orcs"}
+#: O2c's tables (2026-11-07, changed on purpose): a user's Captains (and
+#: through them their orders) and a user's waves join them, with their
+#: lookups ("orc_captains__", "orc_waves__"), their tables' names and
+#: apps.get_model of a Captain's table (REVERSE_TABLES).
+REVERSE = {"orc", "orc_leg", "orcs", "orc_captains", "orc_waves"}
+REVERSE_LOOKUPS = ("orc__", "orc_captains__", "orc_waves__")
+REVERSE_TABLES = ("bot_program_orc", "bot_program_captain")
+#: The Orc tables whose model name does not start with "Orc".
+CAPTAIN_TABLES = ("Captain", "CaptainOrder")
 
 # ── the frozen O1 functions (test item h) ─────────────────────────────────
 
@@ -1186,7 +1206,7 @@ def package_imports(rel, tree) -> list:
                 if mod == "bot_program.orcs" or mod.startswith(
                         "bot_program.orcs.") or full == "bot_program.orcs":
                     out.append((rel, scope, mod, a.name))
-                elif mod == "bot_program.models" and a.name == "OrcIntent":
+                elif mod == "bot_program.models" and a.name in SURFACE_ONLY:
                     out.append((rel, scope, mod, a.name))
         elif isinstance(node, ast.Import):
             for a in node.names:
@@ -1209,20 +1229,22 @@ def is_order_path(rel) -> bool:
 
 
 def reverse_reads(rel, tree) -> list:
-    """(g) An attribute through .orc, .orc_leg or .orcs; a string that
-    starts "orc__" or names an Orc table; apps.get_model of an Orc table."""
+    """(g) An attribute through .orc, .orc_leg or .orcs (and, from O2c,
+    .orc_captains or .orc_waves); a string that starts one of their
+    lookups or names an Orc table; apps.get_model of an Orc table."""
     out = []
     for sub in ast.walk(tree):
         if isinstance(sub, ast.Attribute) and sub.attr in REVERSE:
             out.append(f"{rel}:{sub.lineno} .{sub.attr}")
         elif isinstance(sub, ast.Constant) and isinstance(sub.value, str) and (
-                sub.value.startswith("orc__") or "bot_program_orc"
-                in sub.value):
+                sub.value.startswith(REVERSE_LOOKUPS)
+                or any(t in sub.value for t in REVERSE_TABLES)):
             out.append(f"{rel}:{sub.lineno} {sub.value[:40]!r}")
         elif isinstance(sub, ast.Call) and chain_of(sub.func)[-1] == \
                 "get_model":
             args = [a.value for a in sub.args if isinstance(a, ast.Constant)]
-            if len(args) > 1 and str(args[1]).startswith("Orc"):
+            if len(args) > 1 and (str(args[1]).startswith("Orc")
+                                  or str(args[1]) in CAPTAIN_TABLES):
                 out.append(f"{rel}:{sub.lineno} get_model {args[1]}")
     return out
 
@@ -1645,6 +1667,24 @@ class TheRulesCanFailTests(MindTestCase):
             "from .orcs import lifecycle\n"))
         self.assertEqual(rel, [("bot_program/x.py", "", "bot_program.orcs",
                                 "lifecycle")])
+        # O2c's tables (2026-11-07): a Captain's words through the
+        # registry, a user's Captains and waves, their lookups and tables
+        o2c = ast.parse(inspect.cleandoc("""
+            from bot_program.models import CaptainOrder, AssetBotTrade
+            def f(user):
+                user.orc_captains.first().orders.all()
+                user.orc_waves.count()
+                apps.get_model("bot_program", "CaptainOrder")
+                return ("orc_captains__orders__words", "orc_waves__kind",
+                        "bot_program_captainorder")
+            """))
+        self.assertEqual({(m, n) for _r, _s, m, n in package_imports(
+            "dashboard/new_page.py", o2c)},
+            {("bot_program.models", "CaptainOrder")})
+        self.assertEqual(len(reverse_reads("dashboard/new_page.py", o2c)), 6,
+                         reverse_reads("dashboard/new_page.py", o2c))
+        clean = ast.parse("def f(captain):\n    return captain.orders\n")
+        self.assertEqual(reverse_reads("dashboard/new_page.py", clean), [])
 
     def test_a_changed_frozen_function_changes_its_hash(self):
         from bot_program.orcs import lifecycle

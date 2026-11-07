@@ -26,11 +26,16 @@ class TheSanitiserTests(SimpleTestCase):
         from bot_program.orcs.constants import FENCE_CAPS
         from bot_program.orcs.fence import sanitize
         # "orc" (O2a, 2026-11-05): an Orc's own earlier decision or
-        # refusal, re-read in PS5 as a view (the O2 spec A.47)
+        # refusal, re-read in PS5 as a view (the O2 spec A.47). O2c
+        # (2026-11-07, §1.3.2, changed on purpose): a temperament's lane
+        # texts (PS9), a Captain's words, the Emperor's order and the
+        # Skeptic's verdict
         self.assertEqual(FENCE_CAPS, {"headline": 120, "calendar_title": 80,
                                       "mind": 300, "reviewer": 280,
                                       "lesson": 200, "note": 140,
-                                      "orc": 300})
+                                      "orc": 300, "temperament": 600,
+                                      "captain": 280, "emperor": 600,
+                                      "skeptic": 280})
         for kind, cap in FENCE_CAPS.items():
             with self.subTest(kind):
                 self.assertLessEqual(len(sanitize("word " * 200, cap)), cap)

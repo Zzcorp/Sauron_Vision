@@ -7,9 +7,13 @@ the dossier and the drums (O1c). OrcWake ships as a table only; O1c writes
 it. The tables only O2 writes ship in O2's own migrations (§10.7): O2a's
 (2026-11-05, migration 0049) adds OrcIntent, the proposals in shadow, and
 OrcWake's first send (`queued_at`) with the claim's index; O2b's
-(2026-11-06, migration 0050) adds OrcTierGrade, the probe pairs; Captain,
-CaptainOrder and the 2026-10-09 additions marked O2 come with the later O2
-commits.
+(2026-11-06, migration 0050) adds OrcTierGrade, the probe pairs; O2c's
+(2026-11-07, migration 0051, the O2 spec §1.3.2) adds the Captain, its
+orders in shadow (CaptainOrder), the drums' waves (OrcWave), the
+temperaments' grade (OrcTemperamentGrade) and Orc.temperament, which
+nothing reads until the O2c commits that write them, each behind its own
+switch, OFF on arrival; the other 2026-10-09 additions marked O2 come with
+O2d.
 
 No `choices=` on any status or kind column: the allowed values are tuples
 in bot_program/orcs/constants.py, so a later PR adds one without a
@@ -120,6 +124,11 @@ class Orc(models.Model):
     #: the Horde's denormalised read (§9.5): the last journal entries,
     #: refreshed at every append (bot_program/orcs/notes.py)
     card = models.JSONField(default=dict, blank=True)
+    #: O2c (2026-11-07, the O2 spec §1.3.2, C.3-C.4): the temperament drawn
+    #: just after the birth while `orcs_temperaments` is ON, fixed for
+    #: life; '' for an Orc born without one, never graded as a temperament.
+    #: A label, never a binding column: it moves no stop and no size.
+    temperament = models.CharField(max_length=16, blank=True, default="")
 
     class Meta:
         indexes = [
@@ -342,6 +351,155 @@ class OrcTierGrade(models.Model):
     def __str__(self):
         return (f"{self.orc_id} {self.kind} {self.boundary or ''} "
                 f"{self.routed_rung}/{self.probe_rung} block {self.block}")
+
+
+# ── O2c (2026-11-07, the O2 spec §1.3.2): the Captains, the waves and the
+# temperaments' grade, in shadow. The tables arrive unread: their writers
+# come with the O2c commits that own them (C.6, C.7-C.9, C.16), each
+# behind its own switch, OFF on arrival and turned on only with the
+# trading PIN (N2). No column of theirs reaches an order, a stop or a size
+# (N1); a Captain's words are read only by the surfaces (N1.6).
+
+class Captain(models.Model):
+    """The class leader in shadow (C.7): one per (user, asset class),
+    seated while its class has a living Orc, never deleted (its record is
+    kept). Its wakes: at most 4 a class a day, 15 minutes apart, counted on
+    the UTC day of `counters_day`; its one pending item {reasons,
+    queued_at}, its first send set once and stale at 30 minutes. `label`
+    is the name the class band shows, written by code. No money column."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,
+                             on_delete=models.CASCADE,
+                             related_name="orc_captains")
+    asset_class = models.CharField(max_length=12)
+    seated_at = models.DateTimeField(default=timezone.now)
+    label = models.CharField(max_length=60, blank=True)
+    #: constants.CAPTAIN_STATES
+    state = models.CharField(max_length=12, default="seated")
+    last_wake_at = models.DateTimeField(null=True, blank=True)
+    wakes_today = models.SmallIntegerField(default=0)
+    counters_day = models.DateField(null=True, blank=True)
+    pending = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "asset_class"],
+                                    name="captain_one_per_user_class"),
+        ]
+
+    def __str__(self):
+        return f"Captain {self.asset_class} of {self.user_id} ({self.state})"
+
+
+class CaptainOrder(models.Model):
+    """One order of a Captain's answer, in shadow (C.8): journaled
+    `captain` on each Orc it names, as a view and never a fact; shown in
+    PS11 while unexpired; graded at the named idea's grade (C.9), never
+    applied (Orc.captain_may_cut stays False) and never moving the O arm.
+    `scope` {"class": <asset class>} or {"orcs": [Orc ids]}; `level` is
+    the stored reference of the level it names {level_id, kind, tf, price,
+    stop}, copied by code from the menu, which every later use reads, never
+    the id (A.30's rule, as OrcIntent.level; §1.3.2 lists the id only, and
+    C.9 and PS11 need the reference); `words` the model's, filtered and
+    capped (FENCE_CAPS["captain"]); `cause` {"wave_id"} or {"wake"};
+    `skeptic` the co-sign {verdict, words}, never a gate (C.18); `grade`
+    {r_issue, r_end, value_r, at}. R and prices only: no money column."""
+    captain = models.ForeignKey(Captain, on_delete=models.CASCADE,
+                                related_name="orders")
+    kind = models.CharField(max_length=12)    # constants.CAPTAIN_ORDER_KINDS
+    scope = models.JSONField(default=dict, blank=True)
+    #: for display only
+    level_id = models.CharField(max_length=24, blank=True)
+    level = models.JSONField(default=dict, blank=True)
+    words = models.CharField(max_length=300, blank=True)
+    #: constants.ORDER_MODES: no O2c order binds
+    mode = models.CharField(max_length=10, default="shadow")
+    issued_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    cause = models.JSONField(default=dict, blank=True)
+    skeptic = models.JSONField(default=dict, blank=True)
+    grade = models.JSONField(default=dict, blank=True)
+    s_version = models.CharField(max_length=8, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["captain", "-issued_at"],
+                                name="captainorder_captain_issued"),
+                   models.Index(fields=["expires_at"],
+                                name="captainorder_expires")]
+
+    def __str__(self):
+        return f"{self.captain_id} {self.kind} {self.mode} {self.level_id}"
+
+
+class OrcWave(models.Model):
+    """One wave of war drums for one user (C.16): its drums, the Orcs it
+    reached, its W12 wakes queued and read by a model, and its breaker
+    {state, why} (constants.WAVE_BREAKER_STATES). drums.wave_of names a
+    wave by its kind, symbol and second with no user, so a wave is unique
+    per (user, wave_id), never by its id alone. Prices and counts only;
+    `cost_usd` is the AI spend of its W12 model wakes, in USD, shown on
+    staff pages only."""
+    wave_id = models.CharField(max_length=40)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,
+                             on_delete=models.CASCADE,
+                             related_name="orc_waves")
+    kind = models.CharField(max_length=16)      # constants.DRUM_KINDS
+    symbols = models.JSONField(default=list, blank=True)
+    origin = models.CharField(max_length=40, blank=True)
+    first_at = models.DateTimeField(default=timezone.now)
+    last_at = models.DateTimeField(default=timezone.now)
+    max_hop = models.SmallIntegerField(default=0)
+    #: how many drums it holds, and the Orcs it reached (one delivery each)
+    drums = models.IntegerField(default=0)
+    reach = models.JSONField(default=list, blank=True)
+    w12_queued = models.IntegerField(default=0)
+    w12_answered = models.IntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=6,
+                                   default=0)
+    breaker = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "wave_id"],
+                                    name="orcwave_one_per_user_wave"),
+        ]
+        indexes = [models.Index(fields=["user", "-last_at"],
+                                name="orcwave_user_last")]
+
+    def __str__(self):
+        return f"{self.user_id} {self.wave_id} {self.kind}"
+
+
+class OrcTemperamentGrade(models.Model):
+    """One temperament's block statistic per (temperament, version, venue,
+    asset class, bar source) (C.6): tribunal.block_stats of Δ against the
+    care over the counted grades whose idea had a model wake (n_llm > 0),
+    and its mean against the control's. Venues and bar sources are never
+    pooled. R only."""
+    temperament = models.CharField(max_length=16)
+    version = models.CharField(max_length=8)
+    venue = models.CharField(max_length=8)      # constants.VENUES
+    asset_class = models.CharField(max_length=12)
+    bar_source = models.CharField(max_length=12)
+    n = models.IntegerField(default=0)
+    mean = models.FloatField(null=True, blank=True)
+    se = models.FloatField(null=True, blank=True)
+    lb80 = models.FloatField(null=True, blank=True)
+    ub80 = models.FloatField(null=True, blank=True)
+    vs_control_mean = models.FloatField(null=True, blank=True)
+    block = models.IntegerField(default=0)
+    at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["temperament", "version", "venue", "asset_class",
+                        "bar_source"],
+                name="orctemperamentgrade_one_per_key"),
+        ]
+
+    def __str__(self):
+        return (f"{self.temperament} {self.version} {self.venue}/"
+                f"{self.asset_class}/{self.bar_source}: n {self.n}")
 
 
 class OrcTrack(models.Model):
