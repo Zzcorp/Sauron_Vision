@@ -125,8 +125,11 @@ class TabFragmentTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.content.decode("utf-8", errors="ignore")
         self.assertIn("Bot configurations", body)
-        # Phase-61: top stat strip with ALIVE 6H rendered even with no bots.
-        self.assertIn("ALIVE 6H", body)
+        # Phase-61: top stat strip with ALIVE rendered even with no bots.
+        # Updated deliberately 2026-11-07 (Operations Center OC0, the ALIVE
+        # words): ALIVE reads each enabled bot's own heartbeat now, not
+        # trades in 6 h, so the label is ALIVE NOW.
+        self.assertIn("ALIVE NOW", body)
         self.assertIn("oc-strip", body)
 
     def test_bots_fragment_shows_cooldown_column_when_rows(self):

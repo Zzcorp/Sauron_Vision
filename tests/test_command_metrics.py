@@ -119,22 +119,33 @@ class LiveMetricUnionsBothBooksTests(TestCase):
         from dashboard.views_command import _tab_bar_metrics
         _position(self.user, "AAPL")
         _trade(self.user, "BTCUSD", status="OPEN")
-        self.assertEqual(_tab_bar_metrics(self.user)["live"]["primary"],
-                         "2 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: both books are counted,
+        # in the count beside the split and in the title.
+        live = _tab_bar_metrics(self.user)["live"]
+        self.assertEqual(live["n_open"], 2)
+        self.assertIn("2 open, all worlds", live["title"])
 
     def test_close_pending_still_counts_as_exposure(self):
         """The position is still open at the broker; every other surface on
         the platform counts CLOSE_PENDING as exposure."""
         from dashboard.views_command import _tab_bar_metrics
         _trade(self.user, "BTCUSD", status="CLOSE_PENDING")
-        self.assertEqual(_tab_bar_metrics(self.user)["live"]["primary"],
-                         "1 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: a close pending is
+        # still exposure.
+        self.assertEqual(_tab_bar_metrics(self.user)["live"]["n_open"], 1)
 
     def test_bot_only_book_is_not_zero(self):
         from dashboard.views_command import _tab_bar_metrics
         _trade(self.user, "BTCUSD", status="OPEN")
-        self.assertNotEqual(_tab_bar_metrics(self.user)["live"]["primary"],
-                            "0 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: a bot-only book
+        # is not an empty one.
+        self.assertNotEqual(_tab_bar_metrics(self.user)["live"]["n_open"], 0)
 
 
 # ── 2. P&L comes from marks, not from the dead column ────────────────────
@@ -151,16 +162,26 @@ class UnrealizedFromMarksTests(TestCase):
         from dashboard.views_command import _tab_bar_metrics
         _quote("BTCUSD", "110")
         _trade(self.user, "BTCUSD", status="OPEN", qty="2", entry="100")
-        self.assertEqual(_tab_bar_metrics(self.user)["live"]["secondary"],
-                         "+20.00")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: the P&L is the live
+        # quote's, here the paper world's own figure.
+        live = _tab_bar_metrics(self.user)["live"]
+        self.assertEqual(live["worlds"]["paper"]["pnl"], 20.0)
+        self.assertIn("+20.00 USD", live["title"])
 
     def test_short_side_pnl_flips_sign(self):
         from dashboard.views_command import _tab_bar_metrics
         _quote("BTCUSD", "110")
         _trade(self.user, "BTCUSD", status="OPEN", side="SELL", qty="2",
                entry="100")
-        self.assertEqual(_tab_bar_metrics(self.user)["live"]["secondary"],
-                         "-20.00")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: a short's P&L
+        # flips sign.
+        live = _tab_bar_metrics(self.user)["live"]
+        self.assertEqual(live["worlds"]["paper"]["pnl"], -20.0)
+        self.assertIn("-20.00 USD", live["title"])
 
     def test_the_stored_column_is_ignored_for_legacy_positions(self):
         """A Position row carrying a stale 999 in unrealized_pnl must be
@@ -187,8 +208,13 @@ class UnrealizedFromMarksTests(TestCase):
         self.assertIsNone(deployed)
 
         metric = _tab_bar_metrics(self.user)["live"]
-        self.assertEqual(metric["primary"], "1 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: an unpriced
+        # book is unknown, never flat.
+        self.assertEqual(metric["n_open"], 1)
         self.assertEqual(metric["secondary"], DASH)
+        self.assertIsNone(metric["worlds"][""]["pnl"])
 
     def test_partial_pricing_is_disclosed_in_the_tooltip(self):
         from dashboard.views_command import _tab_bar_metrics
@@ -196,7 +222,11 @@ class UnrealizedFromMarksTests(TestCase):
         _trade(self.user, "BTCUSD", status="OPEN", qty="1", entry="100")
         _position(self.user, "NOQUOTE", qty="1", entry="100")
         metric = _tab_bar_metrics(self.user)["live"]
-        self.assertEqual(metric["primary"], "2 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: partial pricing
+        # is said in the title.
+        self.assertEqual(metric["n_open"], 2)
         self.assertIn("1 of 2", metric["title"])
 
 
@@ -302,7 +332,11 @@ class LiveRefreshPathTests(TestCase):
         _trade(other, "BTCUSD", status="OPEN")
         payload = json.loads(
             self.client.get("/command/tab/metrics/").content.decode("utf-8"))
-        self.assertEqual(payload["tabs"]["live"]["primary"], "0 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: another user's
+        # trades are not counted.
+        self.assertEqual(payload["tabs"]["live"]["n_open"], 0)
 
     def test_page_carries_the_refresh_hooks(self):
         body = self.client.get("/command/").content.decode("utf-8", "ignore")
@@ -346,9 +380,13 @@ class LiveRefreshPathTests(TestCase):
         _trade(self.user, "BTCUSD", status="OPEN", qty="1", entry="100")
         after = json.loads(
             self.client.get("/command/tab/metrics/").content.decode("utf-8"))
-        self.assertEqual(before["tabs"]["live"]["primary"], "0 OPEN")
-        self.assertEqual(after["tabs"]["live"]["primary"], "1 OPEN")
-        self.assertEqual(after["tabs"]["live"]["secondary"], "+10.00")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: the next poll
+        # differs once a fill lands.
+        self.assertEqual(before["tabs"]["live"]["n_open"], 0)
+        self.assertEqual(after["tabs"]["live"]["n_open"], 1)
+        self.assertEqual(after["tabs"]["live"]["worlds"]["paper"]["pnl"], 10.0)
 
 
 # ── 5. The tab bodies stop reporting fiction ─────────────────────────────
@@ -402,8 +440,11 @@ class LiveTabTruthTests(TestCase):
         _trade(self.user, "BTCUSD", status="OPEN")
         r = self.client.get("/command/tab/live/")
         self.assertEqual(r.context["live_opens"], 2)
-        self.assertEqual(_tab_bar_metrics(self.user)["live"]["primary"],
-                         "2 OPEN")
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the LIVE
+        # head leads with REAL ("N REAL OPEN" and REAL's own money) and
+        # never sums the worlds. The meaning is kept: the OPEN POS cell
+        # counts what the head counts.
+        self.assertEqual(_tab_bar_metrics(self.user)["live"]["n_open"], 2)
 
     def test_gate_cell_with_no_decisions_says_the_gate_was_not_asked(self):
         # The cell no longer carries an accept rate at all: allows are
@@ -530,9 +571,12 @@ class BotsTabTruthTests(TestCase):
         self.assertEqual(r.context["n_alive"], DASH)
 
     def test_strip_label_survives(self):
+        # Updated deliberately 2026-11-07 (Operations Center OC0, the ALIVE
+        # words): ALIVE counts enabled bots by their own heartbeat now, not
+        # trades in 6 h, so the label no longer names a 6 h window.
         body = self.client.get("/command/tab/bots/").content.decode(
             "utf-8", "ignore")
-        self.assertIn("ALIVE 6H", body)
+        self.assertIn("ALIVE NOW", body)
 
 
 # ── 6. No silent swallow ─────────────────────────────────────────────────

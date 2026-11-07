@@ -124,8 +124,13 @@ class TheDoorTests(TestCase):
             self.assertTrue(st["words"], key)
             self.assertIsInstance(st["metrics"], list)
             for n, words in st["metrics"]:
-                self.assertIsInstance(n, (int, float))
-                self.assertNotIsInstance(n, bool)
+                # Updated deliberately 2026-11-07 (Operations Center OC0):
+                # a figure nothing measured is the dash "—", a string, with
+                # its reason in the words — never null, never a zero (spec
+                # §5.7). The meaning is kept: a number or a named dash.
+                if n != "—":
+                    self.assertIsInstance(n, (int, float))
+                    self.assertNotIsInstance(n, bool)
                 self.assertTrue(words)
         self.assertIn(live["beat"]["state"], STATES)
         self.assertEqual(set(live["clusters"]), {"markets", "venues", "people"})
@@ -295,7 +300,10 @@ class MetricsMoveTests(TestCase):
 
     def test_an_empty_morgul_cache_never_raises(self):
         watch = self._metrics("watch")
-        self.assertEqual(watch["Morgul guards ran — no run recorded"], 0)
+        # Updated deliberately 2026-11-07 (Operations Center OC0): a run
+        # nobody recorded is no figure, not a zero; the payload's dash is
+        # the string "—" with its reason in the words (spec §5.7).
+        self.assertEqual(watch["Morgul guards ran — no run recorded"], "—")
         self.assertEqual(watch["guard findings standing"], 0)
 
     def test_a_morgul_summary_is_read(self):

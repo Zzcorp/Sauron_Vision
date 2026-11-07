@@ -396,8 +396,12 @@ class TheSurfacesTests(_Case):
 
     def test_the_ops_center_head_and_portfolio_tab(self):
         from dashboard.views_command import _tab_bar_metrics
+        # Updated deliberately 2026-11-07 (Operations Center OC0): every
+        # money cell carries its currency, and the LIVE head prints REAL's
+        # own open P&L (spec §5.2, OC0). The meaning is kept: the head is
+        # eToro's own figure for the row, never the marks' (no "≈").
         self.assertEqual(_tab_bar_metrics(self.user)["live"]["secondary"],
-                         "-1.15")
+                         "-1.15 USD")
         body = self._get("/command/tab/portfolio/")
         table = body.split("Open positions", 1)[1]
         self.assertIn("-1.15", table)
@@ -745,12 +749,19 @@ class TheBookValueShownTests(_Case):
     def test_the_ops_center_heads_and_tab(self):
         from dashboard.views_command import _hero_metrics, _tab_bar_metrics
         sym = self._book().currency_symbol
+        # Updated deliberately 2026-11-07 (Operations Center OC0): the
+        # platform book is in mixed currencies, never converted, so it
+        # wears no currency sign, and the head prints its two decimals like
+        # the hero and the tab (spec §5.2, OC0). The meaning is kept: the
+        # head, the hero and the tab show the same shown book, never the
+        # marks' 3,172.96.
         self.assertEqual(_tab_bar_metrics(self.user)["portfolio"]["primary"],
-                         f"{sym}3,159")
+                         "3,158.85")
         self.assertEqual(_hero_metrics(self.user)["value"], "3,158.85")
         body = self.client.get("/command/tab/portfolio/",
                                HTTP_HOST=HOST).content.decode()
-        self.assertIn(f"{sym}3,158.85", body)
+        self.assertIn("3,158.85", body)
+        self.assertNotIn(f"{sym}3,158.85", body)
         self.assertNotIn("3,172.96", body)
 
     def test_the_pdf(self):

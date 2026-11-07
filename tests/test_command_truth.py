@@ -1,0 +1,1068 @@
+"""THE OPERATIONS CENTER, OC0: truth and cost in today's look (2026-11-07).
+
+/command/ is the operator's home. Its map found it adding REAL, DEMO and
+PAPER money together, printing a DEMO row as REAL MONEY, counting bots on
+a DEMO account as armed with real funds, calling the average win over the
+average loss a profit factor, printing money with no currency and quantities
+with eight decimals, leaving most of its dashes unexplained, holding the
+session open with its own poll, and paying for the shell on every tab. OC0
+fixes what is false or wasteful, in today's styles (the Operations Center
+spec, section 8, OC0; sections 5, 6 and 7 bind it).
+
+What is pinned here, on synthetic rows only (EURUSD, AAPL, BTCUSD, round
+amounts):
+  - worlds: the DEMO row reads DEMO; no money cell anywhere on the page or
+    its fragments prints a sum or an average across worlds; the averages,
+    the profit factor and the P&L by class are per world; the hero's three
+    lines equal the band's own split; ACT splits real and demo; the armed
+    pill counts bots on a REAL account only, and a config whose route
+    cannot be read stays in it;
+  - money paths: live_book_value and what store_book_value writes are the
+    same before and after the page is read; a superuser's Toggle form
+    passes CSRF, and a user the endpoint refuses gets no form;
+  - words, numbers, windows, ages and dashes;
+  - the bots tab: the world from the account, health from the heartbeat;
+  - cost: query budgets cold, fragments without the shell, database
+    aggregates equal to the loops they replace;
+  - no broker or model call to draw the page;
+  - the page's own poll, under node (tests/js/command_metrics.test.js).
+
+Display only: nothing here places, closes or changes an order.
+
+Run with:  python manage.py test tests.test_command_truth
+"""
+import copy
+import json
+import re
+import shutil
+import subprocess
+import sys
+from datetime import timedelta
+from decimal import Decimal
+from html.parser import HTMLParser
+from pathlib import Path
+from unittest import mock, skipIf
+
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.db import connection
+from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
+
+DASH = "—"
+BASE = Path(settings.BASE_DIR)
+FRAGMENTS = ("/command/tab/live/", "/command/tab/portfolio/",
+             "/command/tab/history/", "/command/tab/bots/")
+NODE = shutil.which("node")
+
+
+# ── fixtures: synthetic rows only ────────────────────────────────────────
+
+def _user(name, *, staff=True, superuser=False):
+    return User.objects.create_user(name, password="x", is_staff=staff,
+                                    is_superuser=superuser)
+
+
+def _instrument(symbol, cls, currency="USD"):
+    from instruments.models import Instrument
+    inst, _ = Instrument.objects.get_or_create(
+        symbol=symbol, defaults={"name": symbol, "asset_class": cls,
+                                 "currency": currency})
+    return inst
+
+
+def _quote(symbol, last, cls, *, age_s=30):
+    from market_data.models import LiveQuote
+    inst = _instrument(symbol, cls)
+    LiveQuote.objects.update_or_create(
+        instrument=inst, defaults={"last": Decimal(str(last)),
+                                   "source": "test"})
+    LiveQuote.objects.filter(instrument=inst).update(
+        updated_at=timezone.now() - timedelta(seconds=age_s))
+
+
+def _config(user, name, cls, *, mode="paper", enabled=True, symbols=None,
+            extras=None):
+    from bot_program.models import AssetBotConfig
+    return AssetBotConfig.objects.create(
+        user=user, asset_class=cls, name=name, mode=mode, enabled=enabled,
+        symbols=list(symbols or []), capital=Decimal("10000"),
+        base_currency="USD", extras=extras or {})
+
+
+#: The stamps a row of each world carries (dashboard.position_summary
+#: .world_of reads them): REAL and DEMO are eToro rows, paper=False; DEMO
+#: is the eToro demo world (broker_env "paper"); PAPER is the simulator.
+STAMPS = {
+    "live": (False, {"broker": "etoro", "broker_env": "live",
+                     "value_per_unit": 1}),
+    "demo": (False, {"broker": "etoro", "broker_env": "paper",
+                     "value_per_unit": 1}),
+    "paper": (True, {"broker": "paper"}),
+}
+
+
+def _trade(cfg, symbol, qty, entry, *, world, status="OPEN", side="BUY",
+           pnl=None, r=None, opened_ago_s=600, closed_ago_s=None,
+           rule="oc_rule"):
+    from bot_program.models import AssetBotTrade
+    paper, meta = STAMPS[world]
+    t = AssetBotTrade.objects.create(
+        config=cfg, asset_class=cfg.asset_class, symbol=symbol, side=side,
+        qty=Decimal(str(qty)), entry_price=Decimal(str(entry)),
+        status=status, paper=paper, metadata=dict(meta), rule_name=rule,
+        pnl=None if pnl is None else Decimal(str(pnl)), realized_r=r)
+    upd = {"opened_at": timezone.now() - timedelta(seconds=opened_ago_s)}
+    if closed_ago_s is not None:
+        upd["closed_at"] = timezone.now() - timedelta(seconds=closed_ago_s)
+    AssetBotTrade.objects.filter(pk=t.pk).update(**upd)
+    t.refresh_from_db()
+    return t
+
+
+def _etoro(user, *, demo=False, forex=False, stocks=True, equity="10000.00"):
+    from bot_program.models import EtoroAccount
+    acct = EtoroAccount.objects.create(
+        user=user, demo=demo, label="Main", is_primary_for_stocks=stocks,
+        is_primary_for_forex=forex)
+    acct.set_credentials("k", "u")
+    at = timezone.now() - timedelta(seconds=40)
+    acct.last_used_margin = Decimal("600.00")
+    acct.last_available_cash = Decimal("9000.00")
+    acct.last_pnl = Decimal("12.00")
+    acct.last_frozen_cash = Decimal("0.00")
+    acct.last_balance = Decimal("9988.00")
+    acct.last_margin_at = at
+    acct.last_margin_world = "demo" if demo else "live"
+    acct.last_equity = Decimal(equity)
+    acct.last_equity_currency = "USD"
+    acct.last_equity_at = at
+    acct.save()
+    return acct
+
+
+def _portfolio(user, cash="10000"):
+    from portfolio.services import get_or_create_default_portfolio
+    pf = get_or_create_default_portfolio(user=user)
+    pf.cash_available = Decimal(cash)
+    pf.save()
+    return pf
+
+
+#: The three worlds' open P&L and realized P&L on the fixture below:
+#: REAL +10.00, DEMO +1.00, PAPER +100.00, open and closed.
+REAL_PNL, DEMO_PNL, PAPER_PNL = 10.0, 1.0, 100.0
+
+#: Any sum or average of two or three of them is a number this page must
+#: never print as money (the spec's own list).
+SUMS = ("11.00", "101.00", "110.00", "111.00")
+AVERAGES = ("5.50", "50.50", "55.00", "37.00")
+
+
+def _three_worlds(user, *, with_etoro=True):
+    """One REAL (+10.00), one DEMO (+1.00) and one PAPER (+100.00) row,
+    open and closed in the last hour; a portfolio with 10,000 typed cash;
+    an eToro REAL account read 40 s ago."""
+    _portfolio(user)
+    if with_etoro:
+        _etoro(user)
+    _quote("AAPL", "210", "stock")
+    _quote("EURUSD", "1.09412", "forex")
+    _quote("BTCUSD", "20100", "crypto")
+    real = _config(user, "oc real", "stock", mode="live", symbols=["AAPL"])
+    demo = _config(user, "oc demo", "forex", mode="paper", symbols=["EURUSD"])
+    paper = _config(user, "oc paper", "crypto", symbols=["BTCUSD"])
+    rows = {
+        "live": _trade(real, "AAPL", 1, 200, world="live"),
+        "demo": _trade(demo, "EURUSD", 100, "1.08412", world="demo"),
+        "paper": _trade(paper, "BTCUSD", 1, 20000, world="paper"),
+    }
+    _trade(real, "AAPL", 1, 200, world="live", status="CLOSED",
+           pnl=REAL_PNL, r=1.0, closed_ago_s=900)
+    _trade(demo, "EURUSD", 100, "1.08412", world="demo", status="CLOSED",
+           pnl=DEMO_PNL, r=0.5, closed_ago_s=1200)
+    _trade(paper, "BTCUSD", 1, 20000, world="paper", status="CLOSED",
+           pnl=PAPER_PNL, r=2.0, closed_ago_s=1500)
+    return rows
+
+
+def _page_part(body):
+    """The page's own content: from the hero to the end of the content
+    block — never the shell around it (the band, the rail, the Horde),
+    which S1b owns."""
+    start = body.index('<div class="oc-hero"')
+    end = body.index("</main>", start)
+    return body[start:end]
+
+
+def _texts(html):
+    """Visible text, scripts, styles and SVG drawings left out."""
+    parser = _Walker()
+    parser.feed(html)
+    return parser.texts
+
+
+class _Walker(HTMLParser):
+    """Text nodes with their parent element's attributes; elements by
+    attribute; nothing inside script, style or svg."""
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.texts = []          # [(text, parent attrs dict, parent tag)]
+        self.elements = []       # [(tag, attrs dict, [text...])]
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.VOID:
+            self.elements.append((tag, dict(attrs), []))
+            return
+        if tag in ("script", "style", "svg"):
+            self._skip += 1
+        el = (tag, dict(attrs), [])
+        self.elements.append(el)
+        self.stack.append(el)
+
+    def handle_startendtag(self, tag, attrs):
+        self.elements.append((tag, dict(attrs), []))
+
+    def handle_endtag(self, tag):
+        if tag in self.VOID:
+            return
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                if tag in ("script", "style", "svg"):
+                    self._skip = max(0, self._skip - 1)
+                del self.stack[i:]
+                break
+
+    def handle_data(self, data):
+        if self._skip or not data.strip():
+            return
+        parent = self.stack[-1] if self.stack else ("", {}, [])
+        self.texts.append((data, parent[1], parent[0]))
+        for el in self.stack:
+            el[2].append(data)
+
+
+def _walk(html):
+    w = _Walker()
+    w.feed(html)
+    return w
+
+
+def _money_hits(text, numbers):
+    """Each of `numbers` printed as a figure in `text` (not inside a larger
+    number: 111.00 is not 11.00)."""
+    hits = []
+    for num in numbers:
+        pat = r"(?<![\d.,])" + re.escape(num) + r"(?![\d])"
+        if re.search(pat, text):
+            hits.append(num)
+    return hits
+
+
+def _json_strings(value):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _json_strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _json_strings(v)
+    elif isinstance(value, str):
+        yield value
+
+
+# ── 1. Worlds ────────────────────────────────────────────────────────────
+
+class WorldsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_worlds")
+        self.client.force_login(self.user)
+        self.rows = _three_worlds(self.user)
+
+    def test_a_demo_row_reads_demo_and_a_real_row_reads_real(self):
+        body = self.client.get("/command/tab/live/").content.decode()
+        rows = re.findall(r"<tr data-sv-position-row.*?</tr>", body, re.S)
+        demo = [r for r in rows if ">EURUSD<" in r]
+        real = [r for r in rows if ">AAPL<" in r]
+        self.assertEqual(len(demo), 1, rows)
+        self.assertEqual(len(real), 1, rows)
+        self.assertIn("sv-world--demo", demo[0])
+        self.assertNotIn("sv-world--live", demo[0])
+        self.assertIn("sv-world--live", real[0])
+
+    def test_no_money_cell_prints_a_sum_or_an_average_across_worlds(self):
+        notional = {"live": 210.0, "demo": 109.412, "paper": 20100.0}
+        sums = set(SUMS) | set(AVERAGES)
+        for a, b in (("live", "demo"), ("live", "paper"), ("demo", "paper")):
+            sums.add(f"{notional[a] + notional[b]:,.2f}")
+        sums.add(f"{sum(notional.values()):,.2f}")
+        # floatformat:0 printed the deployed sum with no separator
+        sums.add(f"{round(sum(notional.values()))}")
+        sums.add(f"{round(sum(notional.values())):,}")
+        seen = {"page": " ".join(t for t, _a, _g in _texts(
+            _page_part(self.client.get("/command/").content.decode())))}
+        for path in FRAGMENTS:
+            seen[path] = " ".join(t for t, _a, _g in _texts(
+                self.client.get(path).content.decode()))
+        payload = self.client.get("/command/tab/metrics/").json()
+        seen["metrics"] = " ".join(_json_strings(payload))
+        for where, text in seen.items():
+            self.assertEqual(_money_hits(text, sorted(sums)), [], where)
+
+    def test_averages_profit_factor_and_class_pnl_are_per_world(self):
+        r = self.client.get("/command/tab/portfolio/")
+        stats = r.context["stats_by_world"]
+        self.assertEqual(stats["live"]["avg_win"], REAL_PNL)
+        self.assertEqual(stats["demo"]["avg_win"], DEMO_PNL)
+        self.assertEqual(stats["paper"]["avg_win"], PAPER_PNL)
+        for world in ("live", "demo", "paper"):
+            self.assertIsNone(stats[world]["avg_loss"], world)
+            self.assertIsNone(stats[world]["profit_factor"], world)
+        live = self.client.get("/command/tab/live/")
+        rows = live.context["pnl_24h"]["by_world_class"]
+        got = {(row["world"], row["asset_class"]): row["pnl"] for row in rows}
+        self.assertEqual(got, {("live", "stock"): REAL_PNL,
+                               ("demo", "forex"): DEMO_PNL,
+                               ("paper", "crypto"): PAPER_PNL})
+        self.assertNotIn("pnl-pct", live.content.decode().split(
+            "P&amp;L by asset class")[1].split("Rule control")[0])
+
+    def test_the_heros_three_lines_equal_the_bands_split(self):
+        from core.context_processors import _panel_detail
+        from dashboard.views_command import _hero_metrics
+        cache.clear()
+        band = _panel_detail(self.user)
+        hero = _hero_metrics(self.user)
+        self.assertEqual(hero["worlds"]["live"]["pnl"],
+                         band["panel_open_pnl_live"])
+        self.assertEqual(hero["worlds"]["demo"]["pnl"],
+                         band["panel_open_pnl_demo"])
+        self.assertEqual(hero["worlds"]["paper"]["pnl"],
+                         band["panel_open_pnl_paper"])
+        self.assertEqual(hero["worlds"]["live"]["pnl"], REAL_PNL)
+        body = _page_part(self.client.get("/command/").content.decode())
+        for key in ("world_live", "world_demo", "world_paper"):
+            self.assertIn(f'data-oc-hero="{key}"', body)
+        self.assertIn("never added", body)
+
+    def test_act_splits_real_and_demo(self):
+        from dashboard.views_day import day_live_payload
+        act = {w: n for n, w in
+               day_live_payload(self.user)["stages"]["act"]["metrics"]}
+        self.assertEqual(act["open now, real money"], 1)
+        self.assertEqual(act["open now, demo"], 1)
+        self.assertEqual(act["open now, paper"], 1)
+        self.assertNotIn("open now, live money", act)
+
+    def test_the_tab_heads_lead_with_real_and_keep_a_count_beside_it(self):
+        from dashboard.views_command import _tab_bar_metrics
+        tabs = _tab_bar_metrics(self.user)
+        self.assertEqual(tabs["live"]["primary"], "1 REAL OPEN")
+        self.assertIn("10.00 USD", tabs["live"]["secondary"])
+        self.assertIn("3 open, all worlds", tabs["live"]["title"])
+        self.assertEqual(tabs["live"]["n_open"], 3)
+        self.assertIn("REAL", tabs["bots"]["secondary"])
+        self.assertIn("10.00 USD", tabs["bots"]["secondary"])
+
+
+class ThePillTests(TestCase):
+    """The topbar's red pill is the one REAL marker: it counts bots armed
+    on a REAL account. A config's world is the world of the account its
+    symbols route to; one whose route cannot be read stays in the count,
+    so the pill never under-counts real money (spec §6.3, 3)."""
+
+    def _truth(self, user):
+        from core.context_processors import _bot_truth
+        return _bot_truth(User.objects.get(pk=user.pk), {})["panel_bot"]
+
+    def _live_fx(self, user):
+        _instrument("EURUSD", "forex")
+        return _config(user, "fx live", "forex", mode="live",
+                       symbols=["EURUSD"])
+
+    def test_a_live_mode_config_routed_to_a_demo_account_is_not_counted(self):
+        user = _user("oc_pill_demo")
+        _etoro(user, demo=True, forex=True)
+        self._live_fx(user)
+        bot = self._truth(user)
+        self.assertEqual(bot["live"], 0)
+        self.assertEqual(bot["live_demo"], 1)
+        self.assertIn("1 on a DEMO account", bot["reason"])
+
+    def test_one_on_a_real_account_is_counted(self):
+        user = _user("oc_pill_real")
+        _etoro(user, demo=False, forex=True)
+        self._live_fx(user)
+        bot = self._truth(user)
+        self.assertEqual(bot["live"], 1)
+        self.assertEqual(bot["live_demo"], 0)
+
+    def test_one_whose_route_cannot_be_read_is_counted(self):
+        user = _user("oc_pill_unread")
+        _etoro(user, demo=True, forex=True)
+        self._live_fx(user)
+        with mock.patch(
+                "bot_program.engine.broker_router.broker_name_for_symbol",
+                side_effect=RuntimeError("router unreadable")):
+            bot = self._truth(user)
+        self.assertEqual(bot["live"], 1)
+        self.assertEqual(bot["live_demo"], 0)
+
+    def test_the_pill_prints_the_real_account_count(self):
+        user = _user("oc_pill_page")
+        _etoro(user, demo=True, forex=True)
+        self._live_fx(user)
+        self.client.force_login(user)
+        body = self.client.get("/command/").content.decode()
+        self.assertNotIn("sv-armed-pill", body)
+
+
+# ── 2. Money paths ───────────────────────────────────────────────────────
+
+class MoneyPathsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_money", superuser=True)
+        self.client.force_login(self.user)
+        _three_worlds(self.user)
+
+    def test_the_book_value_and_its_stored_copy_are_unchanged(self):
+        """live_book_value is not edited; the page only reads it. Cash
+        10,000 + the REAL and DEMO notional (210.00 + 109.41) + paper's open
+        and realized P&L (100.00 + 100.00), on the fixture."""
+        from portfolio.services import (get_or_create_default_portfolio,
+                                        live_book_value)
+        from portfolio.tasks import store_book_value
+        before = live_book_value(self.user).value
+        self.assertEqual(before, 10519.41)
+        pf = get_or_create_default_portfolio(user=self.user)
+        stored = pf.current_value
+        for path in ("/command/", "/command/tab/metrics/") + FRAGMENTS:
+            self.assertEqual(self.client.get(path).status_code, 200, path)
+        self.assertEqual(live_book_value(self.user).value, before)
+        pf.refresh_from_db()
+        self.assertEqual(pf.current_value, stored)
+        self.assertTrue(store_book_value(pf, live_book_value(self.user)))
+        pf.refresh_from_db()
+        self.assertEqual(pf.current_value, Decimal("10519.41"))
+
+    def test_a_superusers_toggle_form_passes_csrf(self):
+        from bot_program.models import AssetBotConfig
+        cfg = AssetBotConfig.objects.get(user=self.user, name="oc paper")
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        body = client.get("/command/tab/bots/").content.decode()
+        forms = re.findall(r'<form method="post" action="/admin-dashboard/'
+                           r'asset-bots/toggle/".*?</form>', body, re.S)
+        form = next((f for f in forms
+                     if f'name="config_id" value="{cfg.id}"' in f), None)
+        self.assertIsNotNone(form, "no Toggle form for the config")
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', form)
+        self.assertIsNotNone(token, "the Toggle form carries no CSRF token")
+        # The form as rendered, posted as a browser would: its own token
+        # against the cookie the fragment's response set.
+        r = client.post("/admin-dashboard/asset-bots/toggle/",
+                        {"csrfmiddlewaretoken": token.group(1),
+                         "config_id": cfg.id})
+        self.assertNotEqual(r.status_code, 403, r.content[:300])
+        cfg.refresh_from_db()
+        self.assertFalse(cfg.enabled)
+
+    def test_a_user_the_endpoint_refuses_gets_no_bot_form(self):
+        viewer = _user("oc_money_viewer", staff=True, superuser=False)
+        _config(viewer, "viewer bot", "crypto")
+        self.client.force_login(viewer)
+        body = self.client.get("/command/tab/bots/").content.decode()
+        self.assertIn("viewer bot", body)
+        self.assertNotIn('action="/admin-dashboard/asset-bots/', body)
+        self.assertNotIn("▶ Tick", body)
+
+
+# ── 3. Words ─────────────────────────────────────────────────────────────
+
+class WordsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_words")
+        self.client.force_login(self.user)
+
+    def test_the_platform_book_carries_its_words_and_no_currency_sign(self):
+        _three_worlds(self.user)
+        part = _page_part(self.client.get("/command/").content.decode())
+        self.assertIn("PLATFORM BOOK", part)
+        self.assertIn("10,519.41", part)
+        self.assertNotRegex(part, r"[€$£]\s?10,519\.41")
+        self.assertIn("(EUR + USD, not converted)", part)
+        for words in ("cash typed on /setup/", "not a balance",
+                      "hand-recorded rows too", "not converted"):
+            self.assertIn(words, part)
+        self.assertIn("bk-card", part)
+
+    def test_the_profit_factor_is_gross_wins_over_gross_losses(self):
+        _portfolio(self.user)
+        cfg = _config(self.user, "oc pf", "stock", mode="live")
+        for i, pnl in enumerate((30, 10, -10, -5, -5)):
+            _trade(cfg, "AAPL", 1, 200, world="live", status="CLOSED",
+                   pnl=pnl, r=pnl / 10, closed_ago_s=3600 * (i + 1))
+        r = self.client.get("/command/tab/portfolio/")
+        real = r.context["stats_by_world"]["live"]
+        self.assertEqual(real["profit_factor"], 2.0)   # 40 / 20
+        self.assertEqual(real["payoff"], 3.0)          # 20 / 6.67
+        self.assertEqual(r.context["profit_factor"], 2.0)
+        body = r.content.decode()
+        self.assertIn("payoff", body)
+        self.assertIn("gross wins over gross losses", body)
+
+    def test_the_24h_dash_names_the_2330_snapshot(self):
+        from dashboard.views_command import _hero_metrics
+        from portfolio.models import PortfolioSnapshot
+        pf = _portfolio(self.user)
+        hero = _hero_metrics(self.user)
+        self.assertEqual(hero["delta"], DASH)
+        self.assertIn("23:30 UTC", hero["delta_title"])
+        yesterday = timezone.localdate() - timedelta(days=1)
+        PortfolioSnapshot.objects.create(
+            portfolio=pf, date=yesterday, total_value=Decimal("10000"),
+            cash=Decimal("9000"), daily_pnl=Decimal("42"),
+            daily_pnl_pct=0.42, cumulative_pnl_pct=1.0, max_drawdown=-2.0)
+        hero = _hero_metrics(self.user)
+        self.assertEqual(hero["prev_delta"], "+0.42%")
+        self.assertIn(yesterday.isoformat(), hero["prev_title"])
+
+
+# ── 4. Numbers ───────────────────────────────────────────────────────────
+
+class NumbersTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_numbers")
+        self.client.force_login(self.user)
+
+    def test_no_eight_decimals_and_prices_in_the_instruments_own(self):
+        _three_worlds(self.user)
+        for path in ("/command/tab/live/", "/command/tab/portfolio/"):
+            text = " ".join(t for t, _a, _g in _texts(
+                self.client.get(path).content.decode()))
+            self.assertNotRegex(text, r"\d\.\d{8}\b", path)
+            self.assertIn("1.08412", text, path)
+            self.assertNotRegex(text, r"(?<![\d.])1\.0841(?!\d)", path)
+
+    def test_every_money_cell_has_two_decimals_and_a_currency(self):
+        _portfolio(self.user)
+        _quote("BTCUSD", "34481.4", "crypto")
+        cfg = _config(self.user, "oc big", "crypto")
+        _trade(cfg, "BTCUSD", 1, 34000, world="paper")
+        _trade(cfg, "BTCUSD", 1, 34000, world="paper", status="CLOSED",
+               pnl="481.4", r=1.0, closed_ago_s=600)
+        live = self.client.get("/command/tab/live/").content.decode()
+        self.assertIn("34,481.40 USD", live)
+        money = re.compile(r"^(?:≈ )?[+\-−]?\d{1,3}(?:,\d{3})*\.\d{2} [A-Z]{3}$")
+        n = 0
+        for path in FRAGMENTS + ("/command/",):
+            html = self.client.get(path).content.decode()
+            if path == "/command/":
+                html = _page_part(html)
+            for tag, attrs, texts in _walk(html).elements:
+                if "data-oc-money" not in attrs:
+                    continue
+                value = " ".join("".join(texts).split())
+                n += 1
+                self.assertTrue(value == DASH or money.match(value),
+                                f"{path}: {value!r}")
+        self.assertGreaterEqual(n, 12)
+
+
+# ── 5. Windows and ages ──────────────────────────────────────────────────
+
+class WindowsAndAgesTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_windows")
+        self.client.force_login(self.user)
+        _three_worlds(self.user)
+
+    def test_each_statistic_says_its_window(self):
+        portfolio = self.client.get("/command/tab/portfolio/").content.decode()
+        self.assertIn("lifetime", portfolio)
+        live = self.client.get("/command/tab/live/").content.decode()
+        self.assertIn("all worlds · R only", live)
+        self.assertIn("Gate events · the last 30, any age", live)
+        self.assertIn("24 h", live)
+        history = self.client.get("/command/tab/history/").content.decode()
+        self.assertIn("90 d", history)
+        bots = self.client.get("/command/tab/bots/").content.decode()
+        self.assertIn("24 h", bots)
+
+    def test_the_regime_snapshots_and_gate_times_carry_their_age(self):
+        from brain.models import BrainReport
+        from bot_program.orchestrator_models import OrchestratorEvent
+        from dashboard.views_command import _hero_metrics
+        from portfolio.models import PortfolioSnapshot
+        from portfolio.services import get_or_create_default_portfolio
+        rep = BrainReport.objects.create(regime_label="trending",
+                                         regime_confidence=0.62)
+        BrainReport.objects.filter(pk=rep.pk).update(
+            created_at=timezone.now() - timedelta(hours=2, minutes=5))
+        hero = _hero_metrics(self.user)
+        self.assertEqual(hero["regime_age"], "2 h ago")
+        pf = get_or_create_default_portfolio(user=self.user)
+        day = timezone.localdate() - timedelta(days=1)
+        for i in range(6):
+            PortfolioSnapshot.objects.create(
+                portfolio=pf, date=day - timedelta(days=i),
+                total_value=Decimal("10000"), cash=Decimal("9000"),
+                daily_pnl=Decimal("10"), daily_pnl_pct=0.1 * (i % 3 - 1),
+                cumulative_pnl_pct=1.0, max_drawdown=-2.0)
+        body = self.client.get("/command/tab/portfolio/").content.decode()
+        self.assertIn(f"snapshot {day.isoformat()}", body)
+        old = OrchestratorEvent.objects.create(
+            user=self.user, asset_class="forex", symbol="EURUSD", side="BUY",
+            decision="reject", reason="orchestrator: usd theme cap")
+        when = timezone.now() - timedelta(days=3)
+        OrchestratorEvent.objects.filter(pk=old.pk).update(created_at=when)
+        live = self.client.get("/command/tab/live/").content.decode()
+        self.assertIn(when.strftime("%Y-%m-%d %H:%M"), live)
+
+
+# ── 6. Dashes ────────────────────────────────────────────────────────────
+
+class DashesTests(TestCase):
+    """A dash means no figure here, and its line says why; 0 is a
+    measured zero (spec §5.7)."""
+
+    def _check(self, html, where):
+        walker = _walk(html)
+        legend = set()
+        for tag, attrs, texts in walker.elements:
+            if "data-oc-why" in attrs:
+                legend.add(" ".join("".join(texts).split()))
+        dashes = 0
+        for text, attrs, tag in walker.texts:
+            if text.strip() != DASH:
+                continue
+            dashes += 1
+            title = (attrs.get("title") or "").strip()
+            self.assertTrue(title, f"{where}: a dash in <{tag}> has no title")
+            self.assertIn(" ".join(title.split()), legend,
+                          f"{where}: {title!r} is not in the legend")
+        return dashes
+
+    def test_every_dash_has_a_title_and_the_footer_lists_it(self):
+        for name, build in (("empty", lambda u: None),
+                            ("three worlds", _three_worlds)):
+            user = _user(f"oc_dash_{name.replace(' ', '_')}")
+            build(user)
+            self.client.force_login(user)
+            n = self._check(_page_part(
+                self.client.get("/command/").content.decode()), name + " page")
+            self.assertGreater(n, 0, name)
+            for path in FRAGMENTS:
+                self._check(self.client.get(path).content.decode(),
+                            f"{name} {path}")
+
+    def test_the_payloads_dashes_are_strings_with_words(self):
+        from dashboard.views_day import day_live_payload
+        user = _user("oc_dash_payload")
+        cache.delete("morgul:summary")
+        live = day_live_payload(user)
+        flat = [m for st in live["stages"].values() for m in st["metrics"]]
+        self.assertTrue(all(m[0] is not None for m in flat), flat)
+        dashed = {m[1]: m[0] for m in flat if m[0] == DASH}
+        for words in ("min since the newest live quote — none stored yet",
+                      "min since the freshest bot tick — no heartbeat yet",
+                      "Morgul guards ran — no run recorded",
+                      "min since the broker's reading — none landed yet"):
+            self.assertIn(words, dashed, dashed)
+
+
+# ── 7. The bots tab ──────────────────────────────────────────────────────
+
+class BotsTabTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_bots")
+        self.client.force_login(self.user)
+
+    def test_a_live_mode_config_on_a_demo_account_reads_demo(self):
+        _etoro(self.user, demo=True, forex=True)
+        _instrument("EURUSD", "forex")
+        _config(self.user, "fx on demo", "forex", mode="live",
+                symbols=["EURUSD"])
+        r = self.client.get("/command/tab/bots/")
+        body = r.content.decode()
+        row = re.search(r"<tr[^>]*>(?:(?!</tr>).)*fx on demo.*?</tr>", body,
+                        re.S).group(0)
+        self.assertIn("sv-world--demo", row)
+        self.assertNotIn("sv-world--live", row)
+        self.assertIn("REAL-MONEY BOTS", body)
+        self.assertEqual(r.context["n_live"], 0)
+        self.assertEqual(r.context["n_live_demo"], 1)
+
+    def test_health_comes_from_the_heartbeat_not_from_trades(self):
+        now = timezone.now()
+        fresh = _config(self.user, "ticks on time", "crypto", extras={
+            "last_tick_at": (now - timedelta(minutes=2)).isoformat()})
+        late = _config(self.user, "traded but silent", "crypto", extras={
+            "last_tick_at": (now - timedelta(hours=5)).isoformat()})
+        _trade(late, "BTCUSD", 1, 20000, world="paper", opened_ago_s=600)
+        _config(self.user, "switched off", "crypto", enabled=False, extras={
+            "last_tick_at": (now - timedelta(minutes=1)).isoformat()})
+        r = self.client.get("/command/tab/bots/")
+        health = {row["config"].name: row["health"] for row in r.context["rows"]}
+        self.assertEqual(health, {"ticks on time": "ALIVE",
+                                  "traded but silent": "IDLE",
+                                  "switched off": "OFF"})
+        self.assertEqual(r.context["n_alive"], 1)
+        self.assertNotIn("ALIVE 6H", r.content.decode())
+        self.assertIsNotNone(fresh)
+
+
+# ── 8. Cost ──────────────────────────────────────────────────────────────
+
+class CostTests(TestCase):
+    """Budgets cold, after cache.clear() (spec §7.3), on the three worlds,
+    a hand-recorded row and a few configs.
+
+    Two kinds of read are the shell's, not the page's, and the spec's
+    baselines (§7.1: each the last of several GETs) were taken without them:
+      - the presence stamp (core/presence.py): the middleware writes one
+        row per user at most once a minute, whatever the page. A clear
+        cache would make every GET here pay it (4 statements under the test
+        runner, two of them savepoints), so its throttle is set again after
+        each clear;
+      - on the page GET, the shell's context processors and the ring's
+        counts. The shell is 118 queries cold under the test runner, where
+        `_panel_detail` and two other shell readers never read their cache
+        (their keys hold ids the runner rolls back), so the 105 of §7.3 is
+        asserted as §7.1 measured it: a second GET, with the shell's caches
+        read as in production (the cache is cleared after). The page's OWN
+        reads (rendered without the shell) are asserted cold, ≤ 30, with
+        the ring's counts as the public Wall caches them (wall_facts: 300 s,
+        site-wide, 21 queries once per five minutes).
+    Measured the same way on origin/main: the page 125 warm (54 own), LIVE
+    156 cold, PORTFOLIO 134, HISTORY 124, BOTS 134, metrics 50."""
+
+    BUDGETS = {"/command/tab/live/": 50,
+               "/command/tab/portfolio/": 22, "/command/tab/history/": 14,
+               "/command/tab/bots/": 14, "/command/tab/metrics/": 25}
+    PAGE, PAGE_OWN = 105, 30
+
+    def setUp(self):
+        self.user = _user("oc_cost", superuser=True)
+        _three_worlds(self.user)
+        from portfolio.models import Position
+        from portfolio.services import get_or_create_default_portfolio
+        _quote("USDJPY", "150.120", "forex")
+        Position.objects.create(
+            portfolio=get_or_create_default_portfolio(user=self.user),
+            instrument=_instrument("USDJPY", "forex", "JPY"),
+            direction="long", quantity=Decimal("1000"),
+            entry_price=Decimal("150.000"), current_price=Decimal("150.000"),
+            opened_at=timezone.now() - timedelta(days=1))
+        self.client.force_login(self.user)
+        self.client.get("/command/tab/metrics/")   # the session's first sighting
+
+    def _clear(self):
+        """cache.clear(), the presence stamp's once-a-minute throttle set
+        again (the shell's write, not the page's read)."""
+        from core.presence import PRESENCE_WRITE_INTERVAL
+        cache.clear()
+        cache.set(f"presence:{self.user.pk}", 1, PRESENCE_WRITE_INTERVAL)
+
+    def _count(self, path):
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.get(path)
+        self.assertEqual(r.status_code, 200, path)
+        return len(ctx.captured_queries)
+
+    def test_the_query_budgets_hold_cold(self):
+        over = {}
+        for path, budget in self.BUDGETS.items():
+            self._clear()
+            n = self._count(path)
+            if n > budget:
+                over[path] = (n, budget)
+        self.assertEqual(over, {})
+
+    def test_the_pages_own_reads_hold_cold_and_the_page_holds_warm(self):
+        from core.wall_facts import wall_facts
+        templates = copy.deepcopy(settings.TEMPLATES)
+        templates[0]["OPTIONS"]["context_processors"] = [
+            p for p in templates[0]["OPTIONS"]["context_processors"]
+            if not p.startswith(("core.context_processors", "core.context_ui"))]
+        self._clear()
+        wall_facts()                       # the public Wall's own cache
+        with override_settings(TEMPLATES=templates):
+            own = self._count("/command/")
+        self.assertLessEqual(own, self.PAGE_OWN)
+        self.addCleanup(cache.clear)
+        self._clear()
+        with mock.patch.object(sys, "argv", ["manage.py", "runserver"]):
+            self.client.get("/command/")
+            warm = self._count("/command/")
+        self.assertLessEqual(warm, self.PAGE)
+
+    def test_each_fragment_is_the_same_without_the_shell(self):
+        templates = copy.deepcopy(settings.TEMPLATES)
+        templates[0]["OPTIONS"]["context_processors"] = [
+            p for p in templates[0]["OPTIONS"]["context_processors"]
+            if not p.startswith(("core.context_processors", "core.context_ui"))]
+        token = re.compile(r'(name="csrfmiddlewaretoken" value=")[^"]+')
+        stamp = re.compile(r"\d\d:\d\d:\d\d UTC")
+        for path in FRAGMENTS:
+            with mock.patch("django.utils.timezone.now",
+                            return_value=timezone.now()):
+                full = self.client.get(path).content.decode()
+                with override_settings(TEMPLATES=templates):
+                    bare = self.client.get(path).content.decode()
+            clean = lambda s: stamp.sub("", token.sub(r"\1", s))  # noqa: E731
+            self.assertEqual(clean(full), clean(bare), path)
+
+
+class AggregatesEqualTheLoopsTests(TestCase):
+    """The database aggregates replace Python loops over every close; on a
+    fixture with an unknown, a zero and a hand-recorded close, they answer
+    what the loops answered, world by world."""
+
+    def setUp(self):
+        self.user = _user("oc_agg")
+        self.client.force_login(self.user)
+        pf = _portfolio(self.user)
+        real = _config(self.user, "agg real", "stock", mode="live")
+        demo = _config(self.user, "agg demo", "forex")
+        paper = _config(self.user, "agg paper", "crypto")
+        days = 0
+        for cfg, world, pnls in ((real, "live", (30, 10, -10, -5, None, 0)),
+                                 (demo, "demo", (2, -1, 0)),
+                                 (paper, "paper", (50, -20, -30, None))):
+            for pnl in pnls:
+                days += 1
+                _trade(cfg, "AAPL" if world == "live" else
+                       "EURUSD" if world == "demo" else "BTCUSD",
+                       1, 100, world=world, status="CLOSED", pnl=pnl,
+                       r=None if pnl is None else pnl / 10,
+                       opened_ago_s=86400 * days + 60,
+                       closed_ago_s=86400 * days)
+        from portfolio.models import Position
+        for i, pnl in enumerate(("7.00", "-3.00", "0.00")):
+            Position.objects.create(
+                portfolio=pf, instrument=_instrument("EURUSD", "forex"),
+                direction="long", quantity=Decimal("1"),
+                entry_price=Decimal("1"), current_price=Decimal("1"),
+                unrealized_pnl=Decimal(pnl),
+                opened_at=timezone.now() - timedelta(days=30 + i),
+                closed_at=timezone.now() - timedelta(days=20 + i))
+
+    def _old_loop(self):
+        """The old tab's loop over unified_closed_positions, kept here, with
+        each close's world read by world_of off its trade."""
+        from bot_program.models import AssetBotTrade
+        from dashboard.position_summary import world_of
+        from portfolio.services import (get_or_create_default_portfolio,
+                                        unified_closed_positions)
+        pf = get_or_create_default_portfolio(user=self.user)
+        worlds = {t.id: world_of(t) for t in AssetBotTrade.objects.filter(
+            config__user=self.user, status="CLOSED")}
+        out = {}
+        for p in unified_closed_positions(self.user, pf):
+            w = worlds.get(getattr(p, "trade_id", None), "") \
+                if getattr(p, "source", "") == "bot" else ""
+            out.setdefault(w, []).append(p.unrealized_pnl)
+        stats = {}
+        for w, pnls in out.items():
+            graded = [float(x) for x in pnls if x is not None]
+            wins = [x for x in graded if x > 0]
+            losses = [x for x in graded if x < 0]
+            stats[w] = {
+                "n": len(pnls), "n_graded": len(graded),
+                "n_unknown": len(pnls) - len(graded),
+                "wins": len(wins), "losses": len(losses),
+                "avg_win": round(sum(wins) / len(wins), 2) if wins else None,
+                "avg_loss": (round(sum(losses) / len(losses), 2)
+                             if losses else None),
+                "profit_factor": (round(sum(wins) / abs(sum(losses)), 2)
+                                  if losses else None)}
+        return stats
+
+    def test_portfolio_aggregates_equal_the_old_loop(self):
+        stats = self.client.get("/command/tab/portfolio/").context[
+            "stats_by_world"]
+        for world, old in self._old_loop().items():
+            for key, value in old.items():
+                self.assertEqual(stats[world][key], value, (world, key))
+
+    def test_historys_per_day_cumulative_r_equals_the_per_close_line(self):
+        from bot_program.models import AssetBotTrade
+        r = self.client.get("/command/tab/history/")
+        closes = list(AssetBotTrade.objects.filter(
+            config__user=self.user, status="CLOSED",
+            closed_at__gte=timezone.now() - timedelta(days=90),
+            realized_r__isnull=False).order_by("closed_at")
+            .values_list("closed_at", "realized_r"))
+        running, at_day_end = 0.0, {}
+        for at, rr in closes:
+            running += float(rr)
+            at_day_end[at.date()] = round(running, 4)
+        self.assertEqual(r.context["cum_r_days"],
+                         [d.isoformat() for d in sorted(at_day_end)])
+        self.assertEqual(r.context["cum_r_points"],
+                         [at_day_end[d] for d in sorted(at_day_end)])
+
+    def test_the_best_and_worst_equal_a_sort_of_every_close(self):
+        """Two ranked reads (one per book) answer what sorting every close
+        answered: the five largest gains and the five largest losses, bot
+        and hand-recorded together, each in its own world."""
+        from bot_program.models import AssetBotTrade
+        from dashboard.position_summary import world_of
+        from portfolio.services import (get_or_create_default_portfolio,
+                                        unified_closed_positions)
+        pf = get_or_create_default_portfolio(user=self.user)
+        worlds = {t.id: world_of(t) for t in AssetBotTrade.objects.filter(
+            config__user=self.user, status="CLOSED")}
+        closes = [(float(p.unrealized_pnl), p.instrument.symbol,
+                   worlds.get(getattr(p, "trade_id", None), "")
+                   if getattr(p, "source", "") == "bot" else "")
+                  for p in unified_closed_positions(self.user, pf)
+                  if p.unrealized_pnl is not None]
+        best = sorted((c for c in closes if c[0] > 0), reverse=True)[:5]
+        worst = sorted(c for c in closes if c[0] < 0)[:5]
+        ctx = self.client.get("/command/tab/portfolio/").context
+        got = lambda rows: [(r["pnl"], r["symbol"], r["world"])  # noqa: E731
+                            for r in rows]
+        self.assertEqual(got(ctx["best_trades"]),
+                         [(p, s, w) for p, s, w in best])
+        self.assertEqual(got(ctx["worst_trades"]),
+                         [(p, s, w) for p, s, w in worst])
+        self.assertEqual([p for p, _s, _w in best], [50, 30, 10, 7, 2])
+        self.assertEqual([p for p, _s, _w in worst], [-30, -20, -10, -5, -3])
+
+    def test_the_bots_aggregates_equal_the_per_config_loop(self):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg = AssetBotConfig.objects.get(user=self.user, name="agg paper")
+        _trade(cfg, "BTCUSD", 1, 100, world="paper", opened_ago_s=300)
+        _trade(cfg, "BTCUSD", 1, 100, world="paper", status="CLOSED",
+               pnl=12, r=1.2, opened_ago_s=900, closed_ago_s=600)
+        rows = {row["config"].id: row for row in
+                self.client.get("/command/tab/bots/").context["rows"]}
+        since = timezone.now() - timedelta(hours=24)
+        for c in AssetBotConfig.objects.filter(user=self.user):
+            trades = AssetBotTrade.objects.filter(config=c)
+            closed = trades.filter(status="CLOSED", closed_at__gte=since)
+            pnl = sum((t.pnl for t in closed if t.pnl is not None),
+                      Decimal("0")) if closed.exists() else None
+            row = rows[c.id]
+            self.assertEqual(row["open_count"], trades.filter(
+                status__in=("OPEN", "CLOSE_PENDING")).count(), c.name)
+            self.assertEqual(row["opens_24h"],
+                             trades.filter(opened_at__gte=since).count())
+            self.assertEqual(row["closed_24h"], closed.count())
+            self.assertEqual(row["pnl_24h"],
+                             None if pnl is None else float(pnl), c.name)
+
+
+# ── 9. No broker or model call ───────────────────────────────────────────
+
+class NoBrokerOrModelCallTests(TestCase):
+    SOURCES = ("dashboard/views_command.py",)
+    FORBIDDEN = ("client_for_symbol", "EtoroTrader", "etoro_client",
+                 "ai_agents.providers", "BaseAgent", "anthropic", "openai",
+                 "import requests", "urllib")
+
+    def test_the_source_imports_no_adapter_and_no_model(self):
+        for rel in self.SOURCES:
+            src = (BASE / rel).read_text(encoding="utf-8")
+            for word in self.FORBIDDEN:
+                self.assertNotIn(word, src, f"{rel}: {word}")
+
+    def test_the_page_and_its_fragments_render_with_every_door_shut(self):
+        user = _user("oc_nocall", superuser=True)
+        _three_worlds(user)
+        self.client.force_login(user)
+        calls = []
+
+        def refuse(name):
+            def _raise(*a, **k):
+                calls.append(name)
+                raise AssertionError(f"{name} was called")
+            return _raise
+        patches = [
+            mock.patch("bot_program.engine.etoro_client.EtoroTrader.__init__",
+                       refuse("EtoroTrader")),
+            mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                       refuse("client_for_symbol")),
+            mock.patch("http.client.HTTPConnection.connect",
+                       refuse("HTTPConnection.connect")),
+            mock.patch("urllib3.connectionpool.HTTPConnectionPool.urlopen",
+                       refuse("urlopen")),
+            mock.patch("ai_agents.providers.claude_provider.ClaudeProvider"
+                       ".complete", refuse("model")),
+            mock.patch("ai_agents.base_agent.BaseAgent.run", refuse("agent")),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            for path in ("/command/", "/command/tab/metrics/") + FRAGMENTS:
+                self.assertEqual(self.client.get(path).status_code, 200, path)
+        finally:
+            for p in patches:
+                p.stop()
+        self.assertEqual(calls, [])
+
+
+# ── 10. The page's own poll ──────────────────────────────────────────────
+
+@skipIf(NODE is None, "node is not installed")
+class ThePollUnderNodeTests(SimpleTestCase):
+    """tests/js/command_metrics.test.js drives the metrics poll exactly as
+    command.html ships it, under node with the browser stubbed."""
+
+    def test_the_poll_stops_on_lock_redirect_and_hidden_and_resumes(self):
+        proc = subprocess.run(
+            [NODE, str(BASE / "tests" / "js" / "command_metrics.test.js"),
+             str(BASE / "templates" / "dashboard" / "command.html")],
+            capture_output=True, text=True, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["failed"], [], out)
+        for case in ("sends_x_requested_with", "stops_on_423",
+                     "stops_on_redirect", "nothing_while_hidden",
+                     "resumes_on_pin_unlocked", "resumes_when_visible",
+                     "eye_event_refetches"):
+            self.assertIn(case, out["passed"], out)
+
+
+class ThePageScriptTests(SimpleTestCase):
+    def setUp(self):
+        self.page = (BASE / "templates" / "dashboard" / "command.html"
+                     ).read_text(encoding="utf-8")
+
+    def test_the_css_is_rendered_once(self):
+        """{% block extra_css %} sat inside {% block content %}: the page's
+        style block and its sheet were rendered twice (once by base.html's
+        own extra_css slot, once inside the content)."""
+        parents, stack = {}, []
+        for m in re.finditer(r"\{%\s*(block|endblock)\b\s*(\w*)\s*%\}",
+                             self.page):
+            if m.group(1) == "block":
+                parents[m.group(2)] = stack[-1] if stack else None
+                stack.append(m.group(2))
+            else:
+                stack.pop()
+        self.assertIn("extra_css", parents)
+        self.assertIsNone(parents["extra_css"])
+        self.assertEqual(self.page.count("{% block extra_css %}"), 1)
+
+    def test_the_heads_never_flash_eye_green(self):
+        m = re.search(r"@keyframes oc-changed\s*\{((?:[^{}]*\{[^{}]*\})*)"
+                      r"[^{}]*\}", self.page)
+        self.assertIsNotNone(m)
+        self.assertNotIn("0,232,104", m.group(1).replace(" ", ""))
+        self.assertNotIn("--accent", m.group(1))
