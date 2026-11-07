@@ -90,3 +90,8 @@ En haut, NEED YOU puis l'œil, en petit. Juste dessous, la ligne REAL : la valeu
 6. **Les pages sont des points fixes, et seuls les événements bougent** (ce que je propose). Ou voulais-tu que les pages elles-mêmes flottent doucement autour de l'œil ?
 
 Si les choix proposés te vont, « 6 okay » suffit, comme pour l'Operations Center.
+
+
+## Décisions (7 novembre 2026)
+
+« 6 okay, barad dur devient adresse racine cependant » : les six OK sont donnés, avec un changement au point 3 : l'adresse racine « / » mène à Barad-dûr, et non plus à l'Operations Center. L'Operations Center reste à un clic (l'œil, « Enter the Operations Center », la barre latérale).
