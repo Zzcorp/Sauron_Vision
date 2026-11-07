@@ -310,7 +310,12 @@ class SomethingSaysWhenToLookTests(TestCase):
         third entry point cannot forget to add it."""
         src = self._base()
         i = src.find("function tradeFlow(")
-        j = src.find("window.svTakeTrade = function", i)
+        # tradeFlow's own body, to its closing brace: the helpers that
+        # follow it (the lost-answer lookup, 2026-11-06) dispatch the same
+        # event, and must not answer for its success path.
+        j = src.find("\n  }\n", i)
+        self.assertGreater(i, 0)
+        self.assertGreater(j, i)
         self.assertIn("sv:position-changed", src[i:j])
 
     def test_it_fires_on_the_execute_response_not_the_preview(self):

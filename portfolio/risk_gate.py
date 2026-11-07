@@ -337,7 +337,7 @@ def gate_book_value(user, portfolio) -> float | None:
 
 #: How old the broker's equity reading may be and still size the LIVE
 #: limits (two hours is eight missed 15-minute syncs; the eToro walk beats
-#: every 300 s since 2026-10-31, twenty-four of its passes).
+#: every 60 s since 2026-11-06, a hundred and twenty of its passes).
 LIVE_EQUITY_MAX_AGE_S = 2 * 3600
 
 

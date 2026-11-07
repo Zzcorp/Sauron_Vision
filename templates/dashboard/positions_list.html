@@ -126,9 +126,10 @@ says it in eToro's words.{% endcomment %}
                 <td data-label="Side" class="{% if row.side == 'BUY' %}bkp-up{% else %}bkp-down{% endif %}">{{ row.side }}</td>
                 <td data-label="Qty">{{ row.qty|floatformat:"-4" }}</td>
                 <td data-label="Avg cost">{{ row.avg_cost|floatformat:"-4" }}</td>
-                <td data-label="Mark">{{ row.market_price|floatformat:"-4" }}</td>
-                <td data-label="Value">{{ row.market_value|floatformat:2 }}</td>
-                <td data-label="Unreal P&amp;L" class="{% if row.unrealized_pnl >= 0 %}bkp-up{% else %}bkp-down{% endif %}">{{ row.unrealized_pnl|floatformat:2 }}</td>
+                {# eToro's list carries no mark and no value, and its P&L is the position's own net profit (2026-11-06, views._render_positions: net_profit_t): a dash where eToro sent nothing, never the stored constant 0. #}
+                <td data-label="Mark">{% if broker.kind == "etoro" %}&mdash;{% else %}{{ row.market_price|floatformat:"-4" }}{% endif %}</td>
+                <td data-label="Value">{% if broker.kind == "etoro" %}&mdash;{% else %}{{ row.market_value|floatformat:2 }}{% endif %}</td>
+                <td data-label="Unreal P&amp;L" class="{% if broker.kind == 'etoro' %}{% if row.net_profit_t %}bkp-{{ row.net_profit|sign_class }}{% else %}sv-unknown{% endif %}{% elif row.unrealized_pnl >= 0 %}bkp-up{% else %}bkp-down{% endif %}">{% if broker.kind == "etoro" %}{% if row.net_profit_t %}{{ row.net_profit_t }}{% else %}&mdash;{% endif %}{% else %}{{ row.unrealized_pnl|floatformat:2 }}{% endif %}</td>
                 <td data-label="Ccy">{{ row.currency }}</td>
                 <td data-label="Claim">{% if row.claim == "stopped" %}<span class="bkp-claim bkp-claim--stopped" title="Sauron stopped trying to close this position and eToro still lists it: close it at eToro.">STOPPED</span>{% elif row.claim == "no_broker" %}<span class="bkp-claim bkp-claim--nobroker" title="A live Sauron row on this symbol records no broker, so it is not counted as eToro's: it may be this position.">NO BROKER</span>{% elif row.claimed %}<span class="bkp-claim">CLAIMED</span>{% elif broker.kind == "etoro" %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row accounts for this position: opened in the eToro app, a second position beside Sauron's, or an orphan. Real exposure the platform does not manage.">UNCLAIMED</span>{% else %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row matches this symbol — opened by hand in TWS, or an orphan. Real exposure the platform did not open and does not manage.">UNCLAIMED</span>{% endif %}</td>
             </tr>{% endspaceless %}
@@ -397,7 +398,8 @@ says it in eToro's words.{% endcomment %}
                     {% if p.take_profit %}<span class="pos-price">{% px p.take_profit p.asset_class p.symbol %}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
                 {% endif %}
             </td>
-            <td data-label="P&amp;L" class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            {# WHOSE P&L (2026-11-06, views._live_row): eToro's own figure on an eToro row its holdings list; anywhere else on an eToro row, the words say it is an estimate and from what (pnl_words), with its own key so the refresh pulses it. #}
+            <td data-label="P&amp;L" class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl"{% if p.pnl_title %} title="{{ p.pnl_title }}"{% endif %}>{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}{% if p.pnl_words %}<span class="pos-pnl-src sv-muted" data-sv-live-key="{{ p.key }}.pnlsrc" style="display:block;font-size:.7em;font-weight:400;">{{ p.pnl_words }}</span>{% endif %}</td>
             <td data-label="P&amp;L %" class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} <span class="cap-pct" title="The same P&L measured against the CAPITAL this position ties up (margin for forex, premium for options) — the notional figure is silent about your cash">{{ p.cap_pct_text }} cap</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# R against the stop the position OPENED with, not the current #}
             {# one: a trailing stop rewrites that column, and grading against #}

@@ -2,7 +2,8 @@
 
    The components on the tokens of sv-tokens.css. Loaded by base.html after
    every shell sheet it restyles by class (sauron.css, the overlay, the
-   tour, motion, the activity drawer, the Horde, the Council band) and
+   tour, motion, the activity drawer, the Horde, the Council band, and the
+   signal rail's sheet since main's railfilters merged in, 2026-11-07) and
    before the phone tier, so a rule here meets the rule it replaces at the
    same weight and wins by order. It changes how things look, never what
    they are: no word, no step, no hook a script reads (tests/
@@ -340,6 +341,35 @@ thead th,
 .cb-reasons summary,
 .cb-wtable { font-size: var(--sv-fs-micro); }
 
+/* the signal rail's filters, LEFT THE RAIL, the card's facts and the bottom
+   band's lists (sv-rail.css, railfilters #90, merged 2026-11-07): 22 rules.
+   .ip-dropdown .ip-dd-note outweighs the overlay list's .ip-dd-note above,
+   so it is named at its own weight. */
+.rail-head .rh-held,
+.rf-chip,
+.sr-stage,
+.sr-contra,
+.sr-pop-facts,
+.sr-pop-one,
+.sr-rail-note,
+.sr-gone-head,
+.sr-gone-tags,
+.sr-gone-l1 .sr-badge,
+.sr-gone-tag,
+.sr-gone-at,
+.sr-gone-words,
+.sr-gone-pos,
+.sr-gone-btn,
+.sr-gone-empty,
+.sv-grp,
+.rf-status,
+.rf-k,
+.rf-opt,
+.rf-rule,
+.rf-none,
+.sv-list-note,
+.ip-dropdown .ip-dd-note { font-size: var(--sv-fs-micro); }
+
 /* A few shell spans carry their size inline in base.html's markup (a
    strategy's status in the bottom band's list, the news list, the empty
    watchlist, the instrument preview's "Loading..."). Only !important
@@ -462,6 +492,42 @@ body:not(.light-mode) .sr-pop-grid > div { border-bottom-color: var(--sv-line-1)
 body:not(.light-mode) .sr-pop-k, body:not(.light-mode) .sr-signal .sr-age { color: var(--sv-ink-3); }
 .sr-pop-v { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
 
+/* The rail's filters and LEFT THE RAIL (railfilters #90, merged 2026-11-07):
+   the ⚙ panel's keys, the group heads and LEFT THE RAIL's head are labels;
+   the counts and the times are figures; the status, the notes, the card's
+   facts and the departures' lines are words (their chips and buttons are
+   below). Never a display, an order or a visibility: the filters own those
+   (sv-rail.css, <style id="svRuleOff">, sv-rail-filters.js). */
+.rf-k, .sv-grp, .sr-gone-head {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+}
+.rail-head .rh-held, .rf-status, .rf-opt, .rf-rule, .sr-rail-note, .sv-list-note,
+.ip-dropdown .ip-dd-note, .sr-pop-facts, .sr-pop-one, .sr-contra,
+.sr-gone-tags, .sr-gone-pos { font-family: var(--sv-font-sans); letter-spacing: 0; }
+.rf-chip b, .rf-rule b, .sr-gone-count, .sr-gone-at { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+.sr-gone-l1 .sr-sym { font-family: var(--sv-font-mono); font-weight: 600; letter-spacing: 0; }
+/* Opaque grounds for the rail's translucent ones: the ⚙ panel and the
+   departures recessed on the void, a group head raised like a table head,
+   hairlines between rows. */
+body:not(.light-mode) .rail-facets { border-bottom-color: var(--sv-line-1); }
+body:not(.light-mode) .rail-fpanel,
+body:not(.light-mode) .sr-gone { background: var(--sv-bg-0); }
+body:not(.light-mode) .sv-grp { background: var(--sv-bg-2); }
+body:not(.light-mode) .sr-gone-row { border-top-color: var(--sv-line-1); }
+/* "show all" is a link: ink-1 and its underline, never the Eye (§3.3). */
+body:not(.light-mode) .rf-peek { color: var(--sv-ink-1); }
+/* A muted rule stays struck through, at full strength in ink-3: dimmed to
+   55 % it fell under 4.5:1. */
+body:not(.light-mode) .rf-rule[aria-pressed="false"] { opacity: 1; color: var(--sv-ink-3); }
+/* The ⚙ is a calm control; open, its panel is selected (the Eye's edge). */
+body:not(.light-mode) .rail-head .rh-gear:hover { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
+body:not(.light-mode) .rail-head .rh-gear[aria-expanded="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-eye); }
+/* "↻ N new", what a refresh holds while a card is read: a bubble, like the
+   head's count, not the Eye's wash. */
+body:not(.light-mode) .rail-head .rh-held { background: var(--sv-bg-3); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+body:not(.light-mode) .rail-head .rh-held:hover { background: var(--sv-bg-4); }
+
 /* The user's initials: legible, not green on green. */
 body:not(.light-mode) .um-avatar { background: var(--sv-bg-4); color: var(--sv-ink-1); }
 
@@ -502,6 +568,18 @@ body:not(.light-mode) .pos-pop {
 .sr-popup, .dh-pop, .notif-dropdown, .user-menu-dropdown, .lsp-dropdown,
 .exchange-dropdown, .ticker-popup, .nf-pop, .pos-pop { border-radius: var(--sv-radius-card); }
 .ip-dropdown { border-radius: var(--sv-radius-card) var(--sv-radius-card) 0 0; }
+/* The rail's card scrolls between a sticky head and foot (railfilters #90,
+   merged 2026-11-07): both on the card's own surface, the foot under a
+   hairline. A card pinned open by a click keeps the Eye's edge (selected),
+   which the border above would otherwise cover. A bottom-band dropdown's
+   sticky head sits on the dropdown's surface; the card's one-position note
+   is dashed in its own gold. */
+body:not(.light-mode) .sr-popup .sr-pop-head,
+body:not(.light-mode) .sr-pop-foot { background: var(--sv-bg-2); }
+body:not(.light-mode) .sr-pop-foot { border-top-color: var(--sv-line-2); }
+body:not(.light-mode) .sr-popup.sv-pinned { border-color: var(--sv-eye); }
+body:not(.light-mode) .ip-dropdown .ip-dd-head { background: var(--sv-bg-2); }
+body:not(.light-mode) .sr-pop-one { border-color: color-mix(in srgb, var(--accent-gold-ink) 45%, transparent); }
 
 /* The dialog: bg-2, the dialog shadow; its head carries the subject. A REAL
    or funding dialog (.sv-dialog--danger) carries the REAL red as a 3 px top
@@ -590,6 +668,31 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
     font-size: var(--sv-fs-small);
 }
 .sr-pop-btn.sr-pop-btn-pass:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); border-color: transparent; }
+/* LEFT THE RAIL's buttons (railfilters #90, merged 2026-11-07). ▶ TICKET
+   opens the ticket TAKE TRADE opens, so it wears its signal's side like
+   TAKE TRADE (a short signal is a SELL), an outline, never the Eye's wash;
+   a row with no side keeps the plain look. ↺ BRING BACK is a plain card
+   button. */
+.sr-gone-btn {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+    border-radius: var(--sv-radius-ctl);
+}
+:where(body:not(.light-mode)) .sr-gone-btn { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .sr-gone-btn:hover { background: var(--sv-bg-4); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+.sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-up);
+    border: 1.5px solid var(--sv-up);
+}
+.sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); }
+.sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-down);
+    border: 1.5px solid var(--sv-down);
+}
+.sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
 
 
 /* ══ §7 Buttons: the kit's variants (on .btn, sauron.css) ════════════════ */
@@ -690,6 +793,53 @@ body:not(.light-mode) .wl-class { color: var(--sv-ink-2); background: transparen
 /* Counts are bubbles, not alarms: the bell's and the drawer's numbers. */
 body:not(.light-mode) .notif-badge,
 body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: var(--sv-ink-1); font-family: var(--sv-font-mono); }
+
+/* The rail's filters (railfilters #90, merged 2026-11-07), as the approved
+   board draws them: a chip is a neutral outline and its count a figure;
+   pressed, it is selected (bg-3, ink-1, the Eye's edge); LONG and SHORT
+   carry their side. The ⚙ panel's options press the same way. :where()
+   keeps these at the sheet's own weight, so its states keep theirs. */
+.rf-chip {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+.rf-opt, .rf-rule { border-radius: var(--sv-radius-chip); }
+:where(body:not(.light-mode)) .rf-chip { color: var(--sv-ink-2); border-color: var(--sv-line-3); }
+:where(body:not(.light-mode)) button.rf-chip:hover { color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) button.rf-chip[aria-pressed="true"],
+:where(body:not(.light-mode)) .rf-opt[aria-pressed="true"] { background: var(--sv-bg-3); border-color: var(--sv-eye); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .rf-chip[aria-pressed="true"] b { color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="long"] { color: var(--sv-up); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="short"] { color: var(--sv-down); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="long"]:not([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--sv-up) 50%, transparent); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="short"]:not([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--sv-down) 50%, transparent); }
+
+/* LEFT THE RAIL's rows and the rail's stage chip (railfilters #90, merged
+   2026-11-07): the side in jade or coral on its wash, as on the rail's
+   cards; a tag is an outline in its tone: a loss coral, a target reached
+   jade (a gain, not the Eye), TAKEN the taken family's gold (it carries no
+   side, sauron.css --sr-taken), chased, paused or demoted gold. */
+.sr-stage, .sr-gone-tag, .sr-gone-l1 .sr-badge {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+:where(body:not(.light-mode)) .sr-gone-l1 .sr-badge-bullish { color: var(--sv-up); background: color-mix(in srgb, var(--sv-up) 12%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-l1 .sr-badge-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag { border-color: var(--sv-line-3); }
+:where(body:not(.light-mode)) .sr-gone-tag-stop_crossed,
+:where(body:not(.light-mode)) .sr-gone-tag-closed_stop,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_losing,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_losing_live,
+:where(body:not(.light-mode)) .sr-stage-bearish { color: var(--sv-down); border-color: color-mix(in srgb, var(--sv-down) 45%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag-target_reached,
+:where(body:not(.light-mode)) .sr-gone-tag-closed_target { color: var(--sv-up); border-color: color-mix(in srgb, var(--sv-up) 45%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag-taken { color: var(--sr-taken); border-color: var(--sr-taken-edge); }
+:where(body:not(.light-mode)) .sr-gone-tag-chased,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_paused,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_demoted,
+:where(body:not(.light-mode)) .sr-stage-high { border-color: color-mix(in srgb, var(--accent-gold-ink) 45%, transparent); }
 
 
 /* ══ §7 Data ═════════════════════════════════════════════════════════════

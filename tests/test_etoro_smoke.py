@@ -19,6 +19,7 @@
 from decimal import Decimal
 from io import StringIO
 from unittest import mock
+from urllib.parse import parse_qsl
 
 import requests
 from django.contrib.auth.models import User
@@ -58,7 +59,9 @@ class _FakeSession:
     """Routes (method, substring of "url?k=v&k=v&") -> (status, payload).
     Records every call. The params are folded into the match string, each
     terminated by "&", so "GLD&" cannot match "GLDM&" and two /search calls
-    for two spellings answer differently."""
+    for two spellings answer differently; so is the URL's own query, where
+    the rates read spells its ids with literal commas since 2026-11-06
+    (the feed spec's P-a.1, etoro_client.rates_url)."""
 
     def __init__(self, routes=None, default=(200, {})):
         self.routes = list(routes or [])
@@ -67,9 +70,11 @@ class _FakeSession:
 
     def _hit(self, method, url, **kw):
         self.calls.append((method, url, kw))
-        params = kw.get("params") or {}
-        probe = (url + "?"
-                 + "".join(f"{k}={v}&" for k, v in sorted(params.items())))
+        base, _, query = url.partition("?")
+        pairs = dict(parse_qsl(query))
+        pairs.update(kw.get("params") or {})
+        probe = (base + "?"
+                 + "".join(f"{k}={v}&" for k, v in sorted(pairs.items())))
         for m, sub, status, payload in self.routes:
             if m == method and sub in probe:
                 return _Resp(status, payload, url)

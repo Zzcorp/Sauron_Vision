@@ -525,6 +525,81 @@ class PolarityTests(SimpleTestCase):
         self.assertEqual(offenders, [])
 
 
+class RailFiltersOnTheKitTests(SimpleTestCase):
+    """The signal rail's filters, LEFT THE RAIL and its click-to-open cards
+    (railfilters, #90) on the kit, from the merge of origin/main into this
+    branch (2026-11-07): sv-rail.css loads before the kit, so every size it
+    sets under 11 px meets the micro size at its own selector here; a gain
+    is jade, never the Eye; a pressed filter is selected (bg-3, ink-1, the
+    Eye's edge); and a card pinned open keeps that edge under the kit's
+    popover border, its sticky head and foot on the card's own surface."""
+
+    RAIL = "static/css/sv-rail.css"
+    DARK = "body:not(.light-mode) "
+    WHERE = ":where(body:not(.light-mode)) "
+
+    @staticmethod
+    def value(css, selector, prop):
+        """What the last top-level rule naming `selector` (alone or in a
+        list) gives `prop`: the cascade's answer for rules of one weight."""
+        got = None
+        for prelude, body, ctx in rules(css):
+            if ctx or selector not in [s.strip() for s in prelude.split(",")]:
+                continue
+            for p, v in decls(body):
+                if p == prop:
+                    got = v
+        return got
+
+    def test_the_kit_loads_after_the_rail_sheet_and_before_the_phone_tier(self):
+        base = read(BASE)
+        self.assertLess(base.index("'css/sv-rail.css'"), base.index("'css/sv-kit.css'"))
+        self.assertLess(base.index("'css/sv-kit.css'"), base.index("'css/sv-responsive.css'"))
+
+    def test_every_rail_size_under_11px_meets_the_micro_size(self):
+        small = set()
+        for prelude, body, ctx in rules(read(self.RAIL)):
+            for prop, value in decls(body):
+                v = px(value) if prop == "font-size" else None
+                if v is not None and v < 11:
+                    small.update(s.strip() for s in prelude.split(","))
+        floored = set()
+        for prelude, body, ctx in rules(read(KIT)):
+            if not ctx and ("font-size", "var(--sv-fs-micro)") in decls(body):
+                floored.update(s.strip() for s in prelude.split(","))
+        self.assertGreater(len(small), 20)
+        self.assertEqual(sorted(small - floored), [])
+
+    def test_a_gain_on_the_rail_is_jade_never_the_eye(self):
+        css = read(KIT)
+        for sel, want in ((".sr-gone-l1 .sr-badge-bullish", "var(--sv-up)"),
+                          (".sr-gone-tag-target_reached", "var(--sv-up)"),
+                          (".sr-gone-tag-closed_target", "var(--sv-up)"),
+                          (".sr-gone-l1 .sr-badge-bearish", "var(--sv-down)"),
+                          (".sr-gone-tag-stop_crossed", "var(--sv-down)")):
+            with self.subTest(selector=sel):
+                self.assertEqual(self.value(css, self.WHERE + sel, "color"), want)
+
+    def test_a_pressed_filter_is_selected_with_the_eye_s_edge(self):
+        css = read(KIT)
+        for sel in ('button.rf-chip[aria-pressed="true"]', '.rf-opt[aria-pressed="true"]'):
+            with self.subTest(selector=sel):
+                self.assertEqual(self.value(css, self.WHERE + sel, "border-color"), "var(--sv-eye)")
+                self.assertEqual(self.value(css, self.WHERE + sel, "background"), "var(--sv-bg-3)")
+                self.assertEqual(self.value(css, self.WHERE + sel, "color"), "var(--sv-ink-1)")
+
+    def test_a_pinned_card_keeps_the_eye_s_edge_and_its_ends_their_surface(self):
+        css = read(KIT)
+        # The popover border it must outweigh, and the edge that does.
+        self.assertEqual(self.value(css, self.DARK + ".sr-popup", "border"),
+                         "1px solid var(--sv-line-2)")
+        self.assertEqual(self.value(css, self.DARK + ".sr-popup.sv-pinned", "border-color"),
+                         "var(--sv-eye)")
+        for sel in (".sr-popup .sr-pop-head", ".sr-pop-foot", ".ip-dropdown .ip-dd-head"):
+            with self.subTest(selector=sel):
+                self.assertEqual(self.value(css, self.DARK + sel, "background"), "var(--sv-bg-2)")
+
+
 class AmbientSourceTests(SimpleTestCase):
 
     def test_the_ambient_layers_are_not_displayed_on_work_pages(self):

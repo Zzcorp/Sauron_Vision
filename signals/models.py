@@ -115,6 +115,44 @@ class Signal(models.Model):
             self._acted_cache = self._resolve_acted()
         return self._acted_cache
 
+    @classmethod
+    def prime_acted(cls, signals):
+        """Answer `acted` for many signals in ONE query (2026-11-06).
+
+        The signal rail lists every actionable signal now, not five, and
+        `acted` asked one query per card. This is the same join, batched:
+        the live trades on the signals' symbols opened since the oldest of
+        them, newest first, and for each signal the first trade
+        `_resolve_acted` would pick — the same symbol, opened at or after
+        the signal, and the exact metadata signal_id or the same non-empty
+        rule_name. A display helper: it reads AssetBotTrade and writes
+        nothing; a failed read leaves `acted` to ask per signal, as before.
+        """
+        signals = [s for s in signals if s.pk and s.created_at]
+        if not signals:
+            return
+        try:
+            from bot_program.models import AssetBotTrade
+            trades = list(AssetBotTrade.objects
+                          .filter(symbol__in={s.instrument.symbol
+                                              for s in signals},
+                                  status__in=cls.ACTED_STATUSES,
+                                  opened_at__gte=min(s.created_at
+                                                     for s in signals))
+                          .order_by("-opened_at"))
+        except Exception:  # noqa: BLE001 — each card asks on its own
+            return
+        for s in signals:
+            pick = None
+            for t in trades:
+                if t.symbol != s.instrument.symbol or t.opened_at < s.created_at:
+                    continue
+                if ((t.metadata or {}).get("signal_id") == s.pk
+                        or (s.rule_name and t.rule_name == s.rule_name)):
+                    pick = t
+                    break
+            s._acted_cache = s._acted_from(pick) if pick is not None else None
+
     def _resolve_acted(self):
         if not self.pk or not self.created_at:
             return None
@@ -136,6 +174,10 @@ class Signal(models.Model):
             return None
         if trade is None:
             return None
+        return self._acted_from(trade)
+
+    def _acted_from(self, trade):
+        """The `acted` dict for the live trade the join picked."""
         meta = trade.metadata or {}
         exact = meta.get("signal_id") == self.pk
         return {
@@ -148,6 +190,11 @@ class Signal(models.Model):
             "venue": "PAPER" if trade.paper else "LIVE",
             "rule": trade.rule_name or "",
             "trade_id": trade.pk,
+            # OPEN, or CLOSE_PENDING: still open at the broker while the bot
+            # wants it flat (2026-11-06) — the rail says "closing", and only
+            # an OPEN position is what the hand ticket's one-position-per-
+            # signal check refuses a second of.
+            "status": trade.status,
             "opened_at": trade.opened_at,
             "entry": float(trade.entry_price) if trade.entry_price else None,
             "stop": float(trade.stop_loss) if trade.stop_loss else None,

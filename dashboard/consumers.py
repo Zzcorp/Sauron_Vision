@@ -131,18 +131,31 @@ class DashboardConsumer(AsyncWebsocketConsumer):
         }))
 
 
-def push_quote_update(symbol, price, change_pct):
-    """Utility to push a quote update from any Celery task."""
+def push_quote_update(symbol, price, change_pct, source=""):
+    """Utility to push a quote update from any Celery task.
+
+    THE TICK NAMES ITS SOURCE (2026-11-06, the eToro feed spec's P-c.2):
+    `source`, the feed whose write the tick carries (LiveQuote.source),
+    rides the payload when the caller names it. It rode none, so every
+    pushed tick blanked the headband card's source to "—"
+    (templates/base.html, dhSync: a tick's `source` or nothing), and a
+    row's switch back from eToro's quote to Yahoo's, once its position
+    closed and the 300 s hold ended (bot_program/etoro_quotes.py), showed
+    on no pushed tick. A caller that names none pushes what it pushed."""
     from channels.layers import get_channel_layer
     from asgiref.sync import async_to_sync
 
     channel_layer = get_channel_layer()
     if channel_layer:
+        data = {"symbol": symbol, "price": str(price),
+                "change_pct": str(change_pct)}
+        if source:
+            data["source"] = str(source)
         async_to_sync(channel_layer.group_send)(
             "dashboard_live",
             {
                 "type": "quote_update",
-                "data": {"symbol": symbol, "price": str(price), "change_pct": str(change_pct)},
+                "data": data,
             }
         )
 

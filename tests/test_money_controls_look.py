@@ -144,6 +144,41 @@ class SignalCardLookTests(SimpleTestCase):
         self.assertIn('sr-pop-dir sr-pop-dir-{{ s.direction }}', html)
 
 
+class LeftTheRailLookTests(SimpleTestCase):
+    """LEFT THE RAIL (railfilters, #90; on the kit at the merge of
+    origin/main, 2026-11-07): ▶ TICKET opens the ticket TAKE TRADE opens,
+    so it wears its signal's side like TAKE TRADE (a short signal is a
+    SELL), an outline, never the Eye's wash; ↺ BRING BACK is a plain card
+    button. A row with no side keeps the plain look."""
+
+    def test_the_ticket_wears_the_signal_s_side(self):
+        css = read(KIT)
+        for side, token in (("long", "var(--sv-up)"), ("short", "var(--sv-down)")):
+            rule = block(css, '.sr-gone-row[data-side="%s"] .sr-gone-btn.sr-gone-btn-ticket' % side)
+            with self.subTest(side=side):
+                self.assertEqual(rule["background"], "transparent")
+                self.assertEqual(rule["color"], token)
+                self.assertIn(token, rule["border"])
+                for value in rule.values():
+                    self.assertNotIn("--sv-eye", value)
+                    self.assertNotIn("--accent", value)
+
+    def test_bring_back_is_a_plain_card_button(self):
+        rule = kit_rule(":where(body:not(.light-mode)) .sr-gone-btn")
+        self.assertEqual(rule["background"], "var(--sv-bg-3)")
+        self.assertEqual(rule["border-color"], "var(--sv-line-2)")
+        self.assertEqual(rule["color"], "var(--sv-ink-1)")
+
+    def test_the_departures_keep_their_buttons_words_and_side(self):
+        html = read("templates/_partials/signal_rail_items.html")
+        self.assertIn('data-side="{{ g.facts.side }}"', html)
+        self.assertIn('class="sr-gone-btn sr-gone-btn-ticket"', html)
+        self.assertIn("window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});\">▶ TICKET</button>",
+                      html)
+        self.assertIn('class="sr-gone-btn" data-sv-unpass="{{ g.signal_id }}"', html)
+        self.assertIn("↺ BRING BACK", html)
+
+
 class ProtectiveButtonsLookTests(SimpleTestCase):
     """.btn-danger carries CLOSE, RETRY CLOSE, CLOSE ALL, turn off, all off and
     a withdrawal's Cancel: a neutral outline now, never a red slab."""

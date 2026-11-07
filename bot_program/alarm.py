@@ -41,9 +41,11 @@ WHAT IT SAYS (each an Alarm: a stable key, a title, a few lines)
      collect_faults, its "ran but did nothing" bucket never. Its NAME and
      the kind in words, never its message (ages, and sometimes amounts).
      FLOOD_AT or more stopped at once is the scheduler, said once.
-  E  A live-world broker account that has not answered
-     BROKER_MISS_ALERT_AFTER syncs in a row (the sync's own miss count),
-     and a live Saxo account whose session died (the walk skips it
+  E  A live-world broker account that has not answered its walk's
+     count of syncs in a row (the sync's own miss count and threshold,
+     tasks.broker_miss_alert_after: fifteen on the eToro walk's 60 s
+     beat, three on the others', 2026-11-06), and a live Saxo account
+     whose session died (the walk skips it
      before it can count a miss), named by broker and number, never by
      username.
   F  The emergency flatten (engine/kill_switch.execute_kill_switch) having
@@ -725,7 +727,8 @@ def _session_lost(acct, now) -> bool:
 def read_brokers(now) -> list:
     """E: every keyed LIVE-world account the sync walks (IBKR on a port
     that is not paper, Saxo not SIM, eToro not demo) whose consecutive
-    miss count stands at BROKER_MISS_ALERT_AFTER or more -- and a Saxo
+    miss count stands at its walk's threshold or more
+    (tasks.broker_miss_alert_after, 2026-11-06) -- and a Saxo
     row whose session died, which the walk skips before it could count
     a miss (the keeper owns the session; its alert goes to the Eye's
     staff, never here). Not while the sync's switch is off: its count is
@@ -734,7 +737,7 @@ def read_brokers(now) -> list:
 
     from bot_program.capital_truth import ibkr_in_use
     from bot_program.models import EtoroAccount, IBKRAccount, SaxoAccount
-    from bot_program.tasks import BROKER_MISS_ALERT_AFTER, _broker_kind
+    from bot_program.tasks import _broker_kind, broker_miss_alert_after
     from core.platform_control import is_component_enabled
     if not is_component_enabled("broker_account_sync"):
         return []
@@ -760,7 +763,9 @@ def read_brokers(now) -> list:
                  "Sign in again on /brokers/."]))
             continue
         misses = int(cache.get(f"broker_sync:miss:{kind}:{acct.pk}") or 0)
-        if misses < BROKER_MISS_ALERT_AFTER:
+        # the stall alert's own count: fifteen on the eToro walk's 60 s
+        # beat, three on the others' 900 s (2026-11-06)
+        if misses < broker_miss_alert_after(kind):
             continue
         out.append(Alarm(
             f"broker|{kind}:{acct.pk}",

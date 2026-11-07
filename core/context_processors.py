@@ -228,7 +228,8 @@ def _book_fingerprint(user, portfolio):
 
 
 def _initial_stops_and_worlds(user):
-    """({trade_id: the stop the trade OPENED with}, {trade_id: its world}).
+    """({trade_id: the stop the trade OPENED with}, {trade_id: its world},
+        [the open trades]).
 
     `bot_program.manual_close._initial_stop` is the platform's one definition
     of that number, and bot_grading books R against it. The unified position
@@ -241,17 +242,57 @@ def _initial_stops_and_worlds(user):
     (paper=False) from REAL money, and the unified row carries no metadata
     at all — read off the row, a demo fill was "live", which painted its
     dropdown row red and would have counted its P&L as the real book's.
+
+    The trades themselves ride out too (2026-11-06), with the columns
+    portfolio.services.venue_pnls reads, so the band can print eToro's own
+    P&L on an eToro row without reading them a second time.
     """
     from bot_program.manual_close import _initial_stop
     from bot_program.models import AssetBotTrade
 
     stops, worlds = {}, {}
-    for trade in AssetBotTrade.objects.filter(
-            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
-    ).only("id", "metadata", "stop_loss", "paper"):
+    trades = list(AssetBotTrade.objects.filter(
+        config__user=user, status__in=("OPEN", "CLOSE_PENDING")
+    ).only("id", "metadata", "stop_loss", "paper", "status", "side", "qty",
+           "entry_price", "symbol", "asset_class", "config"))
+    for trade in trades:
         stops[trade.id] = _initial_stop(trade)
         worlds[trade.id] = _world_of(trade)
-    return stops, worlds
+    return stops, worlds, trades
+
+
+def _band_coverage(book, own, quoted):
+    """The book's coverage sentence AS THE BAND PRINTS ITS OPEN P&L
+    (2026-11-06, the review's probe J).
+
+    live_book_value leaves a row it could not price out of the value, the
+    exposure and its own open P&L, and its sentence says so ("... value,
+    exposure and P&L cannot be measured", "the other N are not in these
+    figures"). The band's open P&L also holds such a row when eToro's
+    holdings list it: at eToro's own figure (`own` rows) or at an eToro
+    quote's closing side (`quoted` rows), portfolio.services.venue_pnl. The
+    words beside that figure then say the value and the exposure leave the
+    row out and the open P&L counts it — never that the P&L cannot be
+    measured. With no such row, the book's own sentence, to the letter."""
+    counted = own + quoted
+    if not counted:
+        return book.coverage
+    n_open, n_priced = book.n_open, book.n_priced
+    unpriced = n_open - n_priced
+    left = unpriced - counted
+    how = " and ".join(w for w in (
+        f"{own} at eToro's own figure" if own else "",
+        f"{quoted} at an eToro quote's closing side" if quoted else "") if w)
+    if n_priced:
+        head = (f"{n_priced} of {n_open} open positions have a live quote; "
+                f"the other {unpriced} {'is' if unpriced == 1 else 'are'} "
+                f"not in the value or the exposure")
+    else:
+        head = (f"{n_open} open, none with a live quote — value and exposure "
+                f"cannot be measured")
+    tail = (f", {left} {'is' if left == 1 else 'are'} in no figure at all"
+            if left else "")
+    return f"{head}; the open P&L counts {how}{tail}."
 
 
 def _book_truth(user, portfolio):
@@ -283,9 +324,29 @@ def _book_truth(user, portfolio):
     book = live_book_value(user, portfolio)
     rows, n_priced, unrealized = book.rows, book.n_priced, book.unrealized
     n_open = book.n_open
-    stops, worlds = _initial_stops_and_worlds(user) if n_open else ({}, {})
+    stops, worlds, trades = (_initial_stops_and_worlds(user) if n_open
+                             else ({}, {}, []))
+    # eToro's OWN P&L on an eToro row (2026-11-06, the operator's report:
+    # an open eToro forex row read a gain on Sauron and a small loss in the
+    # eToro app): read AFTER live_book_value has answered, and laid over the
+    # band's own figures below — never handed back to it. The eToro row (and
+    # at most one quote) is read only when an open eToro row exists.
+    venues = {}
+    if trades:
+        try:
+            from portfolio.services import venue_pnls
+            venues = venue_pnls(user, trades, rows={
+                r.trade_id: r for r in rows
+                if getattr(r, "source", "") == "bot"
+                and getattr(r, "trade_id", None)})
+        except Exception as e:  # noqa: BLE001 — the marks' figures stand
+            logger.warning("Headband: eToro's own P&L unreadable: %s", e)
+            venues = {}
 
     detail, r_sum, r_n, bot_r_sum, bot_r_n = [], 0.0, 0, 0.0, 0
+    # {venue_pnl source: rows the book could not price that the band's open
+    # P&L holds at that figure} (the review's probe J, _band_coverage).
+    unpriced_in_pnl = {}
     # The same rows once more, by money world, for the LIVE line on the
     # PORTFOLIO cell: the world, the row's own P&L and its UNROUNDED R, so
     # the per-world R is summed at the book's precision like r_sum above
@@ -317,6 +378,30 @@ def _book_truth(user, portfolio):
         stop = (stops.get(trade_id) if source == "bot"
                 else _f(getattr(row, "stop_loss", None)))
         r_mult = _r_multiple(entry, stop, mark, sign)
+        pnl = _f(getattr(row, "unrealized_pnl", None))
+        pct = _f(getattr(row, "unrealized_pnl_pct", None))
+        mark_source = getattr(row, "mark_source", None)
+        venue = venues.get(trade_id) if source == "bot" else None
+        pnl_words = pnl_title = ""
+        if venue is not None:
+            # The figure the positions page prints for this eToro row; while
+            # it is eToro's own (or its quote's side) the R is that figure
+            # over the risk the row opened with, and it is not a stale
+            # venue print for the LIVE line's words.
+            in_book = mark is not None and pnl is not None
+            pnl, pct = _f(venue["pnl_usd"]), _f(venue["pnl_pct"])
+            if venue["source"] != "estimate":
+                r_mult = venue["r"]
+                mark_source = venue["source"]
+                # A row the book could not price, in the band's open P&L at
+                # eToro's figure: counted, so the words beside that P&L say
+                # it holds the row (2026-11-06, the review's probe J).
+                if not in_book and pnl is not None:
+                    unpriced_in_pnl[venue["source"]] = (
+                        unpriced_in_pnl.get(venue["source"], 0) + 1)
+            # The row's R and % say when they are an estimate (the review,
+            # 2026-11-06): the dropdown row's chip, its words on hover.
+            pnl_words, pnl_title = venue["words"], venue["title"]
         if r_mult is not None:
             r_sum += r_mult
             r_n += 1
@@ -331,13 +416,13 @@ def _book_truth(user, portfolio):
         # the fallback only when the trade could not be read back.
         world = ((worlds.get(trade_id) or _world_of(row)) if source == "bot"
                  else _world_of(row))
-        pnl = _f(getattr(row, "unrealized_pnl", None))
         # With the two words venue_mark.resolve put on the row, so the LIVE
         # line can say when it rests on the venue's last print, not a fresh
-        # one (2026-10-15, review).
+        # one (2026-10-15, review) — or the source of eToro's own figure,
+        # which is neither (2026-11-06).
         by_world_rows.append({
             "world": world, "pnl": pnl, "r": r_mult,
-            "mark_source": getattr(row, "mark_source", None),
+            "mark_source": mark_source,
             "mark_age_s": getattr(row, "mark_age_s", None)})
         detail.append({
             # The trade id is what makes the row actionable: the CLOSE
@@ -352,8 +437,10 @@ def _book_truth(user, portfolio):
             "stop": stop,
             "last": mark,
             "r": None if r_mult is None else round(r_mult, 2),
-            "pct": _f(getattr(row, "unrealized_pnl_pct", None)),
+            "pct": pct,
             "pnl": pnl,
+            "pnl_words": pnl_words,
+            "pnl_title": pnl_title,
             "paper": getattr(row, "paper", None),
             "world": world,
             "source": source,
@@ -361,11 +448,37 @@ def _book_truth(user, portfolio):
             "opened_at": getattr(row, "opened_at", None),
         })
 
+    # The band's open P&L is what its rows PRINT (2026-11-06): with an eToro
+    # row on eToro's own figure, the sum of the rows above; book.unrealized
+    # (the marks' sum, live_book_value's own) otherwise, to the digit.
+    if venues:
+        from portfolio.services import shown_unrealized
+        unrealized = shown_unrealized(
+            {"unrealized_pnl": d["pnl"]} for d in detail)
+
     # Each of the three can be None, and each None means NOT MEASURED: a cash
     # column that could not be read at all, and a deployed/value pair over an
     # open book nothing could price. The cells below print an em-dash for
     # every one of them rather than a 0 that reads as an emptied account.
-    cash, deployed, value = book.cash, book.marked, book.value
+    #
+    # VALUE as the band PRINTS it (2026-11-06, the review): the open P&L
+    # inside it is eToro's own figure for an eToro position its holdings
+    # list, as the rows print (portfolio.services.shown_book) — a display
+    # copy; `book`, live_book_value's own, is never handed on.
+    from portfolio.services import (PNL_ETORO, PNL_ETORO_QUOTE,
+                                    SHOWN_VALUE_WORDS, shown_book)
+    try:
+        shown = shown_book(user, book, venues)
+    except Exception as e:  # noqa: BLE001 — the marks' value stands
+        logger.warning("Headband: the shown book value is unreadable: %s", e)
+        shown = book
+    cash, deployed, value = book.cash, book.marked, shown.value
+    # The words beside the figures say what the figures hold (2026-11-06,
+    # the review's probe J): a row the book could not price is out of the
+    # value and the exposure, and in the open P&L when eToro's figure for
+    # it is printed — never "P&L cannot be measured" beside that P&L.
+    coverage = _band_coverage(book, unpriced_in_pnl.get(PNL_ETORO, 0),
+                              unpriced_in_pnl.get(PNL_ETORO_QUOTE, 0))
 
     # The band hardcoded a € in front of every figure. The portfolio carries
     # its own currency and the bot configs carry theirs, so the sign is read
@@ -378,8 +491,14 @@ def _book_truth(user, portfolio):
     out["panel_cash"] = None if cash is None else f"{cash:,.0f}"
     out["panel_deployed"] = None if deployed is None else f"{deployed:,.0f}"
     out["panel_portfolio_value"] = None if value is None else f"{value:,.0f}"
+    out["panel_value_title"] = f"{SHOWN_VALUE_WORDS} {coverage}"
     out["panel_positions"] = n_open
     out["panel_positions_priced"] = n_priced
+    # How many open positions the band's open P&L holds, and how many of
+    # them only at eToro's figure (the book could not price them): the line
+    # under OPEN P&L counts those, not the priced rows alone (probe J).
+    out["panel_pnl_unpriced"] = sum(unpriced_in_pnl.values())
+    out["panel_pnl_positions"] = n_priced + out["panel_pnl_unpriced"]
     # How much of the VALUE cell the marked half actually covers. The figure
     # is a partial sum whenever a position has no quote, and a cell that says
     # nothing about it looks exactly like a complete one.
@@ -443,7 +562,7 @@ def _book_truth(user, portfolio):
         out["panel_exposure"] = exposure
         out["panel_cash_pct"] = max(0, 100 - exposure)
 
-    out["panel_book_coverage"] = book.coverage
+    out["panel_book_coverage"] = coverage
 
     out["panel_open_pnl"] = unrealized
     out["panel_open_pnl_display"] = _signed(unrealized)
@@ -956,44 +1075,25 @@ def _panel_detail(user):
     except Exception as e:
         logger.debug(f"Panel realised P&L unavailable: {e}")
 
-    # ── The signals themselves, not just how many ────────────────────────
-    try:
-        from signals.models import Signal
-        # SAME set and order as the signal rail (panel_recent_signals:
-        # newest five active). This cell used to show the top four BY
-        # SCORE, so the headband popup and the rail disagreed about what
-        # "the current signals" were — two truths on one screen.
-        out["panel_top_signals"] = [{
-            "symbol": s.instrument.symbol,
-            "direction": s.direction,
-            "score_pct": int(round((s.score or 0) * 100)),
-            "rule": s.rule_name or s.signal_type or "",
-            "created_at": s.created_at,
-            "entry": s.suggested_entry,
-            "stop": s.suggested_stop,
-        } for s in Signal.objects.filter(is_active=True)
-            .select_related("instrument").order_by("-created_at")[:5]]
-    except Exception as e:
-        logger.debug(f"Panel signal detail unavailable: {e}")
+    # ── The signals themselves ───────────────────────────────────────────
+    # (2026-11-06) No longer built here. panel_top_signals is the signal
+    # rail's own list (dashboard.signal_rail), derived per request in
+    # sauron_context from the same snapshot as the rail: this payload is
+    # cached on a book fingerprint that ignores signals, so a list built
+    # here could lag the rail it claims to be.
 
-    # ── Watchlist with prices, so the cell is a watchlist and not a count ─
+    # ── Watchlist: how many are starred ──────────────────────────────────
     try:
         from instruments.models import Instrument
-        from market_data.models import LiveQuote
         # Starred instruments, NOT positions-on-starred-instruments: the old
         # expression counted open portfolio positions that happened to be
         # watchlisted, so the cell read 0 forever on a box with seven stars
         # and no positions — while its own dropdown listed the seven.
         starred = Instrument.objects.filter(is_watchlist=True, is_active=True)
         out["panel_watchlist"] = starred.count()
-        wl = list(starred[:6])
-        wq = {q.instrument_id: q for q in LiveQuote.objects.filter(
-            instrument__in=wl)} if wl else {}
-        out["panel_watchlist_rows"] = [{
-            "symbol": i.symbol,
-            "last": wq[i.id].last if i.id in wq else None,
-            "change": _f(wq[i.id].change_pct) if i.id in wq else None,
-        } for i in wl]
+        # (2026-11-06) The dropdown's rows are the watchlist rail's own list
+        # (core.context_ui ui_watchlist): the same stars, in the same order,
+        # under the same filters — not six of them, cached here.
     except Exception as e:
         logger.debug(f"Panel watchlist detail unavailable: {e}")
 
@@ -1132,6 +1232,12 @@ def sauron_context(request):
     # already has a whole test module about.
     ctx = {
         "user_timezone": user_tz,
+        # (2026-11-06) The live-region sweep says it is one
+        # (_partials/live_region.html sends X-SV-Sweep): it keeps only the
+        # regions, so base.html renders no rail card and no headband row
+        # for it — neither is a region, and the sweep threw them away.
+        "sv_sweep": request.headers.get("X-SV-Sweep") == "1"
+                    if hasattr(request, "headers") else False,
         "pin_locked": pin_locked,
         "idle_lock": idle_lock,
         "exchanges_open_count": exchange_data["open_count"],
@@ -1144,6 +1250,7 @@ def sauron_context(request):
         "panel_currency": "",
         "panel_currency_symbol": "",
         "panel_portfolio_value": None,
+        "panel_value_title": "",
         "panel_cash": None,
         "panel_deployed": None,
         "panel_cash_pct": None,
@@ -1157,6 +1264,8 @@ def sauron_context(request):
         # total to warn about, and a warning that fires on "not measured yet"
         # is one an operator learns to ignore.
         "panel_positions_unpriced": 0,
+        "panel_pnl_positions": 0,
+        "panel_pnl_unpriced": 0,
         "panel_value_partial": False,
         "panel_exposure": None,
         "panel_book_coverage": "",
@@ -1240,6 +1349,12 @@ def sauron_context(request):
         "panel_vix": None,
         "panel_watchlist": 0,
         "panel_recent_signals": [],
+        "panel_top_signals": [],
+        "rail": None,
+        "rail_prefs": None,
+        "rail_rule_off_css": "",
+        "rail_rule_off_json": "[]",
+        "rail_rule_rows": [],
         "panel_recent_positions": [],
         "panel_recent_news": [],
         "panel_recent_strategies": [],
@@ -1386,12 +1501,34 @@ def sauron_context(request):
     try:
         from signals.models import Signal
         from scraping.models import NewsArticle
-        # "-created_at", not "-score": this list is named RECENT and feeds the
-        # signals rail top-down — ranking by score parked a strong old signal
-        # at the top while new arrivals appeared buried mid-list. The score is
-        # already visible on every card (gauge + number); the rail's job is
-        # what just happened.
-        ctx["panel_recent_signals"] = list(Signal.objects.filter(is_active=True).select_related("instrument").order_by("-created_at")[:5])
+        # THE SIGNAL RAIL (2026-11-06): every signal that can be acted on
+        # now, newest first ("-created_at", never "-score": ranking by score
+        # parked a strong old signal at the top while new arrivals appeared
+        # buried mid-list), and why each one left — dashboard.signal_rail.
+        # The `[:5]` that used to sit here was a hidden cap: a burst pushed
+        # earlier signals out before the operator could act on them. The
+        # headband SIGNALS popup (panel_top_signals) is the same list from
+        # the same snapshot. Lazy and memoised on the request, so a render
+        # that never draws the rail (the ticker, the bell rows) pays nothing.
+        from django.utils.functional import SimpleLazyObject
+
+        from dashboard.signal_rail import rail_snapshot
+        ctx["rail"] = SimpleLazyObject(lambda: rail_snapshot(request))
+        ctx["panel_recent_signals"] = SimpleLazyObject(
+            lambda: rail_snapshot(request)["cards"])
+        ctx["panel_top_signals"] = SimpleLazyObject(
+            lambda: rail_snapshot(request)["rows"])
+        # The rail's filters and display choices, from the operator's
+        # profile (dashboard.rail_prefs): base.html renders them on the
+        # hosts and in the muted-rule style, so the first paint is already
+        # filtered. Never from the query string.
+        from dashboard import rail_prefs as _rail_prefs
+        prefs = _rail_prefs.prefs_for(request.user)
+        ctx["rail_prefs"] = prefs
+        ctx["rail_rule_off_css"] = _rail_prefs.rule_off_css(prefs)
+        ctx["rail_rule_off_json"] = _rail_prefs.rule_off_json(prefs)
+        ctx["rail_rule_rows"] = SimpleLazyObject(
+            lambda: _rail_prefs.rule_rows(rail_snapshot(request)["rules"], prefs))
         ctx["panel_recent_news"] = list(NewsArticle.objects.order_by("-published_at")[:5])
         ctx["panel_news_sentiment"] = _news_sentiment_24h(NewsArticle)
         # Matching the count above filter for filter: the rules the engine

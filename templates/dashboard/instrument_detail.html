@@ -267,6 +267,8 @@ exactly what a second queryset built for a table would eventually do.
                             positions page says it (2026-10-15). A real row
                             only: a paper row's quote is its venue.{% endcomment %}
                             {% if p.mark_word and not p.paper %}<small class="ipos-mark sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="display:block;font-size:.7em;font-weight:400;letter-spacing:.04em;text-transform:uppercase;">{{ p.mark_word }}</small>{% endif %}
+                            {# Whose P&L (2026-11-06, views._chart_positions): eToro's own on an eToro row its holdings list; the words say when it is an estimate. #}
+                            {% if p.pnl_words %}<small class="ipos-pnl-src sv-muted" title="{{ p.pnl_title }}" style="display:block;font-size:.7em;font-weight:400;">{{ p.pnl_words }}</small>{% endif %}
                         {% endif %}
                     </td>
                 </tr>

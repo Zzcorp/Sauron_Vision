@@ -168,8 +168,10 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "tick-asset-bots"), "5 min")
         self.assertEqual(_when(scheme, "refresh-bot-bars"), "10 min")
         # 2026-10-31: 300 s, the operator's "the 15min etoro refresh is
-        # way too long" (config/celery.py).
-        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "5 min")
+        # way too long" (config/celery.py); 60 s since 2026-11-06 ("augmenter
+        # to the maximum le taux de refresh ... de eToro surtout").
+        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "60 s")
+        self.assertEqual(_when(scheme, "refresh-etoro-quotes"), "30 s")
         self.assertEqual(_when(scheme, "sauron-mind-synthesize"), "1 h")
         self.assertEqual(_when(scheme, "sauron-critic-pass"), "2 h")
         self.assertEqual(_when(scheme, "fetch-tradingview-ideas"), "6 h")
@@ -183,7 +185,8 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "sauron-horizon-monthly"), "1st 04:45")
         self.assertEqual(_when(scheme, "propose-share-plans"), "every 4 h at :05")
         self.assertEqual(_when(scheme, "refresh-option-chains"), "hourly 13:15–20:15")
-        # 2026-10-31: */5, beside the eToro sync's 300 s
+        # 2026-10-31: */5, beside the eToro sync's 300 s; still */5 beside
+        # its 60 s since 2026-11-06 (config/celery.py says why)
         self.assertEqual(_when(scheme, "reconcile-asset-bot-trades"),
                          "every 5 min")
 
