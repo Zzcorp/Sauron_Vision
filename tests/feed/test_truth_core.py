@@ -41,6 +41,28 @@ def _vq():
     return venue_quotes
 
 
+#: Every input grade() needs, for a healthy, trusted stream in an open
+#: session (each test overrides what it is about).
+OPEN_HEALTHY = dict(session_open=True, ws_healthy=True, ws_trusted=True,
+                    unconfirmed_jump=False, behind=False)
+
+
+def _grade(record, *, now=NOW, asset_class="forex", **kw):
+    vq = _vq()
+    return vq.grade(record, now=now, asset_class=asset_class,
+                    **dict(OPEN_HEALTHY, **kw))
+
+
+def _display(record, *, now=NOW, asset_class="forex", reference=None,
+             slot_shown=False, session_closed_at=None, **kw):
+    vq = _vq()
+    return vq.display_quote(record, _grade(record, now=now,
+                                           asset_class=asset_class, **kw),
+                            now=now, reference=reference,
+                            slot_shown=slot_shown,
+                            session_closed_at=session_closed_at)
+
+
 def _quote(bid="1.1000", ask="1.1002", *, vt_age_s=1, conf_age_s=1,
            channel="ws", iid=1, rate_id="", now=NOW):
     vq = _vq()
@@ -85,6 +107,29 @@ class TheVenueQuoteTests(SimpleTestCase):
         with self.assertRaises(vq.InvalidQuote) as cm:
             _quote(channel="yfinance")
         self.assertEqual(cm.exception.reason, "bad_channel")
+
+    def test_a_side_is_plain_decimal_text_within_range(self):
+        """2026-11-07, review: "9e999999" raised decimal.Overflow out of the
+        constructor, "1e400" was a price and "1_000" read as 1000. A side
+        is plain decimal text (an exponent allowed), within 1e-12..1e13,
+        and every refusal is an InvalidQuote with its reason."""
+        vq = _vq()
+        for bad, reason in (("9e999999", "out_of_range"),
+                            ("1e400", "out_of_range"),
+                            ("1e-13", "out_of_range"),
+                            ("1_000", "unparsed"), ("0x10", "unparsed"),
+                            ("1.1.1", "unparsed"), ("--1", "unparsed"),
+                            ("-Infinity", "not_finite"),
+                            ("sNaN", "not_finite")):
+            with self.subTest(bad=bad):
+                with self.assertRaises(vq.InvalidQuote) as cm:
+                    _quote(bad, bad)
+                self.assertEqual(cm.exception.reason, reason)
+        for good, want in ((" 1.1000 ", Decimal("1.1")), ("11E-1", Decimal(
+                "1.1")), (Decimal("1.1"), Decimal("1.1")), (2, Decimal(2)),
+                (1.5, Decimal("1.5")), ("1e12", Decimal("1e12"))):
+            with self.subTest(good=good):
+                self.assertEqual(_quote(good, good).bid, want)
 
     def test_an_exactly_ten_percent_spread_is_kept_and_a_locked_quote_too(self):
         q = _quote("95", "105")                      # 10% of the mid 100
@@ -245,9 +290,8 @@ class TheThresholdTests(SimpleTestCase):
         for cls in ("forex", "crypto", "index", "commodity", "stock", "etf"):
             for channel in ("rest", "engine"):
                 with self.subTest(cls=cls, channel=channel):
-                    g = vq.grade(_quote(channel=channel, vt_age_s=0,
-                                        conf_age_s=0),
-                                 now=NOW, asset_class=cls)
+                    g = _grade(_quote(channel=channel, vt_age_s=0,
+                                      conf_age_s=0), asset_class=cls)
                     self.assertEqual(g.grade, vq.RECENT)
 
 
@@ -255,7 +299,7 @@ class TheGradeTests(SimpleTestCase):
 
     def test_none_without_a_record(self):
         vq = _vq()
-        g = vq.grade(None, now=NOW, asset_class="forex")
+        g = _grade(None)
         self.assertEqual(g.grade, vq.NONE)
         self.assertIsNone(g.confirm_age_s)
 
@@ -268,8 +312,8 @@ class TheGradeTests(SimpleTestCase):
                               (t.stale_s, vq.RECENT),
                               (t.stale_s + 1, vq.STALE)):
                 with self.subTest(cls=cls, age=age):
-                    g = vq.grade(_quote(vt_age_s=age, conf_age_s=age),
-                                 now=NOW, asset_class=cls)
+                    g = _grade(_quote(vt_age_s=age, conf_age_s=age),
+                               asset_class=cls)
                     self.assertEqual(g.grade, want)
                     self.assertEqual(g.confirm_age_s, age)
 
@@ -278,31 +322,26 @@ class TheGradeTests(SimpleTestCase):
         quiet market) and flagged quiet past EQ; a print a second old
         confirmed 20 minutes ago is STALE (I5)."""
         vq = _vq()
-        quiet = vq.grade(_quote(vt_age_s=600, conf_age_s=1), now=NOW,
-                         asset_class="forex")
+        quiet = _grade(_quote(vt_age_s=600, conf_age_s=1))
         self.assertEqual(quiet.grade, vq.LIVE)
         self.assertIn(vq.QUIET, quiet.flags)
         self.assertEqual(quiet.print_age_s, 600)
-        old = vq.grade(_quote(vt_age_s=1, conf_age_s=1200), now=NOW,
-                       asset_class="forex")
+        old = _grade(_quote(vt_age_s=1, conf_age_s=1200))
         self.assertEqual(old.grade, vq.STALE)
-        lively = vq.grade(_quote(vt_age_s=30, conf_age_s=1), now=NOW,
-                          asset_class="forex")
+        lively = _grade(_quote(vt_age_s=30, conf_age_s=1))
         self.assertNotIn(vq.QUIET, lively.flags)
 
     def test_a_shut_session_is_closed_whatever_the_age(self):
         vq = _vq()
         for age in (1, 600, 3600):
-            g = vq.grade(_quote(vt_age_s=age, conf_age_s=age), now=NOW,
-                         asset_class="forex", session_open=False)
+            g = _grade(_quote(vt_age_s=age, conf_age_s=age),
+                       session_open=False)
             self.assertEqual(g.grade, vq.CLOSED)
-        self.assertEqual(vq.grade(None, now=NOW, asset_class="forex",
-                                  session_open=False).grade, vq.NONE)
+        self.assertEqual(_grade(None, session_open=False).grade, vq.NONE)
 
     def test_an_unconfirmed_jump_is_never_live(self):
         vq = _vq()
-        g = vq.grade(_quote(), now=NOW, asset_class="forex",
-                     unconfirmed_jump=True)
+        g = _grade(_quote(), unconfirmed_jump=True)
         self.assertEqual(g.grade, vq.RECENT)
         self.assertIn(vq.UNCONFIRMED_JUMP, g.flags)
 
@@ -313,44 +352,85 @@ class TheGradeTests(SimpleTestCase):
                          ({"ws_trusted": False}, None),
                          ({"behind": True}, vq.BEHIND)):
             with self.subTest(kw=kw):
-                g = vq.grade(q, now=NOW, asset_class="forex", **kw)
+                g = _grade(q, **kw)
                 self.assertEqual(g.grade, vq.RECENT)
                 if flag:
                     self.assertIn(flag, g.flags)
         rest = _quote(channel="rest")
         from unittest import mock
         with mock.patch.object(vq, "C_REST_MEASURED", True):
-            self.assertEqual(vq.grade(rest, now=NOW, asset_class="forex",
-                                      ws_healthy=False).grade, vq.LIVE,
+            self.assertEqual(_grade(rest, ws_healthy=False).grade, vq.LIVE,
                              "the stream's health never grades a REST "
                              "record")
 
     def test_an_untimed_record_is_never_live(self):
         """W7: an answer without eToro's Date is display only."""
         vq = _vq()
-        g = vq.grade(_quote(vt_age_s=None, channel="rest"), now=NOW,
-                     asset_class="forex")
+        g = _grade(_quote(vt_age_s=None, channel="rest"))
         self.assertNotEqual(g.grade, vq.LIVE)
         self.assertIn(vq.UNTIMED, g.flags)
         self.assertIsNone(g.print_age_s)
 
     def test_a_date_ahead_of_the_clock_is_flagged_and_floored(self):
         vq = _vq()
-        ahead = vq.grade(_quote(vt_age_s=-5), now=NOW, asset_class="forex")
+        ahead = _grade(_quote(vt_age_s=-5))
         self.assertIn(vq.SKEW, ahead.flags)
         self.assertEqual(ahead.print_age_s, 0)
-        near = vq.grade(_quote(vt_age_s=-1), now=NOW, asset_class="forex")
+        near = _grade(_quote(vt_age_s=-1))
         self.assertNotIn(vq.SKEW, near.flags)
+
+    def test_ages_are_exact_seconds(self):
+        """2026-11-07, review: ages were truncated to whole seconds, so a
+        confirmation 15.9 s old read LIVE with L = 15 s."""
+        vq = _vq()
+        q = _quote(vt_age_s=0, conf_age_s=0)
+        for after, want in ((15.0, vq.LIVE), (15.001, vq.RECENT),
+                            (15.9, vq.RECENT)):
+            with self.subTest(after=after):
+                g = _grade(q, now=NOW + timedelta(seconds=after))
+                self.assertEqual(g.grade, want)
+                self.assertAlmostEqual(g.confirm_age_s, after, places=6)
+
+    def test_a_confirmation_ahead_of_the_clock_is_never_live(self):
+        """2026-11-07, review: with the host clock stepped back, a record
+        confirmed "in the future" read LIVE at age 0 for the whole step,
+        on no new evidence. Its age is unknown: flagged, never LIVE."""
+        vq = _vq()
+        confirmed = NOW
+        for back in (60, 3600):
+            with self.subTest(back=back):
+                q = vq.VenueQuote(iid=1, bid="1.1", ask="1.1002",
+                                  vt=confirmed, channel="ws",
+                                  arrival=confirmed)
+                now = confirmed - timedelta(seconds=back) + \
+                    timedelta(seconds=30)
+                g = _grade(q, now=now)
+                self.assertNotEqual(g.grade, vq.LIVE)
+                self.assertIn(vq.CLOCK_BACK, g.flags)
+        q = _quote(vt_age_s=-1, conf_age_s=-1)       # within the tolerance
+        g = _grade(q)
+        self.assertEqual(g.grade, vq.LIVE)
+        self.assertNotIn(vq.CLOCK_BACK, g.flags)
+
+    def test_every_input_is_required(self):
+        """2026-11-07, review: the stream's health, trust and lag, the jump
+        and the session defaulted to the risky values, so a caller that
+        forgot one was handed LIVE. Each is required."""
+        vq = _vq()
+        q = _quote()
+        for missing in OPEN_HEALTHY:
+            with self.subTest(missing=missing):
+                kw = {k: v for k, v in OPEN_HEALTHY.items() if k != missing}
+                with self.assertRaises(TypeError):
+                    vq.grade(q, now=NOW, asset_class="forex", **kw)
 
     def test_a_record_older_than_four_days_is_none(self):
         vq = _vq()
         days = 4 * 86400
-        self.assertEqual(vq.grade(_quote(vt_age_s=days, conf_age_s=days),
-                                  now=NOW, asset_class="forex").grade,
+        self.assertEqual(_grade(_quote(vt_age_s=days, conf_age_s=days)).grade,
                          vq.STALE)
-        self.assertEqual(vq.grade(_quote(vt_age_s=days + 1,
-                                         conf_age_s=days + 1),
-                                  now=NOW, asset_class="forex").grade,
+        self.assertEqual(_grade(_quote(vt_age_s=days + 1,
+                                       conf_age_s=days + 1)).grade,
                          vq.NONE)
 
     def test_the_grade_reads_no_clock_and_no_store(self):
@@ -358,10 +438,9 @@ class TheGradeTests(SimpleTestCase):
         argument, never read."""
         vq = _vq()
         q = _quote(conf_age_s=20)
-        self.assertEqual(vq.grade(q, now=NOW, asset_class="forex"),
-                         vq.grade(q, now=NOW, asset_class="forex"))
+        self.assertEqual(_grade(q), _grade(q))
         with self.assertRaises(TypeError):
-            vq.grade(q, asset_class="forex")
+            vq.grade(q, asset_class="forex", **OPEN_HEALTHY)
 
 
 class TheJumpTests(SimpleTestCase):
@@ -436,60 +515,104 @@ class TheDisplayTests(SimpleTestCase):
 
     def test_the_main_cell_holds_etoros_numbers_only(self):
         vq = _vq()
-        cell = vq.display_quote(_quote("1.1000", "1.1002"), now=NOW,
-                                asset_class="forex", reference=self._ref(),
-                                slot_shown=True)
+        cell = _display(_quote("1.1000", "1.1002"), reference=self._ref(),
+                        slot_shown=False)
         self.assertEqual((cell["bid"], cell["ask"], cell["mid"]),
                          ("1.1000", "1.1002", "1.1001"))
         self.assertEqual(cell["source"], "etoro")
         self.assertEqual(cell["grade"], vq.LIVE)
         self.assertEqual(cell["label"], "eToro · live")
-        self.assertIsNone(cell["slot"], "LIVE: no outside quote shown")
+        self.assertIsNone(cell["slot"], "the slot hidden: no outside quote")
         self.assertNotIn("1.1050", repr({k: v for k, v in cell.items()
                                          if k != "slot"}))
 
+    def test_the_slot_follows_its_hysteresis_even_at_live(self):
+        """§5.6: the slot hides only after eToro has been LIVE for 10 s, so
+        while the hysteresis still shows it (`slot_shown`), it shows at
+        LIVE too (2026-11-07, review: it was dropped at once) — always in
+        its own labelled slot, never in the main cell."""
+        vq = _vq()
+        cell = _display(_quote("1.1000", "1.1002"), reference=self._ref(),
+                        slot_shown=True)
+        self.assertEqual(cell["grade"], vq.LIVE)
+        self.assertEqual(cell["slot"]["source"], "oanda_stream")
+        self.assertEqual((cell["bid"], cell["ask"]), ("1.1000", "1.1002"))
+
     def test_a_degraded_grade_says_its_age(self):
         vq = _vq()
-        recent = vq.display_quote(_quote(vt_age_s=30, conf_age_s=30),
-                                  now=NOW, asset_class="forex")
+        recent = _display(_quote(vt_age_s=30, conf_age_s=30))
         self.assertEqual(recent["grade"], vq.RECENT)
         self.assertEqual(recent["label"], "eToro · 30 s")
         self.assertTrue(recent["degraded"])
-        stale = vq.display_quote(_quote(vt_age_s=600, conf_age_s=600),
-                                 now=NOW, asset_class="forex")
+        stale = _display(_quote(vt_age_s=600, conf_age_s=600))
         self.assertEqual(stale["label"], "eToro · 10 min · feed down")
-        closed = vq.display_quote(_quote(vt_age_s=600, conf_age_s=600),
-                                  now=NOW, asset_class="forex",
-                                  session_open=False)
-        self.assertTrue(closed["label"].startswith("closed · eToro close "))
-        live = vq.display_quote(_quote(), now=NOW, asset_class="forex")
+        live = _display(_quote())
         self.assertFalse(live["degraded"])
 
-    def test_no_record_awaits_etoro_and_the_slot_is_labelled(self):
+    def test_the_screen_shows_the_grade_it_is_handed(self):
+        """2026-11-07, review: display_quote graded on its own defaults, so
+        a stream that was down, untrusted, behind or showing an unconfirmed
+        jump read "eToro · live". It is handed the record's Grade (I6), and
+        degraded shows degraded at once (§5.6, H7)."""
         vq = _vq()
-        cell = vq.display_quote(None, now=NOW, asset_class="forex",
-                                reference=self._ref(), slot_shown=True)
+        q = _quote(conf_age_s=2)
+        for kw in ({"ws_healthy": False}, {"ws_trusted": False},
+                   {"behind": True}, {"unconfirmed_jump": True}):
+            with self.subTest(kw=kw):
+                cell = _display(q, **kw)
+                self.assertEqual(cell["grade"], vq.RECENT)
+                self.assertTrue(cell["degraded"])
+                self.assertEqual(cell["label"], "eToro · 2 s")
+        with self.assertRaises(TypeError):
+            vq.display_quote(q, None, now=NOW)
+
+    def test_closed_says_close_only_near_the_sessions_close(self):
+        """2026-11-07, review: a last print from Wednesday 14:23 showed on
+        Saturday as "closed · eToro close 14:23". It is the close only
+        when it lies near the session's last close."""
+        vq = _vq()
+        wed = datetime(2026, 11, 4, 14, 23, tzinfo=dt_tz.utc)
+        fri_close = datetime(2026, 11, 6, 22, 0, tzinfo=dt_tz.utc)
+        sat = datetime(2026, 11, 7, 12, 0, tzinfo=dt_tz.utc)
+        old = vq.VenueQuote(iid=1, bid="1.1", ask="1.1002", vt=wed,
+                            channel="ws", arrival=wed)
+        cell = _display(old, now=sat, session_open=False,
+                        session_closed_at=fri_close)
+        self.assertEqual(cell["grade"], vq.CLOSED)
+        self.assertEqual(cell["label"],
+                         "closed · eToro's last price Wed 04 Nov 14:23 · "
+                         "2 days ago")
+        last = fri_close - timedelta(seconds=40)
+        close = vq.VenueQuote(iid=1, bid="1.1", ask="1.1002", vt=last,
+                              channel="ws", arrival=last)
+        self.assertEqual(_display(close, now=sat, session_open=False,
+                                  session_closed_at=fri_close)["label"],
+                         "closed · eToro close Fri 06 Nov 21:59")
+        self.assertTrue(_display(close, now=sat, session_open=False)[
+            "label"].startswith("closed · eToro's last price"),
+            "with no known close, never called the close")
+
+    def test_no_record_awaits_etoro_and_the_slot_is_labelled(self):
+        cell = _display(None, reference=self._ref(), slot_shown=True)
         self.assertIsNone(cell["bid"])
         self.assertIsNone(cell["ask"])
         self.assertEqual(cell["label"], "awaiting eToro")
         self.assertEqual(cell["slot"]["source"], "oanda_stream")
         self.assertEqual(cell["slot"]["price"], "1.1050")
         self.assertEqual(cell["slot"]["age_s"], 5)
-        hidden = vq.display_quote(None, now=NOW, asset_class="forex",
-                                  reference=self._ref(), slot_shown=False)
+        hidden = _display(None, reference=self._ref(), slot_shown=False)
         self.assertIsNone(hidden["slot"])
 
     def test_the_slot_carries_its_gap_and_a_stand_in_says_so(self):
         vq = _vq()
-        cell = vq.display_quote(_quote("1.1000", "1.1002", vt_age_s=900,
-                                       conf_age_s=900),
-                                now=NOW, asset_class="forex",
-                                reference=self._ref(), slot_shown=True)
+        cell = _display(_quote("1.1000", "1.1002", vt_age_s=900,
+                               conf_age_s=900),
+                        reference=self._ref(), slot_shown=True)
         self.assertEqual(cell["slot"]["gap_pct"], "0.45")
         fut = vq.ReferenceQuote("XAUUSD", "yfinance", Decimal("2010"), NOW,
                                 stand_in="future")
-        cell = vq.display_quote(None, now=NOW, asset_class="commodity",
-                                reference=fut, slot_shown=True)
+        cell = _display(None, asset_class="commodity", reference=fut,
+                        slot_shown=True)
         self.assertIn("future, different instrument", cell["slot"]["label"])
 
 
@@ -578,8 +701,13 @@ class TheSessionTests(SimpleTestCase):
         self.assertFalse(s.entries_open)
         self.assertTrue(s.in_break_window)
         after = self._s("forex", "EURUSD", _utc(2026, 11, 4, 22, 6))
-        self.assertTrue(after.entries_open)
         self.assertFalse(after.in_break_window)
+        self.assertTrue(after.protection_open)
+        self.assertFalse(after.entries_open, "the settle after the break")
+        self.assertEqual(after.words, "settling after the daily break")
+        settled = self._s("forex", "EURUSD", _utc(2026, 11, 4, 22, 10, 1))
+        self.assertTrue(settled.entries_open)
+        self.assertEqual(settled.words, "")
 
     def test_both_summer_candidate_windows_refuse_entries_until_measured(self):
         from market_data import venue_session
@@ -593,13 +721,38 @@ class TheSessionTests(SimpleTestCase):
         self.assertTrue(self._s("forex", "EURUSD",
                                 _utc(2026, 7, 8, 21, 30)).entries_open)
 
-    def test_the_sunday_reopen_settles_entries_for_five_minutes(self):
+    def test_the_sunday_reopen_settles_entries(self):
+        """The weekly open (22:00 UTC in winter) is a reopen and a daily
+        break window at once: entries wait for the window and the settle
+        after it; protection is open from the first minute."""
         s = self._s("forex", "EURUSD", _utc(2026, 11, 8, 22, 2))
         self.assertTrue(s.protection_open)
         self.assertFalse(s.entries_open)
         self.assertTrue(s.settling)
-        later = self._s("forex", "EURUSD", _utc(2026, 11, 8, 22, 6))
+        mid = self._s("forex", "EURUSD", _utc(2026, 11, 8, 22, 6))
+        self.assertTrue(mid.protection_open)
+        self.assertFalse(mid.entries_open)
+        later = self._s("forex", "EURUSD", _utc(2026, 11, 8, 22, 11))
         self.assertTrue(later.entries_open)
+
+    def test_the_daily_break_settles_entries_as_a_reopen(self):
+        """Decided 2026-11-07 (the review of F1; §5.5 leaves it open): the
+        minutes after eToro's daily rollover carry its widest spreads, so
+        entries settle after each break window as after a reopen; a
+        commodity's daily reopen already settles through market_clock.
+        Protection never waits on it. Summer, unmeasured: both candidate
+        windows settle."""
+        for hour in (21, 22):
+            with self.subTest(hour=hour):
+                s = self._s("forex", "EURUSD", _utc(2026, 7, 8, hour, 7))
+                self.assertTrue(s.protection_open)
+                self.assertFalse(s.entries_open)
+                self.assertFalse(s.in_break_window)
+                self.assertTrue(s.settling)
+        self.assertTrue(self._s("forex", "EURUSD",
+                                _utc(2026, 7, 8, 21, 11)).entries_open)
+        gold = self._s("commodity", "XAUUSD", _utc(2026, 11, 4, 23, 2))
+        self.assertTrue(gold.settling, "market_clock's daily reopen")
 
     def test_crypto_never_shuts_and_never_settles(self):
         for when in (_utc(2026, 11, 7, 12, 0), _utc(2026, 11, 4, 22, 2)):
@@ -631,6 +784,23 @@ class TheSessionTests(SimpleTestCase):
             self.assertTrue(shut_venue.protection_open)
             self.assertFalse(shut_venue.entries_open)
             self.assertEqual(shut_venue.words, "eToro says closed")
+            both = self._s("forex", "EURUSD", _utc(2026, 11, 4, 12, 0),
+                           etoro_open=True)
+            self.assertTrue(both.entries_open)
+
+    def test_once_proven_an_unknown_flag_is_not_a_yes_for_entries(self):
+        """2026-11-07, review: once proven, an unknown eToro flag (None) let
+        entries through on the clock alone. §5.5: entries only when both
+        sources say open. Protection still follows the clock."""
+        from unittest import mock
+        from market_data import venue_session
+        with mock.patch.object(venue_session, "ETORO_OPEN_PROVEN", True):
+            s = self._s("forex", "EURUSD", _utc(2026, 11, 4, 12, 0),
+                        etoro_open=None)
+            self.assertTrue(s.protection_open)
+            self.assertFalse(s.entries_open)
+            self.assertIsNone(s.etoro_open)
+            self.assertEqual(s.words, "eToro's open flag unknown")
 
     def test_the_market_clock_itself_is_not_changed(self):
         from core import exchange_status

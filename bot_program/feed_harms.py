@@ -29,19 +29,32 @@ inside two fences: the path calls it only through bot_program.feed_fence
 is logged once at WARNING (later failures of the same kind at DEBUG), and
 the path's answer, its timing and its commit are untouched. Its row is
 never written inside the path's transaction: it is handed to
-transaction.on_commit(robust=True), the pattern the Orcs' journal hooks
-use, and written in a short transaction of its own once the path's work
-has committed — at once when the path holds none, never if the path rolls
-back — with a statement and lock timeout on PostgreSQL. During a
-kill-switch sweep every row is held in memory (hold) and written once the
-sweep's last close has been sent (release).
+transaction.on_commit (the pattern the Orcs' journal hooks use) and only
+queued once the path's work has committed — never if the path rolls back.
+
+NO ROW IS WRITTEN ON A MONEY PATH'S THREAD (2026-11-07, the review of F1:
+a synchronous insert after each booking stood between two closes of the
+drain). On PostgreSQL, a committed row joins this process's queue and its
+writer thread writes it — the pattern of the rates cache's writer
+(engine/etoro_rates: one thread per process, a bounded queue, reset after
+a fork) — in a short transaction of its own with a statement and lock
+timeout, and closes its connection after each batch. On any other
+database (SQLite: one writer at a time, so a concurrent insert would make
+the path's own next write wait) and inside an open transaction (a test),
+the row is written at once in its own savepoint. A full queue drops the
+row and says so once; a row still queued when the process ends is lost —
+a lost count, never a lost close. During a kill-switch sweep every row is
+held in memory (hold) and queued once the sweep's last close has been
+sent (release).
 """
 from __future__ import annotations
 
+import collections
 import contextvars
+import os
+import threading
 import time
 from datetime import timedelta
-from functools import partial
 
 from django.db import transaction
 from django.db.models.signals import post_save
@@ -49,6 +62,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from bot_program import feed_fence
+from market_data.venue_source import EXACT, is_venue_source
 
 MARK_SKIP_REFERENCE = "mark_skip_reference"
 MARK_SKIP_JUMP = "mark_skip_jump"
@@ -94,6 +108,19 @@ STATEMENT_TIMEOUT_MS = 250
 LOCK_TIMEOUT_MS = 100
 #: The most rows one sweep holds: a runaway never grows a process.
 HOLD_MAX = 5000
+#: The most rows this process's queue keeps for its writer; past it a row
+#: is dropped (told once).
+QUEUE_MAX = 5000
+#: The most rows one insert writes.
+BATCH_MAX = 500
+#: The writer's sleep when nothing wakes it, in seconds.
+WRITER_IDLE_S = 1.0
+#: Rows go to the writer thread (PostgreSQL, outside a transaction). Off,
+#: every row is written at once in its own block (tests may say so).
+BACKGROUND = True
+#: The window `feed_harms --days` may ask for: whole days, at most ten
+#: years (a larger one is no window, and overflows a date).
+MAX_DAYS = 3650
 #: A CLOSED save counts as a booking only while the row's close is this
 #: recent: a later re-save of an old booking (a grade, a backfill) is not
 #: one. Generous: a long kill-switch sweep books with its start time.
@@ -125,8 +152,9 @@ def _num(value):
 
 def _after_commit(fn) -> None:
     """Run `fn` once the caller's transaction commits (at once when it
-    holds none); a raise in `fn` is logged by Django, never raised into
-    the caller (robust)."""
+    holds none). `fn` catches everything itself; robust=True is a second
+    fence, never the first (Django's robust handler formats the callback's
+    __qualname__, which a functools.partial lacks: the review of F1)."""
     transaction.on_commit(fn, robust=True)
 
 
@@ -138,7 +166,13 @@ def _record(kind, *, real=None, symbol="", source="", seconds=None,
            "symbol": str(symbol or "")[:40], "source": str(source or "")[:50],
            "seconds": None if seconds is None else float(seconds),
            "detail": dict(detail or {}), "ref": str(ref or "")[:64]}
-    _after_commit(partial(_deliver, row))
+
+    def deliver_after_commit():
+        try:
+            _deliver(row)
+        except Exception as e:  # noqa: BLE001 — never into the committer
+            _warn("write", kind, e)
+    _after_commit(deliver_after_commit)
 
 
 def _deliver(row) -> None:
@@ -147,9 +181,140 @@ def _deliver(row) -> None:
         if held is not None:
             held.keep(row)
             return
-        _insert([row])
+        _write([row])
     except Exception as e:  # noqa: BLE001 — a lost count, never a raise
         _warn("write", row.get("kind"), e)
+
+
+def _background() -> bool:
+    """The writer thread takes the rows: PostgreSQL, outside any open
+    transaction (no query: the connection's vendor and state)."""
+    if not BACKGROUND:
+        return False
+    conn = transaction.get_connection()
+    return conn.vendor == "postgresql" and not conn.in_atomic_block
+
+
+def _write(rows) -> None:
+    """Hand `rows` to this process's writer thread, or write them now
+    (see the module docstring). Raises only what an at-once write raises:
+    its callers fence it."""
+    if _background():
+        _enqueue(rows)
+    else:
+        _insert(rows)
+
+
+# ── the writer thread: no harm row on a money path's thread ─────────────
+
+#: the rows waiting for the writer, oldest first
+_ROWS: collections.deque = collections.deque()
+#: held by whoever writes the queue (the writer thread, flush)
+_ROWS_LOCK = threading.Lock()
+_WAKE = threading.Event()
+#: this process's writer: {"pid", "thread"}
+_WRITER: dict = {}
+_WRITER_START = threading.Lock()
+
+
+class QueueFull(Exception):
+    """The writer's queue is full: a harm row was dropped."""
+
+
+def _enqueue(rows) -> None:
+    """Leave `rows` for the writer thread. Never waits; past QUEUE_MAX a
+    row is dropped and the drop told once."""
+    for row in rows:
+        if len(_ROWS) >= QUEUE_MAX:
+            _warn("queue", row.get("kind"), QueueFull())
+            continue
+        _ROWS.append(row)
+    _wake_writer()
+
+
+def _wake_writer() -> None:
+    """Start this process's writer if none runs, then wake it. Never waits
+    on a lock."""
+    pid = os.getpid()
+    held = _WRITER.get("thread")
+    if held is None or _WRITER.get("pid") != pid or not held.is_alive():
+        if _WRITER_START.acquire(blocking=False):
+            try:
+                held = _WRITER.get("thread")
+                if held is None or _WRITER.get("pid") != pid \
+                        or not held.is_alive():
+                    t = threading.Thread(target=_writer_loop, daemon=True,
+                                         name="feed-harms-writer")
+                    _WRITER.update(pid=pid, thread=t)
+                    t.start()
+            finally:
+                _WRITER_START.release()
+    _WAKE.set()
+
+
+def _writer_loop() -> None:
+    while True:
+        _WAKE.wait(WRITER_IDLE_S)
+        _WAKE.clear()
+        try:
+            _drain()
+        finally:
+            _close_connection()
+
+
+def _close_connection() -> None:
+    """The writer holds no connection between batches."""
+    try:
+        from django.db import connection
+        connection.close()
+    except Exception:  # noqa: BLE001 — a connection already gone
+        pass
+
+
+def _drain(wait=None) -> None:
+    """Write every queued row, BATCH_MAX at a time. `wait`: the most to
+    wait for a drain another thread is in; None waits as long as it takes.
+    Never raises."""
+    if not _ROWS_LOCK.acquire(timeout=-1 if wait is None
+                              else max(0.0, wait)):
+        return
+    try:
+        while True:
+            batch = []
+            while len(batch) < BATCH_MAX:
+                try:
+                    batch.append(_ROWS.popleft())
+                except IndexError:
+                    break
+            if not batch:
+                return
+            try:
+                _insert(batch)
+            except Exception as e:  # noqa: BLE001 — a lost count
+                _warn("write", "queued", e)
+    finally:
+        _ROWS_LOCK.release()
+
+
+def flush(wait=None) -> None:
+    """Write what this process queued, now, on the caller's thread (tests;
+    the process's exit). Never raises."""
+    _drain(wait)
+
+
+def _after_fork_in_child() -> None:
+    """A forked worker writes what IT counts: the parent's queue, locks and
+    thread are the parent's."""
+    global _ROWS, _ROWS_LOCK, _WAKE, _WRITER_START
+    _ROWS = collections.deque()
+    _ROWS_LOCK = threading.Lock()
+    _WAKE = threading.Event()
+    _WRITER_START = threading.Lock()
+    _WRITER.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
 def _bound() -> None:
@@ -188,7 +353,8 @@ class Hold:
             self.rows.append(row)
 
     def release(self) -> None:
-        """Stop holding and write what was held. Never raises."""
+        """Stop holding and hand what was held to the writer (written at
+        once off PostgreSQL). Never raises."""
         try:
             _HOLD.reset(self._token)
         except Exception:  # noqa: BLE001 — another context's token
@@ -197,7 +363,7 @@ class Hold:
         if not rows:
             return
         try:
-            _insert(rows)
+            _write(rows)
         except Exception as e:  # noqa: BLE001
             _warn("write", "held", e)
 
@@ -393,7 +559,6 @@ def on_exit_saved(trade) -> None:
         kind, source = EXIT_AT_LEVEL, fill
     else:
         quoted = getattr(trade, BOOKING_QUOTE_ATTR, None)
-        from market_data.venue_quotes import EXACT, is_venue_source
         if quoted is not None and not is_venue_source(
                 quoted, str(meta.get("broker") or ""), reading=EXACT):
             kind, source = EXIT_AT_OUTSIDE_QUOTE, quoted
@@ -432,8 +597,11 @@ def report(days, *, now=None) -> dict:
     over the last `days` days: counts and seconds, nothing else."""
     from bot_program.feed_harm_models import FeedHarmEvent
     from django.db.models import Count
+    days = int(days)
+    if not 1 <= days <= MAX_DAYS:
+        raise ValueError(f"days must be 1 to {MAX_DAYS}")
     now = now or timezone.now()
-    since = now - timedelta(days=int(days))
+    since = now - timedelta(days=days)
     qs = FeedHarmEvent.objects.filter(at__gte=since, at__lte=now)
     counts = {k: 0 for k in KINDS}
     for row in qs.values("kind").annotate(n=Count("id")):

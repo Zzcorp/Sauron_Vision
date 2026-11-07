@@ -5,6 +5,10 @@ from typing import NamedTuple, Optional
 
 from django.conf import settings
 
+# THE ONE VENUE-SOURCE RULE (the eToro feed spec, F1): standard library
+# only, imported with this module so the P&L tier can never fail on it
+from market_data.venue_source import is_venue_source
+
 logger = logging.getLogger(__name__)
 
 # How a per-user book is named, and the name of the shared one. These are the
@@ -1217,10 +1221,9 @@ def _etoro_side(trade, quote, now):
     long, the ask for a short, as eToro values an open position — or None.
     A quote of another feed is never the closing side, sides or not.
     eToro-written: the one venue-source rule (the eToro feed spec, F1,
-    market_data.venue_quotes.is_venue_source): "etoro", or "etoro_" /
+    market_data.venue_source.is_venue_source): "etoro", or "etoro_" /
     "etoro-" and a channel, trimmed, in any case — exactly this tier's
     test before it."""
-    from market_data.venue_quotes import is_venue_source
     if quote is None or not is_venue_source(getattr(quote, "source", "")):
         return None
     long_ = str(getattr(trade, "side", "") or "").upper() in ("BUY", "LONG")

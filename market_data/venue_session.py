@@ -23,8 +23,19 @@ THE RULE IS ASYMMETRIC. Protection treats a market as open when either
 source says so; entries only when both do, the reopen settle period has
 passed (THRESHOLDS[class].settle_s) and no unmeasured break window holds.
 A disagreement can therefore only hold back an entry, never protection;
-the words say which source disagreed ("eToro says open"). Pure: `now` is
-an argument, nothing is read but the clock function.
+the words say which source disagreed ("eToro says open"). Once eToro's
+flag is proven, an UNKNOWN flag (None) is not a "yes": entries wait for
+eToro to say open (2026-11-07, review).
+
+THE DAILY BREAK IS A REOPEN, FOR ENTRIES (decided 2026-11-07, the review
+of F1; §5.5 leaves it open): the settle period runs after the end of each
+forex break window, as it runs after market_clock's weekly or holiday
+reopen — the minutes after eToro's daily rollover carry its widest
+spreads, and a commodity's daily reopen already settles through
+market_clock. It holds back entries only; protection never waits on it.
+In an unmeasured regime every candidate window settles, so a summer day
+refuses entries 21:00-21:10 and 22:00-22:10 UTC until M2 measures one.
+Pure: `now` is an argument, nothing is read but the clock function.
 """
 from __future__ import annotations
 
@@ -55,7 +66,7 @@ class Session(NamedTuple):
     clock_open: bool
     etoro_open: Optional[bool]       # None while unproven or unknown
     in_break_window: bool
-    settling: bool
+    settling: bool                   # after a reopen or a daily break
     words: str
 
 
@@ -104,24 +115,33 @@ def session(asset_class, symbol="", *, now, exchange="",
     cls = str(asset_class or "").strip().lower()
     clock = _clock(cls, symbol, exchange, now)
     clock_open = bool(clock.get("is_open", True))
-    venue = etoro_open if (ETORO_OPEN_PROVEN and etoro_open is not None) \
-        else None
+    venue = etoro_open if ETORO_OPEN_PROVEN else None
     protection = clock_open or venue is True
-    in_break = cls in BREAK_CLASSES and any(
-        start <= now < end for start, end in break_windows(now))
+    windows = break_windows(now) if cls in BREAK_CLASSES else []
+    in_break = any(start <= now < end for start, end in windows)
     settle_s = thresholds(cls).settle_s
     opened = clock.get("opened")
-    settling = bool(clock_open and settle_s and opened is not None
-                    and (now - opened).total_seconds() < settle_s)
-    entries = (clock_open and venue is not False and not in_break
-               and not settling)
+    after_reopen = bool(clock_open and settle_s and opened is not None
+                        and (now - opened).total_seconds() < settle_s)
+    after_break = bool(clock_open and settle_s and not in_break and any(
+        end <= now < end + timedelta(seconds=settle_s)
+        for _, end in windows))
+    settling = after_reopen or after_break
+    # entries: the clock says open, and — once eToro's flag is proven —
+    # eToro says open too (an unknown flag is not a yes)
+    venue_ok = (venue is True) if ETORO_OPEN_PROVEN else True
+    entries = (clock_open and venue_ok and not in_break and not settling)
     words = ""
     if venue is not None and venue != clock_open:
         words = "eToro says open" if venue else "eToro says closed"
+    elif ETORO_OPEN_PROVEN and venue is None and clock_open:
+        words = "eToro's open flag unknown"
     elif in_break and clock_open:
         words = "forex daily break (window not yet measured)" \
             if regime(now) not in MEASURED_BREAKS else "forex daily break"
-    elif settling:
+    elif after_reopen:
         words = "settling after the reopen"
+    elif after_break:
+        words = "settling after the daily break"
     return Session(protection, entries, clock_open, venue, in_break,
                    settling, words)

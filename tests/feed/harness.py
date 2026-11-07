@@ -12,10 +12,18 @@ can hold. Nothing here calls eToro, a broker or a model.
   * EtoroTrader: a fake eToro, named as the adapter so the engine's
     adapter_key reads "etoro". Its rates come from a script (a tick dict,
     or an exception the read raises); it RECORDS EVERY REQUEST it is
-    given; and it FAILS EVERY WRITE — an order, a close, a cancel, a stop
-    move — with FakeWriteRefused, as a refusing venue reads, unless the
-    scenario accepts writes (writes="accept"), when a close is answered in
-    eToro's measured shape: PENDING, nothing executed, no price.
+    given, with its arguments; and it FAILS EVERY WRITE the real client
+    has — an order, a close, a cancel, a stop or a target move — with
+    FakeWriteRefused, as a refusing venue reads, unless the scenario
+    accepts writes (writes="accept"), when a close is answered in eToro's
+    measured shape: PENDING, nothing executed, no price. ITS SURFACE IS THE
+    REAL CLIENT'S (2026-11-07, the review of F1): a method the real
+    EtoroTrader has and no scenario scripted is recorded and refused
+    (FakeUnscripted), never missing — so an engine probe such as
+    getattr(client, "modify_protective", None) takes the real client's
+    branch — and a name the real client lacks is missing here too. The
+    real client's local helpers answer as it does without the wire: its
+    world, its key's name, and no instrument id known (no cache read).
   * Fake LiveQuote writers: write_live_quote goes through the real
     market_data.quotes.write_quote — its precedence and its 300 s hold —
     then dates the row on the fake clock.
@@ -37,10 +45,10 @@ from unittest import mock
 T0 = datetime(2026, 11, 4, 12, 0, tzinfo=dt_tz.utc)
 #: Where the engine asks for a symbol's client.
 ROUTER = "bot_program.engine.broker_router.client_for_symbol"
-#: The fake's write methods: every one fails unless writes are accepted.
+#: The real client's writes (bot_program.engine.etoro_client.EtoroTrader):
+#: every one fails unless the scenario accepts writes.
 WRITE_METHODS = ("market_order", "close_position", "cancel_order",
-                 "modify_position", "update_stop_loss", "place_order",
-                 "open_position", "limit_order", "stop_order")
+                 "modify_protective", "modify_target")
 #: eToro's measured answer to an accepted close (etoro_client
 #: .close_position): submitted, nothing executed yet, no price.
 PENDING_CLOSE = {"orderId": "c-1", "status": "PENDING",
@@ -90,6 +98,27 @@ class FakeWriteRefused(RuntimeError):
     """The fake eToro refused a write: the replay never sends anything."""
 
 
+class FakeUnscripted(RuntimeError):
+    """The real client has this method and the scenario scripted no answer:
+    recorded, and refused."""
+
+
+_REAL_SURFACE: dict = {}
+
+
+def real_surface() -> frozenset:
+    """Every method of the real eToro client (its callables, public and
+    private, dunders aside)."""
+    if "names" not in _REAL_SURFACE:
+        import inspect
+
+        from bot_program.engine.etoro_client import EtoroTrader as Real
+        _REAL_SURFACE["names"] = frozenset(
+            n for n in dir(Real) if not n.startswith("__")
+            and callable(inspect.getattr_static(Real, n)))
+    return _REAL_SURFACE["names"]
+
+
 class EtoroTrader:
     """A FAKE eToro (see the module docstring). `rates`: {symbol: tick dict
     or an exception to raise}; a symbol with none raises. `positions`: the
@@ -119,7 +148,32 @@ class EtoroTrader:
 
     @property
     def writes_sent(self) -> list:
-        return [r for r in self.requests if r[0] in WRITE_METHODS]
+        """Every write asked, with its arguments (a close's position id,
+        symbol and quantity; an order's symbol, side and quantity; a stop
+        or target move's position id and level)."""
+        return [list(r) for r in self.requests if r[0] in WRITE_METHODS]
+
+    # ── the real client's local helpers (no request) ─────────────────
+    def _world(self):
+        return "demo" if self.demo else "live"
+
+    def _bkey(self):
+        return "replay-key"
+
+    def _known_id(self, symbol):
+        """No id known without the wire: the rates cache is never read."""
+        return None
+
+    def __getattr__(self, name):
+        if name.startswith("__") or name not in real_surface():
+            raise AttributeError(name)
+
+        def unscripted(*args, **kwargs):
+            self._note(name, *args)
+            raise FakeUnscripted(f"the replay scripted no answer for "
+                                 f"eToro's {name}")
+        unscripted.__name__ = name
+        return unscripted
 
     # ── reads ────────────────────────────────────────────────────────
     def ticker(self, symbol):
@@ -157,8 +211,13 @@ class EtoroTrader:
     def cancel_order(self, order_id):
         return self._write("cancel_order", order_id)
 
-    def modify_position(self, *a, **k):
-        return self._write("modify_position", *a)
+    def modify_protective(self, trade_id, new_price):
+        self._write("modify_protective", trade_id, new_price)
+        return {"ok": True, "price": float(new_price)}
+
+    def modify_target(self, trade_id, new_price):
+        self._write("modify_target", trade_id, new_price)
+        return {"ok": True, "price": float(new_price)}
 
 
 def tick(last, *, spread="0.0002"):

@@ -22,20 +22,31 @@ an account figure or an id. What is pinned:
     the path's own commit; one WARNING per failure, never more, on the
     counter's side and on the path's; a money module reaches the counters
     only through bot_program.feed_fence;
-  * the kill switch's harm rows wait until the sweep's last close is sent.
+  * the kill switch's harm rows wait until the sweep's last close is sent;
+  * NO ROW IS WRITTEN ON A MONEY PATH'S THREAD (2026-11-07, the review of
+    F1): on PostgreSQL outside a transaction, a committed row joins the
+    process's queue and the writer thread writes it — proven on the drain,
+    whose eToro requests all go out before any harm insert; a raise out of
+    the delivery never escapes into a booking (no functools.partial for
+    Django's robust handler to trip on), and the app starts even when the
+    counters cannot load.
 
 Run with:  python manage.py test tests.feed.test_feed_harms
 """
 import contextlib
 import io
 import logging
+import sys
+import threading
+import time
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
 from django.core.management import call_command
 from django.db import transaction
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 
 from tests.feed import harness as H
 
@@ -57,13 +68,19 @@ def _rows(kind=None):
     return list(qs.filter(kind=kind) if kind else qs)
 
 
+def _switch_on(key):
+    from core.platform_control import PlatformComponent
+    PlatformComponent.objects.update_or_create(
+        key=key, defaults={"name": key, "category": "system",
+                           "is_enabled": True})
+
+
 def _poll_commodities(case, info):
     """The commodity poller's pass over one synthetic instrument whose
     Yahoo answer is `info` (its components switched on)."""
     from market_data import tasks
-    from tests.test_aragorn import _switch
-    _switch("platform_master")
-    _switch("scraper_commodities")
+    _switch_on("platform_master")
+    _switch_on("scraper_commodities")
 
     class _Ticker:
         def __init__(self, sym):
@@ -200,7 +217,7 @@ class TheCommandTests(TestCase):
                                          symbol="AAPL", seconds=s)
         old = FeedHarmEvent.objects.create(kind="close_no_mark", real=True)
         FeedHarmEvent.objects.filter(pk=old.pk).update(
-            at=now - __import__("datetime").timedelta(days=9))
+            at=now - timedelta(days=9))
         out = io.StringIO()
         call_command("feed_harms", "--days", "7", stdout=out)
         text = out.getvalue()
@@ -223,6 +240,18 @@ class TheCommandTests(TestCase):
         from django.core.management.base import CommandError
         with self.assertRaisesRegex(CommandError, "--days"):
             call_command("feed_harms", "--days", "0", stdout=io.StringIO())
+
+    def test_an_absurd_window_is_a_clear_refusal_not_a_traceback(self):
+        """2026-11-07, review: --days 1000000 died on an OverflowError."""
+        from django.core.management.base import CommandError
+        for days in ("1000000", "3651"):
+            with self.subTest(days=days):
+                with self.assertRaisesRegex(CommandError, "--days"):
+                    call_command("feed_harms", "--days", days,
+                                 stdout=io.StringIO())
+        out = io.StringIO()
+        call_command("feed_harms", "--days", "3650", stdout=out)
+        self.assertIn("3650 day(s)", out.getvalue())
 
     def test_the_command_is_in_the_catalogue_and_off_the_run_lane(self):
         """/ops/ lists it as a read (core.ops_commands): read-only, asking
@@ -269,7 +298,6 @@ class TheMarkSkipTests(_Case):
         self.assertIn("platform's quote", d["why"])
 
     def test_a_jump_and_a_freeze_are_their_own_kinds(self):
-        from datetime import timedelta
         t = self._row(meta={"care": {
             "last_mark": 1.1, "last_mark_at": self.clock.ago(60).isoformat(),
             "mark_same_since": self.clock.ago(60).isoformat()}})
@@ -283,7 +311,6 @@ class TheMarkSkipTests(_Case):
             self._check(frozen, 1.1)
         self.assertEqual(sorted(r.kind for r in _rows()),
                          ["mark_skip_frozen", "mark_skip_jump"])
-        self.assertIsNotNone(timedelta)
 
     def test_a_paper_row_and_an_accepted_mark_record_nothing(self):
         H.write_live_quote("EURUSD", source="oanda_stream", last="1.1000",
@@ -494,7 +521,6 @@ class TheExitBookingTests(_Case):
         self.assertEqual([r.kind for r in _rows()], [])
 
     def test_a_re_save_of_an_old_booking_is_not_a_booking(self):
-        from datetime import timedelta
         t = self._row(status="CLOSED", meta={"exit_fill_source": "mark"})
         type(t).objects.filter(pk=t.pk).update(
             closed_at=self.clock.now - timedelta(days=2))
@@ -853,3 +879,244 @@ class TheHooksMovedNothingTests(_Case):
                 self.captureOnCommitCallbacks(execute=True):
             execute_kill_switch(self.owner, reason="replay")
         self.assertEqual(seen, [((etoro_budget.P0, "kill switch"), True)])
+
+
+# ── 5. no harm row on a money path's thread (2026-11-07, review) ────────
+
+class _Autocommit(TransactionTestCase):
+    """Real autocommit (no test transaction): on-commit callbacks run as
+    in production."""
+
+    def setUp(self):
+        self.clock = H.FakeClock()
+        self.clock.__enter__()
+        self.addCleanup(self.clock.__exit__, None, None, None)
+        p = mock.patch("bot_program.venue_mark.market_shut",
+                       return_value=None)
+        p.start()
+        self.addCleanup(p.stop)
+        self.owner = H.user("auto_owner")
+        self.cfg = H.live_config(self.owner, "forex")
+        H.instrument("EURUSD", "forex")
+        _fh()._reset_warnings()
+        self.addCleanup(_fh().flush)
+
+    def _row(self, **kw):
+        d = dict(entry="1.1000", stop="1.0900", target="1.1200")
+        d.update(kw)
+        return H.real_row(self.cfg, "EURUSD", **d)
+
+
+class TheWriterThreadTests(_Autocommit):
+    """On PostgreSQL every row is written by the writer thread. The test
+    database is SQLite, so the thread's choice is forced here
+    (_background) and its insert recorded: which thread, and what the
+    drain had sent to eToro by then."""
+
+    def _drain(self, events, inserted):
+        from bot_program.models import AssetBotTrade
+        from bot_program.pending_closes import retry_all_pending_closes
+        AssetBotTrade.objects.all().delete()
+        for i in (1, 2, 3):
+            self._row(status="CLOSE_PENDING", position_id=f"d-{i}")
+
+        class _Rec(H.EtoroTrader):
+            def _note(self_, method, *args):
+                events.append(("eToro", method))
+                super()._note(method, *args)
+        with H.route_to(_Rec({"EURUSD": H.tick("1.0990")}, positions=[])):
+            return retry_all_pending_closes()
+
+    def test_the_drain_sends_every_request_before_any_harm_insert(self):
+        """The review's scenario: three CLOSE_PENDING rows drained in
+        autocommit. Before, the drain read get_positions, ticker, INSERT,
+        get_positions, ticker, INSERT... on its own thread; now every eToro
+        request goes out first and every insert runs on the writer thread.
+        The insert is held shut until the drain has returned: had one run
+        on the drain's thread, the drain would have waited on it and the
+        insert been recorded before the drain's end."""
+        fh = _fh()
+        events, inserted = [], []
+        main = threading.get_ident()
+        gate = threading.Event()
+
+        def slow_insert(rows):
+            gate.wait(5)
+            inserted.append((threading.get_ident(),
+                             tuple(r["kind"] for r in rows)))
+            events.append(("harm insert", len(rows)))
+            time.sleep(0.25)
+        with mock.patch.object(fh, "_background", return_value=True), \
+                mock.patch.object(fh, "_insert", side_effect=slow_insert):
+            out = self._drain(events, inserted)
+            self.assertEqual(inserted, [], "nothing written during the drain")
+            gate.set()
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and \
+                    sum(len(k) for _, k in inserted) < 3:
+                time.sleep(0.02)
+        self.assertEqual(sum(len(k) for _, k in inserted), 3)
+        self.assertTrue(all(tid != main for tid, _ in inserted),
+                        "every insert on the writer thread")
+        kinds = [e[0] for e in events]
+        self.assertEqual(kinds.index("harm insert"),
+                         len(kinds) - len([k for k in kinds
+                                           if k == "harm insert"]),
+                         f"every eToro request before any insert: {events}")
+        self.assertEqual(out["closed"], 3)
+
+    def test_the_queue_drops_past_its_bound_and_says_so_once(self):
+        fh = _fh()
+        rows = [{"kind": "exit_at_mark"}] * 5
+        with mock.patch.object(fh, "QUEUE_MAX", 3), \
+                mock.patch.object(fh, "_wake_writer"), \
+                self.assertLogs("bot_program.feed_harms",
+                                level=logging.DEBUG) as logs:
+            fh._enqueue(rows)
+            fh._enqueue(rows)
+            queued = len(fh._ROWS)
+            fh._ROWS.clear()
+        self.assertEqual(queued, 3)
+        warnings = [r for r in logs.records if r.levelno >= logging.WARNING]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("QueueFull", warnings[0].getMessage())
+
+    def test_a_forked_worker_starts_with_its_own_queue_and_writer(self):
+        fh = _fh()
+        fh._ROWS.append({"kind": "exit_at_mark"})
+        fh._WRITER.update(pid=-1, thread=None)
+        try:
+            fh._after_fork_in_child()
+            self.assertEqual(len(fh._ROWS), 0)
+            self.assertEqual(fh._WRITER, {})
+        finally:
+            fh._ROWS.clear()
+
+    def test_the_real_insert_outside_a_transaction_writes_its_rows(self):
+        """`_insert` as the writer runs it: outside any transaction, in a
+        block of its own (bounded on PostgreSQL)."""
+        from django.db import connection
+        fh = _fh()
+        self.assertFalse(connection.in_atomic_block)
+        with mock.patch.object(fh, "_bound", wraps=fh._bound) as bound:
+            fh._insert([{"at": self.clock.now, "kind": "close_no_mark",
+                         "real": True, "symbol": "EURUSD", "source": "",
+                         "seconds": None, "detail": {}, "ref": ""}])
+        bound.assert_called_once_with()
+        self.assertEqual([r.kind for r in _rows()], ["close_no_mark"])
+
+    def test_the_bound_is_local_to_the_counters_own_block_on_postgresql(self):
+        fh = _fh()
+        cur = mock.MagicMock()
+        conn = mock.MagicMock(vendor="postgresql")
+        conn.cursor.return_value.__enter__.return_value = cur
+        with mock.patch("django.db.transaction.get_connection",
+                        return_value=conn):
+            fh._bound()
+        sql, params = cur.execute.call_args[0]
+        self.assertIn("set_config('statement_timeout', %s, true)", sql)
+        self.assertIn("set_config('lock_timeout', %s, true)", sql)
+        self.assertEqual(params, ["250ms", "100ms"])
+
+    def test_the_thread_is_chosen_only_on_postgresql_outside_a_block(self):
+        fh = _fh()
+        for vendor, atomic, want in (("postgresql", False, True),
+                                     ("postgresql", True, False),
+                                     ("sqlite", False, False)):
+            with self.subTest(vendor=vendor, atomic=atomic):
+                conn = mock.MagicMock(vendor=vendor, in_atomic_block=atomic)
+                with mock.patch("django.db.transaction.get_connection",
+                                return_value=conn):
+                    self.assertEqual(fh._background(), want)
+        conn = mock.MagicMock(vendor="postgresql", in_atomic_block=False)
+        with mock.patch("django.db.transaction.get_connection",
+                        return_value=conn), \
+                mock.patch.object(fh, "BACKGROUND", False):
+            self.assertFalse(fh._background())
+
+
+class TheDeliveryNeverEscapesTests(_Autocommit):
+    """2026-11-07, review: the row was registered as functools.partial,
+    which Django's robust on-commit handler cannot name (no __qualname__):
+    a raise out of the delivery escaped into the booking as an
+    AttributeError and dropped the path's own later on-commit work."""
+
+    def test_a_raising_delivery_never_escapes_a_booking(self):
+        from bot_program.models import AssetBotTrade
+        t = self._row()
+        after = []
+        with mock.patch.object(_fh(), "_deliver",
+                               side_effect=RuntimeError("counter broke")):
+            with transaction.atomic():
+                t.status = "CLOSED"
+                t.exit_price = Decimal("1.0990")
+                t.closed_at = self.clock.now
+                t.metadata = {**t.metadata, "exit_fill_source": "mark"}
+                t.save()
+                # the money path's own after-commit work
+                transaction.on_commit(lambda: after.append("re-read"))
+        self.assertEqual(AssetBotTrade.objects.get(pk=t.pk).status, "CLOSED")
+        self.assertEqual(after, ["re-read"])
+
+    def test_the_orphan_close_with_a_raising_delivery(self):
+        """The reconcile's orphan close books inside an atomic block, then
+        asks eToro's account to be read again on commit: unchanged."""
+        from bot_program import etoro_cells
+        from bot_program.reconcile_asset import _close_as_orphan
+        H.write_live_quote("EURUSD", source="oanda_stream", last="1.0980",
+                           clock=self.clock)
+        outcomes = {}
+        for mode in ("none", "deliver raises"):
+            orphan = self._row(position_id=f"o-{len(outcomes)}")
+            asks = []
+            ctx = (mock.patch.object(_fh(), "_deliver",
+                                     side_effect=RuntimeError("x"))
+                   if mode != "none" else contextlib.nullcontext())
+            with ctx, H.route_to(H.EtoroTrader()), \
+                    mock.patch.object(etoro_cells, "account_pk_for",
+                                      return_value=1), \
+                    mock.patch.object(etoro_cells, "request_refresh",
+                                      side_effect=lambda pk, why="":
+                                      asks.append(why)):
+                booked = _close_as_orphan(orphan)
+            outcomes[mode] = (booked, H.row_state(orphan)["status"], asks)
+        self.assertEqual(outcomes["deliver raises"], outcomes["none"])
+        self.assertEqual(outcomes["none"], (True, "CLOSED", ["venue close"]))
+
+    def test_every_registered_callback_can_be_named(self):
+        """What Django's robust handler formats: the callback's name."""
+        fh = _fh()
+        seen = []
+        with mock.patch.object(fh, "_after_commit",
+                               side_effect=lambda fn: seen.append(fn)):
+            fh._record("close_no_mark", real=True)
+        (fn,) = seen
+        self.assertTrue(fn.__qualname__)
+
+
+class TheAppStartsWithoutTheCountersTests(SimpleTestCase):
+    """2026-11-07, review: ready() imported the counters bare, so a counter
+    that failed to load stopped web, workers and beat."""
+
+    def test_a_counter_that_cannot_load_never_stops_the_app(self):
+        import bot_program
+        from bot_program import apps, feed_fence
+        saved = sys.modules.get("bot_program.feed_harms")
+        had = hasattr(bot_program, "feed_harms")
+        attr = getattr(bot_program, "feed_harms", None)
+        feed_fence.forget()
+        sys.modules["bot_program.feed_harms"] = None
+        if had:
+            delattr(bot_program, "feed_harms")
+        try:
+            with self.assertLogs("bot_program.feed_harms",
+                                 level=logging.WARNING) as logs:
+                self.assertFalse(apps.connect_harm_counters())
+        finally:
+            sys.modules["bot_program.feed_harms"] = saved
+            if had:
+                bot_program.feed_harms = attr
+            feed_fence.forget()
+        self.assertIn("ModuleNotFoundError", logs.records[0].getMessage())
+        self.assertTrue(apps.connect_harm_counters())
+

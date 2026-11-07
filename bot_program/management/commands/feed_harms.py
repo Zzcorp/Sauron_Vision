@@ -28,9 +28,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from bot_program import feed_harms
         days = options["days"]
-        if days is None or days < 1:
-            raise CommandError("--days must be a whole number of days, "
-                               "1 or more")
+        if days is None or not 1 <= days <= feed_harms.MAX_DAYS:
+            raise CommandError(f"--days must be a whole number of days, "
+                               f"1 to {feed_harms.MAX_DAYS}")
         r = feed_harms.report(days)
         self.stdout.write(f"Feed harms over the last {days} day(s), since "
                           f"{r['since']:%Y-%m-%d %H:%M} UTC")

@@ -34,20 +34,22 @@ database, and the one money door it holds is shut.
     it before F1 and they disagree on names no code writes; the readings
     keep each caller's answer to the letter (tests/feed/
     test_venue_source_one_rule.py runs the old and the new side by side).
+    It lives in market_data.venue_source (standard library only, imported
+    at module level by its callers) and is re-exported here.
 
 Constants are the spec's starting values; each later change is measured
 first (M1, M2) and logged.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple, Optional
 
-#: The venue whose prices this core carries, and the LiveQuote source its
-#: readers write today (the legacy Sync button, the interim quotes beat).
-VENUE = "etoro"
+from market_data.venue_source import (  # noqa: F401 — re-exported
+    CHANNEL, EXACT, PREFIX, READINGS, VENUE, is_venue_source)
 
 # ── grades, channels, flags ───────────────────────────────────────────────
 
@@ -64,6 +66,9 @@ UNCONFIRMED_JUMP = "unconfirmed_jump"
 SKEW = "skew"                       # eToro's Date ahead of the host clock
 BEHIND = "behind"                   # REST showed a newer print than the topic
 UNTIMED = "untimed"                 # no eToro Date: display only (W7)
+#: The record's confirmation lies ahead of the host clock (the clock went
+#: back): its age is unknown, so it is never LIVE (2026-11-07, review).
+CLOCK_BACK = "clock_back"
 
 # ── the money door's answers ──────────────────────────────────────────────
 
@@ -120,12 +125,27 @@ C_REST_UNMEASURED_S = 60
 C_REST_MEASURED = False
 #: No feed REST GET more often than max(C_rest, this) per batch (§4.5.6).
 REST_FLOOR_S = 30
-#: A Date this far ahead of the host clock flags `skew`.
+#: A Date this far ahead of the host clock flags `skew`; a confirmation
+#: this far ahead flags `clock_back` and is never LIVE.
 SKEW_TOLERANCE_S = 2
+#: A frame whose Date lies more than this ahead of its own arrival is not
+#: eToro's print (a corrupt frame, a misread day or zone): refused and
+#: counted as `future_date`, so one bad frame can never freeze a store
+#: behind a Date no real print reaches (2026-11-07, review).
+FUTURE_DATE_TOLERANCE_S = 60
 #: A record older than this is gone (the stores' expiry).
 RECORD_KEEP_S = 4 * 86400
 #: A spread wider than this share of the mid is not a quote (W1).
 MAX_SPREAD_FRACTION = Decimal("0.10")
+#: No price eToro quotes lies outside 10**-12 .. 10**13 (adjusted
+#: exponents -12 .. 12): beyond, a side is refused as `out_of_range`
+#: before any arithmetic can overflow (2026-11-07, review).
+MAX_PRICE_EXPONENT = 12
+#: The CLOSED cell calls the last print "eToro close" only when it lies
+#: this close to the session's last close; otherwise it is "eToro's last
+#: price", with its day and age (a print from Wednesday is not Friday's
+#: close).
+CLOSE_PRINT_NEAR_S = 15 * 60
 
 # ── hysteresis (§5.6; no money decision ever waits on it) ─────────────────
 
@@ -169,19 +189,39 @@ def _side(side) -> str:
     return s
 
 
+#: A side's text: plain decimal notation, an optional exponent — nothing
+#: else Python's Decimal would also take ("1_000", " 1 ", "0x1").
+_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+_NOT_FINITE = {"nan", "snan", "inf", "infinity"}
+
+
 def _parse(value) -> Decimal:
     if value is None or (isinstance(value, str) and not value.strip()):
         raise InvalidQuote("missing_side")
     if isinstance(value, bool):
         raise InvalidQuote("unparsed", repr(value))
     try:
-        d = value if isinstance(value, Decimal) else Decimal(str(value).strip())
-    except (InvalidOperation, ValueError, TypeError):
+        if isinstance(value, Decimal):
+            d = value
+        elif isinstance(value, int):
+            d = Decimal(value)
+        else:
+            text = str(value).strip()
+            if text.lstrip("+-").lower() in _NOT_FINITE:
+                raise InvalidQuote("not_finite", repr(value))
+            if not _NUMBER.fullmatch(text):
+                raise InvalidQuote("unparsed", repr(value))
+            d = Decimal(text)
+        if not d.is_finite():
+            raise InvalidQuote("not_finite", repr(value))
+        if d <= 0:
+            raise InvalidQuote("not_positive", repr(value))
+        if abs(d.adjusted()) > MAX_PRICE_EXPONENT:
+            raise InvalidQuote("out_of_range", repr(value))
+    except InvalidQuote:
+        raise
+    except (ArithmeticError, ValueError, TypeError):
         raise InvalidQuote("unparsed", repr(value)) from None
-    if not d.is_finite():
-        raise InvalidQuote("not_finite", repr(value))
-    if d <= 0:
-        raise InvalidQuote("not_positive", repr(value))
     return d
 
 
@@ -212,8 +252,12 @@ class VenueQuote:
         bid, ask = _parse(self.bid), _parse(self.ask)
         if bid > ask:
             raise InvalidQuote("crossed", f"bid {bid} over ask {ask}")
-        mid = (bid + ask) / 2
-        if (ask - bid) > MAX_SPREAD_FRACTION * mid:
+        try:
+            mid = (bid + ask) / 2
+            wide = (ask - bid) > MAX_SPREAD_FRACTION * mid
+        except ArithmeticError:            # bounded above; never a raise
+            raise InvalidQuote("unparsed", "arithmetic") from None
+        if wide:
             raise InvalidQuote("wide_spread")
         if self.channel not in CHANNELS:
             raise InvalidQuote("bad_channel", repr(self.channel))
@@ -368,20 +412,16 @@ def money_price(instrument, purpose, *, record=None, now=None):
 class Grade(NamedTuple):
     grade: str
     flags: frozenset
-    confirm_age_s: Optional[int]
-    print_age_s: Optional[int]
+    confirm_age_s: Optional[float]
+    print_age_s: Optional[float]
 
 
 def thresholds(asset_class) -> ClassThresholds:
     return THRESHOLDS.get(str(asset_class or "").strip().lower(), STRICTEST)
 
 
-def _secs(delta) -> int:
-    return int(delta.total_seconds())
-
-
-def grade(record, *, now, asset_class, session_open=True, ws_healthy=True,
-          ws_trusted=True, unconfirmed_jump=False, behind=False) -> Grade:
+def grade(record, *, now, asset_class, session_open, ws_healthy, ws_trusted,
+          unconfirmed_jump, behind) -> Grade:
     """How far `record` (a VenueQuote, or None) may be trusted at `now`.
 
     LIVE: the session is open for the purpose, the quote is timed, not an
@@ -391,11 +431,22 @@ def grade(record, *, now, asset_class, session_open=True, ws_healthy=True,
     RECENT: not LIVE, confirmed within S. STALE: beyond S, kept for display
     up to RECORD_KEEP_S. CLOSED: the session is shut. NONE: no record.
     Print ages are raw (now - eToro's Date, floored at 0); confirmation
-    ages are Sauron's clock, so skew never reaches them."""
+    ages are Sauron's clock, so skew never reaches them.
+
+    EVERY INPUT IS REQUIRED (2026-11-07, review): a caller that forgets
+    one cannot be handed LIVE by a default. Ages are seconds as floats,
+    compared exactly (a confirmation 15.9 s old is not within 15 s). A
+    confirmation more than SKEW_TOLERANCE_S ahead of `now` — the host
+    clock went back — is flagged `clock_back` and is never LIVE: its age
+    is unknown."""
     if record is None:
         return Grade(NONE, frozenset(), None, None)
     flags = set()
-    confirm_age = max(0, _secs(now - record.confirmed_at))
+    raw_confirm = (now - record.confirmed_at).total_seconds()
+    clock_back = raw_confirm < -SKEW_TOLERANCE_S
+    if clock_back:
+        flags.add(CLOCK_BACK)
+    confirm_age = max(0.0, raw_confirm)
     if confirm_age > RECORD_KEEP_S:
         return Grade(NONE, frozenset(), None, None)
     print_age = None
@@ -405,7 +456,7 @@ def grade(record, *, now, asset_class, session_open=True, ws_healthy=True,
         raw = (now - record.vt).total_seconds()
         if raw < -SKEW_TOLERANCE_S:
             flags.add(SKEW)
-        print_age = max(0, int(raw))
+        print_age = max(0.0, raw)
     if unconfirmed_jump:
         flags.add(UNCONFIRMED_JUMP)
     if behind and record.channel == WS:
@@ -414,11 +465,11 @@ def grade(record, *, now, asset_class, session_open=True, ws_healthy=True,
         return Grade(CLOSED, frozenset(flags), confirm_age, print_age)
     t = thresholds(asset_class)
     if record.channel == WS:
-        channel_ok = ws_healthy and ws_trusted and not behind
+        channel_ok = bool(ws_healthy and ws_trusted and not behind)
     else:
         channel_ok = C_REST_MEASURED
     if (confirm_age <= t.live_s and record.vt is not None
-            and not unconfirmed_jump and channel_ok):
+            and not clock_back and not unconfirmed_jump and channel_ok):
         if print_age is not None and print_age > t.entry_quiet_s:
             flags.add(QUIET)
         return Grade(LIVE, frozenset(flags), confirm_age, print_age)
@@ -514,18 +565,35 @@ def _slot(reference, record, now) -> Optional[dict]:
             "gap_pct": gap}
 
 
-def display_quote(record, *, now, asset_class, session_open=True,
-                  reference=None, slot_shown=False) -> dict:
+def _when_words(at, now) -> str:
+    """hh:mm on `now`'s own day (UTC), else its day as well."""
+    if at.astimezone(now.tzinfo).date() == now.date():
+        return f"{at:%H:%M}"
+    return f"{at:%a %d %b %H:%M}"
+
+
+def display_quote(record, graded, *, now, reference=None, slot_shown=False,
+                  session_closed_at=None) -> dict:
     """The main price cell of an eToro instrument and its outside slot.
+
+    `graded` is the record's Grade, from grade() with every input the feed
+    knows — the stream's health, trust and lag, an unconfirmed jump, the
+    session (I6: the screen is handed a grade, it never computes one, so a
+    degraded stream shows degraded at once, §5.6, H7).
 
     The cell holds eToro's numbers only — bid, ask, the mid for a compact
     cell — labelled with the grade and age, or "awaiting eToro" with no
     price at all. `reference`, an outside quote, appears only in "slot",
-    labelled with its source, age and gap, and only when `slot_shown`
-    (the hysteresis of §5.6 decides it: after eToro has been STALE for
-    SLOT_SHOW_AFTER_STALE_S) and eToro is not LIVE."""
-    g = grade(record, now=now, asset_class=asset_class,
-              session_open=session_open)
+    labelled with its source, age and gap, and exactly while `slot_shown`:
+    the hysteresis of §5.6 decides it (shown after eToro has been STALE
+    for SLOT_SHOW_AFTER_STALE_S, hidden only after eToro has been LIVE for
+    SLOT_HIDE_AFTER_LIVE_S, so it may still show at LIVE). CLOSED reads
+    "eToro close hh:mm" only when the last print lies within
+    CLOSE_PRINT_NEAR_S of `session_closed_at` (the session's last close);
+    otherwise it is "eToro's last price", with its day and age."""
+    if not isinstance(graded, Grade):
+        raise TypeError("display_quote is handed the record's Grade")
+    g = graded
     cell = {"source": VENUE, "channel": None, "bid": None, "ask": None,
             "mid": None, "grade": g.grade, "age_s": g.confirm_age_s,
             "flags": sorted(g.flags), "degraded": g.grade != LIVE,
@@ -542,8 +610,17 @@ def display_quote(record, *, now, asset_class, session_open=True,
                              f"feed down")
         else:
             at = record.vt or record.confirmed_at
-            cell["label"] = f"closed · eToro close {at:%H:%M}"
-    if slot_shown and g.grade != LIVE:
+            near = (session_closed_at is not None and abs(
+                (session_closed_at - at).total_seconds())
+                <= CLOSE_PRINT_NEAR_S)
+            if near:
+                cell["label"] = f"closed · eToro close {_when_words(at, now)}"
+            else:
+                age = max(0.0, (now - at).total_seconds())
+                cell["label"] = (f"closed · eToro's last price "
+                                 f"{_when_words(at, now)} · "
+                                 f"{_age_words(age)} ago")
+    if slot_shown:
         cell["slot"] = _slot(reference, record if g.grade != NONE else None,
                              now)
     return cell
@@ -587,44 +664,3 @@ def reference_quote(row, *, symbol, stand_in=None) -> Optional[ReferenceQuote]:
                           ask=_opt(getattr(row, "ask", None)),
                           stand_in=stand_in)
 
-
-# ── the one venue-source rule (§3.2 item 3; F1) ───────────────────────────
-
-#: THE RULE (the spec's): the venue's own name or one of its channels —
-#: "etoro", "etoro_ws", "etoro_rest", "etoro-..." — trimmed, in any case.
-CHANNEL = "channel"
-#: The venue's own name only, any case, untrimmed: the carrier's own write
-#: (venue_mark.quote_stand_in, generic over carriers: an OANDA row's
-#: "oanda_stream" quote is not "oanda"'s own write).
-EXACT = "exact"
-#: Anything that begins with the venue's name, any case, untrimmed: mark
-#: sanity's second opinion (VENUE_SOURCES, 2026-10-05).
-PREFIX = "prefix"
-READINGS = (CHANNEL, EXACT, PREFIX)
-
-
-def is_venue_source(source, venue=VENUE, *, reading=CHANNEL) -> bool:
-    """Did `venue`'s own reader write a quote whose source is `source`?
-
-    ONE FUNCTION FOR THE THREE TESTS THAT ANSWERED IT BEFORE F1. They
-    agree on every source the code base writes ("etoro" from the legacy
-    Sync and the interim quotes beat; every outside feed's name; any
-    case). They differ only on names no code writes — "etoro_ws", a padded
-    " etoro", "etorox" — and each caller keeps its own answer there by its
-    `reading`, so no decision moves (tests/feed/test_venue_source_one_rule
-    .py runs the three old tests beside these readings over every such
-    name and lists each difference)."""
-    if reading not in READINGS:
-        raise ValueError(f"not a reading: {reading!r}")
-    if not venue:
-        return False
-    if reading == EXACT:
-        # venue_mark.quote_stand_in before F1, to the letter
-        return str(source or "").lower() == str(venue).lower()
-    if reading == PREFIX:
-        # mark_sanity.second_opinion before F1, to the letter
-        return str(source or "").lower().startswith(str(venue))
-    # portfolio.services._is_etoro_source before F1, to the letter
-    s = str(source or "").strip().lower()
-    v = str(venue).strip().lower()
-    return bool(v) and (s == v or s.startswith((v + "_", v + "-")))

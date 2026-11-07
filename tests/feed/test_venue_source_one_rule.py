@@ -282,22 +282,24 @@ class TheCallersTests(TestCase):
 
 class TheOneRuleIsAskedTests(TestCase):
     """Each caller asks is_venue_source, with its reading — and no caller
-    keeps a test of its own."""
+    keeps a test of its own. Each binds the rule when it is imported
+    (market_data.venue_source, the review of F1), so the spy replaces the
+    caller's own name."""
 
-    def _spy(self):
-        from market_data import venue_quotes
-        real = venue_quotes.is_venue_source
+    def _spy(self, caller):
+        from market_data import venue_source
+        real = venue_source.is_venue_source
         calls = []
 
         def spy(*a, **k):
             calls.append((a, k))
             return real(*a, **k)
-        return mock.patch.object(venue_quotes, "is_venue_source",
-                                 side_effect=spy), calls
+        return mock.patch(f"{caller}.is_venue_source", side_effect=spy), \
+            calls
 
     def test_t1_asks_the_exact_reading(self):
         from bot_program.venue_mark import quote_stand_in
-        p, calls = self._spy()
+        p, calls = self._spy("bot_program.venue_mark")
         with p:
             self.assertEqual(quote_stand_in(
                 "XAUUSD", SimpleNamespace(source="etoro"), carrier="etoro"),
@@ -312,7 +314,7 @@ class TheOneRuleIsAskedTests(TestCase):
                                          asset_class="forex")
         LiveQuote.objects.create(instrument=inst, last=Decimal("1.1"),
                                  source="etoro")
-        p, calls = self._spy()
+        p, calls = self._spy("bot_program.mark_sanity")
         with p:
             self.assertIsNone(second_opinion("EURUSD"))
         self.assertEqual(calls, [(("etoro", "etoro"),
@@ -320,7 +322,7 @@ class TheOneRuleIsAskedTests(TestCase):
 
     def test_t3_asks_the_channel_reading(self):
         from portfolio.services import _etoro_side
-        p, calls = self._spy()
+        p, calls = self._spy("portfolio.services")
         q = SimpleNamespace(source="etoro", bid=Decimal("1.1"),
                             ask=Decimal("1.1002"), updated_at=NOW)
         with p:
@@ -341,3 +343,56 @@ class TheOneRuleIsAskedTests(TestCase):
                          "the P&L tier asks is_venue_source itself")
         t3 = inspect.getsource(services._etoro_side)
         self.assertIn("is_venue_source(", t3)
+
+
+class TheRuleCannotFailOpenTests(TestCase):
+    """2026-11-07, review: the three callers imported the rule from
+    market_data.venue_quotes at call time, inside code that fails open —
+    with that module unimportable, mark sanity answered ok on a suspect
+    mark and the stand-in check waived a future. The rule now lives in
+    market_data.venue_source (standard library only) and is bound when
+    each caller is imported: the core's module failing changes nothing."""
+
+    def test_the_callers_answer_as_before_with_the_core_unimportable(self):
+        import sys
+
+        from bot_program import mark_sanity
+        from bot_program.venue_mark import quote_stand_in
+        from instruments.models import Instrument
+        from market_data.models import LiveQuote
+        from portfolio.services import _etoro_side
+        inst = Instrument.objects.create(symbol="XAUUSD", name="XAUUSD",
+                                         asset_class="commodity")
+        LiveQuote.objects.create(instrument=inst, last=Decimal("2100"),
+                                 source="yfinance")
+
+        def answers():
+            q = SimpleNamespace(source="yfinance", bid=Decimal("2099"),
+                                ask=Decimal("2101"),
+                                updated_at=NOW - timedelta(seconds=5))
+            return (quote_stand_in("XAUUSD", q, carrier="etoro"),
+                    mark_sanity.second_opinion("XAUUSD"),
+                    _etoro_side(SimpleNamespace(side="BUY"), q, NOW))
+        before = answers()
+        saved = sys.modules.get("market_data.venue_quotes")
+        import market_data
+        had = hasattr(market_data, "venue_quotes")
+        attr = getattr(market_data, "venue_quotes", None)
+        sys.modules["market_data.venue_quotes"] = None
+        if had:
+            delattr(market_data, "venue_quotes")
+        try:
+            with self.assertRaises(ImportError):
+                __import__("market_data.venue_quotes")
+            during = answers()
+        finally:
+            if saved is not None:
+                sys.modules["market_data.venue_quotes"] = saved
+            else:
+                sys.modules.pop("market_data.venue_quotes", None)
+            if had:
+                market_data.venue_quotes = attr
+        self.assertEqual(during, before)
+        self.assertEqual(before[0], "future")
+        self.assertEqual(before[1], 2100.0)
+
