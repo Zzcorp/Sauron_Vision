@@ -82,6 +82,9 @@ NO_POSITIONS = "No open positions."
 DEMO_LINE = ("Sauron trades on the demo account; the real account is read, "
              "not traded.")
 READ_FAILED = "the live read did not answer"
+#: The eToro request budget did not send the live read (2026-11-01): not a
+#: failure, said as what it is.
+READ_DEFERRED = "the live read was not asked (the eToro request budget)"
 NO_KEY = "no key is stored for a live read"
 KEY_UNREADABLE = "the stored key could not be read"
 WORLD_UNKNOWN = "the stored reading does not say which account it came from"
@@ -149,7 +152,7 @@ def _stored_reading(acct) -> bool:
 
 # ── the open positions ────────────────────────────────────────────────────
 
-def position_item(row, trade=None) -> dict:
+def position_item(row, trade=None, venue=None) -> dict:
     """One open position as the digests say it.
 
     The P&L and its percentage are the row's own, marked by _open_book:
@@ -159,6 +162,13 @@ def position_item(row, trade=None) -> dict:
     currency (position_summary._unconverted_ccy). A legacy row has none:
     _open_book marks it (mark - entry) x quantity in the instrument's
     price currency, unconverted, and the page prints it bare.
+
+    eToro's OWN P&L (2026-11-06, the operator's report: an open eToro
+    forex row read a gain on Sauron and a small loss in the eToro app):
+    `venue` is portfolio.services.venue_pnl's answer for an open eToro
+    row, the figure the positions page prints — eToro's own, in the
+    account's dollars, while its holdings list the position; else an
+    estimate, and the line says so ("estimate: <feed> quote, <age>").
     """
     from bot_program.asset_engine.base import is_entry_working
     from dashboard import position_summary as ps
@@ -183,6 +193,11 @@ def position_item(row, trade=None) -> dict:
     pnl = None if working else _float(getattr(row, "unrealized_pnl", None))
     pct = (None if working
            else _float(getattr(row, "unrealized_pnl_pct", None)))
+    estimate_words = ""
+    if venue is not None and not working:
+        pnl, pct = _float(venue["pnl_usd"]), _float(venue["pnl_pct"])
+        ccy = venue["ccy"] or ccy
+        estimate_words = venue["words"]
     # The page's own words for the mark (2026-10-08, venue_mark.resolve): a
     # real row whose platform quote is another instrument waits for the
     # venue's price; one valued at an old venue print says its age.
@@ -195,7 +210,11 @@ def position_item(row, trade=None) -> dict:
         middle = "no live price yet"
     else:
         middle = f"{ps.percent(pct)} · {ps.money(pnl, ccy, signed=True)}"
-        if src == "venue_stale":
+        if estimate_words:
+            # whose figure, where it is not eToro's own (2026-11-06): the
+            # estimate's words name the price and its age already
+            middle += f" · {estimate_words}"
+        elif venue is None and src == "venue_stale":
             from bot_program.venue_mark import age_words
             age = age_words(getattr(row, "mark_age_s", None))
             middle += (f" · venue price {age} old" if age
@@ -258,8 +277,14 @@ def real_account(acct, now) -> tuple:
         try:
             reading = eye.read_live_account(api_key, user_key, cells=True)
         except Exception as e:  # noqa: BLE001 — the digest goes out anyway
-            logger.warning("digest: the live eToro read for user %s did not "
-                           "answer (%s)", acct.user_id, type(e).__name__)
+            if getattr(e, "budget_refused", False):
+                why = READ_DEFERRED
+                logger.info("digest: the live eToro read for user %s was "
+                            "not asked: %s", acct.user_id, e)
+            else:
+                logger.warning("digest: the live eToro read for user %s "
+                               "did not answer (%s)", acct.user_id,
+                               type(e).__name__)
             reading = None
     equity = (reading or {}).get("equity")
     if equity:
@@ -368,9 +393,17 @@ def demo_account_line(acct, now) -> str:
     return f"eToro demo account: {WORLD_UNKNOWN}" if not world else ""
 
 
-def simulated_section(user, acct, items, book, page_read, now) -> dict:
+def simulated_section(user, acct, items, book, page_read, now,
+                      venues=None) -> dict:
     """The simulated positions (the biggest moves first), their open P&L,
-    the demo account's equity, the book value."""
+    the demo account's equity, the book value.
+
+    The book value as the pages print it (2026-11-06, the review of the
+    change for the operator's report of an open eToro forex row that read
+    a gain on Sauron and a small loss in the eToro app): the open P&L inside
+    it at eToro's own figure for an eToro position its holdings list
+    (portfolio.services.shown_book over `venues`, the answers the lines
+    above were written from); live_book_value's own is not handed on."""
     from bot_program import telegram_eye as eye
     from dashboard import position_summary as ps
 
@@ -399,8 +432,13 @@ def simulated_section(user, acct, items, book, page_read, now) -> dict:
         lines.append("Book value: not set")
     else:
         try:
-            from portfolio.services import live_book_value
+            from portfolio.services import live_book_value, shown_book
             bv = live_book_value(user, book, book=page_read)
+            try:
+                bv = shown_book(user, bv, venues)
+            except Exception as e:  # noqa: BLE001 — the marks' value stands
+                logger.warning("digest: the shown book value is unreadable "
+                               "(%s)", type(e).__name__)
             value = bv.value
             lines.append(f"Book value: {eye.money(bv.value, bv.currency)} · "
                          f"cash {eye.money(bv.cash, bv.currency)}")
@@ -428,16 +466,34 @@ def book_sections(user, now=None) -> dict:
            if getattr(r, "source", "") == "bot" and getattr(r, "trade_id", None)]
     trades = ({t.pk: t for t in AssetBotTrade.objects.filter(pk__in=ids)
                .select_related("config")} if ids else {})
+    # eToro's own P&L on an open eToro row (2026-11-06): the figure
+    # /positions/ prints (portfolio.services.venue_pnls). page_read itself
+    # goes on to live_book_value as the marks priced it.
+    venues = {}
+    if trades:
+        try:
+            from portfolio.services import venue_pnls
+            venues = venue_pnls(user, list(trades.values()), rows={
+                r.trade_id: r for r in rows
+                if getattr(r, "source", "") == "bot"
+                and getattr(r, "trade_id", None)})
+        except Exception as e:  # noqa: BLE001 — the marks' figures stand
+            logger.warning("digest: eToro's own P&L unreadable (%s)",
+                           type(e).__name__)
     items = [position_item(
         r, trades.get(r.trade_id) if getattr(r, "source", "") == "bot"
-        else None) for r in rows]
+        else None,
+        venue=(venues.get(r.trade_id)
+               if getattr(r, "source", "") == "bot" else None))
+        for r in rows]
     acct = (EtoroAccount.objects.filter(user=user).first()
             if user is not None else None)
     real = sum(1 for it in items if it["real"])
     summary = (NO_POSITIONS if not items else
                f"Open positions: {len(items)} ({len(items) - real} "
                f"simulated · {real} real money)")
-    simulated = simulated_section(user, acct, items, book, page_read, now)
+    simulated = simulated_section(user, acct, items, book, page_read, now,
+                                  venues=venues)
     return {"summary": [summary],
             "counts": {"open": len(items), "simulated": len(items) - real,
                        "real_money": real},

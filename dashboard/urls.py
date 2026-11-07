@@ -45,6 +45,7 @@ from .views_close import (close_position_preview, close_position_execute,
                           close_advice, close_selected_preview,
                           close_selected_execute)
 from .views_links import close_dialog, signal_ticket
+from .ticket_outcome import take_trade_outcome
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard, risk_dashboard_live
@@ -178,7 +179,17 @@ urlpatterns = [
     # position ceiling and notional cap — PIN-confirmed, audited.
     path("take-trade/lane-knobs/", views.take_trade_lane_knobs,
          name="take_trade_lane_knobs"),
+    # What became of one ticket's send (2026-11-06): the caller's own
+    # record of its ref, read-only, for a page whose answer was lost after
+    # the PIN. Under /api/ so a locked tab's ask is answered 423.
+    path("api/take-trade/outcome/<str:ref>/", take_trade_outcome,
+         name="take_trade_outcome"),
     path("partials/signal-rail/", views.signal_rail_partial, name="signal_rail_partial"),
+    # The operator's own PASS on a rail signal, kept on the server so every
+    # browser agrees (2026-11-06). Display only; under /api/ for the 423.
+    path("api/signal-rail/pass/", views.signal_rail_pass, name="signal_rail_pass"),
+    # The rail's filters and display choices, per user (2026-11-06).
+    path("api/rail-prefs/", views.rail_prefs_json, name="rail_prefs_json"),
     path("partials/ticker/", views.ticker_partial, name="ticker_partial"),
     path("partials/notif-items/", views.notif_items_partial, name="notif_items_partial"),
     path("partials/panel-counts/", views.panel_counts_json, name="panel_counts_json"),

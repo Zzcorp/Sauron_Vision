@@ -70,6 +70,11 @@ app.conf.task_routes = {
     # a few seconds after the booking, paced to one per account per 20 s.
     # Beside the quote poller: the next order is judged on what it reads.
     "bot_program.tasks.refresh_etoro_cells": {"queue": "fast"},
+    # 2026-11-06 -- eToro's own quotes for the open real positions
+    # (bot_program/etoro_quotes.py): every 30 s, a few rates reads at P3 in
+    # the eToro request budget, beside the quote poller whose LiveQuote it
+    # writes.
+    "bot_program.tasks.refresh_etoro_quotes": {"queue": "fast"},
     "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
     # 2026-10-31 -- the demo short proofs (bot_program/short_proofs.py): one
     # demo round trip polls eToro for up to ~20 s, never in front of the
@@ -234,9 +239,20 @@ app.conf.beat_schedule = {
     # freshness window: at the old 1800s a forex quote was stale for half
     # its life and the mark silently fell back to bar closes. For real
     # forex ticks enable the OANDA streamer — free, broker-grade.
+    # EVERY 300 s (2026-11-06, the operator: "augmenter to the maximum le
+    # taux de refresh des valeurs"), not the 60 s a batched call could
+    # have: the task asks Yahoo one pair at a time (a yfinance Ticker each,
+    # whose .info is three Yahoo requests in yfinance 1.7.0, and a fourth,
+    # the one-minute history, when .info carries no price), up to fifty
+    # pairs a pass (47 in the catalogue): about 140 to 190 Yahoo requests
+    # a pass, 28 to 38 a minute at 300 s (14 to 19 at 600 s). 300 s is the
+    # floor the code calls a polite yfinance citizen
+    # (tests/test_data_quality.py), the commodity and index pollers' own
+    # cadence; a pair a fresher eToro quote holds is not asked at all
+    # (refresh-etoro-quotes below, _held_symbols).
     "fetch-forex-live": {
         "task": "market_data.tasks.fetch_forex_quotes",
-        "schedule": 600.0,
+        "schedule": 300.0,
     },
     "fetch-commodity-live": {
         "task": "market_data.tasks.fetch_commodity_quotes",
@@ -641,10 +657,29 @@ app.conf.beat_schedule = {
     # cadence-bound: the 60 s lag window (PORTFOLIO_LAG_S) and the
     # order-read wait (venue_exit.UNPROVEN_WAIT_S, 3300 s, at least four
     # asks) hold at any beat; four asks are simply reached sooner. One book
-    # read per pass per user and world is two GETs of /portfolio per five
-    # minutes, inside the client's own pacing (portfolio is no pause site;
-    # a 429 there counts on the venue's health, three in 180 s make it
-    # sick — a rate this beat alone cannot reach).
+    # read per pass per user and world was two GETs of /portfolio per five
+    # minutes (one since 2026-11-01, below), inside the client's own
+    # pacing (portfolio is no pause site; a 429 there counts on the
+    # venue's health, three in 180 s make it sick — a rate this beat alone
+    # cannot reach).
+    # ONE GET A PASS since 2026-11-01: the row walk and the unclaimed sweep
+    # share one read of eToro's book per user and world
+    # (reconcile_asset.one_book_per_pass); a read that failed is asked
+    # again by the sweep (2026-11-02). THE BEAT IS C2's (2026-11-02): it
+    # sat at minute 3 of every five from 2026-11-01; C2's */5 is restored,
+    # as C2 set it, and the request budget meters what it asks.
+    # IT STAYS AT */5 (2026-11-06, the faster refresh; the sync below went
+    # to 60 s). Its eToro cost alone would allow */2: one GET of /portfolio
+    # a pass per user and world at P2, half a GET a minute of the account
+    # family's 30. Not all of its cost is the budget's: each pass also
+    # sweeps every keyed Saxo and IBKR book (no eToro budget meters them),
+    # sends a P0 order read, never refused, for each row whose miss is
+    # still unanswered, and writes the bots' component row, which /day/
+    # and the digest judge against its most frequent writer (at */2 the
+    # reconcile, not the 300 s tick, would answer for it). The 60 s sync
+    # already shows within a minute what eToro holds and each position's
+    # own P&L; a stop or a target eToro filled is still booked within five
+    # minutes.
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
         "schedule": crontab(minute="*/5"),
@@ -680,9 +715,47 @@ app.conf.beat_schedule = {
     # fifteen minutes, BROKER_MISS_ALERT_AFTER) raise the stall alert,
     # still once per six hours. The history rows grow three-fold, inside
     # the 400-day prune (EQUITY_HISTORY_DAYS).
+    # THE BEAT IS C2's (2026-11-02): it sat at minute 1 of every five from
+    # 2026-11-01; C2's 300 s interval is restored, as C2 set it, and the
+    # request budget meters what it asks. Its stored equity is also the
+    # pool check's since 2026-11-01 (capital_truth.broker_equity, 15
+    # minutes or less).
+    # EVERY 60 s (2026-11-06, the operator: "augmenter to the maximum le
+    # taux de refresh des valeurs et de eToro surtout"): the cash, the used
+    # margin, the equity and the holdings eToro reports, each position's
+    # own net profit with them, are at most a minute old. The budget shows
+    # the room: a pass is two account GETs per keyed account
+    # (aggregate-portfolio, /portfolio; no /search once the book is named)
+    # at P2, two a minute of the account family's 30 a minute (E1's start
+    # rate, of which P2 may take 28), beside the reconcile's half a GET, the
+    # re-read after the platform's orders (at most three a minute in a
+    # burst) and the rare /status, digest and key probe. The history keeps
+    # one row in five minutes (tasks.ETORO_HISTORY_EVERY_S), the stall
+    # alert fifteen missed passes, fifteen minutes
+    # (tasks.BROKER_MISS_ALERT_AFTER_BY_KIND), and the follower pools are
+    # retuned every pass, from an equity a minute old. A failing account
+    # read is now two notes on the venue's health a minute: a venue that
+    # fails is sick within two passes (new real entries held, closes and
+    # stop moves never).
     "sync-etoro-accounts": {
         "task": "bot_program.tasks.sync_etoro_accounts",
-        "schedule": 300.0,
+        "schedule": 60.0,
+    },
+    # EVERY 30 s (2026-11-06, bot_program/etoro_quotes.py): eToro's own
+    # quotes (bid, ask, last) for the instruments of the OPEN REAL eToro
+    # rows, written to LiveQuote under the source "etoro", which outranks
+    # yfinance while fresh (market_data/quotes.py). At P3 in the eToro
+    # request budget, never P1; ONE batched read a pass once the operator's
+    # measurement proved the batch (manage.py etoro_rates_shape), one read
+    # an instrument until then, at most six a pass. A refusal, a 429 (the
+    # shared pause), a 5xx or a transport failure ends the pass; nothing is
+    # asked while eToro is sick or the pause holds. Under the sync's
+    # switches, read inline. A run not started within 25 s is dropped
+    # (expire_seconds: the database scheduler's spelling).
+    "refresh-etoro-quotes": {
+        "task": "bot_program.tasks.refresh_etoro_quotes",
+        "schedule": 30.0,
+        "options": {"expires": 25, "expire_seconds": 25},
     },
     # 2026-09-17 — Saxo's OAuth session keeper. UNGATED: the refresh token
     # lives forty minutes and rotates, so a session that died because a

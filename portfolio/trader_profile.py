@@ -164,6 +164,14 @@ class TraderProfile(models.Model):
     # desktop for a page already read on the phone, and "seen" is a fact
     # about the operator, not about one browser.
     pages_seen = models.JSONField(default=dict, blank=True)
+    # THE RAIL'S FILTERS AND DISPLAY CHOICES (2026-11-06): which asset
+    # classes, sides, scores, stages and rules the signal rail and the
+    # headband popups show, how they sort and group, and the watchlist's
+    # own — dashboard.rail_prefs cleans it against its whitelist on every
+    # write. On the server for the reason pages_seen is: every browser, and
+    # the phone, draw the same rail. DISPLAY ONLY: no engine module, bot,
+    # alert or ticket reads it.
+    rail_prefs = models.JSONField(default=dict, blank=True)
 
     idle_lock_enabled = models.BooleanField(default=True,
         help_text="Lock the session behind the PIN after a period of inactivity.")

@@ -262,8 +262,11 @@ class TheReadThroughTests(_SharedOn, SimpleTestCase):
         t, fake = _client([RATES_OK], env="live")
         self.assertEqual(float(t.ticker("AAPL")["lastPrice"]), 100.0)
         self.assertEqual(_searches(fake), [])
-        self.assertEqual(fake.calls[0][2]["params"],
-                         {"instrumentIds": "1001"})
+        # the id rides the URL's own query since 2026-11-06 (literal
+        # commas, the feed spec's P-a.1: etoro_client.rates_url)
+        self.assertTrue(fake.calls[0][1].endswith(
+            "/instruments/rates?instrumentIds=1001"), fake.calls[0][1])
+        self.assertNotIn("params", fake.calls[0][2])
 
 
 # ── the write ─────────────────────────────────────────────────────────────

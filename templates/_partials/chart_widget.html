@@ -1371,8 +1371,11 @@ is under it.{% endcomment %}
             + level('target', 'Target', p.tp_text || p.tp)
             + '</div>');
         var now = rWords(p.r_now), pct = pctWords(p.pnl_pct);
+        /* An eToro position's figure that is an estimate says so beside it
+           (2026-11-06, p.pnl_words: "estimate: <feed> quote, <age>"). */
         h.push('<dl class="sv-sig-facts">'
-            + fact('Now', now + (pct ? ' · ' + pct : ''))
+            + fact('Now', now + (pct ? ' · ' + pct : '')
+                   + (p.pnl_words ? ' · ' + p.pnl_words : ''))
             + fact('Open for', ageWords(p.age_s))
             + (p.leverage ? fact('Leverage', String(p.leverage) + 'x') : '')
             + (typeof p.soft_stop === 'number' ? fact('Soft stop', p.soft_stop_text || p.soft_stop) : '')

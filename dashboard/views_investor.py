@@ -38,7 +38,13 @@ def _panel_context(access):
 
     positions = []
     if access.show_positions:
-        for row in unified_open_positions(owner, portfolio):
+        # eToro's OWN P&L on an open eToro row (2026-11-06): display copies
+        # (portfolio.services.shown_open_rows), the figure /positions/
+        # prints.
+        from portfolio.services import shown_open_rows
+        shown, _venues = shown_open_rows(
+            owner, unified_open_positions(owner, portfolio))
+        for row in shown:
             inst = getattr(row, "instrument", None)
             positions.append({
                 "symbol": getattr(inst, "symbol", "") or "—",
@@ -48,6 +54,10 @@ def _panel_context(access):
                 # Dollar columns obey the same flag as everything else.
                 "pnl": (None if access.percents_only
                         else row.unrealized_pnl),
+                # Where an eToro row's figure is an estimate, the panel says
+                # so and from what (2026-11-06, the review); "" on eToro's
+                # own figure and on every other row.
+                "pnl_words": getattr(row, "pnl_words", "") or "",
             })
 
     history = []

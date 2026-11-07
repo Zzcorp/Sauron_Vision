@@ -110,6 +110,13 @@
     {# THE COUNCIL BAND (2026-10-22): Sauron's voices on the right edge, staff only. After the Horde, whose right edge an open band pushes; before the phone tier, whose rail line hides it. #}
     <link rel="stylesheet" href="{% static 'css/sv-council-band.css' %}">
     <script src="{% static 'js/sv-council-band.js' %}" defer></script>
+    {# THE SIGNAL RAIL (2026-11-06): every signal, LEFT THE RAIL, the facet counts; its filters hide and order rows by the facts each row carries. After the council band, before the phone tier, which stays the last shell sheet. #}
+    <link rel="stylesheet" href="{% static 'css/sv-rail.css' %}">
+    {# The rules muted from the rail's filters (2026-11-06), one generated rule each, from the operator's prefs; static/js/sv-rail-filters.js rewrites it on a change. #}
+    <style id="svRuleOff" data-rules="{{ rail_rule_off_json|default:'[]' }}">{{ rail_rule_off_css|default:''|safe }}</style>
+    {# A group header whose class has no row left to show (2026-11-06): one rule per host and class, written by static/js/sv-rail-filters.js — in <head>, so no live region ever sees a client edit. #}
+    <style id="svGrpOff"></style>
+    <script src="{% static 'js/sv-rail-filters.js' %}" defer></script>
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
@@ -852,7 +859,7 @@
             <div class="info-panel-bar">
                 <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link ip-cat-pf">
                     <span class="ip-label">PORTFOLIO</span>
-                    <span class="ip-count" data-sv-live="hb-pf-value" data-sv-live-key="hb-pf-value">{% if panel_portfolio_value %}<span title="{{ panel_book_coverage }}">{{ panel_currency_symbol }}{{ panel_portfolio_value }}</span>{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span>
+                    <span class="ip-count" data-sv-live="hb-pf-value" data-sv-live-key="hb-pf-value">{% if panel_portfolio_value %}<span title="{{ panel_value_title|default:panel_book_coverage }}">{{ panel_currency_symbol }}{{ panel_portfolio_value }}</span>{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span>
                     {% comment %}
                     THE LIVE P&L (2026-10-14, the operator: "add also on
                     portfolio the live P&L"). The open P&L of the REAL-MONEY
@@ -880,7 +887,7 @@
                     title; a manual Position that states no venue is
                     counted beside the worlds, in none of them.
                     {% endcomment %}
-                    <span class="ip-pnl" data-sv-live="hb-pf-pnl" data-sv-live-key="hb-pf-pnl"><span class="sv-venue sv-venue--live" title="Open P&amp;L of the real-money book alone, each row at its venue's own rate. Paper and demo are shown apart and never added to it.">LIVE</span> {% if panel_open_pnl_live_display %}<span class="{% if panel_open_pnl_live > 0 %}up{% elif panel_open_pnl_live < 0 %}down{% endif %}"{% if panel_live_pnl_title %} title="{{ panel_live_pnl_title }}"{% endif %}>{{ panel_open_pnl_live_display }}</span> {% if panel_open_r_live_display %}<span class="{% if panel_open_r_live > 0 %}up{% elif panel_open_r_live < 0 %}down{% endif %}"{% if panel_live_r_title %} title="{{ panel_live_r_title }}"{% endif %}>{{ panel_open_r_live_display }}</span>{% else %}<span class="sv-unknown" title="{{ panel_live_r_title }}">&mdash;R</span>{% endif %}{% if panel_live_coverage_short %} <span class="ip-pnl-note sv-unknown" title="{{ panel_live_coverage_title }}">&middot; {{ panel_live_coverage_short }}</span>{% endif %}{% if panel_live_stale_title %} <span class="ip-pnl-note sv-unknown" title="{{ panel_live_stale_title }}">&middot; stale</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ panel_live_dash_title }}">&mdash;</span>{% endif %}{% if panel_paper_positions %} <span class="ip-pnl-apart"><span class="sv-venue sv-venue--paper">PAPER</span> {% if panel_open_pnl_paper_display %}<span class="{% if panel_open_pnl_paper > 0 %}up{% elif panel_open_pnl_paper < 0 %}down{% endif %}">{{ panel_open_pnl_paper_display }}</span>{% else %}<span class="sv-unknown" title="Paper positions open, none with a live quote">&mdash;</span>{% endif %}</span>{% endif %}{% if panel_demo_positions %} <span class="ip-pnl-apart"><span class="sv-venue sv-venue--demo">DEMO</span> {% if panel_open_pnl_demo_display %}<span class="{% if panel_open_pnl_demo > 0 %}up{% elif panel_open_pnl_demo < 0 %}down{% endif %}">{{ panel_open_pnl_demo_display }}</span>{% else %}<span class="sv-unknown" title="Demo positions open, none marked at the venue's rate">&mdash;</span>{% endif %}</span>{% endif %}{% if panel_unvenued_words %} <span class="ip-pnl-apart ip-pnl-note sv-unknown" title="{{ panel_unvenued_title }}">{{ panel_unvenued_words }}</span>{% endif %}</span>
+                    <span class="ip-pnl" data-sv-live="hb-pf-pnl" data-sv-live-key="hb-pf-pnl"><span class="sv-venue sv-venue--live" title="Open P&amp;L of the real-money book alone: eToro's own figure for each eToro position its holdings list (read in the last 15 minutes), the venue's rate otherwise. Paper and demo are shown apart and never added to it.">LIVE</span> {% if panel_open_pnl_live_display %}<span class="{% if panel_open_pnl_live > 0 %}up{% elif panel_open_pnl_live < 0 %}down{% endif %}"{% if panel_live_pnl_title %} title="{{ panel_live_pnl_title }}"{% endif %}>{{ panel_open_pnl_live_display }}</span> {% if panel_open_r_live_display %}<span class="{% if panel_open_r_live > 0 %}up{% elif panel_open_r_live < 0 %}down{% endif %}"{% if panel_live_r_title %} title="{{ panel_live_r_title }}"{% endif %}>{{ panel_open_r_live_display }}</span>{% else %}<span class="sv-unknown" title="{{ panel_live_r_title }}">&mdash;R</span>{% endif %}{% if panel_live_coverage_short %} <span class="ip-pnl-note sv-unknown" title="{{ panel_live_coverage_title }}">&middot; {{ panel_live_coverage_short }}</span>{% endif %}{% if panel_live_stale_title %} <span class="ip-pnl-note sv-unknown" title="{{ panel_live_stale_title }}">&middot; stale</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ panel_live_dash_title }}">&mdash;</span>{% endif %}{% if panel_paper_positions %} <span class="ip-pnl-apart"><span class="sv-venue sv-venue--paper">PAPER</span> {% if panel_open_pnl_paper_display %}<span class="{% if panel_open_pnl_paper > 0 %}up{% elif panel_open_pnl_paper < 0 %}down{% endif %}">{{ panel_open_pnl_paper_display }}</span>{% else %}<span class="sv-unknown" title="Paper positions open, none with a live quote">&mdash;</span>{% endif %}</span>{% endif %}{% if panel_demo_positions %} <span class="ip-pnl-apart"><span class="sv-venue sv-venue--demo">DEMO</span> {% if panel_open_pnl_demo_display %}<span class="{% if panel_open_pnl_demo > 0 %}up{% elif panel_open_pnl_demo < 0 %}down{% endif %}">{{ panel_open_pnl_demo_display }}</span>{% else %}<span class="sv-unknown" title="Demo positions open, none marked at the venue's rate">&mdash;</span>{% endif %}</span>{% endif %}{% if panel_unvenued_words %} <span class="ip-pnl-apart ip-pnl-note sv-unknown" title="{{ panel_unvenued_title }}">{{ panel_unvenued_words }}</span>{% endif %}</span>
                     <span class="ip-sub" data-sv-live="hb-pf-sub">{{ panel_positions }} pos · {% if panel_exposure is not None %}{{ panel_exposure }}% in{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash; in</span>{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">PORTFOLIO &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
@@ -1012,6 +1019,8 @@
                                 <span class="ipr-qty">{{ t.qty|floatformat:"-4" }}</span>
                                 {% if t.status == "CLOSE_PENDING" %}<span class="sv-chip sv-chip--warn" title="The broker refused the close — this is still open there">closing</span>{% endif %}
                                 {% money_world t compact="1" %}
+                                {# An eToro row's R and % that are an estimate say so (2026-11-06): the words name the price and its age. #}
+                                {% if t.pnl_words %}<span class="sv-chip sv-chip--muted ipr-est" title="{{ t.pnl_words }}. {{ t.pnl_title }}">estimate</span>{% endif %}
                                 {% if not t.id %}
                                 {# Legacy book row: no trade id, and no close path exists for one. #}
                                 <span class="sv-chip sv-chip--muted" title="Manual book — the platform has no close control for these">manual</span>
@@ -1048,8 +1057,9 @@
                 {% endcomment %}
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link ip-cat-pnl">
                     <span class="ip-label">OPEN P&amp;L</span>
-                    <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books at live marks. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_positions_priced < panel_positions %}real + paper across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
+                    <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books: eToro's own figure for each eToro position its holdings list, live marks otherwise. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
+                    {# The count is the positions the figure HOLDS (2026-11-06, the review's probe J): a row the book could not price is in it when eToro's figure for it is (panel_pnl_unpriced), never "0 of 1" under a figure that holds it. #}
+                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_pnl_unpriced and panel_pnl_positions < panel_positions %}real + paper across {{ panel_pnl_positions }} of {{ panel_positions }} positions{% elif panel_pnl_unpriced %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% elif panel_positions_priced < panel_positions %}real + paper across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">OPEN P&amp;L &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
                         <div data-sv-live="hb-pnl-detail">
@@ -1157,27 +1167,33 @@
                 </a>
                 <a href="{% url 'signals_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">SIGNALS</span>
-                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{{ panel_signals|default:"0" }}</span>
-                    <span class="ip-sub" data-sv-live="hb-signals-sub">{{ panel_bullish|default:"0" }} bull · {{ panel_bearish|default:"0" }} bear</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">ACTIVE SIGNALS</div>
+                    {% comment %}
+                    THE RAIL'S COUNT (2026-11-06): the signals on the rail,
+                    not every active row — the cell and the rail head say the
+                    same number, and the dropdown's grid says the rest. The
+                    rows are the rail's own list (rail.rows), in a container
+                    that is NOT a live region: the rail refresh paints it from
+                    the same fetch as the rail, and the 60s sweep never
+                    writes it. The counts here are written by both the sweep
+                    and the rail refresh, from the same function. A rail that
+                    could not be read is an unknown, "—", never a zero.
+                    {% endcomment %}
+                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{% if rail.error %}<span class="sv-unknown" title="The rail could not be read: the signals are untouched">&mdash;</span>{% else %}{{ rail.n|default:"0" }}{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-signals-sub">{% if rail.error %}<span class="sv-unknown">&mdash;</span>{% else %}{{ rail.long_n|default:"0" }} long · {{ rail.short_n|default:"0" }} short{% endif %}</span>
+                    <div class="ip-dropdown" id="hbSignalsDD" data-sv-fhost="signals" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.sig kind="signals" %}>
+                        <div class="ip-dd-head">SIGNALS ON THE RAIL</div>
+                        {# The rail's own filters, on the same state (2026-11-06): outside every live region, so a sweep never writes them. #}
+                        <div class="rail-facets rf-compact" data-f-kind="signals" role="toolbar" aria-label="Filter the signals">{% include "_partials/rail_sig_chips.html" with p=rail_prefs.sig full=False %}</div>
                         <div data-sv-live="hb-signals-detail">
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">BULLISH</span><span class="dv">{{ panel_bullish|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">BEARISH</span><span class="dv red">{{ panel_bearish|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">{{ panel_signals|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">24H NEW</span><span class="dv">{{ panel_signals_24h|default:"0" }}</span></div>
+                        <div class="ip-dd-grid" title="{{ rail.title }}">
+                            <div class="ip-dd-cell"><span class="dk">ON THE RAIL</span><span class="dv" data-sv-rail-n="n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ACTIVE (ENGINE)</span><span class="dv" data-sv-rail-n="active">{% if rail.error %}&mdash;{% else %}{{ rail.active_n|default:"0" }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LEFT 24H</span><span class="dv" data-sv-rail-n="gone">{% if rail.error %}&mdash;{% else %}{{ rail.gone_n|default:"0" }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">NEW 24H</span><span class="dv" data-sv-rail-n="new24">{% if rail.error %}&mdash;{% else %}{{ rail.new24|default:"0" }}{% endif %}</span></div>
                         </div>
-                        {% comment %} The counts said how many. They never said which. {% endcomment %}
-                        {% for sig in panel_top_signals %}
-                        <div class="ip-dd-row">
-                            <span class="ipr-sym">{{ sig.symbol }}</span>
-                            <span class="ipr-side ipr-side--{{ sig.direction }}">{{ sig.direction|upper|slice:":4" }}</span>
-                            <span class="ipr-meter"><span class="ipr-meter-fill" style="width:{{ sig.score_pct }}%;"></span></span>
-                            <span class="ipr-score">{{ sig.score_pct }}</span>
-                            <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}">{{ sig.created_at|timesince }} ago</span>
                         </div>
-                        {% endfor %}
+                        <div class="sv-sig-rows" id="hbSignalRows" data-sv-list="signals">
+                        {% if not sv_sweep %}{% include "_partials/signal_rows_compact.html" %}{% endif %}
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Signals</div>
                     </div>
@@ -1352,22 +1368,34 @@
                     <span class="ip-label">WATCHLIST</span>
                     <span class="ip-count" id="ipWatchlistCount" data-sv-live="hb-watchlist" data-sv-live-key="hb-watchlist">{{ panel_watchlist|default:"0" }}</span>
                     <span class="ip-sub">tracked</span>
-                    <div class="ip-dropdown">
+                    {% comment %}
+                    THE WATCHLIST RAIL'S OWN LIST (2026-11-06): every star the
+                    rail draws, in its order, under its filters (this
+                    dropdown is a watch host too), instead of six cached
+                    rows. The rows stay inside the live region — their prices
+                    refresh with the sweep — and carry the same facts as the
+                    rail's items; the chips sit outside it.
+                    {% endcomment %}
+                    <div class="ip-dropdown" id="hbWatchDD" data-sv-fhost="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
                         <div class="ip-dd-head">WATCHLIST</div>
+                        <div class="rail-facets rf-compact" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=False %}</div>
                         <div data-sv-live="hb-watchlist-detail">
-                        {% for w in panel_watchlist_rows %}
-                        <div class="ip-dd-row">
+                        <div class="sv-wl-rows" data-sv-list="watch">
+                        {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cheld:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
+                        {% for w in ui_watchlist %}
+                        <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                             <span class="ipr-sym">{{ w.symbol }}</span>
-                            <span class="ipr-qty">{% if w.last %}{{ w.last }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
-                            {% if w.change is not None %}
-                            <span class="ipr-pct {% if w.change >= 0 %}up{% else %}down{% endif %}">{{ w.change|floatformat:2 }}%</span>
-                            {% comment %} The quote may exist with no change on it; 0.00% was
-                               printed here before, which is a different claim. {% endcomment %}
-                            {% else %}<span class="ipr-pct sv-unknown" title="No change recorded for this quote">&mdash;</span>{% endif %}
+                            <span class="ipr-qty">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                            {% if w.last %}
+                            <span class="ipr-pct {% if w.change_pct >= 0 %}up{% else %}down{% endif %}">{{ w.change_pct|floatformat:2 }}%</span>
+                            {% comment %} No quote, no change: a dash, never 0.00%, which is a different claim. {% endcomment %}
+                            {% else %}<span class="ipr-pct sv-unknown" title="No quote for this instrument">&mdash;</span>{% endif %}
                         </div>
                         {% empty %}
                         <div class="sv-empty"><b>No watchlist</b>Nothing is flagged for tracking yet.</div>
                         {% endfor %}
+                        {% if ui_watch_facets.more %}<div class="ip-dd-note" style="order:99999999">Showing {{ ui_watch_facets.n }} of {{ ui_watch_facets.total }} starred. /instruments/?filter=watchlist lists every one.</div>{% endif %}
+                        </div>
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
                     </div>
@@ -1474,15 +1502,49 @@
 
 <!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->
 <div class="signals-rail" id="signalsRail">
-    <div class="rail-section sig-section" id="railSignals">
+    {% comment %}
+    THE SIGNAL RAIL (2026-11-06): every signal that can be acted on now,
+    newest first, scrolling inside the body (dashboard.signal_rail). The
+    head counts the cards and its title says the rest; "↻ N new" (railHeld)
+    says what a refresh is holding while a card is read, and applies it on
+    a click. The facet strip counts the rail per asset class (a class at 0
+    hides by CSS, so a refresh can light it up) and its LEFT chip shows or
+    hides LEFT THE RAIL. Both sit OUTSIDE the body, which every refresh
+    replaces, so the state they carry survives it. The sweep (sv_sweep)
+    renders no card: the body is not a region.
+    {% endcomment %}
+    <div class="rail-section sig-section" id="railSignals" data-sv-fhost="signals" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.sig kind="signals" %}>
         <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railSignals').classList.toggle('collapsed');localStorage.setItem('sauron_rail_sig',document.getElementById('railSignals').classList.contains('collapsed')?'1':'0');})()">
             <span class="rh-icon">&#x25C8;</span>
             <span class="rh-label">SIGNALS</span>
-            <span class="rh-count">{{ panel_signals|default:"0" }}</span>
+            <button type="button" class="rh-held" id="railHeld" hidden title="A refresh is waiting while you read a card. Click to show it now."></button>
+            <button type="button" class="rh-gear" data-f-panel="railSigPanel" aria-controls="railSigPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
+            <span class="rh-count" id="railSigCount" title="{{ rail.title }}">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span>
             <span class="rh-chev">▼</span>
         </div>
+        {% comment %}
+        THE FILTERS (2026-11-06): asset class (press more than one to
+        combine), long or short, the bots' vote, held, LEFT THE RAIL, and in
+        the ⚙ panel the minimum score, the stage, held or not, the sort, the
+        grouping by class, the density and a mute per rule. State on the
+        host above, facts on the rows; static/css/sv-rail.css hides and
+        orders, static/js/sv-rail-filters.js writes the state and saves it
+        to the operator's profile. "show all" pauses every filter at once,
+        for a look, and is not saved.
+        {% endcomment %}
+        <div class="rail-facets" id="railSigFacets" data-f-kind="signals" role="toolbar" aria-label="Filter the signals on the rail">{% include "_partials/rail_sig_chips.html" with p=rail_prefs.sig full=True %}</div>
+        <div class="rail-fpanel" id="railSigPanel" data-f-kind="signals" hidden>
+            <div class="rf-row"><span class="rf-k">MIN SCORE</span><button type="button" class="rf-opt" data-f-key="score" data-f-val="0" aria-pressed="{% if not rail_prefs.sig.score %}true{% else %}false{% endif %}">any</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="5" aria-pressed="{% if rail_prefs.sig.score == 5 %}true{% else %}false{% endif %}">.5</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="6" aria-pressed="{% if rail_prefs.sig.score == 6 %}true{% else %}false{% endif %}">.6</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="7" aria-pressed="{% if rail_prefs.sig.score == 7 %}true{% else %}false{% endif %}">.7</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="8" aria-pressed="{% if rail_prefs.sig.score == 8 %}true{% else %}false{% endif %}">.8</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="9" aria-pressed="{% if rail_prefs.sig.score == 9 %}true{% else %}false{% endif %}">.9</button></div>
+            <div class="rf-row"><span class="rf-k">STAGE</span><button type="button" class="rf-opt" data-f-key="stage" data-f-val="all" aria-pressed="{% if rail_prefs.sig.stage == 'votes' or rail_prefs.sig.stage == 'live' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="votes" aria-pressed="{% if rail_prefs.sig.stage == 'votes' %}true{% else %}false{% endif %}" title="Only the signals a default bot counts now: a voting stage, fired in the last 24 hours">votes</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="live" aria-pressed="{% if rail_prefs.sig.stage == 'live' %}true{% else %}false{% endif %}" title="Only the signals a default bot counts now at a live-venue stage">live</button></div>
+            <div class="rf-row"><span class="rf-k">HELD</span><button type="button" class="rf-opt" data-f-key="held" data-f-val="all" aria-pressed="{% if rail_prefs.sig.held == 'held' or rail_prefs.sig.held == 'not' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="held" data-f-val="held" aria-pressed="{% if rail_prefs.sig.held == 'held' %}true{% else %}false{% endif %}">held</button><button type="button" class="rf-opt" data-f-key="held" data-f-val="not" aria-pressed="{% if rail_prefs.sig.held == 'not' %}true{% else %}false{% endif %}">not held</button></div>
+            <div class="rf-row"><span class="rf-k">SORT</span><button type="button" class="rf-opt" data-f-key="sort" data-f-val="new" aria-pressed="{% if rail_prefs.sig.sort == 'score' or rail_prefs.sig.sort == 'class' %}false{% else %}true{% endif %}">newest</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="score" aria-pressed="{% if rail_prefs.sig.sort == 'score' %}true{% else %}false{% endif %}">score</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="class" aria-pressed="{% if rail_prefs.sig.sort == 'class' %}true{% else %}false{% endif %}">class</button></div>
+            <div class="rf-row"><span class="rf-k">GROUP BY CLASS</span><button type="button" class="rf-opt" data-f-key="group" data-f-val="0" aria-pressed="{% if rail_prefs.sig.group %}false{% else %}true{% endif %}">off</button><button type="button" class="rf-opt" data-f-key="group" data-f-val="1" aria-pressed="{% if rail_prefs.sig.group %}true{% else %}false{% endif %}">on</button></div>
+            <div class="rf-row"><span class="rf-k">DENSITY</span><button type="button" class="rf-opt" data-f-key="dense" data-f-val="0" aria-pressed="{% if rail_prefs.sig.dense %}false{% else %}true{% endif %}">comfortable</button><button type="button" class="rf-opt" data-f-key="dense" data-f-val="1" aria-pressed="{% if rail_prefs.sig.dense %}true{% else %}false{% endif %}">compact</button></div>
+            <div class="rf-row"><span class="rf-k">LEFT THE RAIL</span><button type="button" class="rf-opt" data-f-key="gone" data-f-val="0" aria-pressed="{% if rail_prefs.sig.gone %}false{% else %}true{% endif %}">hidden</button><button type="button" class="rf-opt" data-f-key="gone" data-f-val="1" aria-pressed="{% if rail_prefs.sig.gone %}true{% else %}false{% endif %}">shown</button></div>
+            <div class="rf-row rf-row-rules"><span class="rf-k" title="Untick a rule to mute it; a rule that appears later is shown, never hidden">RULES</span><div class="rf-rules" id="railRuleList">{% for name, key, n, shown in rail_rule_rows %}<button type="button" class="rf-rule" data-f-key="rule" data-f-val="{{ name }}" data-rule-key="{{ key }}" aria-pressed="{{ shown|yesno:'true,false' }}" title="{{ name }}">{{ name|default:"(no rule)"|truncatechars:30 }} <b>{{ n }}</b></button>{% empty %}<span class="rf-none">No rule on the rail.</span>{% endfor %}</div></div>
+        </div>
         <div class="rail-body" id="railSignalsBody">
-            {% include "_partials/signal_rail_items.html" %}
+            {% if not sv_sweep %}{% include "_partials/signal_rail_items.html" with rail_initial=True %}{% endif %}
         </div>
     </div>
 
@@ -1492,12 +1554,29 @@
         <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railWatch').classList.toggle('collapsed');localStorage.setItem('sauron_rail_watch',document.getElementById('railWatch').classList.contains('collapsed')?'1':'0');})()">
             <span class="rh-icon">◉</span>
             <span class="rh-label">WATCHLIST</span>
+            <button type="button" class="rh-gear" data-f-panel="railWatchPanel" aria-controls="railWatchPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
             <span class="rh-count" id="railWatchlistCount">{{ ui_watchlist|length }}</span>
             <span class="rh-chev">▼</span>
         </div>
-        <div class="rail-body" id="railWatchBody">
+        {% comment %}
+        THE WATCHLIST'S FILTERS (2026-11-06): asset class, held or not, and
+        in the ⚙ panel the sort (class, symbol, held first), the grouping by
+        class and the density. The host is the body below (its items stay
+        its direct children, which the live price painter and the hover
+        engine rely on); the items keep .wl-sym / .wl-last / .wl-chg and
+        their data-decimals, so a tick paints a filtered row exactly as
+        before. Up to a stated ceiling, never a silent one.
+        {% endcomment %}
+        <div class="rail-facets" id="railWatchFacets" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=True %}</div>
+        <div class="rail-fpanel" id="railWatchPanel" data-f-kind="watch" hidden>
+            <div class="rf-row"><span class="rf-k">SORT</span><button type="button" class="rf-opt" data-f-key="sort" data-f-val="class" aria-pressed="{% if rail_prefs.watch.sort == 'symbol' or rail_prefs.watch.sort == 'held' %}false{% else %}true{% endif %}">class</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="symbol" aria-pressed="{% if rail_prefs.watch.sort == 'symbol' %}true{% else %}false{% endif %}">symbol</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="held" aria-pressed="{% if rail_prefs.watch.sort == 'held' %}true{% else %}false{% endif %}">held first</button></div>
+            <div class="rf-row"><span class="rf-k">GROUP BY CLASS</span><button type="button" class="rf-opt" data-f-key="group" data-f-val="0" aria-pressed="{% if rail_prefs.watch.group %}false{% else %}true{% endif %}">off</button><button type="button" class="rf-opt" data-f-key="group" data-f-val="1" aria-pressed="{% if rail_prefs.watch.group %}true{% else %}false{% endif %}">on</button></div>
+            <div class="rf-row"><span class="rf-k">DENSITY</span><button type="button" class="rf-opt" data-f-key="dense" data-f-val="0" aria-pressed="{% if rail_prefs.watch.dense %}false{% else %}true{% endif %}">comfortable</button><button type="button" class="rf-opt" data-f-key="dense" data-f-val="1" aria-pressed="{% if rail_prefs.watch.dense %}true{% else %}false{% endif %}">compact</button></div>
+        </div>
+        <div class="rail-body" id="railWatchBody" data-sv-fhost="watch" data-sv-list="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
+            {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cheld:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
             {% for w in ui_watchlist %}
-            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}">
+            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                 <div class="wl-row1">
                     <span class="wl-sym">{{ w.symbol }}</span>
                     <span class="wl-last">{% px w.last w.asset_class w.symbol %}</span>
@@ -1585,6 +1664,7 @@
                 <span style="font-size:10px;">Mark instruments as watchlist in the Instruments page.</span>
             </div>
             {% endfor %}
+            {% if ui_watch_facets.more %}<div class="sv-list-note" style="order:99999999">Showing {{ ui_watch_facets.n }} of {{ ui_watch_facets.total }} starred. /instruments/?filter=watchlist lists every one.</div>{% endif %}
         </div>
     </div>
 </div>
@@ -1661,48 +1741,86 @@
     });
     return { top: top + 12, bottom: bottom - 12 };
   }
+  /* Shared with the portal engine (UPGRADE-9), which places the
+     watchlist's cards between the same bands. */
+  window.svChromeBounds = chromeBounds;
+  /* ON CLICK, PINNED, AND FITTING THE SCREEN (2026-11-06). A click or a
+     tap on the card (a.sr-signal) pins its popup: it stays while the hand
+     leaves, the rail sweeps or the tab is switched, and closes on an
+     outside click or tap, Esc, its × or a second click (window.svPin, in
+     UPGRADE-9, keeps one pinned popup on the page). Hover still previews
+     on a desktop, unchanged, and opens nothing while a card is pinned. A
+     modified click keeps the browser's own meaning.
+
+     Placement: the card is capped at the space between the fixed chrome
+     bands and scrolls inside, its head and its foot (TAKE TRADE, PASS)
+     sticky (static/css/sv-rail.css); its top sits on the card's top, slid
+     up only as far as the bottom band requires and never above the top
+     band; the arrow points at the card; a narrow window caps its width to
+     the room left of the rail. A pinned card follows the rail's scroll. */
+  function placePopup(wrap, pop) {
+    var rect = wrap.getBoundingClientRect();
+    var cb = chromeBounds();
+    var space = Math.max(120, cb.bottom - cb.top);
+    pop.style.maxHeight = space + 'px';
+    pop.style.overflowY = 'auto';
+    var room = rect.left - 24;
+    pop.style.width = room < 300 ? Math.max(200, room) + 'px' : '';
+    var ph = Math.min(pop.offsetHeight || 220, space);
+    var top = rect.top;
+    if (top + ph > cb.bottom) top = cb.bottom - ph;
+    if (top < cb.top) top = cb.top;
+    /* Right anchor: 12px gutter from the rail's left edge — popup
+       sits in the page content area, NOT overlapping the rail. */
+    pop.style.right = (window.innerWidth - rect.left + 12) + 'px';
+    pop.style.left = 'auto';
+    pop.style.top = top + 'px';
+    var arrow = rect.top + rect.height / 2 - top;
+    arrow = Math.max(14, Math.min(arrow, ph - 14));
+    pop.style.setProperty('--sr-arrow-y', arrow + 'px');
+  }
   function showPopup(wrap) {
     var pop = wrap.querySelector('.sr-popup');
     if (!pop) return;
-    var rect = wrap.getBoundingClientRect();
     /* Make popup measurable so we can clamp to viewport vertically. */
     pop.style.visibility = 'hidden';
     pop.style.opacity = '0';
-    pop.style.maxHeight = '';
-    pop.style.overflowY = '';
     pop.classList.add('show');
-    var pw = pop.offsetWidth || 300;
-    var ph = pop.offsetHeight || 220;
-    /* Right anchor: 12px gutter from the rail's left edge — popup
-       sits in the page content area, NOT overlapping the rail. */
-    var rightOf = (window.innerWidth - rect.left) + 12;
-    var cb = chromeBounds();
-    /* Taller than the space between the bands: cap and scroll — the
-       action buttons at the bottom must stay reachable. */
-    var space = cb.bottom - cb.top;
-    if (ph > space) {
-      pop.style.maxHeight = space + 'px';
-      pop.style.overflowY = 'auto';
-      ph = space;
-    }
-    /* Vertical: centered on the row, clamped between the chrome bands. */
-    var top = rect.top + rect.height / 2 - ph / 2;
-    top = Math.max(cb.top, Math.min(top, cb.bottom - ph));
-    pop.style.right = rightOf + 'px';
-    pop.style.left = 'auto';
-    pop.style.top  = top + 'px';
+    placePopup(wrap, pop);
     /* Now reveal. */
     pop.style.visibility = '';
     pop.style.opacity = '';
   }
+  function pinned(pop) { return !!(pop && pop.classList.contains('sv-pinned')); }
   function hidePopup(wrap) {
     var pop = wrap.querySelector('.sr-popup');
     if (!pop) return;
     pop.classList.remove('show');
+    pop.classList.remove('sv-pinned');
+    var a = wrap.querySelector('a.sr-signal');
+    if (a) a.setAttribute('aria-expanded', 'false');
+    if (window.svPin) window.svPin.drop(pop);
     /* See SV.popup in static/js/sv-notif-card.js: the registry is how the
        other engines' scroll handlers know a scroll came from inside a card
        the operator is reading rather than from a stale anchor. */
     if (window.SV && SV.popup) SV.popup.closed(pop);
+    /* (2026-11-06) A rail refresh that waited for this card lands now,
+       unless the hand is still on the rail (UPGRADE-3, svRailRelease). */
+    if (window.svRailRelease) window.svRailRelease();
+  }
+  function pinCard(wrap) {
+    var pop = wrap.querySelector('.sr-popup');
+    if (!pop) return;
+    if (wrap._srCancel) wrap._srCancel();
+    if (window.svPin) window.svPin.take(pop, function () { hidePopup(wrap); }, wrap);
+    /* Pinned BEFORE it is measured (2026-11-06, the review): on a touch
+       screen or under 900px only a pinned card displays, and one measured
+       hidden was placed as if it had no height. */
+    pop.classList.add('sv-pinned');
+    showPopup(wrap);
+    var a = wrap.querySelector('a.sr-signal');
+    if (a) a.setAttribute('aria-expanded', 'true');
+    if (window.SV && SV.popup) SV.popup.opened(pop);
   }
   function bind() {
     document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
@@ -1716,9 +1834,11 @@
          pointer is on the card: `maybeHide` checks where the pointer went
          first, and arriving on either end cancels it. A card the operator
          has REACHED closes when they leave it or press Escape, not on a
-         stopwatch racing their hand to the action buttons. */
+         stopwatch racing their hand to the action buttons. A PINNED card
+         does not close on the hand at all. */
       function scheduleHide() {
         if (hideTimer) clearTimeout(hideTimer);
+        if (pinned(pop)) return;
         hideTimer = setTimeout(function() { hidePopup(wrap); }, 260);
       }
       function cancelHide() {
@@ -1733,10 +1853,17 @@
         }
         scheduleHide();
       }
+      wrap._srCancel = function () {
+        cancelHide();
+        if (enterTimer) { clearTimeout(enterTimer); enterTimer = null; }
+      };
       wrap.addEventListener('mouseenter', function() {
         cancelHide();
+        /* No hover preview while any popup is pinned (2026-11-06). */
+        if (window.svPin && window.svPin.current()) return;
         if (enterTimer) clearTimeout(enterTimer);
         enterTimer = setTimeout(function() {
+          if (window.svPin && window.svPin.current()) return;
           showPopup(wrap);
           if (pop && window.SV && SV.popup) SV.popup.opened(pop);
         }, window.SV_HOVER_BEAT_MS || 450);
@@ -1760,10 +1887,103 @@
       }
     });
   }
+  /* The rail's clicks, delegated to the body no refresh replaces: the
+     card pins or unpins its popup, the × closes it. */
+  var railBody = document.getElementById('railSignalsBody');
+  if (railBody) {
+    railBody.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var x = t.closest('.sv-pop-x');
+      if (x) {
+        var xw = x.closest('.sr-signal-wrap');
+        e.preventDefault();
+        e.stopPropagation();
+        if (xw) hidePopup(xw);
+        return;
+      }
+      var a = t.closest('a.sr-signal');
+      if (!a || !railBody.contains(a)) return;
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      var wrap = a.closest('.sr-signal-wrap');
+      if (!wrap) return;
+      if (pinned(wrap.querySelector('.sr-popup'))) hidePopup(wrap);
+      else pinCard(wrap);
+    });
+    var placing = false;
+    function replace() {
+      if (placing) return;
+      placing = true;
+      var raf = window.requestAnimationFrame
+        ? function (f) { window.requestAnimationFrame(f); }
+        : function (f) { setTimeout(f, 16); };
+      raf(function () {
+        placing = false;
+        var pop = railBody.querySelector('.sr-popup.sv-pinned');
+        var wrap = pop && pop.closest('.sr-signal-wrap');
+        if (wrap) placePopup(wrap, pop);
+      });
+    }
+    railBody.addEventListener('scroll', replace);
+    window.addEventListener('resize', replace);
+  }
+  /* A row of the headband SIGNALS popup opens its card in the rail: the
+     rail opens and SIGNALS un-collapses if they were not, the card scrolls
+     into view and its popup pins. A card the rail does not show (left the
+     rail, or hidden by a filter) opens /signals/ instead. */
+  window.svRailFocus = function (id) {
+    var sid = String(id);
+    var rail = document.getElementById('signalsRail');
+    var sec = document.getElementById('railSignals');
+    var find = function () {
+      return document.querySelector('#railSignalsBody .sr-signal-wrap[data-signal-id="' + sid + '"]');
+    };
+    var wrap = find();
+    var gone = !wrap || wrap.style.display === 'none'
+      || (window.getComputedStyle && window.getComputedStyle(wrap).display === 'none');
+    if (!rail || !sec || gone) { window.location.assign('/signals/'); return; }
+    var wait = 0;
+    if (!rail.classList.contains('open')) {
+      rail.classList.add('open');
+      try { localStorage.setItem('sauron_signals_rail', 'open'); } catch (e) {}
+      wait = 320;
+    }
+    if (sec.classList.contains('collapsed')) {
+      sec.classList.remove('collapsed');
+      try { localStorage.setItem('sauron_rail_sig', '0'); } catch (e) {}
+      wait = 320;
+    }
+    if (window.svPin) window.svPin.closeCurrent();
+    setTimeout(function () {
+      var w = find();
+      if (!w) { window.location.assign('/signals/'); return; }
+      if (w.scrollIntoView) w.scrollIntoView({ block: 'nearest' });
+      pinCard(w);
+    }, wait);
+  };
+  var hbRows = document.getElementById('hbSignalRows');
+  if (hbRows) {
+    hbRows.addEventListener('click', function (e) {
+      var row = e.target && e.target.closest ? e.target.closest('.sv-sig-row[data-signal-id]') : null;
+      if (!row) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.svRailFocus(row.getAttribute('data-signal-id'));
+    });
+    hbRows.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      var row = e.target && e.target.closest ? e.target.closest('.sv-sig-row[data-signal-id]') : null;
+      if (row) window.svRailFocus(row.getAttribute('data-signal-id'));
+    });
+  }
   /* Escape closes whichever rail card is open — the universal way out of
-     anything floating, and previously the one this card did not offer. */
+     anything floating, and previously the one this card did not offer.
+     Not while an overlay dialog is open (the TAKE TRADE ticket over a
+     pinned card): Esc there is the dialog's. */
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    if (document.querySelector('.sv-dialog.is-open')) return;
     document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
       if (wrap._srHide) wrap._srHide();
     });
@@ -1780,9 +2000,22 @@
 
 /* ── Phase 64.4 — signal dismiss / star (localStorage-backed) ───
    PASS button: hides the rail item locally + remembers the dismissal
-   so it stays hidden across reloads. Pure client-side, no backend. */
+   so it stays hidden across reloads.
+
+   A PASS LIVES ON THE SERVER (2026-11-06): it is posted to
+   /api/signal-rail/pass/ (dashboard.RailDeparture), so it holds on every
+   browser and LEFT THE RAIL can say it in words and bring it back. The
+   local set is an OUTBOX: it hides the card at once and keeps it hidden
+   until the server's render stops carrying it (a lost POST is re-sent
+   once per page load); only after a render that read the rail
+   ([data-sv-rail-ok]) are the ids no longer on screen pruned. A pass made
+   before the server kept them reaches it the first time its card renders.
+   The ticket's success path still calls dismissSignal, and the server
+   reads the book to say TAKEN rather than PASSED. Display only: the
+   engine still sees the signal. */
 (function(){
   var DISM_KEY = 'sauron_dismissed_signals';
+  var sentThisLoad = {};
   function loadSet() {
     try {
       var raw = localStorage.getItem(DISM_KEY) || '[]';
@@ -1794,25 +2027,74 @@
     try { localStorage.setItem(DISM_KEY, JSON.stringify(Array.from(set))); }
     catch (e) { /* quota — ignore */ }
   }
-  function applyDismissals() {
-    var set = loadSet();
-    if (!set.size) return;
-    document.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(function(wrap) {
-      if (set.has(String(wrap.dataset.signalId))) {
-        wrap.style.display = 'none';
-      }
+  function csrf() {
+    var m = String(document.cookie || '').match(/csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function sendPass(sid, undo) {
+    sentThisLoad[sid] = true;
+    return fetch('/api/signal-rail/pass/', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+      body: JSON.stringify({ signal_id: parseInt(sid, 10), undo: !!undo })
+    }).then(function (r) {
+      if (r.status === 423 && window.svIdleLock) window.svIdleLock.engage(false);
+      /* Stored only when the server says so, in its own JSON: an expired
+         session is redirected to the login page, which answers 200
+         (2026-11-06, the review). */
+      if (!r.ok || r.redirected) return false;
+      return r.json().then(function (j) { return !!(j && j.ok); },
+                           function () { return false; });
+    }).catch(function () { return false; });
+  }
+  /* A passed card and its headband row leave every count at once
+     (data-sv-out): a pass is not "hidden by your filters". The row hides
+     now; the card collapses (dismissSignal). */
+  function markOut(sid) {
+    document.querySelectorAll('.sr-signal-wrap[data-signal-id="' + sid + '"], .sv-sig-row[data-signal-id="' + sid + '"]').forEach(function (el) {
+      el.setAttribute('data-sv-out', '');
+      if (el.classList.contains('sv-sig-row')) el.style.display = 'none';
     });
   }
-  window.dismissSignal = function(id) {
-    var sid = String(id);
+  function outbox(sid) {
     var set = loadSet();
     set.add(sid);
     saveSet(set);
+    markOut(sid);
+    /* Stored: the rail asks again at once, so its counts and LEFT THE RAIL
+       say it now rather than at the next sweep. */
+    sendPass(sid, false).then(function (ok) {
+      if (ok && window.svRailSoon) window.svRailSoon();
+    });
+  }
+  function applyDismissals() {
+    var set = loadSet();
+    if (!set.size) return;
+    var onScreen = {};
+    document.querySelectorAll('.sr-signal-wrap[data-signal-id], .sv-sig-row[data-signal-id]').forEach(function(el) {
+      var sid = String(el.getAttribute('data-signal-id'));
+      if (!set.has(sid)) return;
+      onScreen[sid] = true;
+      el.style.display = 'none';
+      el.setAttribute('data-sv-out', '');
+      if (!sentThisLoad[sid]) sendPass(sid, false);
+    });
+    var body = document.getElementById('railSignalsBody');
+    if (!body || !body.querySelector('[data-sv-rail-ok]')) return;
+    var pruned = false;
+    Array.from(set).forEach(function (sid) {
+      if (!onScreen[sid]) { set.delete(sid); pruned = true; }
+    });
+    if (pruned) saveSet(set);
+  }
+  window.dismissSignal = function(id) {
+    var sid = String(id);
+    outbox(sid);
     /* Hide any open popup for this wrap then collapse + remove. */
     var wrap = document.querySelector('.sr-signal-wrap[data-signal-id="' + sid + '"]');
     if (!wrap) return;
     var pop = wrap.querySelector('.sr-popup');
-    if (pop) pop.classList.remove('show');
+    if (wrap._srHide) wrap._srHide(); else if (pop) pop.classList.remove('show');
     /* Capture height first so the max-height transition has somewhere
        to animate FROM — and animate it INLINE: the inline start value
        set here would beat any max-height declared on the class, so the
@@ -1836,8 +2118,37 @@
   /* Optional: clear-all helper for the user, callable from the console. */
   window.sauronUndismissAllSignals = function() {
     localStorage.removeItem(DISM_KEY);
-    document.querySelectorAll('.sr-signal-wrap').forEach(function(w) { w.style.display = ''; });
+    document.querySelectorAll('.sr-signal-wrap').forEach(function(w) {
+      w.style.display = '';
+      w.removeAttribute('data-sv-out');
+    });
   };
+  /* ↺ BRING BACK (2026-11-06): your own pass or take, undone on the
+     server, and the rail asks again at once. */
+  window.svRailUnpass = function (id) {
+    var sid = String(id);
+    var set = loadSet();
+    if (set.has(sid)) { set.delete(sid); saveSet(set); }
+    sendPass(sid, true).then(function () {
+      if (window.svRailSoon) window.svRailSoon();
+    });
+  };
+  /* LEFT THE RAIL is shown or hidden by an attribute on the rail section
+     (data-f-gone), which no refresh replaces; its chip is one of the
+     rail's filters (static/js/sv-rail-filters.js), kept on the operator's
+     profile. ↺ BRING BACK is delegated here, to the section. */
+  var railHost = document.getElementById('railSignals');
+  if (railHost) {
+    railHost.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target : null;
+      var back = t && t.closest('[data-sv-unpass]');
+      if (!back) return;
+      e.preventDefault();
+      e.stopPropagation();
+      back.disabled = true;
+      window.svRailUnpass(back.getAttribute('data-sv-unpass'));
+    });
+  }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', applyDismissals);
   } else {
@@ -1857,23 +2168,62 @@
     var m = document.cookie.match(/csrftoken=([^;]+)/);
     return m ? m[1] : '';
   }
-  /* A non-JSON response is a real state, not a "network error": a 404 is
-     a signal that expired between hover and click, a redirect-to-login is
-     an expired session, a 403 is CSRF. Decode to something actionable. */
-  function decode(r) {
+  /* A non-JSON response is a real state, not a "network error". What it
+     MEANS depends on whether the request could have run behind it
+     (2026-11-06, a live forex ticket: a LIVE order whose answer was lost
+     after the PIN read "Network error", and eToro had filled it).
+
+     Three answers come from in front of the view, so they, and only
+     they, say nothing was sent: a redirect (the login, the idle lock or
+     the investor gate answered), a 403 (CSRF: Django refused before the
+     view ran) and a 404 (no such signal or instrument: the view's first
+     line). A page with <html in it is not a login page: Django's 500
+     page carries it too, so only a redirect reads as an expired session
+     — or as the idle lock, when it lands on /locked/. These POSTs ask
+     for no JSON, so core/idle_lock answers them with that redirect,
+     never with its 423, and the remedy is the PIN, not a new login.
+
+     A preview only reads, so whatever else it gets back, nothing was sent
+     (decode). An EXECUTE is different: any other answer (a 5xx, a body
+     nobody can read) may come from behind a view that ran, so the order
+     may have gone and the ticket looks it up (decodeSent, `lost`). */
+  var LOCKED = 'The screen is locked — unlock it with your PIN first.';
+  function readAnswer(r, how) {
     return r.text().then(function (t) {
-      try { return JSON.parse(t); }
-      catch (e) {
-        var msg = r.status === 404
-          ? 'This signal is no longer active — it expired or its levels were hit.'
-          : r.status === 403
-            ? 'Not allowed — refresh the page and try again.'
-            : (r.redirected || t.indexOf('<html') !== -1)
-              ? 'Session expired — refresh the page and log in again.'
-              : 'HTTP ' + r.status;
-        return { error: msg };
+      var j = null;
+      try { j = JSON.parse(t); } catch (e) { j = null; }
+      var lost = how.sent
+        ? { lost: true, why: 'the platform answered HTTP ' + r.status + ' with no result' }
+        : null;
+      if (lost && r.status >= 500) return lost;
+      if (j && typeof j === 'object') {
+        /* the idle lock's 423, to a request that asks for JSON
+           (core/idle_lock._wants_json): in front of every view */
+        if (j.pin_locked) {
+          return { error: LOCKED + ' ' + how.nothing };
+        }
+        return j;
       }
+      if (r.redirected) {
+        if (String(r.url || '').indexOf('/locked/') !== -1) {
+          return { error: LOCKED + ' ' + how.nothing };
+        }
+        return { error: 'Session expired — refresh the page and log in again. ' + how.nothing };
+      }
+      if (r.status === 403) {
+        return { error: 'Not allowed — refresh the page and try again. ' + how.nothing };
+      }
+      if (r.status === 404) return { error: how.gone + ' ' + how.nothing };
+      return lost || { error: 'The platform answered HTTP ' + r.status + '. ' + how.nothing };
     });
+  }
+  /* Both doors answer 404: an inactive signal, or an inactive instrument. */
+  var GONE = 'This signal or instrument is no longer active — a signal expires, or ends when its levels are hit.';
+  function decode(r) {
+    return readAnswer(r, { sent: false, gone: GONE, nothing: 'Nothing was sent.' });
+  }
+  function decodeSent(r) {
+    return readAnswer(r, { sent: true, gone: GONE, nothing: 'Nothing was sent.' });
   }
   var inflight = false;   /* double-click / two-tab guard, client half */
 
@@ -1942,7 +2292,9 @@
 
      Resolves to {qty, stop, target, close_ids} on confirm — each number
      null when it was left alone, so an untouched ticket sends no override
-     field at all — or null on cancel. */
+     field at all — or null on cancel. With an automatic size it also says
+     what it showed (shown_qty, shown_raised; 2026-11-06), which the send
+     holds a raised size to. */
   function sizeDialog(p) {
     return new Promise(function (resolve) {
       var step = Number(p.qty_step) || 0;
@@ -1954,6 +2306,28 @@
       var avail = Number(p.available) || 0;
       var budget = Number(p.risk_dollars) || 0;
       var def = Number(p.qty);
+      /* THE SMALLEST SIZE (2026-11-06, manual_trade._smallest_size): the
+         size the server raised this ticket to when the risk budget sized
+         it to zero; 0 on any other ticket. */
+      var smallestQty = (p.smallest_size && Number(p.smallest_size.qty) > 0)
+        ? Number(p.smallest_size.qty) : 0;
+      /* The server's sentence for a raise at the planned stop: the
+         smallest size, or the broker's minimum (venue_min_note,
+         2026-10-01). */
+      var raisedNote = (p.smallest_size && p.smallest_size.note) || p.venue_min_note || '';
+      /* THE BROKER'S MINIMUM (2026-10-01, manual_trade._venue_min_qty): the
+         send lifts a budget size under it back up to it, so the dialog
+         holds it too (review, 2026-11-06); 0 when unread or paper. */
+      var vminQty = (p.venue_min_qty !== null && p.venue_min_qty !== undefined
+                     && Number(p.venue_min_qty) > 0) ? Number(p.venue_min_qty) : 0;
+      /* The lane's own risk per ticket, in percent, for the raise's words. */
+      var budgetPct = Number((p.risk_appetite || {}).pct);
+      /* MAX SINGLE POSITION, in the pool's money (portfolio.risk_gate.
+         single_position_state): the send refuses past it, after the PIN;
+         the size check below refuses it first (review, 2026-11-06). */
+      var single = p.book_single_position || {};
+      var singleCap = (single.cap_money !== null && single.cap_money !== undefined
+                       && isFinite(Number(single.cap_money))) ? Number(single.cap_money) : null;
       var L = p.levels || {};
       var lever = p.leverage || {};
       /* THE SEND'S OWN CASH CHECK (2026-10-31, manual_trade.
@@ -2058,6 +2432,31 @@
       }
       function stopMoved() { return levelable && moved(stopVal, defStop); }
       function targetMoved() { return levelable && moved(targetVal, defTarget); }
+      /* What the risk budget buys at the current stop, floored. */
+      function budgetQty() {
+        var r = rpu();
+        return r > 0 ? floorStep(budget / r) : 0;
+      }
+      /* A ticket raised to the smallest size keeps it at a moved stop the
+         budget still buys less at — what the send does
+         (manual_trade._judge_ticket, 2026-11-06); the risk then follows
+         the stop. */
+      function smallestHolds() {
+        return smallestQty > 0 && budgetQty() < smallestQty;
+      }
+      /* ...and a ticket the broker's minimum binds keeps the minimum at a
+         moved stop the budget buys less at, as the send does: it lifts the
+         budget's size back up to it (review, 2026-11-06). */
+      function vminHolds() {
+        return !smallestHolds() && vminQty > 0 && budgetQty() < vminQty;
+      }
+      /* Whether the automatic size is raised above what the risk budget
+         buys: the server's own raise at the planned stop, the hold at a
+         moved one. Sent back with the size (shown_raised): the send
+         refuses a raise the ticket did not show. */
+      function autoRaised() {
+        return stopMoved() ? (smallestHolds() || vminHolds()) : !!raisedNote;
+      }
       /* The size the risk budget implies at the current stop. Untouched,
          it is the server's own number rather than a re-derivation of it:
          re-deriving would land a step away from what the server sends and
@@ -2066,8 +2465,31 @@
          is not a ceiling. */
       function autoQty() {
         if (!stopMoved()) return def;
-        var r = rpu();
-        return r > 0 ? floorStep(budget / r) : 0;
+        var q = budgetQty();
+        if (smallestQty > 0 && q < smallestQty) q = smallestQty;
+        /* the broker's minimum the send lifts it to (2026-10-01) */
+        if (vminQty > 0 && q < vminQty) q = vminQty;
+        return q;
+      }
+      /* What the raised size risks AT THE CURRENT STOP, in words (review,
+         2026-11-06): the box at the top and the line beside the PIN said
+         the planned stop's money whatever the stop became. The server's
+         own sentence while the stop is the planned one. */
+      function riskWords(q) {
+        var r = q * rpu();
+        return money(r) + ' (' + (capital > 0 ? (r / capital * 100).toFixed(2) + '%' : '—') +
+               ' of the pool)';
+      }
+      function raisedWords(q) {
+        if (!stopMoved()) return raisedNote;
+        var whom = smallestHolds()
+          ? ((p.smallest_size && p.smallest_size.whom) || 'the smallest size the venue takes')
+          : 'the broker\'s minimum for ' + p.symbol;
+        return 'Raised to ' + whom + ': ' + units(q) + ' unit' + (q === 1 ? '' : 's') +
+               '. At this stop it risks ' + riskWords(q) +
+               (isFinite(budgetPct) && budgetPct > 0
+                 ? ', more than the ' + budgetPct.toFixed(2) + '% a ticket risks by default.'
+                 : '.');
       }
 
       /* ── The verdict, previewed ───────────────────────────────────────
@@ -2173,6 +2595,18 @@
                  (freed() > 0 ? ' after the closes ticked above' : '') + '.' +
                  (kept > 0 ? ' Tick another position to close, or size down.' : '');
         }
+        /* MAX SINGLE POSITION (review, 2026-11-06): the send refuses past
+           it, after the PIN (manual_trade._judge_ticket); refused here
+           first, in its terms — the lane's own knob on /admin-dashboard/
+           ("max single position") lifts it. */
+        if (singleCap !== null && cupu > 0 && q * cupu > singleCap + 1e-9) {
+          return units(q) + ' units ties up ' + money(q * cupu) + ' — past the ' +
+                 money(singleCap) + ' a single position may hold' +
+                 (isFinite(Number(single.limit_pct)) && Number(single.capital_base) > 0
+                   ? ' (' + Number(single.limit_pct) + '% of the ' +
+                     money(single.capital_base) + ' ' + (single.base_label || 'pool') + ')'
+                   : '') + '.';
+        }
         /* The size control stops where eToro's cash check would refuse:
            its free cash and, below 100%, the pledge ceiling, at this
            multiplier (at exactly 100% the free cash alone, 2026-11-01). */
@@ -2251,6 +2685,28 @@
                        (h.manual ? 'by hand' : ('rule ' + (h.rule || '—'))) +
                        ' · ' + h.venue + ' · #' + h.trade_id);
           }).join('<br>') + '</div>';
+      }
+
+      /* THE SIZE WAS RAISED ABOVE THE RISK BUDGET: the budget sized this
+         ticket to zero and the server proposes the smallest size the venue
+         takes (smallest_size, 2026-11-06), or it raised the size to the
+         broker's minimum (venue_min_note, 2026-10-01). The server's
+         sentence, with the money it risks, before the PIN: the operator's
+         call, repeated beside the PIN and the go button (sideNotes).
+         render() keeps it true (review, 2026-11-06): the money follows a
+         moved stop (raisedWords), and the box goes when the size is no
+         longer the raised one — a typed size, or a stop the budget buys
+         enough at — and comes when a moved stop makes the hold bind. */
+      var raisable = !!raisedNote || smallestQty > 0 || vminQty > 0;
+      if (raisable) {
+        warnHtml += '<div class="sz-warn sz-warn--book" data-role="smallestsize"' +
+          (raisedNote ? '' : ' hidden') + '>' +
+          '<b>SIZE RAISED ABOVE THE RISK BUDGET</b>' +
+          '<span data-role="raisedwords">' + esc(raisedNote) + '</span>' +
+          '<br>' + esc('A warning, not a block: the size is yours to send' +
+                       (live ? ' with your trading PIN' : '') + ', or to change ' +
+                       'below. Your bots never raise a size: they skip the ticket.') +
+          '</div>';
       }
 
       /* CONCENTRATION. The per-ticket ceiling is judged on this ticket; this
@@ -2673,6 +3129,14 @@
           'eToro\'s cash check would refuse this ticket — the reason is at the top.') +
           '</div>';
       }
+      /* The raise, with what the size risks at the CURRENT stop: render()
+         writes it, and hides it when the size is not the raised one. */
+      if (raisable) {
+        sideNotes += '<div class="sz-warn sz-warn--book" data-role="smallestsizenotice"' +
+          (raisedNote ? '' : ' hidden') + '>' + esc(
+          'Size raised above the risk budget — what it risks is at the top.') +
+          '</div>';
+      }
       var host = document.createElement('div');
       host.className = 'sv-dialog sz-dialog' + ((funding || live) ? ' sv-dialog--danger' : '');
       host.setAttribute('data-sv-overlay', 'dialog');
@@ -2770,6 +3234,9 @@
       var pinIn = host.querySelector('[data-role="pin"]');
       var levSel = host.querySelector('[data-role="lev"]');
       var rrWarn = host.querySelector('[data-role="rrwarn"]');
+      var raisedBox = host.querySelector('[data-role="smallestsize"]');
+      var raisedSpan = host.querySelector('[data-role="raisedwords"]');
+      var raisedNotice = host.querySelector('[data-role="smallestsizenotice"]');
       var settled = false;
 
       /* REWARD:RISK (2026-10-02). What the levels can make against what
@@ -2835,8 +3302,14 @@
                       esc(money(use)) + ')</span>');
           }
           if (!qtyTouched && stopMoved()) {
-            bits.push('<span>SIZE FOLLOWS THE STOP — the risk budget is held at <b>' +
-                      esc(money(budget)) + '</b></span>');
+            bits.push(smallestHolds()
+              ? '<span>SIZE HELD AT THE SMALLEST SIZE — <b>' + esc(units(smallestQty)) +
+                '</b> unit' + (smallestQty === 1 ? '' : 's') + '; the risk follows the stop</span>'
+              : vminHolds()
+              ? '<span>SIZE HELD AT THE BROKER\'S MINIMUM — <b>' + esc(units(vminQty)) +
+                '</b> unit' + (vminQty === 1 ? '' : 's') + '; the risk follows the stop</span>'
+              : '<span>SIZE FOLLOWS THE STOP — the risk budget is held at <b>' +
+                esc(money(budget)) + '</b></span>');
           }
           if (sizeWhy) bits.push('<span class="sz-why">' + esc(sizeWhy) + '</span>');
           out.innerHTML = bits.join('');
@@ -2855,6 +3328,24 @@
               ? '<span class="sz-why">' + esc(money(short)) + ' short — this ' +
                 'selection does not fund the trade.</span>'
               : '<span class="sz-ok">Covered.</span>');
+        }
+
+        /* THE RAISE, as it stands now (review, 2026-11-06): shown while
+           the size is the automatic one and raised above the budget — the
+           size the send sends as raised — with what it risks at this stop;
+           gone for a typed size or a stop the budget buys enough at. */
+        if (raisedBox) {
+          var raisedNow = (!qtyTouched || !moved(qtyVal, autoQty())) && autoRaised();
+          raisedBox.hidden = !raisedNow;
+          if (raisedNotice) raisedNotice.hidden = !raisedNow;
+          if (raisedNow) {
+            if (raisedSpan) raisedSpan.textContent = raisedWords(q);
+            if (raisedNotice) {
+              raisedNotice.textContent = 'Size raised above the risk budget — ' +
+                units(q) + ' unit' + (q === 1 ? '' : 's') + ', risking ' + riskWords(q) +
+                ' at this stop; the box at the top says why.';
+            }
+          }
         }
 
         var rr = rewardRisk();
@@ -2980,8 +3471,17 @@
            ledger records as hand-sized. */
         var auto = autoQty();
         var atAuto = !qtyTouched || !moved(qtyVal, auto);
+        var sendsAuto = !(sizable && !atAuto);
         finish({
-          qty: (sizable && !atAuto) ? qtyVal : null,
+          qty: sendsAuto ? null : qtyVal,
+          /* THE SIZE THIS TICKET SHOWED (review, 2026-11-06), when the
+             size is the automatic one, and whether it was raised above
+             the risk budget: the send re-runs the preview under its lock,
+             and refuses — nothing sent — a raise it did not show, or a
+             raised size that moved since (an eToro minimum read there and
+             not here, a mark that moved). A typed size is sent as typed. */
+          shown_qty: sendsAuto ? auto : null,
+          shown_raised: sendsAuto ? autoRaised() : false,
           stop: stopMoved() ? stopVal : null,
           target: targetMoved() ? targetVal : null,
           close_ids: ids,
@@ -3043,21 +3543,51 @@
                     onSuccess);
           return;
         }
+        /* One ref per send (2026-11-06): this order's name for the lookup
+           below when its answer is lost. A new multiplier (above) sends
+           nothing, so it makes none. */
+        var ref = ticketRef();
         var body = Object.assign({ close_ids: choice.close_ids }, extraBody || {});
         if (choice.leverage != null) body.leverage = choice.leverage;
         if (choice.qty !== null) body.qty = choice.qty;
+        /* the size the ticket showed, and whether it was raised
+           (2026-11-06): the send refuses a raise it did not show */
+        if (choice.shown_qty !== null && choice.shown_qty !== undefined) {
+          body.shown_qty = choice.shown_qty;
+          body.shown_raised = !!choice.shown_raised;
+        }
         if (choice.stop !== null) body.stop = choice.stop;
         if (choice.target !== null) body.target = choice.target;
         if (choice.pin) body.pin = choice.pin;
         if (choice.dup_seen) body.dup_seen = choice.dup_seen;
         if (choice.council) body.council_session = choice.council;
+        body.ticket_ref = ref;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
-        }).then(decode).then(function (res) {
+        }).then(decodeSent).then(function (res) {
+          /* A 5xx, or an answer that says neither ok nor error: the view
+             may have run, so the order may have gone. Looked up, never
+             told as "nothing happened". */
+          if (res.lost || (!res.ok && !res.error)) {
+            lostAnswer(ref, res.why || 'the platform answered without a result', onSuccess);
+            return;
+          }
           done();
           if (res.error) {
+            /* "The order MAY have reached the broker" (manual_trade: the
+               broker call raised before its answer arrived) is no refusal:
+               the order may be at eToro. Its own words, and the positions
+               asked again — never "Trade not taken". */
+            if (mayHaveReached(res.error)) {
+              positionsChanged(res);
+              SV.overlay.alert({
+                title: 'The order may have reached the broker',
+                message: res.error + ' ' + DONT_RESEND
+              });
+              return;
+            }
             /* If funding closes already happened, the operator must know —
                capital moved even though nothing opened. */
             var said = SV.overlay.alert({
@@ -3095,7 +3625,13 @@
           SV.overlay.alert({
             title: 'Position open',
             message: res.side + ' ' + units(res.qty) + ' ' + res.symbol + ' @ ' + res.entry +
-              (res.sized_by === 'operator' ? '  (your size — ' + money(res.risk_dollars) + ' at risk)' : '') +
+              (res.sized_by === 'operator' ? '  (your size — ' + money(res.risk_dollars) + ' at risk)'
+                /* the smallest size, as the server names it (2026-11-06,
+                   review): the venue's own, or this platform's step */
+                : res.sized_by === 'smallest_size'
+                ? '  (' + (res.size_words || 'the smallest size') + ' — ' +
+                  money(res.risk_dollars) + ' at risk)'
+                : '') +
               /* Name back exactly what the operator moved. Claiming the
                  platform's defaults on a ticket they adjusted — or the
                  reverse — is how a stop nobody chose ends up trusted. */
@@ -3113,14 +3649,303 @@
                 ? ' — closed first: ' + res.closed.join(', ') : '')
           });
         }).catch(function (e) {
-          done();
-          SV.overlay.alert({ title: 'Network error', message: String(e) });
+          /* The order left this page and no answer came back: the line
+             dropped, or the answer was cut or could not be read. The
+             order MAY have gone, so it is looked up. The bare "Network
+             error" said here read as "nothing happened" after the PIN,
+             and the order had filled. */
+          lostAnswer(ref, String(e), onSuccess);
         });
       });
     }).catch(function (e) {
       done();
-      SV.overlay.alert({ title: 'Network error', message: String(e) });
+      /* Before any order: a preview only reads. */
+      SV.overlay.alert({
+        title: 'Could not reach the platform',
+        message: 'Nothing was sent — a preview only reads (' + String(e) +
+                 '). Try again when the connection is back.'
+      });
     });
+  }
+
+  /* ── A LOST ANSWER (2026-11-06) ──────────────────────────────────────
+     A live forex ticket: the order left after the PIN, eToro filled it, and
+     the page said "Network error". An answer lost after an order left is
+     not "nothing happened", so the page says the order MAY have gone, not
+     to send it again, and asks Sauron what became of it.
+
+     Each send carries a ref (ticketRef, in the execute body). The execute
+     views record it 'received' before the executor runs and 'booked' or
+     'refused' once it answers (dashboard/ticket_outcome.py), and
+     /api/take-trade/outcome/<ref>/ reads the caller's own record. The
+     page asks with growing gaps, stops at the first 'booked' or
+     'refused', and says what it found: 'received' at the end is an order
+     Sauron has and no result recorded for — still working, or stopped
+     after it may have reached the broker, which is never read as "the
+     broker has not answered" (eToro may have filled it before the view
+     died); 'unknown' is no record, which is never read as proof that
+     nothing was sent. An ask that fails, or hangs past
+     OUTCOME_ASK_MS, changes no words. Closing the answer ends the asking,
+     and the ticket's double-click guard is held until then. */
+  var OUTCOME_URL = '/api/take-trade/outcome/';
+  var OUTCOME_GAPS = [1000, 3000, 6000, 12000, 20000, 30000];
+  var OUTCOME_ASK_MS = 10000;
+  var OUTCOME_STATES = ['received', 'booked', 'refused', 'unknown'];
+  /* Every unsure outcome sends the operator to the eToro app first: an
+     order Sauron holds no row for (its view died after the broker took
+     it) is on eToro at once, and on Positions only once the account is
+     read again. */
+  var DONT_RESEND = 'Do not send it again: check the eToro app first ' +
+                    '(Sauron\'s Positions may not show it yet), then Positions.';
+
+  function ticketRef() {
+    var hex = '';
+    try {
+      var a = new Uint8Array(16);
+      window.crypto.getRandomValues(a);
+      for (var i = 0; i < a.length; i++) hex += (a[i] < 16 ? '0' : '') + a[i].toString(16);
+    } catch (e) { hex = ''; }
+    /* No crypto here: still one ref per send. It only names an order to
+       its owner's own lookup, and the server keys it by the user. */
+    while (hex.length < 32) hex += Math.floor(Math.random() * 16).toString(16);
+    return hex.slice(0, 32);
+  }
+
+  /* manual_trade's words when the broker call raised before its answer
+     arrived: the order may be at the broker, so they are no refusal. */
+  function mayHaveReached(text) {
+    return /MAY have reached the broker/i.test(String(text || ''));
+  }
+
+  /* The positions may have moved: the instrument chart hears the event,
+     the positions list and the counters have refreshes of their own. */
+  function positionsChanged(detail) {
+    try {
+      document.dispatchEvent(new CustomEvent('sv:position-changed',
+                                             { detail: detail || {} }));
+    } catch (e) { /* UI only */ }
+    try { if (window.svLiveRefresh) window.svLiveRefresh(); } catch (e) { /* UI only */ }
+    try { if (window.refreshPanelCounts) window.refreshPanelCounts(); } catch (e) { /* UI only */ }
+  }
+
+  /* One ask: the record, or null when the ask itself failed (dropped, a
+     locked tab's 423, a redirect to a login, a 5xx, no known state) or
+     had no answer after OUTCOME_ASK_MS. It always settles: on the
+     half-open line that lost the order's answer an ask can hang for good
+     (neither daphne nor Caddy cuts it), and one hung ask stalled the
+     asks on "asking again…" with no last words. A cut ask is aborted
+     where the browser can, and counts as an ask that failed. */
+  function askOutcome(ref, ctl) {
+    return new Promise(function (settle) {
+      var cut = setTimeout(function () {
+        cut = null;
+        if (ctl) { try { ctl.abort(); } catch (e) { /* already settled */ } }
+        settle(null);
+      }, OUTCOME_ASK_MS);
+      var done = function (o) {
+        if (cut) { clearTimeout(cut); cut = null; }
+        settle(o);
+      };
+      Promise.resolve().then(function () {
+        return fetch(OUTCOME_URL + encodeURIComponent(ref) + '/', {
+          method: 'GET', credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+          signal: ctl ? ctl.signal : undefined
+        });
+      }).then(function (r) {
+        if (!r.ok || r.redirected) return null;
+        return r.json().then(function (o) {
+          return (o && OUTCOME_STATES.indexOf(o.state) !== -1) ? o : null;
+        }, function () { return null; });
+      }).then(done, function () { done(null); });
+    });
+  }
+
+  /* The asks, until one answers 'booked' or 'refused' or the gaps run
+     out. report(known, final, asked): the strongest answer so far (a later
+     'unknown' never erases a 'received'), or null when no ask answered.
+     Returns stop(). */
+  function followOutcome(ref, report) {
+    var asked = 0, timer = null, ctl = null, stopped = false, known = null;
+    function next() {
+      if (stopped) return;
+      if (asked >= OUTCOME_GAPS.length) {
+        stopped = true;
+        report(known, true, asked);
+        return;
+      }
+      timer = setTimeout(function () {
+        timer = null;
+        ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+        askOutcome(ref, ctl).then(function (o) {
+          if (stopped) return;
+          asked += 1;
+          if (o && !(o.state === 'unknown' && known && known.state === 'received')) known = o;
+          if (o && (o.state === 'booked' || o.state === 'refused')) {
+            stopped = true;
+            report(o, true, asked);
+            return;
+          }
+          report(known, false, asked);
+          next();
+        });
+      }, OUTCOME_GAPS[asked]);
+    }
+    next();
+    return function stop() {
+      stopped = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (ctl) { try { ctl.abort(); } catch (e) { /* already settled */ } }
+    };
+  }
+
+  /* The words for what is known. Never "nothing was sent" on no record
+     alone: the line may have dropped after the order reached Sauron. */
+  function outcomeWords(o, final) {
+    if (o && o.state === 'booked') {
+      return {
+        title: o.working ? 'The order went — the broker holds it, not filled yet'
+                         : 'The order went — position open',
+        message: o.side + ' ' + units(o.qty) + ' ' + o.symbol +
+          (o.working ? '' : ' @ ' + lvl(o.entry)) +
+          (o.venue === 'live' ? '  ·  LIVE — real funds' : '') +
+          (o.protection_note ? '  ·  ⚠ ' + o.protection_note : '') +
+          (o.readback_note ? '  ·  ⚠ ' + o.readback_note : '') +
+          (o.closed && o.closed.length ? ' — closed first: ' + o.closed.join(', ') : '') +
+          '  ·  This is the order you sent: do not send it again.'
+      };
+    }
+    if (o && o.state === 'refused') {
+      /* the record says it (in_doubt); its words are the fallback */
+      if (o.in_doubt || mayHaveReached(o.error)) {
+        return { title: 'The order may have reached the broker',
+                 message: o.error + ' ' + DONT_RESEND };
+      }
+      return {
+        title: 'The order was refused — nothing opened',
+        message: o.error + ' Nothing opened.' +
+          (o.closed && o.closed.length
+            ? '  ·  Already closed for funding: ' + o.closed.join(', ') : '')
+      };
+    }
+    if (!final) {
+      return {
+        title: 'Connection lost — the order may have gone',
+        message: 'The order left this page and its answer did not come back. Sauron ' +
+                 'is checking now whether the broker took it — do not send it again ' +
+                 'before the answer.'
+      };
+    }
+    if (o && o.state === 'received') {
+      /* No result was written: the view may still be working, or may
+         have died after the broker took the order (a 500 after the
+         send). Never "the broker has not answered": eToro may have
+         filled it already. */
+      return {
+        title: 'Sauron has the order — no final answer recorded',
+        message: 'Sauron received this order and has no result recorded for it: it ' +
+                 'may still be working, or it may have stopped after the order reached ' +
+                 'the broker. ' + DONT_RESEND
+      };
+    }
+    if (o && o.state === 'unknown') {
+      return {
+        title: 'Not confirmed — check before sending it again',
+        message: 'Sauron has no record of this order reaching it. If the line dropped ' +
+                 'before the order left this page, nothing was sent — but it may have ' +
+                 'gone. ' + DONT_RESEND
+      };
+    }
+    return {
+      title: 'Connection lost — the order may have gone',
+      message: 'The order left this page and its answer did not come back, and Sauron ' +
+               'could not be asked what became of it. It may have gone. ' + DONT_RESEND
+    };
+  }
+
+  /* The answer's own dialog, built the way the ticket is: SV.overlay.alert
+     renders its message once, and this one changes as the asks come
+     back. Its X and its button close it, and closing it ends the asking
+     and frees the ticket. Escape and a tap outside do not
+     (data-sv-persist): a stray tap on a phone must not end the asking
+     before the answer is in. */
+  function lostAnswer(ref, why, onSuccess) {
+    inflight = true;
+    positionsChanged({});
+    var host = null;
+    try {
+      host = document.createElement('div');
+      host.className = 'sv-dialog sv-dialog--danger';
+      host.setAttribute('data-sv-overlay', 'dialog');
+      host.setAttribute('data-sv-persist', '');
+      host.setAttribute('aria-labelledby', 'svOutcomeTitle');
+      host.innerHTML =
+        '<div class="sv-dialog-head">' +
+          '<span class="sv-dialog-title" id="svOutcomeTitle" data-role="outcome-title"></span>' +
+          '<button type="button" class="sv-dialog-x" data-sv-close aria-label="Close">&times;</button>' +
+        '</div>' +
+        '<div class="sv-dialog-body">' +
+          '<p class="sv-dialog-msg" data-role="outcome-msg" aria-live="polite" tabindex="-1"></p>' +
+          '<p class="sv-dialog-detail" data-role="outcome-step" aria-live="polite"></p>' +
+          '<p class="sv-dialog-detail" data-role="outcome-why"></p>' +
+        '</div>' +
+        '<div class="sv-dialog-foot">' +
+          '<button type="button" class="sv-dialog-btn sv-dialog-btn--go" data-role="outcome-ok">Close</button>' +
+        '</div>';
+      document.body.appendChild(host);
+      var titleEl = host.querySelector('[data-role="outcome-title"]');
+      var msgEl = host.querySelector('[data-role="outcome-msg"]');
+      var stepEl = host.querySelector('[data-role="outcome-step"]');
+      var okEl = host.querySelector('[data-role="outcome-ok"]');
+      host.querySelector('[data-role="outcome-why"]').textContent =
+        'On this page: ' + why + '.';
+      var paint = function (w, step) {
+        titleEl.textContent = w.title;
+        msgEl.textContent = w.message;
+        stepEl.textContent = step || '';
+        stepEl.hidden = !step;
+      };
+      paint(outcomeWords(null, false), 'Asking Sauron what became of it…');
+      var stop = null;
+      host.addEventListener('sv:close', function () {
+        if (stop) stop();
+        inflight = false;
+        setTimeout(function () {
+          if (host.parentNode) host.parentNode.removeChild(host);
+        }, 200);
+      });
+      okEl.addEventListener('click', function () { SV.overlay.close(host); });
+      /* Focus on the words, not the button: a stray Enter must not end
+         the asking before the answer is in. */
+      host.setAttribute('data-sv-focus', '[data-role="outcome-msg"]');
+      SV.overlay.open(host, null);
+      stop = followOutcome(ref, function (o, final, asked) {
+        if (!final) {
+          paint(outcomeWords(o, false),
+                (o && o.state === 'received'
+                  ? 'Sauron has the order; no result is recorded for it yet. '
+                  : 'No answer yet. ') +
+                'Asked ' + asked + ' of ' + OUTCOME_GAPS.length + ' times — asking again…');
+          return;
+        }
+        paint(outcomeWords(o, true), '');
+        okEl.textContent = 'OK';
+        host.setAttribute('data-outcome', o ? o.state : 'unanswered');
+        positionsChanged(o || {});
+        if (o && o.state === 'booked' && onSuccess) {
+          try { onSuccess(o); } catch (e) { /* UI only */ }
+        }
+      });
+    } catch (e) {
+      /* No dialog could be built: the words still reach the operator,
+         without the asking. */
+      if (host && host.parentNode) host.parentNode.removeChild(host);
+      inflight = false;
+      var w = outcomeWords(null, true);
+      try {
+        SV.overlay.alert({ title: w.title, message: w.message + '  ·  On this page: ' + why + '.' });
+      } catch (e2) { /* nothing left to say it with */ }
+    }
   }
   window.svTakeTrade = function (signalId) {
     tradeFlow('/signals/' + signalId + '/take-trade/preview/',
@@ -3150,20 +3975,26 @@
      rows, which sit INSIDE a category anchor, can cancel the navigation
      their own container would otherwise perform. */
   /* Same decoding, different 404: on this endpoint a 404 means the trade
-     is not this user's (or is already gone), not that a signal expired. */
+     is not this user's (or is already gone), not that a signal expired.
+     The close is sent like an order: an answer lost after it left may
+     hide a close that happened (decodeCloseSent, `lost`). */
+  var GONE_CLOSE = 'That position is no longer open, or is not yours to close.';
   function decodeClose(r) {
-    return r.text().then(function (t) {
-      try { return JSON.parse(t); }
-      catch (e) {
-        var msg = r.status === 404
-          ? 'That position is no longer open, or is not yours to close.'
-          : r.status === 403
-            ? 'Not allowed — refresh the page and try again.'
-            : (r.redirected || t.indexOf('<html') !== -1)
-              ? 'Session expired — refresh the page and log in again.'
-              : 'HTTP ' + r.status;
-        return { error: msg };
-      }
+    return readAnswer(r, { sent: false, gone: GONE_CLOSE, nothing: 'Nothing was closed.' });
+  }
+  function decodeCloseSent(r) {
+    return readAnswer(r, { sent: true, gone: GONE_CLOSE, nothing: 'Nothing was closed.' });
+  }
+  /* A close whose answer was lost after it left (2026-11-06): it may have
+     happened. No lookup: the positions list is the answer, so it is
+     asked again and the operator is sent to it before a second close. */
+  function closeMayHaveGone(why) {
+    positionsChanged({});
+    SV.overlay.alert({
+      title: 'Connection lost — the close may have gone',
+      message: 'The close left this page and its answer did not come back (' + why +
+               '). The position MAY already be closed — check Positions before ' +
+               'closing it again.'
     });
   }
   var closing = false;
@@ -3233,8 +4064,9 @@
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: (ok === true ? '' : ok) })
-        }).then(decodeClose).then(function (res) {
+        }).then(decodeCloseSent).then(function (res) {
           done();
+          if (res.lost) { closeMayHaveGone(res.why); return; }
           if (res.error) {
             SV.overlay.alert({
               title: res.still_open || res.pending ? 'STILL OPEN — not closed'
@@ -3258,12 +4090,17 @@
           });
         }).catch(function (e) {
           done();
-          SV.overlay.alert({ title: 'Network error', message: String(e) });
+          /* the close left and no answer came back: it may have happened */
+          closeMayHaveGone(String(e));
         });
       });
     }).catch(function (e) {
       done();
-      SV.overlay.alert({ title: 'Network error', message: String(e) });
+      /* before any close: the preview only reads */
+      SV.overlay.alert({
+        title: 'Could not reach the platform',
+        message: 'Nothing was closed (' + String(e) + ').'
+      });
     });
   }
   document.addEventListener('click', function (e) {
@@ -4316,51 +5153,222 @@ window.svWheelMarquee = function (frame, track) {
      state to reapply. Two arrivals get marked here, not two states:
      a card whose id is NEW slides in; a card that was already on screen and
      has just GAINED the mark pulses once, because a silent repaint of a
-     card the eye has already passed over is a change nobody sees. */
-  let railRefreshing = false;
-  function refreshSignalRail() {
+     card the eye has already passed over is a change nobody sees.
+
+     A BURST IS NEVER DROPPED, AND NOTHING SWAPS UNDER THE READER
+     (2026-11-06). The rail lists every actionable signal now, so a burst
+     is the case to get right: a socket announcement debounces 400ms
+     (railSoon), and a call made while a fetch is in flight no longer
+     vanishes — it sets railAgain, and exactly one more fetch runs when the
+     first settles. The fetching never waits; the SWAP does, while the
+     operator reads (a card shown, the headband SIGNALS dropdown pinned,
+     or the hand on the rail): the newest answer is held, "↻ N new" in the
+     rail head says so and applies it on a click, and it lands when the
+     reading stops. One answer paints both lists — the rail and, from the
+     <template> it carries, the headband popup's rows — and every count
+     outside them, from its meta block. */
+  let railInFlight = false, railAgain = false, railHeld = null;
+  let railSoonT = null, railLeaveT = null;
+  function railReading() {
     const body = document.getElementById('railSignalsBody');
-    if (!body || railRefreshing) return;
-    railRefreshing = true;
+    if (!body) return false;
+    if (body.querySelector('.sr-popup.show')) return true;
+    /* The headband SIGNALS dropdown open at all — pinned, or on the hover
+       beat — is the operator reading its rows: a click must never land on
+       a row that moved under the hand (2026-11-06, the review). */
+    const dd = document.getElementById('hbSignalsDD');
+    if (dd && (dd.classList.contains('sv-pinned') || dd.style.display === 'block')) return true;
+    return !!(body.matches && body.matches(':hover'));
+  }
+  /* The counts outside the replaced body, from the answer's own meta:
+     the rail head and its title, the facet strip, the headband cell, its
+     sub-line and its grid. The 60s headband sweep renders the same values
+     from the same function, so the two writers agree. */
+  function paintRailMeta(m) {
+    if (!m || !m.ok) return;
+    const say = (el, v) => {
+      const t = String(v === undefined || v === null ? '' : v);
+      if (el && el.textContent !== t) el.textContent = t;
+    };
+    const head = document.getElementById('railSigCount');
+    if (head) { say(head, m.n); if (m.title) head.setAttribute('title', m.title); }
+    const per = {};
+    (m.classes || []).forEach(c => { per[c[0]] = c[1]; });
+    document.querySelectorAll('[data-sv-fc]').forEach(el => {
+      const n = per[el.getAttribute('data-sv-fc')] || 0;
+      say(el, n);
+      const chip = el.closest('[data-n]');
+      if (chip) chip.setAttribute('data-n', String(n));
+    });
+    document.querySelectorAll('[data-sv-gone-n]').forEach(el => say(el, m.gone));
+    document.querySelectorAll('[data-sv-rail-n]').forEach(el => say(el, m[el.getAttribute('data-sv-rail-n')]));
+    say(document.querySelector('[data-sv-live="hb-signals"]'), m.n);
+    say(document.querySelector('[data-sv-live="hb-signals-sub"]'),
+        m.long + ' long · ' + m.short + ' short');
+  }
+  /* "↻ N new": the cards a held answer would add — counted through the
+     stylesheet, in a hidden probe inside the rail's own host, so a card
+     the filters will hide reads "filtered", never "new" (2026-11-06, the
+     review). The probe lives for this call only. */
+  function paintHeld() {
+    const chip = document.getElementById('railHeld');
+    if (!chip) return;
+    if (!railHeld) { chip.setAttribute('hidden', ''); chip.textContent = ''; return; }
+    const on = {};
+    document.querySelectorAll('#railSignalsBody .sr-signal-wrap[data-signal-id]')
+      .forEach(w => { on[w.getAttribute('data-signal-id')] = 1; });
+    const host = document.getElementById('railSignals');
+    const box = document.createElement('div');
+    box.setAttribute('hidden', '');
+    box.setAttribute('data-sv-probe', '');
+    box.innerHTML = railHeld;
+    if (host) host.appendChild(box);
+    let fresh = 0, filtered = 0;
+    box.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
+      if (on[w.getAttribute('data-signal-id')]) return;
+      const cs = window.getComputedStyle ? window.getComputedStyle(w) : null;
+      if (cs && cs.display === 'none') filtered += 1; else fresh += 1;
+    });
+    if (box.parentNode) box.parentNode.removeChild(box);
+    let text = '↻ update';
+    if (fresh) text = '↻ ' + fresh + ' new' + (filtered ? ' · ' + filtered + ' filtered' : '');
+    else if (filtered) text = '↻ ' + filtered + ' filtered';
+    chip.textContent = text;
+    chip.removeAttribute('hidden');
+  }
+  function railApply(html) {
+    const body = document.getElementById('railSignalsBody');
+    if (!body) return;
     const before = new Map(
       Array.from(body.querySelectorAll('.sr-signal-wrap[data-signal-id]'))
         .map(w => [w.dataset.signalId, w.dataset.acted || '']));
-    fetch('/partials/signal-rail/', { credentials: 'same-origin' })
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(html => {
-        body.innerHTML = html;
-        body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
-          const was = before.get(w.dataset.signalId);
-          if (was === undefined) {
-            w.classList.add('sr-slide-in');
-            /* The entrance ends, the class leaves with it — a hover
-               DURING the half-second slide would still position the
-               fixed popup against the transforming wrap otherwise. */
-            w.addEventListener('animationend', function () {
-              w.classList.remove('sr-slide-in');
-            }, { once: true });
-          }
-          else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
-        });
-        /* Named, for the same reason the bell rows name theirs: a signal
-           landing in the rail is not a reason to close a headband popup
-           three hundred pixels away. */
-        document.dispatchEvent(new CustomEvent('htmx:afterSwap',
-                                               { detail: { svRegion: body } }));
-      })
-      .catch(() => {})
-      .finally(() => { railRefreshing = false; });
+    body.innerHTML = html;
+    const tpl = body.querySelector('[data-sv-mirror]');
+    if (tpl) {
+      const rows = document.getElementById(tpl.getAttribute('data-sv-mirror'));
+      if (rows) rows.innerHTML = tpl.innerHTML;
+      tpl.remove();
+    }
+    const meta = body.querySelector('[data-sv-rail-meta]');
+    if (meta) { try { paintRailMeta(JSON.parse(meta.textContent)); } catch (e) {} }
+    body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
+      const was = before.get(w.dataset.signalId);
+      if (was === undefined) {
+        w.classList.add('sr-slide-in');
+        /* The entrance ends, the class leaves with it — a hover
+           DURING the half-second slide would still position the
+           fixed popup against the transforming wrap otherwise. */
+        w.addEventListener('animationend', function () {
+          w.classList.remove('sr-slide-in');
+        }, { once: true });
+      }
+      else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
+    });
+    railHeld = null;
+    paintHeld();
+    /* Named, for the same reason the bell rows name theirs: a signal
+       landing in the rail is not a reason to close a headband popup
+       three hundred pixels away. */
+    document.dispatchEvent(new CustomEvent('htmx:afterSwap',
+                                           { detail: { svRegion: body } }));
   }
+  /* The held answer lands when the reading stops; `force` (the chip) lands
+     it at once. */
+  window.svRailRelease = function (force) {
+    if (railHeld && (force || !railReading())) railApply(railHeld);
+  };
+  function refreshSignalRail() {
+    const body = document.getElementById('railSignalsBody');
+    if (!body) return;
+    if (railInFlight) { railAgain = true; return; }
+    railInFlight = true;
+    fetch('/partials/signal-rail/', { credentials: 'same-origin' })
+      .then(r => { if (!r.ok || r.redirected) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(html => { if (railReading()) { railHeld = html; paintHeld(); } else railApply(html); })
+      .catch(() => {})
+      .finally(() => { railInFlight = false;
+        if (railAgain) { railAgain = false; refreshSignalRail(); } });
+  }
+  function railSoon() {
+    if (railSoonT) clearTimeout(railSoonT);
+    railSoonT = setTimeout(() => { railSoonT = null; refreshSignalRail(); }, 400);
+  }
+  window.svRailSoon = railSoon;
 
-  /* The rail's own slow sweep, for the same reason the ticker has one:
-     a Signal written by a path that does not reach the post_save push
-     (a bulk create, a replay, a migration) would otherwise sit unseen
-     until a reload. */
-  setInterval(function () {
-    if (!document.hidden) refreshSignalRail();
-  }, 300000);
+  /* The rail's own sweep, for the same reason the ticker has one: a
+     Signal written by a path that does not reach the post_save push (a
+     bulk create, a replay, a migration) would otherwise sit unseen until
+     a reload — and a price or an age departure has no push at all, so it
+     reaches the rail within the minute, the cadence the headband sweep
+     keeps. Never while the tab is hidden; at once when it comes back. */
+  setInterval(function () { if (!document.hidden) refreshSignalRail(); }, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshSignalRail();
+  });
   document.addEventListener('sv:pin-unlocked', function () {
     refreshSignalRail();
+  });
+  (function () {
+    const body = document.getElementById('railSignalsBody');
+    if (body) body.addEventListener('mouseleave', function () {
+      if (railLeaveT) clearTimeout(railLeaveT);
+      railLeaveT = setTimeout(() => { railLeaveT = null; window.svRailRelease(); }, 300);
+    });
+    const chip = document.getElementById('railHeld');
+    /* A button in the rail head, whose own click collapses the section:
+       the chip's click stops here. */
+    if (chip) chip.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      /* A card pinned on the rail (or the pinned headband list) unpins
+         first: the answer it waited for is the one to read now. */
+      const cur = window.svPin && window.svPin.current();
+      const rb = document.getElementById('railSignalsBody');
+      if (cur && ((rb && rb.contains(cur)) || cur.id === 'hbSignalsDD')) window.svPin.closeCurrent();
+      window.svRailRelease(true);
+    });
+  })();
+
+  /* The watchlist rail's own facts follow the headband WATCHLIST rows
+     (2026-11-06, the review). The 60s sweep re-draws those rows, a fill
+     changes what is held, and the two lists are one list under one set of
+     filters: the rail's items take the held fact and the order ranks the
+     sweep just drew (their --o-* properties only), and the HELD counts
+     follow. Prices stay with applyTick. */
+  function svWlVars(item, from) {
+    const vars = {};
+    (from.getAttribute('style') || '').split(';').forEach(p => {
+      const i = p.indexOf(':');
+      const k = i > 0 ? p.slice(0, i).trim() : '';
+      if (k.indexOf('--o-') === 0) vars[k] = p.slice(i + 1).trim();
+    });
+    const kept = (item.getAttribute('style') || '').split(';')
+      .filter(p => p.trim() && !(p.split(':')[0].trim() in vars));
+    Object.keys(vars).forEach(k => kept.push(k + ':' + vars[k]));
+    const next = kept.join(';');
+    if (item.getAttribute('style') !== next) item.setAttribute('style', next);
+  }
+  document.addEventListener('sv:live-swapped', function (e) {
+    const d = e && e.detail;
+    if (!d || d.region !== 'hb-watchlist-detail' || !d.node) return;
+    const body = document.getElementById('railWatchBody');
+    if (!body) return;
+    const fresh = {};
+    d.node.querySelectorAll('.sv-wl-row[data-symbol]')
+      .forEach(r => { fresh[r.getAttribute('data-symbol')] = r; });
+    let held = 0;
+    body.querySelectorAll('.wl-item[data-symbol]').forEach(item => {
+      const r = fresh[item.getAttribute('data-symbol')];
+      if (r) {
+        const h = r.getAttribute('data-held') || '0';
+        if (item.getAttribute('data-held') !== h) item.setAttribute('data-held', h);
+        svWlVars(item, r);
+      }
+      if (item.getAttribute('data-held') === '1') held += 1;
+    });
+    document.querySelectorAll('[data-sv-wheld]').forEach(el => {
+      if (el.textContent !== String(held)) el.textContent = String(held);
+    });
   });
 
   /* Exposed for the /ws/eye/ listener. A fill is the ONLY announcement a
@@ -4630,7 +5638,7 @@ window.svWheelMarquee = function (frame, track) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
-        else if (msg.type === 'signal') refreshSignalRail();
+        else if (msg.type === 'signal') railSoon();
         else if (msg.type === 'news') refreshTicker();
         else if (msg.type === 'watchlist') applyWatchlistCount(msg.data);
       } catch(e) {}
@@ -4798,6 +5806,67 @@ window.svWheelMarquee = function (frame, track) {
     if (!pop || !window.SV || !SV.popup) return;
     (open ? SV.popup.opened : SV.popup.closed)(pop);
   }
+  /* ONE PINNED POPUP ON THE PAGE (2026-11-06). A click or a tap pins the
+     rail's signal card (Phase 62.1), the watchlist's and the data
+     headband's cards and the bottom bar's dropdowns (below): pinning one
+     closes the one before, and while one is pinned no hover preview opens
+     anywhere. A pinned popup stays while the hand leaves, the page
+     scrolls, the live sweep runs or the tab is switched; it closes on an
+     outside click or tap (not inside an open overlay dialog — the TAKE
+     TRADE ticket opened over a pinned card does not close the card), Esc
+     (not while a dialog is open), its ×, a second click on what opened
+     it, or its anchor leaving the page. */
+  window.svPin = (function () {
+    var cur = null;
+    function close(c) { try { c.close(); } catch (e) { /* closed anyway */ } }
+    return {
+      take: function (pop, closeFn, anchor) {
+        if (cur && cur.pop !== pop) { var prev = cur; cur = null; close(prev); }
+        cur = { pop: pop, close: closeFn, anchor: anchor || null };
+      },
+      drop: function (pop) { if (cur && (!pop || cur.pop === pop)) cur = null; },
+      current: function () { return cur ? cur.pop : null; },
+      anchor: function () { return cur ? cur.anchor : null; },
+      closeCurrent: function () { if (cur) { var c = cur; cur = null; close(c); } }
+    };
+  })();
+  function isPinned(pop) { return !!(pop && pop.classList && pop.classList.contains('sv-pinned')); }
+  function dialogOpen() { return !!document.querySelector('.sv-dialog.is-open'); }
+  /* The × of a pinned portal popup or dropdown, appended once to its head
+     (the rail's card renders its own). */
+  function addPopX(pop, headSel, closeFn) {
+    if (pop._svX) return;
+    var head = pop.querySelector(headSel);
+    if (!head) return;
+    var x = document.createElement('button');
+    x.setAttribute('type', 'button');
+    x.className = 'sv-pop-x';
+    x.setAttribute('aria-label', 'Close');
+    x.setAttribute('title', 'Close (Esc)');
+    x.textContent = '\u00d7';
+    x.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeFn();
+    });
+    head.appendChild(x);
+    pop._svX = x;
+  }
+  document.addEventListener('pointerdown', function (e) {
+    var pop = window.svPin.current();
+    var t = e.target;
+    if (!pop || !t || t.nodeType !== 1) return;
+    if (pop.contains(t)) return;
+    var anchor = window.svPin.anchor();
+    if (anchor && anchor.contains(t)) return;
+    if (t.closest && t.closest('.sv-dialog, .sv-backdrop')) return;
+    window.svPin.closeCurrent();
+  }, true);
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    if (!window.svPin.current() || dialogOpen()) return;
+    window.svPin.closeCurrent();
+  });
   function showPortalPopup(item, popSelector, maxW, placement) {
     /* An item a live swap has taken is anchored nowhere: its rect is all
        zeros, and its card would open in the corner pointing at nothing. */
@@ -4818,23 +5887,33 @@ window.svWheelMarquee = function (frame, track) {
        their cursor onto the popup to click links/buttons inside.    */
     pop.style.pointerEvents = 'auto';
     var r = item.getBoundingClientRect();
-    var ph = pop.offsetHeight || 0;
+    /* Fit the screen (2026-11-06): never wider than the window allows (a
+       360px phone), and capped at the height left, scrolling inside. */
+    var w = Math.min(maxW, window.innerWidth - 32);
+    pop.style.maxWidth = w + 'px';
+    pop.style.minWidth = w < 320 ? w + 'px' : '';
     var top, left;
     if (placement === 'left') {
-      /* Beside the item, vertically centered — the signal-card pattern. */
+      /* Beside the item, centred on it and clamped between the chrome
+         bands — the signal-card pattern; the space between them is its
+         height. */
+      var cb = window.svChromeBounds ? window.svChromeBounds()
+        : { top: 12, bottom: window.innerHeight - 12 };
+      var space = Math.max(120, cb.bottom - cb.top);
+      pop.style.maxHeight = space + 'px';
+      var ph = Math.min(pop.offsetHeight || 0, space);
       top = r.top + r.height / 2 - ph / 2;
-      left = r.left - maxW - 12;
+      top = Math.max(cb.top, Math.min(top, cb.bottom - ph));
+      left = r.left - w - 12;
     } else {
+      /* Under its cell, always: the card is capped at the height left
+         below it rather than slid up over the band it describes. */
       top = r.bottom + 4;
       left = r.left;
-    }
-    /* Clamp to the viewport on both axes: headband popups near the right
-       edge slide left; rail popups near the bottom slide up. */
-    if (ph && top + ph > window.innerHeight - 12) {
-      top = window.innerHeight - ph - 12;
+      pop.style.maxHeight = Math.max(120, window.innerHeight - top - 12) + 'px';
     }
     if (top < 12) top = 12;
-    if (left + maxW > window.innerWidth - 16) left = window.innerWidth - maxW - 16;
+    if (left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
     if (left < 16) left = 16;
     pop.style.top = top + 'px';
     pop.style.left = left + 'px';
@@ -4869,6 +5948,8 @@ window.svWheelMarquee = function (frame, track) {
      the gap itself. */
   function maybeHidePortalPopup(item, pop, to) {
     if (!pop) return;
+    /* A pinned card does not close on the hand (2026-11-06). */
+    if (isPinned(pop)) return;
     if (to && to.nodeType === 1
         && ((item && item.contains(to)) || pop.contains(to))) {
       if (item && item._popHideTimer) {
@@ -4881,11 +5962,21 @@ window.svWheelMarquee = function (frame, track) {
   function scheduleHidePortalPopup(item, pop) {
     if (!pop) return;
     if (item._popHideTimer) clearTimeout(item._popHideTimer);
-    item._popHideTimer = setTimeout(function() { hidePortalPopup(pop); }, POP_LEAVE_MS);
+    item._popHideTimer = setTimeout(function() {
+      if (!isPinned(pop)) hidePortalPopup(pop);
+    }, POP_LEAVE_MS);
   }
   function hidePortalPopup(pop) {
     if (!pop) return;
     popRegister(pop, false);
+    if (isPinned(pop)) {
+      pop.classList.remove('sv-pinned');
+      if (pop._origParent) pop._origParent.setAttribute('aria-expanded', 'false');
+    }
+    window.svPin.drop(pop);
+    pop.style.maxHeight = '';
+    pop.style.maxWidth = '';
+    pop.style.minWidth = '';
     pop.style.display = '';
     pop.style.position = '';
     pop.style.zIndex = '';
@@ -4918,7 +6009,8 @@ window.svWheelMarquee = function (frame, track) {
      or open across it. */
   function resetPortals() {
     if (beatItem) disarmPortal(beatItem);
-    portalOpen.slice().forEach(function(p) { hidePortalPopup(p); });
+    /* A pinned card is not a hand that left unseen: it stays. */
+    portalOpen.slice().forEach(function(p) { if (!isPinned(p)) hidePortalPopup(p); });
     portalRewake = true;
   }
 
@@ -4929,6 +6021,7 @@ window.svWheelMarquee = function (frame, track) {
      nothing. */
   document.addEventListener('keydown', function(e) {
     if ((e.key === 'Escape' || e.key === 'Esc') && activePopup) {
+      if (isPinned(activePopup) && dialogOpen()) return;
       hidePortalPopup(activePopup);
     }
   });
@@ -4945,6 +6038,8 @@ window.svWheelMarquee = function (frame, track) {
        A swap that names no region keeps the old blanket behaviour. */
     var region = e && e.detail && e.detail.svRegion;
     var anchor = activePopup._origParent;
+    /* A pinned card whose cell is still on the page stays pinned. */
+    if (isPinned(activePopup) && anchor && anchor.isConnected) return;
     if (region && region.contains && anchor && anchor.isConnected
         && region !== anchor && !region.contains(anchor)) return;
     hidePortalPopup(activePopup);
@@ -4966,19 +6061,46 @@ window.svWheelMarquee = function (frame, track) {
   // travelling pointer while the feed rows two bands away took 2s.
   // One beat at a time: arming an item disarms the last one, whose leave
   // may never have come (a swap removed it from under the pointer).
+  // No hover preview while a popup is pinned (2026-11-06).
   function armPortal(item, sel, width, side){
+    if (window.svPin.current()) return;
     if (beatItem && beatItem !== item) disarmPortal(beatItem);
     if (item._svBeat) clearTimeout(item._svBeat);
     beatItem = item;
     item._svBeat = setTimeout(function(){
       item._svBeat = null;
       if (beatItem === item) beatItem = null;
+      if (window.svPin.current()) return;
       showPortalPopup(item, sel, width, side);
     }, window.SV_HOVER_BEAT_MS || 450);
   }
   function disarmPortal(item){
     if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
     if (beatItem === item) beatItem = null;
+  }
+  /* A click or a tap pins the item's card at once (2026-11-06). */
+  function pinPortal(item, sel, width, side){
+    disarmPortal(item);
+    var was = item._portalPop;
+    if (was && isPinned(was) && was.style.display === 'block') {
+      hidePortalPopup(was);
+      return;
+    }
+    /* Pinned BEFORE it is measured (2026-11-06, the review): on a touch
+       screen or a phone only a pinned card displays. */
+    var first = item.querySelector(sel) || was;
+    if (first) first.classList.add('sv-pinned');
+    showPortalPopup(item, sel, width, side);
+    var pop = item._portalPop;
+    if (!pop || pop.style.display !== 'block') {
+      if (first) first.classList.remove('sv-pinned');
+      return;
+    }
+    window.svPin.take(pop, function(){ hidePortalPopup(pop); }, item);
+    pop.classList.add('sv-pinned');
+    addPopX(pop, '.dh-pop-head', function(){ hidePortalPopup(pop); });
+    item.setAttribute('aria-haspopup', 'dialog');
+    item.setAttribute('aria-expanded', 'true');
   }
 
   /* Hover is DELEGATED to each band's own frame, which no refresh replaces
@@ -4994,9 +6116,18 @@ window.svWheelMarquee = function (frame, track) {
     var item = node && node.nodeType === 1 && node.closest ? node.closest(sel) : null;
     return item && host.contains(item) ? item : null;
   }
-  function delegatePortal(host, sel, arm){
+  function delegatePortal(host, sel, arm, pin){
     if (!host || host._svPortalHost) return;
     host._svPortalHost = true;
+    /* The click pins (2026-11-06); a modified click keeps the browser's
+       own meaning (a new tab). */
+    if (pin) host.addEventListener('click', function(e){
+      var item = portalItemAt(host, sel, e.target);
+      if (!item) return;
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      pin(item);
+    });
     host.addEventListener('mouseover', function(e){
       var item = portalItemAt(host, sel, e.target);
       var from = e.relatedTarget;
@@ -5027,12 +6158,16 @@ window.svWheelMarquee = function (frame, track) {
   // Data headband popups (portal to body) — hover-friendly
   delegatePortal(document.getElementById('dataHeadband'), '.dh-item', function(item){
     armPortal(item, '.dh-pop', 380);
+  }, function(item){
+    pinPortal(item, '.dh-pop', 380);
   });
 
   // Watchlist rail popups — same portal, same lifecycle, but placed to the
   // SIDE of the rail like the signal cards' popups, not under the item.
   delegatePortal(document.getElementById('railWatchBody'), '.wl-item', function(item){
     armPortal(item, '.wl-pop', 380, 'left');
+  }, function(item){
+    pinPortal(item, '.wl-pop', 380, 'left');
   });
 
   // News ticker popups (portal to body), delegated to #tickerBar — bound
@@ -5184,25 +6319,54 @@ window.svWheelMarquee = function (frame, track) {
   // As body children the dropdowns' hovercard tier wins for real. The
   // CSS :hover display rule no longer reaches them, so JS owns show/hide,
   // with a short grace so the pointer can travel into the dropdown.
+  //
+  // ON CLICK, PINNED (2026-11-06): a click or a tap on a cell pins its
+  // dropdown open — it stays while the hand leaves and closes on an
+  // outside click, Esc, its × or a second click on the cell (svPin); hover
+  // still opens it on the beat, and nothing opens on hover while a popup
+  // is pinned. It opens upward, capped at the height up to the top chrome
+  // and scrolling inside, its head sticky. The "▸ View …" footer, dead
+  // since the dropdown left its cell for <body>, navigates to the cell's
+  // page again.
   document.querySelectorAll('.info-panel-wrap .ip-cat').forEach(function(cat){
     var dd = cat.querySelector('.ip-dropdown');
     if(!dd) return;
     document.body.appendChild(dd);
+    var kids = dd.children;
+    var foot = kids.length ? kids[kids.length - 1] : null;
+    if (foot && foot.classList.contains('ip-dd-item')) foot.setAttribute('data-sv-dd-foot', '');
     var hideTimer = null;
+    function pinnedDd() { return dd.classList.contains('sv-pinned'); }
+    function hideNow(){
+      dd.style.display = 'none';
+      // display:none keeps the rows in the document, so a dwell card
+      // anchored to one never sees its anchor "detach" — close it with
+      // the panel it belongs to, or it floats over a page alone.
+      if (window.SV && window.SV.dwell && window.SV.dwell.hideWithin) {
+        window.SV.dwell.hideWithin(dd);
+      }
+      // The SIGNALS rows were being read: a rail refresh that waited for
+      // them lands now (2026-11-06, the review).
+      if (dd.id === 'hbSignalsDD' && window.svRailRelease) window.svRailRelease();
+    }
     function hideSoon(){
       if (hideTimer) clearTimeout(hideTimer);
+      if (pinnedDd()) return;
       hideTimer = setTimeout(function(){
-        dd.style.display = 'none';
-        // display:none keeps the rows in the document, so a dwell card
-        // anchored to one never sees its anchor "detach" — close it with
-        // the panel it belongs to, or it floats over a page alone.
-        if (window.SV && window.SV.dwell && window.SV.dwell.hideWithin) {
-          window.SV.dwell.hideWithin(dd);
-        }
+        if (pinnedDd()) return;
+        hideNow();
       }, 120);
     }
     function cancelHide(){
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
+    function unpin(){
+      cancelHide();
+      dd.classList.remove('sv-pinned');
+      cat.setAttribute('aria-expanded', 'false');
+      window.svPin.drop(dd);
+      popRegister(dd, false);
+      hideNow();
     }
     // Published for the news dwell-card: stepping from a row onto its
     // card exits this dropdown, and without a shared grace the panel
@@ -5219,6 +6383,9 @@ window.svWheelMarquee = function (frame, track) {
       var r = cat.getBoundingClientRect();
       dd.style.visibility = 'hidden'; dd.style.display = 'block';
       dd.style.pointerEvents = 'auto';
+      // The height left up to the top chrome, never under 160px.
+      var cb = window.svChromeBounds ? window.svChromeBounds() : { top: 12 };
+      dd.style.maxHeight = Math.max(160, r.top - (cb.top - 12) - 8) + 'px';
       // Clamp with the MEASURED width — the old assumed 340px let the
       // wider dropdowns overshoot the right edge by their difference.
       var ddW = dd.offsetWidth || 340;
@@ -5232,16 +6399,41 @@ window.svWheelMarquee = function (frame, track) {
     cat.addEventListener('mouseenter', function(){
       cancelHide();
       if (dd.style.display === 'block') return;
+      if (window.svPin.current()) return;
       if (openTimer) clearTimeout(openTimer);
-      openTimer = setTimeout(function(){ openTimer = null; open(); },
-                             window.SV_HOVER_BEAT_MS || 450);
+      openTimer = setTimeout(function(){
+        openTimer = null;
+        if (window.svPin.current()) return;
+        open();
+      }, window.SV_HOVER_BEAT_MS || 450);
     });
     cat.addEventListener('mouseleave', function(){
       if (openTimer) { clearTimeout(openTimer); openTimer = null; }
       hideSoon();
     });
+    cat.addEventListener('click', function(e){
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+      if (pinnedDd() && dd.style.display === 'block') { unpin(); return; }
+      cancelHide();
+      window.svPin.take(dd, unpin, cat);
+      open();
+      dd.classList.add('sv-pinned');
+      addPopX(dd, '.ip-dd-head', unpin);
+      cat.setAttribute('aria-haspopup', 'dialog');
+      cat.setAttribute('aria-expanded', 'true');
+      popRegister(dd, true);
+    });
     dd.addEventListener('mouseenter', cancelHide);
     dd.addEventListener('mouseleave', hideSoon);
+    dd.addEventListener('click', function(e){
+      var f = e.target && e.target.closest ? e.target.closest('[data-sv-dd-foot]') : null;
+      if (!f || !dd.contains(f)) return;
+      e.preventDefault();
+      var href = cat.getAttribute('href');
+      if (href) window.location.assign(href);
+    });
   });
 
   // Info panel minimize / restore toggle

@@ -40,7 +40,8 @@ access row says dollars are disclosed.{% endcomment %}
             <td style="font-family:var(--font-mono);font-weight:700;">{{ p.symbol }}</td>
             <td><span class="badge badge-{{ p.asset_class }}">{{ p.asset_class }}</span></td>
             <td style="font-family:var(--font-mono);font-size:11px;">{{ p.direction }}</td>
-            <td class="num {% if p.pnl_pct and p.pnl_pct < 0 %}down{% elif p.pnl_pct %}up{% endif %}" style="font-family:var(--font-mono);">{% if p.pnl_pct is not None %}{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            {# An eToro position's figure that is an estimate says so (2026-11-06): the words name the price and its age. #}
+            <td class="num {% if p.pnl_pct and p.pnl_pct < 0 %}down{% elif p.pnl_pct %}up{% endif %}" style="font-family:var(--font-mono);">{% if p.pnl_pct is not None %}{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}{% if p.pnl_words %}<span class="sv-muted" style="display:block;font-size:.7em;font-weight:400;">{{ p.pnl_words }}</span>{% endif %}</td>
             {% if not access.percents_only %}<td class="num" style="font-family:var(--font-mono);">{% if p.pnl is not None %}{{ p.pnl|floatformat:2 }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>{% endif %}
         </tr>
         {% endfor %}

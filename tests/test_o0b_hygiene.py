@@ -907,11 +907,20 @@ class TheLastLookFailClosedTests(SimpleTestCase):
         self._429_and_pause(fail_closed=False)
         self._429_and_pause(fail_closed=True)
 
-    def test_the_only_caller_keeps_the_default(self):
+    def test_the_only_caller_fails_closed_on_a_snapshot_price_alone(self):
+        """execute_entry, the one caller, keeps the default for a proposal
+        read on the wire and fails closed for one priced off the shared
+        rates cache or a batch (2026-11-01, engine/etoro_rates: an order
+        is never priced off a cache or a batch snapshot alone,
+        tests.test_etoro_rates_batch.TheSnapshotPricedOrderTests)."""
         from bot_program.asset_engine.base import AssetBot
         src = inspect.getsource(AssetBot.execute_entry)
         self.assertEqual(src.count("self._last_look("), 1)
-        self.assertNotIn("fail_closed", src)
+        self.assertEqual(src.count("fail_closed="), 1)
+        self.assertIn("fail_closed=_snapshot_priced", src)
+        self.assertIn('level_meta.get("proposal_quote_age_s") is not None',
+                      src)
+        self.assertIn('level_meta.get("proposal_quote_batched")', src)
         params = inspect.signature(AssetBot._last_look).parameters
         self.assertEqual(params["fail_closed"].default, False)
         self.assertEqual(params["fail_closed"].kind,

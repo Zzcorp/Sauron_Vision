@@ -423,7 +423,12 @@ class InfoPanelDetailTests(TestCase):
         self.assertIsNone(row["r"])
 
     def test_the_signals_panel_names_the_signals(self):
-        """It rendered four counts and not one of the actual signals."""
+        """It rendered four counts and not one of the actual signals.
+
+        (2026-11-06) The rows are the signal rail's own list, built per
+        request from the rail's snapshot and no longer inside the cached
+        _panel_detail (tests/test_rail_every_signal.py), so they are read
+        from sauron_context, where the page reads them."""
         from instruments.models import Instrument
         from signals.models import Signal
         inst, _ = Instrument.objects.get_or_create(
@@ -431,7 +436,11 @@ class InfoPanelDetailTests(TestCase):
         Signal.objects.create(instrument=inst, signal_type="technical",
                               direction="bullish", urgency="high", title="t",
                               score=0.8, is_active=True, price_at_signal=1)
-        top = self._detail()["panel_top_signals"]
+        from core.context_processors import sauron_context
+        from django.test import RequestFactory
+        req = RequestFactory().get("/")
+        req.user = self.user
+        top = sauron_context(req)["panel_top_signals"]
         self.assertEqual(top[0]["symbol"], "ETHUSD")
         self.assertEqual(top[0]["score_pct"], 80)
 

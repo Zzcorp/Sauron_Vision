@@ -1013,6 +1013,9 @@
       pnl = el('span', 'hd-pnl ' + toneCls(s.money.pnl_tone),
                s.money.pnl_t + (s.money.pnl_v !== null && s.money.pnl_v !== undefined && s.money.ccy ? ' ' + s.money.ccy : ''));
       pnl.setAttribute('data-flash', s.key + ':pnl');
+      /* Whose figure (2026-11-06): eToro's own on an eToro seat; the
+         words say when it is an estimate, and why on hover. */
+      if (s.money.pnl_title) pnl.title = s.money.pnl_title;
       if (s.mark.v === null || s.mark.v === undefined) {
         var w = el('span', 'hd-wait', DASH + (s.mark.wait ? ' ' + s.mark.wait : ''));
         w.title = s.mark.title || '';
@@ -1044,6 +1047,9 @@
     add(r3, rr);
     add(r3, pnl);
     markBits.forEach(function (b) { add(r3, b); });
+    /* An estimate says so after the mark (2026-11-06): R, P&L and the
+       mark stay one unit, in that order. */
+    if (pnl && s.money.pnl_words) add(r3, el('span', 'hd-muted', s.money.pnl_words));
     var lv = s.levels || {};
     var r4 = add(card, el('div', 'hd-seat-row hd-phone-hide'));
     /* The stop that can be hit (the venue's, on a row it protects), and
@@ -1473,6 +1479,7 @@
       add(r2, el('span', toneCls(s.money.pnl_tone), s.money.pnl_t + (s.money.pnl_v !== null && s.money.ccy ? ' ' + s.money.ccy : '')));
       if (s.mark.v === null || s.mark.v === undefined) add(r2, el('span', 'hd-wait', DASH + ' ' + (s.mark.wait || '')));
       else add(r2, el('span', '', s.mark.t + (s.mark.word ? ' ' + s.mark.word : '')));
+      if (s.money.pnl_words) add(r2, el('span', 'hd-muted', s.money.pnl_words));
     }
     /* Every reason that fired, in the sticky head, in a box of its own
        height (sv-horde.css): a long list scrolls there and never pushes

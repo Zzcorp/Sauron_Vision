@@ -14,14 +14,64 @@ expired or was dismissed, and the whole point is that the operator
 learns the engine acted. It ages out on its own lifecycle like any
 other card. Because the state is server-rendered it survives the WS
 partial swap for free — there is no client-side state to reapply.
+
+EVERY SIGNAL, AND WHY EACH ONE LEFT (2026-11-06). The rail lists every
+signal that can be acted on now (dashboard.signal_rail), newest first,
+not the five newest; it scrolls inside the rail. A signal leaves for a
+stated reason, and LEFT THE RAIL (hidden until its chip is pressed)
+keeps the last 24 hours of departures in words, with the TAKE TRADE
+ticket still offered while the engine holds the signal. Every row
+carries its facts as data-* attributes, which the rail's filters read
+(static/css/sv-rail.css); no row is ever edited by script. The meta
+block paints the counts outside this body, and the <template> carries
+the headband popup's rows, so one fetch updates both lists. base.html's
+first render passes rail_initial and renders those rows itself.
 {% endcomment %}
+{% if not rail.error %}<div data-sv-rail-ok hidden></div>{% endif %}
+{% if rail.error %}<div class="sr-rail-note sr-rail-error">The rail could not be read ({{ rail.error }}). The signals are untouched: /signals/ lists every one.</div>{% endif %}
+<section class="sr-gone" data-sv-gone aria-label="Signals that left the rail in the last 24 hours">
+    <div class="sr-gone-head">
+        <span class="sr-gone-title">LEFT THE RAIL · 24H</span>
+        <span class="sr-gone-count">{{ rail.gone_n|default:"0" }}</span>
+    </div>
+    {% if rail.gone_tags_words %}<div class="sr-gone-tags">{{ rail.gone_tags_words }}</div>{% endif %}
+    {% for g in rail.gone %}
+    <div class="sr-gone-row" data-sv-row data-gone data-reason="{{ g.reason }}" data-signal-id="{{ g.signal_id }}" data-asset-class="{{ g.facts.asset_class }}" data-side="{{ g.facts.side }}" data-score-b="{{ g.facts.score_band }}" data-stage="{{ g.facts.stage }}" data-votes="{{ g.facts.votes|yesno:'1,0' }}" data-live="{{ g.facts.live|yesno:'1,0' }}" data-held="{{ g.facts.held|yesno:'1,0' }}" data-rule-key="{{ g.facts.rule_key }}" data-created="{{ g.created_at|date:'c' }}">
+        <div class="sr-gone-l1">
+            <span class="sr-sym">{{ g.symbol }}</span>
+            <span class="sr-badge sr-badge-{{ g.direction }}">{{ g.direction|upper|slice:":4" }}</span>
+            <span class="sr-gone-tag sr-gone-tag-{{ g.reason }}">{{ g.tag }}</span>
+            <span class="sr-gone-at" title="{{ g.at|date:'Y-m-d H:i' }} UTC">{{ g.at|date:"H:i" }}</span>
+        </div>
+        <div class="sr-gone-words">{{ g.words }}{% if g.closed_words %} · {{ g.closed_words }}{% endif %}</div>
+        {% if g.position_words %}<div class="sr-gone-pos">{{ g.position_words }}</div>{% endif %}
+        {% if g.takeable or g.yours %}
+        <div class="sr-gone-acts">
+            {% if g.takeable %}<button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="Still active in the engine: the ticket is the one TAKE TRADE opens, priced when you open it" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>{% endif %}
+            {% if g.yours %}<button type="button" class="sr-gone-btn" data-sv-unpass="{{ g.signal_id }}" title="Put it back on your rail">↺ BRING BACK</button>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% empty %}
+    {% if not rail.error %}<div class="sr-gone-empty">Nothing left the rail in the last 24 hours.</div>{% endif %}
+    {% endfor %}
+    {% comment %}Every departure the engine still holds is drawn above, its
+    ticket with it (2026-11-06, the review); only the engine's own closes are
+    drawn up to a bound, and these lines say how many more there were.{% endcomment %}
+    {% if rail.gone_more %}<div class="sr-rail-note">and {{ rail.gone_more }} more engine closes in the last 24h, drawn no further: the engine closed them, so no ticket is lost. /signals/ lists every signal.</div>{% endif %}
+    {% if rail.closed_unread %}<div class="sr-rail-note">{{ rail.closed_unread }} more engine closes of the last 24h were not read (the newest {{ rail.closed_fetch }} were). /signals/ lists every signal.</div>{% endif %}
+</section>
+{% if rail.ceiling_hit %}<div class="sr-rail-note sr-rail-ceiling">Showing the newest {{ rail.ceiling }} of {{ rail.total }} signals from the last 48h. /signals/ lists every one.</div>{% endif %}
+{% url 'signals_list' as signals_url %}
+<div class="sr-list" data-sv-list="signals">
+{% for g in rail.groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cscore:{{ g.o_cls }};--o-score:0">{{ g.label }}</div>{% endfor %}
 {% for s in panel_recent_signals %}
-            <div class="sr-signal-wrap{% if s.acted %} sr-acted sr-acted-{{ s.acted.by }}{% endif %}" data-signal-id="{{ s.id }}"{% if s.acted %} data-acted="{{ s.acted.by }}"{% endif %}>
+            <div class="sr-signal-wrap{% if s.acted %} sr-acted sr-acted-{{ s.acted.by }}{% endif %}" data-signal-id="{{ s.id }}"{% if s.acted %} data-acted="{{ s.acted.by }}"{% endif %} data-sv-row data-asset-class="{{ s.rail.asset_class }}" data-side="{{ s.rail.side }}" data-score-b="{{ s.rail.score_band }}" data-stage="{{ s.rail.stage }}" data-votes="{{ s.rail.votes|yesno:'1,0' }}" data-live="{{ s.rail.live|yesno:'1,0' }}" data-held="{{ s.rail.held|yesno:'1,0' }}" data-rule-key="{{ s.rail.rule_key }}" data-created="{{ s.created_at|date:'c' }}" style="--o-score:{{ s.rail.o_score }};--o-cls:{{ s.rail.o_cls }};--o-cscore:{{ s.rail.o_cscore }}">
                 <button type="button" class="sr-x"
-                        title="Dismiss — hides this signal for you; the engine still sees it"
-                        aria-label="Dismiss {{ s.instrument.symbol }} signal"
+                        title="Pass — takes it off your rail on every device; the engine still sees it"
+                        aria-label="Pass on {{ s.instrument.symbol }} signal"
                         onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">&times;</button>
-                <a href="{% url 'signals_list' %}" class="sr-signal" style="text-decoration:none;">
+                <a href="{{ signals_url }}" class="sr-signal" aria-haspopup="dialog" aria-expanded="false" style="text-decoration:none;">
                     <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
                     <div class="sr-detail">
                         <div class="sr-row1">
@@ -43,8 +93,12 @@ partial swap for free — there is no client-side state to reapply.
                             <span class="sr-score-num">{{ s.score|floatformat:2 }}</span>
                             {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}">{{ s.urgency|upper|slice:":3" }}</span>{% endif %}
                         </div>
-                        {% if s.rule_name %}
-                        <div class="sr-row3">{{ s.rule_name|truncatechars:34 }}</div>
+                        <div class="sr-row3">
+                            {% if s.rail.stage_label %}<span class="sr-stage sr-stage-{{ s.rail.stage_tone }}" title="{{ s.rail.stage_reason }}">{{ s.rail.stage_label }}</span>{% endif %}
+                            {% if s.rule_name %}<span class="sr-rule">{{ s.rule_name|truncatechars:28 }}</span>{% endif %}
+                        </div>
+                        {% if s.rail.contra %}
+                        <div class="sr-contra" title="A newer opposite signal from another rule on this instrument. The bots net the two sides; you decide.">⚠ CONTRA {{ s.rail.contra.rule|truncatechars:20 }} {{ s.rail.contra.side }} {{ s.rail.contra.at|timesince|truncatechars:8 }}</div>
                         {% endif %}
                         {% if s.acted %}
                         {# The state that used to be missing: something already acted on this. #}
@@ -63,6 +117,7 @@ partial swap for free — there is no client-side state to reapply.
                         <span class="sr-pop-sym">{{ s.instrument.symbol }}</span>
                         <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{{ s.direction|upper }}</span>
                         {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}" style="margin-left:auto;">{{ s.urgency|upper }}</span>{% endif %}
+                        <button type="button" class="sv-pop-x" aria-label="Close this card" title="Close (Esc)">&times;</button>
                     </div>
                     {% if s.acted %}
                     {% comment %}The banner exists so the operator reads
@@ -126,13 +181,46 @@ partial swap for free — there is no client-side state to reapply.
                         a suggested entry is still reachable.{% endcomment %}
                         <div><span class="sr-pop-k">mark</span><span class="sr-pop-v">{% px s.instrument.live_quote.last s.instrument.asset_class s.instrument.symbol %}</span></div>
                         <div><span class="sr-pop-k">age</span><span class="sr-pop-v">{{ s.created_at|timesince }}</span></div>
+                        <div><span class="sr-pop-k">R:R now</span><span class="sr-pop-v">{% if s.rail.rr_now is not None %}{{ s.rail.rr_now|floatformat:2 }}{% else %}<span class="sv-unknown" title="No fresh quote, or no levels to weigh">&mdash;</span>{% endif %}</span></div>
+                        <div><span class="sr-pop-k">leaves</span><span class="sr-pop-v" title="{{ s.rail.leaves_words }}">{{ s.rail.leaves_at|timeuntil|truncatechars:10 }}</span></div>
+                    </div>
+                    {% comment %}Can anything act on it, and what is its
+                    rule worth: the stage badge (signal_surface.stage_badge,
+                    the entry path's own two functions), the floor's graded
+                    record and the real-money record on this class. The vote
+                    ends 24 hours after the signal FIRED, as decide() counts
+                    it, whatever the scanner re-matched since; the words say
+                    "a default bot", whose age limit that is.{% endcomment %}
+                    <div class="sr-pop-facts">
+                        <div class="sr-pop-fact"><span class="sr-pop-k">stage</span> {{ s.rail.stage_label|default:"—" }} · {{ s.rail.vote_words }}</div>
+                        <div class="sr-pop-fact"><span class="sr-pop-k">graded</span> {{ s.rail.record_words }}</div>
+                        {% if s.rail.live_words %}<div class="sr-pop-fact"><span class="sr-pop-k">real money</span> {{ s.rail.live_words }}</div>{% endif %}
+                        {% if s.rail.held %}<div class="sr-pop-fact"><span class="sr-pop-k">held</span> you hold {{ s.instrument.symbol }} ({{ s.rail.held_venue }})</div>{% endif %}
                     </div>
                     {% comment %}Reaction row (take trade / pass) — primary
                     decisions. TAKE TRADE only for directional signals: a
                     neutral verdict carries no side, and the server refuses
-                    it too.{% endcomment %}
+                    it too. Your own exact hand position on THIS signal is
+                    one position per signal: while it is OPEN the server
+                    refuses a second (manual_trade's duplicate check), so the
+                    card says so rather than offering a ticket it would
+                    refuse. While its close is pending the server would take
+                    a second, but the position is still open at the broker:
+                    the card keeps the ticket back, the safer side, and says
+                    the position is closing, never that it is open.
+
+                    THE FOOT (2026-11-06): both action rows ride a sticky foot
+                    (static/css/sv-rail.css), so TAKE TRADE and PASS stay in
+                    view while a long card's body scrolls between its head
+                    and them; ALL SIGNALS keeps the way to /signals/ that a
+                    click on the card used to be (a click now pins this
+                    card).{% endcomment %}
+                    <div class="sr-pop-foot">
                     <div class="sr-pop-actions sr-pop-actions-react">
-                        {% if s.direction == "bullish" or s.direction == "bearish" %}
+                        {% if s.acted and s.acted.by == "manual" and s.acted.exact %}
+                        {% if s.acted.status == "CLOSE_PENDING" %}<span class="sr-pop-one">Position #{{ s.acted.trade_id }} is closing (close pending): a new ticket on this signal waits until it has closed.</span>
+                        {% else %}<span class="sr-pop-one">One position per signal: #{{ s.acted.trade_id }} is open.</span>{% endif %}
+                        {% elif s.direction == "bullish" or s.direction == "bearish" %}
                         <button type="button"
                                 class="sr-pop-btn sr-pop-btn-act{% if s.acted %} sr-pop-btn-add{% endif %}"
                                 data-signal-id="{{ s.id }}"
@@ -148,17 +236,27 @@ partial swap for free — there is no client-side state to reapply.
                     {# Explore row — secondary deep-dive actions. #}
                     <div class="sr-pop-actions">
                         <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">▸ INSTRUMENT</a>
+                        <a href="{{ signals_url }}" class="sr-pop-btn">▸ ALL SIGNALS</a>
                         <button type="button" class="sr-pop-btn"
                                 data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
                                 data-ask-kind="signal">
                             ▸ ASK SAURON
                         </button>
                     </div>
+                    </div>
                 </div>
             </div>
             {% empty %}
-            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
+            {% comment %}An unread rail is an unknown, never an empty one: its
+            note above says so, and nothing here claims the rail is empty
+            (2026-11-06, the review).{% endcomment %}
+            {% if not rail.error %}
+            <div class="sr-empty" style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
                 <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
-                No active signals
+                No signal on the rail{% if rail.gone_n %} · {{ rail.gone_n }} left in the last 24h{% endif %}
             </div>
+            {% endif %}
             {% endfor %}
+</div>
+<div data-sv-rail-meta hidden>{{ rail.meta|json_script }}</div>
+{% if not rail_initial %}<template data-sv-mirror="hbSignalRows">{% include "_partials/signal_rows_compact.html" %}</template>{% endif %}

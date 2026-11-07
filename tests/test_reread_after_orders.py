@@ -953,8 +953,10 @@ class OneReadPerPassTests(TestCase):
 class AMissedCellsPassTests(TestCase):
     """A pass whose cash and used margin did not answer refreshes neither
     the equity nor last_sync (above), and counts as a missed sync: three
-    such passes running raise the stall alert, the cash cells being what
-    the order gate reads. A good pass clears the count."""
+    such passes running raised the stall alert, the cash cells being what
+    the order gate reads. A good pass clears the count. Fifteen passes
+    since 2026-11-06 (tasks.broker_miss_alert_after): the walk beats every
+    60 s, and fifteen passes are the fifteen minutes three made at 300 s."""
 
     def setUp(self):
         cache.clear()
@@ -973,17 +975,20 @@ class AMissedCellsPassTests(TestCase):
 
     def test_three_passes_without_cells_raise_the_stall_alert(self):
         """The cells alert, not the unreachable one: eToro answered the
-        holdings beside them (review, 2026-10-31)."""
+        holdings beside them (review, 2026-10-31). The eToro walk's own
+        count since 2026-11-06: fifteen passes, fifteen minutes."""
+        from bot_program.tasks import broker_miss_alert_after
+        after = broker_miss_alert_after("etoro")
         with patch("bot_program.notifications.notify_broker_unreachable",
                    return_value=True) as unreachable, \
                 patch(CELLS_ALERT, return_value=True) as alert:
-            for _ in range(2):
+            for _ in range(after - 1):
                 _sync(self._double(cells_answer=False))
             alert.assert_not_called()
             _sync(self._double(cells_answer=False))
         alert.assert_called_once()
         unreachable.assert_not_called()
-        self.assertEqual(alert.call_args.kwargs["misses"], 3)
+        self.assertEqual(alert.call_args.kwargs["misses"], after)
         self.assertEqual(alert.call_args.kwargs["broker"], "etoro")
         self.assertTrue(alert.call_args.kwargs["holdings_answered"])
 
@@ -1007,17 +1012,19 @@ class AMissedCellsPassTests(TestCase):
         and the used margin did not answer, how old the cells every eToro
         order is judged on are, and nothing about the keys."""
         from bot_program import notifications
+        from bot_program.tasks import broker_miss_alert_after
+        after = broker_miss_alert_after("etoro")   # 15 since 2026-11-06
         with patch.object(notifications, "dispatch_notification",
                           return_value=True) as sent, \
                 self.assertLogs("bot_program.tasks", level="WARNING") as logs:
-            for _ in range(3):
+            for _ in range(after):
                 _sync(self._double(cells_answer=False))
         sent.assert_called_once()
         kw = sent.call_args.kwargs
         words = " ".join([kw["title"], kw["body"]]
                          + kw["row_data"]["items"])
-        self.assertIn("Main: eToro answered no cash or used margin for 3 "
-                      "syncs running", kw["title"])
+        self.assertIn(f"Main: eToro answered no cash or used margin for "
+                      f"{after} syncs running", kw["title"])
         self.assertIn("the holdings answered", kw["body"])
         self.assertIn("every eToro order is judged on", kw["body"])
         self.assertIn("10 min old", kw["body"])
@@ -1025,7 +1032,7 @@ class AMissedCellsPassTests(TestCase):
                       "Equity and holdings on every page"):
             self.assertNotIn(wrong, words)
         miss_lines = [m for m in logs.output if "consecutive miss" in m]
-        self.assertEqual(len(miss_lines), 3, logs.output)
+        self.assertEqual(len(miss_lines), after, logs.output)
         for line in miss_lines:
             self.assertIn("answered no cash / used margin", line)
             self.assertNotIn("no equity AND no holdings", line)
@@ -1039,43 +1046,50 @@ class AMissedCellsPassTests(TestCase):
         nothing.demo = True
         nothing.account_snapshot.return_value = None
         nothing.broker_portfolio.return_value = None
+        # fifteen passes on the eToro walk since 2026-11-06
+        from bot_program.tasks import broker_miss_alert_after
+        after = broker_miss_alert_after("etoro")
         with patch("bot_program.notifications.notify_broker_unreachable",
                    return_value=True) as unreachable, \
                 patch(CELLS_ALERT, return_value=True) as cells:
             _sync(self._double(cells_answer=False))
             _sync(nothing)
-            _sync(self._double(cells_answer=False))
+            for _ in range(after - 2):
+                _sync(self._double(cells_answer=False))
         unreachable.assert_called_once()
         cells.assert_not_called()
-        self.assertEqual(unreachable.call_args.kwargs["misses"], 3)
+        self.assertEqual(unreachable.call_args.kwargs["misses"], after)
 
 
 class TheMinutesFollowEachWalkTests(TestCase):
     """The stall alert said "since {misses x 15} minutes ago" for every
     broker: at the eToro walk's 300 s, three missed passes are fifteen
     minutes, not forty-five. The Treasury's "the sync runs every 15" is
-    each walk's own figure too."""
+    each walk's own figure too. At its 60 s since 2026-11-06 the alert
+    waits fifteen passes (tasks.broker_miss_alert_after): fifteen minutes
+    again."""
 
     def setUp(self):
         self.user = User.objects.create_user("rr_min", password="x")
 
-    def _alert(self, broker):
+    def _alert(self, broker, misses=3):
         from bot_program import notifications
         with patch.object(notifications, "dispatch_notification",
                           return_value=True) as d:
             notifications.notify_broker_unreachable(
-                self.user, label="Main", host="api", port=0, misses=3,
+                self.user, label="Main", host="api", port=0, misses=misses,
                 broker=broker)
         return d.call_args.kwargs
 
     def test_the_alert_counts_each_walks_beat(self):
         from bot_program.broker_vision import sync_minutes
-        self.assertEqual(sync_minutes("etoro"), 5)
+        from bot_program.tasks import broker_miss_alert_after
+        self.assertEqual(sync_minutes("etoro"), 1)
         self.assertEqual(sync_minutes("ibkr"), 15)
         self.assertEqual(sync_minutes("saxo"), 15)
-        kw = self._alert("etoro")
+        kw = self._alert("etoro", misses=broker_miss_alert_after("etoro"))
         self.assertIn("since 15 minutes ago", kw["body"])
-        self.assertIn("Silent for 3 syncs running (about 15 minutes)",
+        self.assertIn("Silent for 15 syncs running (about 15 minutes)",
                       kw["row_data"]["items"])
         kw = self._alert("ibkr")
         self.assertIn("since 45 minutes ago", kw["body"])
@@ -1088,7 +1102,9 @@ class TheMinutesFollowEachWalkTests(TestCase):
 
     def test_the_switch_and_the_broker_card_say_the_etoro_minutes(self):
         """The broker_account_sync row (/health/) and the broker card's
-        hover said "every 15 min" for all three walks."""
+        hover said "every 15 min" for all three walks. Every minute since
+        2026-11-06 (the operator: "augmenter to the maximum le taux de
+        refresh ... de eToro surtout"; it was every 5 min)."""
         from pathlib import Path
 
         from django.conf import settings
@@ -1096,31 +1112,35 @@ class TheMinutesFollowEachWalkTests(TestCase):
         from core.platform_control import DEFAULT_COMPONENTS
         row = next(c for c in DEFAULT_COMPONENTS
                    if c["key"] == "broker_account_sync")
-        self.assertIn("eToro every 5 min", row["description"])
+        self.assertIn("eToro every minute", row["description"])
         card = (Path(settings.BASE_DIR) / "templates" / "_partials"
                 / "broker_account.html").read_text(encoding="utf-8")
-        self.assertIn("eToro every 5 min", card)
+        self.assertIn("eToro every minute", card)
         self.assertNotIn("written by the broker sync every 15 min", card)
 
     def test_the_treasury_says_the_etoro_walks_minutes(self):
         from bot_program.broker_vision import vision
         _account(self.user, age_s=3 * 3600)
         notes = " ".join(vision(self.user)["notes"])
-        self.assertIn("minutes old; the sync runs every 5.", notes)
+        # every minute since 2026-11-06 (every 5 from 2026-10-31)
+        self.assertIn("minutes old; the sync runs every 1.", notes)
         self.assertNotIn("every 15.", notes)
 
 
 class TheCadencesTests(TestCase):
     """The operator asked for both on 2026-10-31: the eToro sync every
     300 s (900 s before) and the reconcile every 5 minutes (*/15 before);
-    the re-read rides the fast queue."""
+    the re-read rides the fast queue. And faster on 2026-11-06 ("augmenter
+    to the maximum le taux de refresh ... de eToro surtout"): the sync
+    every 60 s; the reconcile stays every 5 minutes
+    (tests.test_faster_refresh)."""
 
     def test_the_beats_and_the_route(self):
         from celery.schedules import crontab
 
         from config.celery import app
         beat = app.conf.beat_schedule
-        self.assertEqual(beat["sync-etoro-accounts"]["schedule"], 300.0)
+        self.assertEqual(beat["sync-etoro-accounts"]["schedule"], 60.0)
         self.assertEqual(beat["reconcile-asset-bot-trades"]["schedule"],
                          crontab(minute="*/5"))
         self.assertEqual(

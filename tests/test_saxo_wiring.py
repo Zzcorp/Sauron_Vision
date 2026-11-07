@@ -382,8 +382,10 @@ class TheSyncTests(TestCase):
         self.assertEqual(entry["schedule"],
                          app.conf.beat_schedule["sync-broker-account"]["schedule"])
         self.assertEqual(entry["schedule"], 900.0)
+        # the eToro walk: 300 s from 2026-10-31, 60 s since 2026-11-06
+        # (tests.test_faster_refresh); still not Saxo's 900 s
         self.assertEqual(
-            app.conf.beat_schedule["sync-etoro-accounts"]["schedule"], 300.0)
+            app.conf.beat_schedule["sync-etoro-accounts"]["schedule"], 60.0)
 
 
 class ThePageClaimsClassesTests(TestCase):

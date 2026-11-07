@@ -2586,7 +2586,9 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
     thing that can. The minutes are that broker's own walk's
     (broker_vision.sync_minutes, 2026-10-31): eToro's walks every 5
     minutes, IBKR's and Saxo's every 15, and three eToro misses are fifteen
-    minutes, not forty-five.
+    minutes, not forty-five. eToro's every minute since 2026-11-06, and the
+    alert waits fifteen of its misses (tasks.broker_miss_alert_after):
+    fifteen minutes still.
     """
     remedy, url = BROKER_REMEDY.get(broker or "ibkr",
                                     BROKER_REMEDY["ibkr"])
