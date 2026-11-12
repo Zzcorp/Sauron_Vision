@@ -7115,11 +7115,39 @@ class AssetBot(ABC):
                 if _floor is not None and not _why and _fm.get("need"):
                     _floor = float(_fm["need"])
             else:
+                # ONE DOLLAR RATE PER ENTRY, AT THE ORDER TOO (2026-11-12;
+                # main's own, recorded by the venue floor's reviews).
+                # eToro states its minimum in dollars and it is turned into
+                # units here with the candidate's price and the candidate's
+                # OWN rate (the sizer's, on the candidate), never a second
+                # read of the platform's feed: read again, the rate moved
+                # the minimum between the proposal and the order, and a bot
+                # whose own size was exactly the minimum was refused on the
+                # noise between two feeds. A pair whose base is the dollar
+                # (_usd_base_pair) takes eToro's figure in units: N units of
+                # it are N dollars whatever the price. A candidate built by
+                # hand, with no rate, reads one as before.
+                try:
+                    _cand_vpu = float(
+                        (sizing or {}).get("value_per_unit") or 0.0)
+                except (TypeError, ValueError):
+                    _cand_vpu = 0.0
+                if not _cand_vpu > 0:
+                    _cand_vpu = self._value_per_unit(symbol)
                 _floor, _why = self._venue_size_floor(
                     client, symbol, price=price,
                     min_notional=self._extras_float("venue_min_notional",
                                                     0.0),
-                    value_per_unit=self._value_per_unit(symbol))
+                    value_per_unit=_cand_vpu)
+                from bot_program.engine.capabilities import has_capability
+                if (_floor is not None and not _why
+                        and self._usd_base_pair(symbol)
+                        and has_capability(client, "money_floor")
+                        and not has_capability(client, "size_floor")):
+                    # eToro's own figure: the division by the price and
+                    # the rate undone, to the sixth decimal (_floor_minimum)
+                    _floor = round(float(_floor) * float(price)
+                                   * float(_cand_vpu), 6)
             if _floor is None:
                 logger.info("[%s_bot] %s: no venue size floor measured (%s) "
                             "— an under-minimum order, if this venue has "

@@ -14,7 +14,9 @@ prices, round invented pools; no broker, no model, no HTTP):
     proposed before the day crossed the limit, never judged elite, is not
     sent;
   * the 12-hour note after a refused levered order: written exactly when
-    eToro refused an order that reached it, whoever reads the refusal.
+    eToro refused an order that reached it, whoever reads the refusal;
+  * eToro's minimum at the order in units with one dollar rate per entry,
+    and in eToro's own figure for a pair whose base is the dollar.
 
 Run with:  python manage.py test tests.test_entry_at_the_send
 """
@@ -325,3 +327,77 @@ class TheTwelveHourNoteTests(TestCase):
             raises=RuntimeError('eToro refused (400): {"errorCode": 720}')))
         self.assertEqual(
             out.cfg.extras["leverage_refusals"]["EURUSD"]["leverage"], 10)
+
+
+def _pair_row(iid, symbol):
+    """An eligibility row for a forex pair the harness does not carry,
+    as forex is measured (a 1,000 USD minimum exposure)."""
+    return H._row(iid, symbol, [
+        H._lev("cfd", "long", [1], max_sl=100, min_amount=25),
+        H._lev("cfd", "long", [2, 5, 10, 20, 30], min_amount=25),
+        H._lev("cfd", "short", [1, 2, 5, 10, 20, 30], min_amount=25)],
+        min_exposure=1000)
+
+
+class TheMinimumAtTheOrderTests(TestCase):
+    """E. main's own check of eToro's minimum at the order (the venue
+    floor's switch OFF; ON, a size that clears the minimum meets the same
+    check). eToro states its minimum in dollars, and the order turned it
+    into units with the candidate's price and a SECOND read of the
+    platform's dollar rate: a bot whose own size was exactly the minimum
+    could be refused on the noise between the two feeds. One rate per
+    entry (the candidate's, the sizer's), as the floor reads it for a
+    raised entry; for a pair whose base is the dollar, eToro's figure in
+    units."""
+
+    def _world(self, tag, symbol, price, pool, **changes):
+        H.switch(H.SWITCH, None)
+        H.switch(H.LEVERAGE, True)
+        table = H.rows(**{symbol: _pair_row(1005, symbol)})
+        return H.arm("forex_under_min", tag, symbol=symbol, price=price,
+                     pool=pool, table=table, **changes)
+
+    def test_a_pair_whose_base_is_the_dollar_at_exactly_the_minimum_goes(
+            self):
+        """USDJPY at 150.00, a 6,000 pool, a 1.5% stop: the risk budget
+        (15.00 at the stop, at the platform's yen rate of 1/150.03) sizes
+        1,000 units. N units of USDJPY are N dollars of exposure, so
+        eToro's 1,000 USD minimum is 1,000 units; turned into units through
+        eToro's price and the platform's rate it read 1,000.2, and the
+        bot's own 1,000 were refused. Now they are sent, at the bot's own
+        size. A size under eToro's figure is still refused, with its
+        numbers."""
+        def yen(bot):
+            bot._value_per_unit = lambda symbol: 1 / 150.03
+        out = H.run(self._world("jpy", "USDJPY", "150.00", "6000"),
+                    prepare=yen)
+        self.assertEqual(out.cand.qty_default, 1000.0)
+        self.assertIsNotNone(out.res, H.skip_of(out))
+        self.assertEqual([o[:3] for o in H.orders(out)],
+                         [["USDJPY", "BUY", 1000.0]])
+        under = H.run(self._world("jpy_under", "USDJPY", "150.00", "6000"),
+                      prepare=yen, size_mult=0.9)
+        self.assertEqual(H.orders(under), [])
+        skip = H.skip_of(under)
+        self.assertEqual(skip["code"], "venue_min_size")
+        self.assertTrue(skip["detail"].startswith(
+            "sized 900 units from the stop distance; this venue's minimum "
+            "is 1000. "), skip)
+
+    def test_the_rate_of_the_proposal_is_the_rate_at_the_order(self):
+        """EURGBP at 0.8500, Fractional Units on (forex by the unit), a
+        6,005 pool: the risk budget sizes 927 units at the proposal's pound
+        rate of 1.2700, where eToro's minimum is 926.4 units. The
+        platform's rate reads 1.2690 when the order is built: read again,
+        the minimum was 927.1 and the entry was refused. One rate per
+        entry: sent, at the bot's own 927."""
+        rate = {"v": 1.2700}
+        out = H.run(
+            self._world("gbp", "EURGBP", "0.8500", "6005", fractions=True),
+            prepare=lambda bot: setattr(
+                bot, "_value_per_unit", lambda symbol: rate["v"]),
+            between=lambda: rate.update(v=1.2690))
+        self.assertEqual(out.cand.qty_default, 927.0)
+        self.assertIsNotNone(out.res, H.skip_of(out))
+        self.assertEqual([o[:3] for o in H.orders(out)],
+                         [["EURGBP", "BUY", 927.0]])
