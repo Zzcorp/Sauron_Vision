@@ -1,6 +1,7 @@
 {% load sauron_tags oc_dash %}
 {# BOTS tab — per-AssetBotConfig overview with health + cooldown. #}
-{# Rendered without the request (views_command._fragment). Each bot's world is its ACCOUNT's (a live-mode bot on an eToro demo account is DEMO), its health is its own heartbeat against the tick's cadence, and the two bot forms are drawn only for the users their endpoint accepts, with their CSRF token (2026-11-07, OC0). #}
+{# Rendered without the request (views_command._fragment). Each bot's world is its ACCOUNT's (a live-mode bot on an eToro demo account is DEMO) and its health is its own heartbeat against the tick's cadence (2026-11-07, OC0). #}
+{# NO FORM HERE (2026-11-12, proposal P1, the operator's OK of 2026-11-07): the bots' "Toggle" and "▶ Tick" left the home for everyone and stay on the bots page, unchanged. This tab shows states; a superuser, the only user their endpoints accept, gets one plain link to the bots page under the table. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
 {# With no bot configured there is no population to count enabled, live or #}
@@ -42,7 +43,7 @@
         <thead><tr>
             <th>health</th><th>asset</th><th>name</th><th>world</th>
             <th>open</th><th>opens 24h</th><th>closes 24h</th><th>P&amp;L 24 h</th>
-            <th>cooldown</th><th>last tick</th>{% if can_operate %}<th>action</th>{% endif %}
+            <th>cooldown</th><th>last tick</th>
         </tr></thead>
         <tbody>
         {% for r in rows %}
@@ -87,27 +88,16 @@
                 <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
                     {% if r.tick_text %}<span title="{{ r.health_title }}">{{ r.tick_text }}</span>{% else %}<span title="{{ why.no_tick }}">—</span>{% dash_note "—" why.no_tick %}{% endif %}
                 </td>
-                {# The two forms post to an endpoint that refuses everyone but a superuser (views_admin_hq._admin_only): drawn for no one else. Their words, PIN and endpoints are unchanged. #}
-                {% if can_operate %}
-                <td style="display:flex;gap:6px;">
-                    <form method="post" action="{% url 'hq_toggle_asset_bot' %}" style="display:inline;">
-                        {% csrf_token %}
-                        <input type="hidden" name="config_id" value="{{ r.config.id }}">
-                        {% if r.config.mode == 'live' and not r.config.enabled %}<input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;">{% endif %}
-                        <button class="btn btn-sm" type="submit">Toggle</button>
-                    </form>
-                    <form method="post" action="{% url 'hq_run_asset_bot' %}" style="display:inline;">
-                        {% csrf_token %}
-                        <input type="hidden" name="config_id" value="{{ r.config.id }}">
-                        <button class="btn btn-sm" type="submit">▶ Tick</button>
-                    </form>
-                </td>
-                {% endif %}
             </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
+    {# In the two forms' place (2026-11-12, P1): "Toggle" did not say on or off, and "▶ Tick" started a bot pass from the home with no PIN and no confirmation. Both are on the bots page, with the PIN that arming a live bot asks; their endpoints (views_admin_hq._admin_only) refuse everyone but a superuser, so nobody else is pointed to them. A link, never a form. #}
+    {% if can_operate %}
+    {# A hand-taken lane (the "manual" config TAKE TRADE books against) is a row of this table and not of the bots page, which lists the fleet: its on/off is the System map's. Said in words; the one link stays the bots page's. #}
+    <p data-oc-bot-controls style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin:10px 0 0;">To turn a bot on or off, or to run one tick by hand: <a href="{% url 'asset_bots_dashboard' %}" style="color:var(--accent);">Bots page ›</a>{% if has_manual_lane %} · a hand-taken lane (manual) is not listed there: the System map turns it on or off{% endif %}</p>
+    {% endif %}
     {% else %}
         <p class="oc-empty">No bot configurations yet. Create one from the <a href="{% url 'admin_dashboard' %}" style="color:var(--accent);">Admin HQ</a>.</p>
     {% endif %}

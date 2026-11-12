@@ -42,7 +42,6 @@ from datetime import timedelta
 from django.contrib.auth.decorators import login_required
 from django.db.models import Avg, Count, F, Max, Q, Sum
 from django.http import HttpResponse, JsonResponse
-from django.middleware.csrf import get_token
 from django.shortcuts import render
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -940,8 +939,8 @@ def command_center(request):
         # /api/day/live/ once the page is up (dashboard.views_day).
         "day": _day_context(),
         "day_us": _us_band(),
-        # The bot forms and the kill switch's link are for the users their
-        # endpoints accept (superusers, views_admin_hq._admin_only).
+        # The kill switch's link is for the users its endpoint accepts
+        # (superusers, views_admin_hq._admin_only).
         "can_operate": bool(getattr(user, "is_superuser", False)),
         "why": WHY,
         "oc_dashes": [],
@@ -1011,8 +1010,9 @@ def command_tab_metrics(request):
 def _fragment(template, context):
     """A tab body, rendered with `render_to_string` and NO request
     (2026-11-07, OC0): the shell's context processors — some seventy
-    queries the fragment never printed — do not run. A body that holds a
-    form is handed its CSRF token by its view."""
+    queries the fragment never printed — do not run. No tab body holds a
+    form (2026-11-12, P1: the bots' two forms left the home), so none
+    needs a CSRF token; one that ever does must be handed it by its view."""
     context.setdefault("oc_dashes", [])
     context.setdefault("why", WHY)
     context.setdefault("read_at", timezone.now())
@@ -1796,13 +1796,19 @@ def command_tab_bots(request):
     world chip from the ACCOUNT the config's symbols route to (a live-mode
     bot on an eToro demo account read REAL MONEY off its mode); health
     from each bot's own heartbeat against the tick's cadence, not from
-    "traded in 6 h". The Toggle and Tick forms are rendered only for the
-    users their endpoint accepts (superusers), with their CSRF token."""
+    "traded in 6 h".
+
+    NO FORM (2026-11-12, proposal P1, the operator's OK of 2026-11-07):
+    the Toggle and Tick forms left the home for everyone. "Toggle" did not
+    say on or off, and "Tick" started a bot pass from the home with no PIN
+    and no confirmation. Both stay on the bots page (/asset-bots/), and
+    their endpoints, PIN and words are not edited. A superuser, the only
+    user those endpoints accept, gets one plain link to that page."""
     from bot_program.asset_engine.safety import heartbeat_age_seconds
     from bot_program.models import AssetBotConfig, AssetBotTrade
     from core.context_processors import (BOT_TICK_OVERDUE_FACTOR,
                                          _bot_tick_cadence_seconds,
-                                         config_worlds)
+                                         _is_manual_config, config_worlds)
     from dashboard.position_summary import world_of
 
     user = request.user
@@ -1911,11 +1917,14 @@ def command_tab_bots(request):
         "n_alive": (sum(1 for r in rows if r["health"] == "ALIVE")
                     if rows else DASH),
         "cadence_min": round(cadence / 60),
-        # The two forms post to an endpoint that refuses everyone but a
-        # superuser (views_admin_hq._admin_only): rendered for no one else,
-        # and with the request's CSRF token, since this body is rendered
-        # without the request (2026-11-07, spec §6.3, 2).
+        # The link to the bots page, where Toggle and Tick are: for the
+        # users their endpoints accept (views_admin_hq._admin_only refuses
+        # everyone but a superuser). No form is drawn here, so no CSRF
+        # token is handed in (2026-11-12, P1).
         "can_operate": bool(getattr(user, "is_superuser", False)),
-        "csrf_token": get_token(request),
+        # This tab lists the TAKE TRADE lanes too; the bots page lists the
+        # fleet without them (views_asset_bots), so the line says where a
+        # lane's own switch is.
+        "has_manual_lane": any(_is_manual_config(c) for c in configs),
     }
     return _fragment("dashboard/_command_bots.html", context)

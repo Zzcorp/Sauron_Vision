@@ -18,8 +18,9 @@ amounts):
     pill counts bots on a REAL account only, and a config whose route
     cannot be read stays in it;
   - money paths: live_book_value and what store_book_value writes are the
-    same before and after the page is read; a superuser's Toggle form
-    passes CSRF, and a user the endpoint refuses gets no form;
+    same before and after the page is read; the home holds no bot form for
+    anyone (proposal P1, 2026-11-12), and the bots page keeps both, with
+    their CSRF token and their PIN field;
   - words, numbers, windows, ages and dashes;
   - the bots tab: the world from the account, health from the heartbeat;
   - cost: query budgets cold, fragments without the shell, database
@@ -456,27 +457,171 @@ class MoneyPathsTests(TestCase):
         pf.refresh_from_db()
         self.assertEqual(pf.current_value, Decimal("10519.41"))
 
-    def test_a_superusers_toggle_form_passes_csrf(self):
+    # ── the bots' Toggle and Tick (proposal P1) ──────────────────────────
+    #
+    # Updated deliberately 2026-11-12. OC0 pinned here that a superuser's
+    # BOTS tab on the home drew the Toggle form with its CSRF token
+    # (test_a_superusers_toggle_form_passes_csrf). The operator approved
+    # proposal P1 on 2026-11-07: the two forms leave the home for everyone
+    # ("Toggle" does not say on or off, and "▶ Tick" starts a bot pass from
+    # the home with no PIN and no confirmation) and stay on the bots page.
+    # The meaning is kept and moved with the forms: the home holds neither
+    # form for any user, the bots page holds both, and the Toggle form as
+    # the bots page renders it still passes CSRF. The endpoints, their PIN
+    # and their words are not edited.
+
+    BOT_ENDPOINTS = ("/admin-dashboard/asset-bots/toggle/",
+                     "/admin-dashboard/asset-bots/tick/")
+
+    def _bot_forms(self, html):
+        """[(action, the form's html)] for every form that posts to the
+        Toggle or the Tick endpoint."""
+        return [(m.group(1), m.group(0)) for m in re.finditer(
+            r'<form\b[^>]*\baction="([^"]*)"[^>]*>.*?</form>', html, re.S)
+            if m.group(1) in self.BOT_ENDPOINTS]
+
+    def test_the_home_holds_no_bot_form_for_any_user(self):
         from bot_program.models import AssetBotConfig
-        cfg = AssetBotConfig.objects.get(user=self.user, name="oc paper")
+        # A disabled live-mode config: the row whose Toggle form carried
+        # the PIN field.
+        _config(self.user, "oc live off", "stock", mode="live",
+                enabled=False, symbols=["AAPL"])
+        staff = _user("oc_money_staff", staff=True)
+        viewer = _user("oc_money_viewer2", staff=False)
+        for user in (staff, viewer):
+            _config(user, f"{user.username} bot", "crypto")
+        for user in (self.user, staff, viewer):
+            self.client.force_login(user)
+            names = list(AssetBotConfig.objects.filter(user=user)
+                         .values_list("name", flat=True))
+            self.assertTrue(names, user.username)
+            for path in ("/command/tab/bots/", "/command/?tab=bots"):
+                body = self.client.get(path).content.decode()
+                where = f"{user.username} {path}"
+                if path.startswith("/command/tab/"):
+                    for name in names:
+                        self.assertIn(name, body, where)
+                    # The fragment holds no form at all, so no token and
+                    # no PIN field either.
+                    self.assertNotIn("<form", body, where)
+                    self.assertNotIn("csrfmiddlewaretoken", body, where)
+                    self.assertNotIn('name="pin"', body, where)
+                    self.assertNotIn("▶ Tick", body, where)
+                    self.assertNotIn(">Toggle<", body, where)
+                else:
+                    body = _page_part(body)
+                self.assertEqual(self._bot_forms(body), [], where)
+                for action in self.BOT_ENDPOINTS:
+                    self.assertNotIn(action, body, where)
+
+    def test_a_superuser_gets_one_link_to_the_bots_page_instead(self):
+        """In the forms' place, for the users the endpoints accept: one
+        plain link to the bots page, where both remain. Nobody else is
+        told of controls the endpoint would refuse them."""
+        staff = _user("oc_money_staff2", staff=True)
+        _config(staff, "staff bot", "crypto")
+        link = re.compile(r'<p\b[^>]*data-oc-bot-controls[^>]*>(.*?)</p>',
+                          re.S)
+        body = self.client.get("/command/tab/bots/").content.decode()
+        found = link.findall(body)
+        self.assertEqual(len(found), 1, found)
+        anchors = re.findall(r'<a\b[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+                             found[0], re.S)
+        self.assertEqual([(href, " ".join(text.split()))
+                          for href, text in anchors],
+                         [("/asset-bots/", "Bots page ›")])
+        words = " ".join(t for t, _a, _g in _texts(found[0]))
+        self.assertIn("on or off", words)
+        self.assertIn("tick", words.lower())
+        self.assertNotIn("System map", words)
+        self.client.force_login(staff)
+        body = self.client.get("/command/tab/bots/").content.decode()
+        self.assertIn("staff bot", body)
+        self.assertEqual(link.findall(body), [])
+
+    def test_a_hand_taken_lane_is_said_not_to_be_on_the_bots_page(self):
+        """This tab lists every config, the TAKE TRADE lane ("manual", no
+        symbols) among them; the bots page lists the fleet without it
+        (views_asset_bots). The home's Toggle was the one page form for
+        that row: the line that replaces it says where its switch is, so a
+        superuser is not sent to a page that does not hold it."""
+        from bot_program.manual_trade import manual_config_for
+        lane = manual_config_for(self.user, "forex")
+        self.assertEqual((lane.name, lane.symbols), ("manual", []))
+        body = self.client.get("/command/tab/bots/").content.decode()
+        found = re.findall(r'<p\b[^>]*data-oc-bot-controls[^>]*>(.*?)</p>',
+                           body, re.S)
+        self.assertEqual(len(found), 1, found)
+        # Still one link, to the bots page; the System map is named.
+        self.assertEqual(re.findall(r'<a\b[^>]*href="([^"]*)"', found[0]),
+                         ["/asset-bots/"])
+        words = " ".join(t for t, _a, _g in _texts(found[0]))
+        self.assertIn("hand-taken lane", words)
+        self.assertIn("System map", words)
+        # The bots page, as it always was, lists no row for the lane.
+        page = self.client.get("/asset-bots/").content.decode()
+        self.assertFalse([f for _a, f in self._bot_forms(page)
+                          if f'name="config_id" value="{lane.id}"' in f])
+
+    def test_the_bots_page_keeps_both_forms_and_they_post_as_before(self):
+        from bot_program.models import AssetBotConfig
+        _instrument("AAPL", "stock")
+        off = _config(self.user, "oc live off", "stock", mode="live",
+                      enabled=False, symbols=["AAPL"])
+        paper = AssetBotConfig.objects.get(user=self.user, name="oc paper")
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.user)
-        body = client.get("/command/tab/bots/").content.decode()
-        forms = re.findall(r'<form method="post" action="/admin-dashboard/'
-                           r'asset-bots/toggle/".*?</form>', body, re.S)
-        form = next((f for f in forms
-                     if f'name="config_id" value="{cfg.id}"' in f), None)
-        self.assertIsNotNone(form, "no Toggle form for the config")
-        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', form)
-        self.assertIsNotNone(token, "the Toggle form carries no CSRF token")
-        # The form as rendered, posted as a browser would: its own token
-        # against the cookie the fragment's response set.
-        r = client.post("/admin-dashboard/asset-bots/toggle/",
-                        {"csrfmiddlewaretoken": token.group(1),
-                         "config_id": cfg.id})
+        r = client.get("/asset-bots/")
+        self.assertEqual(r.status_code, 200)
+        forms = self._bot_forms(r.content.decode())
+        toggle_url, tick_url = self.BOT_ENDPOINTS
+
+        def form_for(action, cfg):
+            hits = [f for a, f in forms if a == action
+                    and f'name="config_id" value="{cfg.id}"' in f]
+            self.assertEqual(len(hits), 1, (action, cfg.name))
+            self.assertIn('method="post"', hits[0])
+            token = re.search(
+                r'name="csrfmiddlewaretoken" value="([^"]+)"', hits[0])
+            self.assertIsNotNone(token, (action, cfg.name))
+            return hits[0], token.group(1)
+
+        # Both forms for every bot row, the PIN field where it always was:
+        # on the Toggle of a live-mode bot that is off (arming it).
+        for cfg in (paper, off):
+            toggle, _tok = form_for(toggle_url, cfg)
+            tick, _tok = form_for(tick_url, cfg)
+            self.assertIn(">Toggle</button>", toggle)
+            self.assertIn(">▶ Tick</button>", tick)
+            self.assertNotIn('name="pin"', tick)
+        self.assertIn('type="password" name="pin"', form_for(toggle_url, off)[0])
+        self.assertNotIn('name="pin"', form_for(toggle_url, paper)[0])
+
+        # The Toggle form as rendered, posted as a browser would: its own
+        # token against the cookie the page's response set.
+        _form, token = form_for(toggle_url, paper)
+        r = client.post(toggle_url, {"csrfmiddlewaretoken": token,
+                                     "config_id": paper.id})
         self.assertNotEqual(r.status_code, 403, r.content[:300])
-        cfg.refresh_from_db()
-        self.assertFalse(cfg.enabled)
+        paper.refresh_from_db()
+        self.assertFalse(paper.enabled)
+        # Arming a live-mode bot still asks for the PIN: with none, it
+        # stays off.
+        r = client.post(toggle_url, {"csrfmiddlewaretoken": token,
+                                     "config_id": off.id})
+        self.assertNotEqual(r.status_code, 403, r.content[:300])
+        off.refresh_from_db()
+        self.assertFalse(off.enabled)
+        # The Tick form reaches the runner, as before (the runner itself is
+        # not run here).
+        _form, token = form_for(tick_url, paper)
+        with mock.patch("bot_program.asset_engine.runner.run_asset_bot_tick",
+                        return_value={"status": "skipped",
+                                      "reason": "test"}) as tick:
+            r = client.post(tick_url, {"csrfmiddlewaretoken": token,
+                                       "config_id": paper.id})
+        self.assertNotEqual(r.status_code, 403, r.content[:300])
+        tick.assert_called_once_with(paper.id)
 
     def test_a_user_the_endpoint_refuses_gets_no_bot_form(self):
         viewer = _user("oc_money_viewer", staff=True, superuser=False)
@@ -486,6 +631,10 @@ class MoneyPathsTests(TestCase):
         self.assertIn("viewer bot", body)
         self.assertNotIn('action="/admin-dashboard/asset-bots/', body)
         self.assertNotIn("▶ Tick", body)
+        # And the endpoints refuse that user, as they always did.
+        for url in self.BOT_ENDPOINTS:
+            self.assertEqual(self.client.post(url, {"config_id": 1}).status_code,
+                             403, url)
 
 
 # ── 3. Words ─────────────────────────────────────────────────────────────

@@ -1091,8 +1091,8 @@ fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
 The home after login. It answers **what is my money doing, and what
 should I do now**; the Oculus answers whether the machine is turning. It
 places, closes and changes nothing by itself: its CLOSE buttons open the
-same dialog as /positions/, with the same PIN, and its bot forms post to
-the Admin HQ's endpoints.
+same dialog as /positions/, with the same PIN, and it holds no bot
+control (see "The bots' Toggle and Tick" below).
 
 **Three worlds, never added.** Every row belongs to one world, read off
 its own stamps by `dashboard.position_summary.world_of` (the paper flag,
@@ -1131,7 +1131,26 @@ so, until then, with yesterday's change and its date beside it.
 | LIVE | now | each open row with its world, its mark's source and age, its P&L in its own currency (an estimate starts with `≈`); `Gate events · the last 30, any age`, dated when not today; the CLOSE column stays on screen |
 | PORTFOLIO | lifetime, per world | win rate, profit factor (gross wins over gross losses), payoff (average win over average loss), averages, the top five closes; Sharpe and Sortino over 30 days of daily snapshots (5 or more needed); max drawdown from the newest snapshot, dated |
 | HISTORY | 90 days | R only for the head (all worlds); per-rule P&L per world with its currency; the cumulative R line one point per day; the weekday map shaded by its average R (0.05R floor) |
-| BOTS | 24 hours | opens, closes and realized P&L per world, in the config's currency; health from each bot's own tick against the tick's cadence (ALIVE on time, IDLE late or not ticked yet, OFF disabled); the Toggle and Tick forms only for superusers, who alone may post them |
+| BOTS | 24 hours | opens, closes and realized P&L per world, in the config's currency; health from each bot's own tick against the tick's cadence (ALIVE on time, IDLE late or not ticked yet, OFF disabled); a P&L names its world when it is not the row's chip; no form: the bots' Toggle and Tick are on the bots page |
+
+**The bots' Toggle and Tick.** They left the home on 2026-11-12 (the
+operator's OK of 2026-11-07): `Toggle` did not say on or off, and
+`▶ Tick` started a bot pass from the home with no PIN and no
+confirmation. Nothing else changed: the endpoints, the PIN that arming a
+live bot asks, and their words are the same.
+
+- **Each bot of the fleet:** the bots page (`/asset-bots/`) keeps both
+  forms on every row. The BOTS tab of the home shows states only; a
+  superuser, the only user those endpoints accept, finds one link to the
+  bots page under the table.
+- **Every enabled config at once:** `▶ Tick All` on the Admin HQ, as
+  before.
+- **A hand-taken lane** (the `manual` config TAKE TRADE books against) is
+  listed on the home's BOTS tab and not on the bots page. Its on/off was
+  the home's Toggle; it is now the System map's (a superuser, with the
+  PIN to arm a live one) and the shell's `bot off ID` / `bot on ID
+  [--yes]` (`bot list` gives the ids; see Operating notes). Its venue
+  (ARM LIVE / BACK TO PAPER) stays on the Admin HQ's manual-lane panel.
 
 **Dashes.** A `—` is never a zero: each has a title saying why, and the
 foot of the page lists every reason shown (`What a dash means here`). In
