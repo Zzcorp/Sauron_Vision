@@ -1,0 +1,9 @@
+{% load static quote_tags %}{% comment %}
+ONE PRICE EVERYWHERE (2026-11-12): the browser's one price painter
+(static/js/sv-venue.js), its marks, the server's clock for its ages, and
+the quote block of every symbol this response printed (market_data
+.one_quote; core/templatetags/quote_tags.py). Included once, at the end of
+the shell: everything the page printed before it is in the block.
+{% endcomment %}<link rel="stylesheet" href="{% static 'css/sv-venue.css' %}">
+<span hidden data-sv-now="{% q_now %}"></span>{% q_json %}
+<script src="{% static 'js/sv-venue.js' %}" defer></script>

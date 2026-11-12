@@ -64,6 +64,14 @@ def q_json(context):
 
 
 @register.simple_tag(takes_context=True)
+def q_now(context):
+    """The response's instant in epoch milliseconds: the browser's ages are
+    counted on the server's clock (data-sv-now)."""
+    reg = _registry(context)
+    return int(round(reg.now.timestamp() * 1000))
+
+
+@register.simple_tag(takes_context=True)
 def q_title(context, symbol, side=None):
     """The hover of a price cell: its words, who read it, a carried
     spread, the outside quote beside it."""

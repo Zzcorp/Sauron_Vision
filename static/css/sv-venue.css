@@ -1,0 +1,31 @@
+/* sv-venue.css: the one price painter's marks (2026-11-12, static/js/sv-venue.js).
+   Its own sheet: the shell's sheet is rewritten on another branch. Colours
+   are the theme's tokens only. */
+
+/* A price that just moved: once, at most once a second a cell. */
+[data-q].sv-q-moved {
+    text-shadow: 0 0 8px currentColor;
+    transition: text-shadow .25s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    [data-q].sv-q-moved { text-shadow: none; transition: none; }
+}
+
+/* A shut market's last price, and a price that is not there, read muted
+   wherever they are printed. */
+[data-q][data-q-state="shut"],
+[data-q][data-q-state="none"] {
+    color: var(--text-muted);
+}
+
+/* The words beside a price age the way the headband card always aged. */
+[data-q].sv-age--stale { color: var(--accent-gold-ink, var(--text-muted)); }
+[data-q].sv-age--dead { color: var(--accent-red); }
+
+/* The dot at the right edge of a spark: the price shown now. Hollow when
+   the spark's bars are another feed's than the price. */
+.sv-q-dot { fill: var(--text-primary); stroke: var(--text-primary); stroke-width: 1; }
+.sv-q-dot--other { fill: none; }
+
+/* The chart's "now" caption (chart_widget, data-role="now"). */
+.sv-src-now { display: block; color: var(--text-secondary); }
