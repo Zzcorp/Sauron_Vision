@@ -234,6 +234,7 @@ from .models_control import (  # noqa: F401
 )
 from .models_opportunity import OpportunitySetup, OpportunityFlag, DiscoveredSetup  # noqa: F401
 from .models_events import FastEvent  # noqa: F401
+from .models_hold import SignalHold  # noqa: F401
 
 
 # ── WS push on signal creation ──────────────────────────────────────────
