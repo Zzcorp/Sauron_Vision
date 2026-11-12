@@ -17,18 +17,19 @@ session", a brain with 0 concerns) and never a dash inside a sentence.
 {% endcomment %}
 
 {# ── 1. Top strip — regime · gate · exposure · session pulse #}
+{# Every line under a figure wraps (oc-strip-sub--wrap, 2026-11-12): it is where the window, the worlds and the age are said, and on one line the ellipsis cut them ("0 closed · win rate — …" for "· all worlds · R only") at every desktop width. The same on the HISTORY and BOTS strips. #}
 <div class="oc-strip">
     <div class="oc-strip-cell" title="{% if brain_unread %}{{ why.not_measured }}{% else %}{{ brain.regime_title|default:why.no_report }}{% endif %}">
         <span class="oc-strip-label">REGIME</span>
         {% if brain.report %}
         <span class="oc-strip-value oc-regime-{{ brain_regime }}">{{ brain_regime|upper }}</span>
-        <span class="oc-strip-sub">conf {{ brain_regime_conf }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · report {{ brain_age_str }}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">conf {{ brain_regime_conf }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · report {{ brain_age_str }}</span>
         {% elif brain_unread %}
         <span class="oc-strip-value">{% dash why.not_measured %}</span>
-        <span class="oc-strip-sub">the brain's report could not be read</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">the brain's report could not be read</span>
         {% else %}
         <span class="oc-strip-value">{% dash why.no_report %}</span>
-        <span class="oc-strip-sub">trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span></span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span></span>
         {% endif %}
     </div>
     <div class="oc-strip-cell">
@@ -36,7 +37,7 @@ session", a brain with 0 concerns) and never a dash inside a sentence.
         {# its allows, so a ratio of the two is not a rate anybody measured. #}
         <span class="oc-strip-label">GATE 24H</span>
         <span class="oc-strip-value">{% if gate_unread %}{% dash why.not_measured %}{% elif gate_asked %}{{ gate_n_reject }}{% else %}{% dash why.gate_not_asked %}{% endif %}</span>
-        <span class="oc-strip-sub">{% if gate_unread %}the gate's decisions could not be read · 24 h{% else %}refused · {{ gate_n_allow }} allow logged (sampled) · 24 h{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if gate_unread %}the gate's decisions could not be read · 24 h{% else %}refused · {{ gate_n_allow }} allow logged (sampled) · 24 h{% endif %}</span>
     </div>
     {# DEPLOYED, per world, in USD (2026-11-07): the notional at the marks, REAL first, never added; its share of the typed cash is gone (a mixed-currency ratio of mixed worlds). #}
     <div class="oc-strip-cell" title="The notional of the open rows at their marks, in USD (price x quantity x the row's USD per unit), each world apart and never added. The platform's own arithmetic, not eToro's.">
@@ -62,27 +63,27 @@ session", a brain with 0 concerns) and never a dash inside a sentence.
         <span class="oc-strip-label">OPEN POS</span>
         <span class="oc-strip-value"{% if live_opens == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_opens }}</span>{% dash_note live_opens why.not_measured %}
         <span class="oc-strip-sub oc-strip-sub--wrap">{% for s in live_open_split %}{{ s.n }} {{ s.name|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}</span>
-        <span class="oc-strip-sub">{{ live_bots_total }} configs · {{ live_bots_enabled }} enabled</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{{ live_bots_total }} configs · {{ live_bots_enabled }} enabled</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">24H R</span>
         <span class="oc-strip-value {% if live_24h_sum_r > 0 %}up{% elif live_24h_sum_r < 0 %}down{% endif %}">{% if pulse_unread %}{% dash why.not_measured %}{% elif live_24h_sum_r == "—" %}{% if live_24h_n %}{% dash why.ungraded %}{% else %}{% dash why.nothing_24h %}{% endif %}{% else %}{% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R{% endif %}</span>
-        <span class="oc-strip-sub">{% if pulse_unread %}the closes could not be read{% else %}{{ live_24h_n }} closed · {% if live_24h_win_rate == "—" %}win rate <span title="{% if live_24h_n %}{{ why.ungraded }}{% else %}{{ why.nothing_24h }}{% endif %}">—</span>{% if live_24h_n %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_24h %}{% endif %}{% else %}{{ live_24h_win_rate }}% win{% endif %}{% endif %} · all worlds · R only</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if pulse_unread %}the closes could not be read{% else %}{{ live_24h_n }} closed · {% if live_24h_win_rate == "—" %}win rate <span title="{% if live_24h_n %}{{ why.ungraded }}{% else %}{{ why.nothing_24h }}{% endif %}">—</span>{% if live_24h_n %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_24h %}{% endif %}{% else %}{{ live_24h_win_rate }}% win{% endif %}{% endif %} · all worlds · R only</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">W / L 24H</span>
         <span class="oc-strip-value">{% if pulse_unread %}{% dash why.not_measured %}{% else %}<span class="up">{{ live_24h_wins }}</span> / <span class="down">{{ live_24h_losses }}</span>{% endif %}</span>
-        <span class="oc-strip-sub">trade tally · 24 h · all worlds</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">trade tally · 24 h · all worlds</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">RULES</span>
         <span class="oc-strip-value"{% if live_rules_active == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_rules_active }}</span>{% dash_note live_rules_active why.not_measured %}
-        <span class="oc-strip-sub">{% if rules_unread %}the rule controls could not be read{% else %}{{ live_rules_paused }} paused · {{ live_rules_research }} research{% endif %} · platform-wide</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if rules_unread %}the rule controls could not be read{% else %}{{ live_rules_paused }} paused · {{ live_rules_research }} research{% endif %} · platform-wide</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CONCERNS</span>
         <span class="oc-strip-value {% if brain_top_concerns %}down{% endif %}">{% if brain_unread %}{% dash why.not_measured %}{% else %}{{ brain_top_concerns|length }}{% endif %}</span>
-        <span class="oc-strip-sub">flagged by the brain{% if brain.report %} · report {{ brain_age_str }}{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">flagged by the brain{% if brain.report %} · report {{ brain_age_str }}{% endif %}</span>
     </div>
 </div>
 

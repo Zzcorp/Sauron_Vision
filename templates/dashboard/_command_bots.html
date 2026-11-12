@@ -12,22 +12,22 @@
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CONFIGS</span>
         <span class="oc-strip-value" data-sv-count="{{ n_configs }}">{{ n_configs }}</span>
-        <span class="oc-strip-sub">across all asset classes</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">across all asset classes</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ENABLED</span>
         <span class="oc-strip-value {% if n_configs and n_enabled %}up{% endif %}" data-sv-count="{{ n_enabled }}"{% if not n_configs %} title="{{ why.no_configs }}"{% endif %}>{{ n_enabled }}</span>{% dash_note n_enabled why.no_configs %}
-        <span class="oc-strip-sub">currently scanning</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">currently scanning</span>
     </div>
     <div class="oc-strip-cell" title="Enabled live-mode bots whose symbols route to a REAL account (or whose route cannot be read: never under-counted); DEMO: those on a broker's demo account. The world is the account's, not the config's mode.">
         <span class="oc-strip-label">REAL-MONEY BOTS</span>
         <span class="oc-strip-value {% if n_configs and n_live %}up{% endif %}" data-sv-count="{{ n_live }}"{% if not n_configs %} title="{{ why.no_configs }}"{% endif %}>{{ n_live }}</span>{% dash_note n_live why.no_configs %}
-        <span class="oc-strip-sub">DEMO {% if n_configs %}{{ n_live_demo }}{% else %}<span title="{{ why.no_configs }}">—</span>{% dash_note "—" why.no_configs %}{% endif %} · world: its account</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">DEMO {% if n_configs %}{{ n_live_demo }}{% else %}<span title="{{ why.no_configs }}">—</span>{% dash_note "—" why.no_configs %}{% endif %} · world: its account</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ALIVE NOW</span>
         <span class="oc-strip-value {% if not n_configs %}{% elif n_alive %}up{% else %}down{% endif %}" data-sv-count="{{ n_alive }}"{% if not n_configs %} title="{{ why.no_configs }}"{% endif %}>{{ n_alive }}</span>{% dash_note n_alive why.no_configs %}
-        <span class="oc-strip-sub">{% if n_configs %}enabled, own tick on time · every {{ cadence_min }} min{% else %}no bots to watch{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if n_configs %}enabled, own tick on time · every {{ cadence_min }} min{% else %}no bots to watch{% endif %}</span>
     </div>
 </div>
 

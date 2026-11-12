@@ -11,22 +11,22 @@
         <span class="oc-strip-label">CLOSED 90D</span>
         {# data-sv-count: the motion layer counts this up from 0 on reveal (static/js/sv-motion.js); the rendered text is the fallback. #}
         <span class="oc-strip-value" data-sv-count="{{ n_closed }}">{{ n_closed }}</span>
-        <span class="oc-strip-sub">{{ n_wins }} wins · {{ n_graded }} graded · 90 d · all worlds</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{{ n_wins }} wins · {{ n_graded }} graded · 90 d · all worlds</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">WIN RATE</span>
         <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}<span title="{% if n_closed %}{{ why.ungraded }}{% else %}{{ why.nothing_90d }}{% endif %}">—</span>{% if n_closed %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_90d %}{% endif %}{% endif %}</span>
-        <span class="oc-strip-sub">{% if win_rate is not None %}90 d, graded closes, all worlds{% else %}no graded closes in 90 d{% endif %}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{% if win_rate is not None %}90 d, graded closes, all worlds{% else %}no graded closes in 90 d{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">TOTAL R</span>
         <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{% if total_r is not None %}{{ total_r }}R{% else %}<span title="{% if n_closed %}{{ why.ungraded }}{% else %}{{ why.nothing_90d }}{% endif %}">—</span>{% if n_closed %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_90d %}{% endif %}{% endif %}</span>
-        <span class="oc-strip-sub">summed across all rules · 90 d · all worlds · R only</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">summed across all rules · 90 d · all worlds · R only</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">DECAY ALERTS</span>
         <span class="oc-strip-value {% if decay_alerts %}down{% endif %}" data-sv-count="{{ decay_alerts|length }}">{{ decay_alerts|length }}</span>
-        <span class="oc-strip-sub">unresolved</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">unresolved</span>
     </div>
 </div>
 

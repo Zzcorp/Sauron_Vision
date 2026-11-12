@@ -782,6 +782,29 @@ class WindowsAndAgesTests(TestCase):
         bots = self.client.get("/command/tab/bots/").content.decode()
         self.assertIn("24 h", bots)
 
+    def test_no_strip_line_is_cut_by_an_ellipsis(self):
+        """The line under a strip figure is where its window, its worlds
+        and its age are said ("· all worlds · R only", "· report 2 h ago",
+        "· platform-wide"). On one line with an ellipsis, a six-cell strip
+        at 1440 px showed "0 closed · win rate — …" and "conf 0.62 · trust
+        MEDI…": the label was in the page and not on the screen. Every
+        such line on the four tabs wraps (sauron.css's
+        .oc-strip-sub--wrap, as PORTFOLIO's and eToro's cells already
+        did)."""
+        from brain.models import BrainReport
+        BrainReport.objects.create(regime_label="trending",
+                                   regime_confidence=0.62)
+        for path in FRAGMENTS:
+            body = self.client.get(path).content.decode()
+            lines = re.findall(r'class="(oc-strip-sub\b[^"]*)"', body)
+            self.assertGreaterEqual(len(lines), 4, path)
+            cut = [c for c in lines if "oc-strip-sub--wrap" not in c.split()]
+            self.assertEqual(cut, [], path)
+        css = (BASE / "static" / "css" / "sauron.css").read_text(
+            encoding="utf-8")
+        self.assertRegex(css, r"\.oc-strip-sub\.oc-strip-sub--wrap\s*\{[^}]*"
+                              r"white-space:\s*normal")
+
     def test_the_regime_snapshots_and_gate_times_carry_their_age(self):
         from brain.models import BrainReport
         from bot_program.orchestrator_models import OrchestratorEvent
