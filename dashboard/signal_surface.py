@@ -513,8 +513,21 @@ COST_SYMBOL_CAVEAT = (
 
 # ── (g) CAN ITS MARKET TRADE NOW? ─────────────────────────────────────────
 
-MARKET_TICKET_WORDS = ("A paper ticket is refused until it opens; a live "
-                       "ticket warns and is yours to send.")
+#: What a shut market means for a ticket, said beside the badge. The
+#: paper venue refuses a market's first quarter hour too, hence "and
+#: settled". An index reads shut only while its cash session and the
+#: futures week both are, and the hour it opens is the futures week's;
+#: the paper venue reads the cash session alone, so an index has words of
+#: its own (the review of 2026-11-12).
+MARKET_TICKET_WORDS = ("A paper ticket is refused until it has opened and "
+                       "settled; a live ticket warns and is yours to send.")
+INDEX_TICKET_WORDS = ("A paper ticket is refused outside its cash session; "
+                      "a live ticket warns and is yours to send.")
+
+
+def market_ticket_words(asset_class) -> str:
+    return (INDEX_TICKET_WORDS if (asset_class or "") == "index"
+            else MARKET_TICKET_WORDS)
 
 
 def market_block(signal, now=None) -> dict:
@@ -533,7 +546,8 @@ def market_block(signal, now=None) -> dict:
         if not getattr(signal, "is_active", False):
             return out
         from signals.market_hold import market_state
-        st = market_state(signal.instrument, now=now)
+        inst = signal.instrument
+        st = market_state(inst, now=now)
     except Exception as e:  # noqa: BLE001 — a badge is never worth a page
         logger.warning("[signals] market state unread for signal #%s: %s",
                        getattr(signal, "pk", None), e)
@@ -541,8 +555,28 @@ def market_block(signal, now=None) -> dict:
     if st.get("state") != "shut":
         return out
     words = str(st.get("words") or "its market is shut")
+    ticket = market_ticket_words(getattr(inst, "asset_class", ""))
     return {"shut": True, "opens": st.get("opens") or "",
-            "title": f"{words[:1].upper()}{words[1:]}. {MARKET_TICKET_WORDS}"}
+            "title": f"{words[:1].upper()}{words[1:]}. {ticket}"}
+
+
+#: The day and the month of a hold's line, from fixed tables: no locale
+#: can change the words.
+_DAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTH_ABBR = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+               "Oct", "Nov", "Dec")
+
+
+def _dated(moment) -> str:
+    """"Sun 8 Nov 22:20 UTC" for an aware datetime, "" for None. A
+    /signals/ row stays listed for weeks: a weekday alone would not say
+    which Sunday (the review of 2026-11-12)."""
+    if moment is None:
+        return ""
+    from datetime import timezone as dt_timezone
+    m = moment.astimezone(dt_timezone.utc)
+    return (f"{_DAY_ABBR[m.weekday()]} {m.day} {_MONTH_ABBR[m.month - 1]} "
+            f"{m.strftime('%H:%M')} UTC")
 
 
 def hold_blocks(signals) -> dict:
@@ -567,16 +601,24 @@ def hold_blocks(signals) -> dict:
         born = ("born while its market was shut" if h.reopens_at is not None
                 else "born while its market could not trade")
         words = str(h.words or "")
+        when = _dated(h.decided_at)
         if h.state == SignalHold.HELD:
             text = f"announcement held: {born}" + (
                 f" · it opens {utc_words(h.reopens_at)}"
                 if h.reopens_at is not None else "")
         elif h.state == SignalHold.RELEASED:
-            text = f"{born} · announced at the open" + (
-                f", {utc_words(h.decided_at)}" if h.decided_at else "")
+            # A release nobody heard says so: the pass writes that reason
+            # when the banner, the bell and the channels all failed.
+            unheard = h.reason == SignalHold.ANNOUNCE_FAILED
+            text = (f"{born} · "
+                    + ("released" if unheard else "announced")
+                    + " at the open" + (f", {when}" if when else "")
+                    + (", but its announcement failed" if unheard else ""))
         else:
-            text = f"{born} · {words[:1].lower()}{words[1:]}" if words \
-                else f"{born} · never announced"
+            said = (f"{words[:1].lower()}{words[1:]}" if words
+                    else "never announced")
+            text = (f"{born} · {said.rstrip('.')} ({when})." if when
+                    else f"{born} · {said}")
         out[h.signal_id] = {"text": text,
                             "title": f"{words[:1].upper()}{words[1:]}"}
     return out

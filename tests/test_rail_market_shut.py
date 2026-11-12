@@ -63,8 +63,14 @@ from tests.test_signal_market_hold import (MON_1000, SAT_0005, SAT_NOON,
 NODE = shutil.which("node")
 SAT_1100 = _t(2026, 11, 7, 11, 0)
 OPENS = "opens Sun 22:00 UTC"
-TICKET_WORDS = ("a paper ticket is refused until it opens; a live ticket "
-                "warns and is yours to send")
+# The paper venue also refuses a market's first quarter hour, so "until
+# it opens" was a quarter hour short. And an index "opens" with the
+# futures week while the paper venue reads its cash session alone, so
+# for an index those words were untrue (the review of 2026-11-12).
+TICKET_WORDS = ("a paper ticket is refused until it has opened and settled; "
+                "a live ticket warns and is yours to send")
+INDEX_TICKET_WORDS = ("a paper ticket is refused outside its cash session; "
+                      "a live ticket warns and is yours to send")
 ROW_ANY = re.compile(r'<div class="ip-dd-row sv-sig-row"[^>]*?'
                      r'data-signal-id="(\d+)".*?</div>', re.S)
 
@@ -176,6 +182,30 @@ class TheBadgeTests(_Base):
         other = _card(html, always)
         self.assertNotIn("MARKET SHUT", other)
         self.assertNotIn("data-market", other)
+
+    def test_an_index_says_its_paper_ticket_follows_the_cash_session(self):
+        """An index reads shut only while its cash session and the futures
+        week both are, and the hour it opens is the futures week's. The
+        paper venue reads the cash session alone: "refused until it
+        opens" was untrue for it (the review of 2026-11-12)."""
+        spx = _sig(_db_inst("SPX500", "index"), SAT_1100, rule="rms_idx",
+                   direction="bullish", entry="6000", stop="5900",
+                   target="6200")
+        card = _card(self._rail(SAT_NOON), spx)
+        title = re.search(r'<div class="sr-shut" title="([^"]*)"', card)
+        self.assertEqual(title.group(1),
+                         "Its cash session and the futures week are both "
+                         "shut: it opens Sunday 23:00 UTC. "
+                         + INDEX_TICKET_WORDS[0].upper()
+                         + INDEX_TICKET_WORDS[1:] + ".")
+        self.assertIn('<span class="sr-pop-k">market</span> shut · opens Sun '
+                      f'23:00 UTC · {INDEX_TICKET_WORDS}</div>', card)
+        self.assertNotIn("until it has opened", card)
+        with _at(SAT_NOON):
+            page = _page(self.client, "/signals/")
+        badge = re.search(r'<span class="badge badge-high sig-shut" '
+                          r'title="([^"]*)"', _signals_row(page, spx))
+        self.assertEqual(badge.group(1), title.group(1))
 
     def test_the_headband_row_carries_the_badge_and_the_hour(self):
         shut, always = self._two()
@@ -582,8 +612,8 @@ class TheChipInTheBrowserTests(_Base):
 # it is drawn: the rail is the one above.
 # ═════════════════════════════════════════════════════════════════════════
 
-WAIT_TITLE = ("The market is shut: a paper ticket is refused until it opens;"
-              " a live ticket warns and is yours to send")
+WAIT_TITLE = "The market is shut: " + TICKET_WORDS
+INDEX_WAIT_TITLE = "The market is shut: " + INDEX_TICKET_WORDS
 # A market in its first quarter hour is open: its row never says "shut".
 SETTLE_TITLE = ("The market has just opened: a paper ticket is refused in "
                 "its first quarter hour; a live ticket is yours to send")
@@ -649,6 +679,17 @@ class TheMarketShutSectionTests(_HoldBase):
         self.assertEqual(cell.group(1).strip(), "1")
         self.assertRegex(page, r'<span class="dk">MARKET SHUT</span><span '
                                r'class="dv" data-sv-rail-n="waiting">1</span>')
+
+    def test_2_an_index_row_says_its_paper_ticket_follows_the_cash_session(
+            self):
+        spx = _sig(_db_inst("SPX500", "index"), SAT_1100, rule="rms_idx",
+                   direction="bullish", entry="6000", stop="5900",
+                   target="6200")
+        rows = [r for r in _waiting_rows(self._rail(SAT_NOON))
+                if f'data-signal-id="{spx.pk}"' in r]
+        self.assertEqual(len(rows), 1)
+        self.assertIn(f'title="{INDEX_WAIT_TITLE}"', rows[0])
+        self.assertNotIn("until it has opened", rows[0])
 
     def test_2_its_row_says_when_the_market_opens_and_keeps_its_ticket(self):
         shut, _always = self._two()
@@ -733,6 +774,12 @@ class TheMarketShutSectionTests(_HoldBase):
         row = [c for c in pc.DEFAULT_COMPONENTS
                if c["key"] == "signal_market_hold"][0]
         self.assertIn("rail card waits under MARKET SHUT", row["description"])
+        # ...that the section is hidden until shown, which is what makes
+        # a card seem to vanish; and it no longer says a signal is dropped
+        # whenever its plan was not confirmed: with no price it is
+        # announced, unchecked (the review of 2026-11-12).
+        self.assertIn("hidden until shown", row["description"])
+        self.assertNotIn("else it is dropped", row["description"])
         self.assertIn("no money", row["description"])
         self.assertLess(len(row["description"]), 300)
         self.assertNotIn("is_enabled", row)
@@ -1056,12 +1103,42 @@ class TheSignalsPageSaysItWasHeldTests(_HoldBase):
         with _at(SUN_2220):
             release_due()
             html = _page(self.client, "/signals/")
+        # With the day and the month: a row stays listed for weeks, and
+        # a weekday alone does not say which Sunday (the review of
+        # 2026-11-12).
         self.assertIn("born while its market was shut · announced at the "
-                      "open, Sunday 22:20 UTC", _signals_row(html, sig))
+                      "open, Sun 8 Nov 22:20 UTC", _signals_row(html, sig))
         self.assertIn("born while its market was shut · at the open the "
                       "first price, 1.09100, was at or through its stop, "
-                      "1.09000: it was never announced.",
-                      _signals_row(html, gapped))
+                      "1.09000: it was never announced (Sun 8 Nov 22:20 "
+                      "UTC).", _signals_row(html, gapped))
+
+    def test_a_release_nobody_heard_says_so(self):
+        """The row of a release whose announcement failed must not read
+        "announced at the open" (the review of 2026-11-12)."""
+        from io import StringIO
+        from unittest.mock import patch
+
+        from django.core.management import call_command
+
+        from signals.market_hold import release_due
+        sig = self._held(born=SUN_0900)
+        _quote(self.fx, "1.08450", SUN_2217)
+        with _at(SUN_2220), \
+                patch("signals.announce.announce_released",
+                      side_effect=RuntimeError("no announcement")), \
+                self.assertLogs("signals.market_hold", "ERROR"):
+            release_due()
+            html = _page(self.client, "/signals/")
+        said = ("born while its market was shut · released at the open, Sun "
+                "8 Nov 22:20 UTC, but its announcement failed")
+        row = _signals_row(html, sig)
+        self.assertIn(f">{said}</div>", row)
+        self.assertNotIn("announced at the open", row)
+        out = StringIO()
+        with _at(SUN_2220):
+            call_command("signals", "show", str(sig.pk), stdout=out)
+        self.assertIn(said, out.getvalue())
 
     def test_with_no_hold_row_the_page_is_the_one_before(self):
         self._two()

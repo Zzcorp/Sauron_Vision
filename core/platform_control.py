@@ -614,9 +614,6 @@ DEFAULT_COMPONENTS = [
      "category": "pipeline", "is_enabled": True},
 
     # ── The signal market hold (2026-11-12, signals/market_hold.py) ──────
-    # A group's "all on" leaves it OFF (OPERATOR_CHOICE_SWITCHES, above:
-    # the review of 2026-11-12), which corrects this note's last sentence:
-    # its own row or `component on` turns it on, never a bulk button.
     # The operator, 2026-11-11: signals announced while their market is
     # shut. Told the announcements would wait for the open, he asked to
     # keep receiving every signal live (2026-11-12), so a shut market is
@@ -626,15 +623,19 @@ DEFAULT_COMPONENTS = [
     # market cannot trade, and the lifecycle task's release pass sends it
     # once, 15 minutes after the open, or drops it (closed, aged, or its
     # first price past its plan). ON also moves such a signal's card off
-    # the rail, under MARKET SHUT (dashboard/signal_rail.py), until its
-    # market has opened and settled: the description says so, because a
-    # card that leaves the rail unannounced reads as a lost signal. It
-    # gates no task of its own (the pass writes its counts on this row
-    # when something is held), reads no order path and writes no Signal
-    # field, so it is not a live-money switch and not a PIN switch; "all
-    # on" may turn it on. Description measured at 297 chars (< 300).
+    # the rail, under MARKET SHUT (the rail's own display module), until
+    # its market has opened and settled: the description says so, and
+    # that the section is hidden until shown, because a card that leaves
+    # the rail unannounced reads as a lost signal. It gates no task of
+    # its own (the pass writes its counts on this row when something is
+    # held), reads no order path and writes no Signal field, so it is not
+    # a live-money switch and not a PIN switch. A group's "all on" leaves
+    # it OFF all the same (OPERATOR_CHOICE_SWITCHES, above; the review of
+    # 2026-11-12): he keeps every signal live, so its own row or
+    # `component on` turns it on, never a bulk button. Description
+    # measured at 295 chars (< 300).
     {"key": "signal_market_hold", "name": "Signal Market Hold",
-     "description": "Off (default): every signal is announced as it fires; one whose market is shut says so. On: its banner, bell and Telegram wait for the open, then go out once if it is under 24h old and its plan holds at the first price, else it is dropped; its rail card waits under MARKET SHUT. It moves no money.",
+     "description": "Off (default): every signal is announced as it fires; one on a shut market says so. On: its banner, bell and Telegram wait for the open, then go out once, or it is dropped if 24h old or its first price broke its plan; its rail card waits under MARKET SHUT, hidden until shown. It moves no money.",
      "category": "pipeline"},
 
     # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────

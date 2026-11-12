@@ -88,7 +88,8 @@ a card waits under MARKET SHUT instead while its market cannot trade
 (shut, or in its first quarter hour): off the cards, the rail's count and
 the headband list, with the hour the market opens, whether its 24 hours
 end before that, and its ticket (a paper ticket is refused until the
-market opens; a live one warns and is the operator's to send). It is a
+market has opened and settled, or outside the cash session for an index;
+a live one warns and is the operator's to send). It is a
 card again by itself once the market has opened and settled. While a
 market cannot trade, the price rules (5 to 7) judge nothing: a quote
 re-stamped before the open used to record a sticky STOP departure. The
