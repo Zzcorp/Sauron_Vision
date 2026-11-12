@@ -72,6 +72,9 @@ makes the announcement wait for the market:
                   5  no such price 30 minutes after the    release, saying
                      settle                                its levels were
                                                            not re-checked
+                A price that cannot be read or judged is no price: rule 4
+                is fenced, the row waits out the same 30 minutes, then is
+                announced saying its first price could not be judged.
   a release     announces once, through the same three steps as a birth,
                 with one more sentence ("fired Sunday 09:00 UTC, while its
                 market was shut"), best score first, so the 20 Telegram
@@ -369,9 +372,11 @@ def _first_price(instrument, since, now):
         return None
 
 
-def _release_note(signal, hold, mark) -> dict:
+def _release_note(signal, hold, mark, unjudged=False) -> dict:
     """What a release says: {"clause" (the banner and the bell), "line"
-    (the Telegram message and the copies), "words" (kept on the row)}."""
+    (the Telegram message and the copies), "words" (kept on the row)}.
+    `unjudged`: no mark because the first price could not be read or
+    judged, which is not the same as no price having come."""
     from signals.models_hold import SignalHold
     fired = utc_words(signal.created_at)
     if hold.reason == SignalHold.MARKET_SETTLING:
@@ -380,6 +385,14 @@ def _release_note(signal, hold, mark) -> dict:
     else:
         its, the = "while its market was shut", "while the market was shut"
     clause = f"fired {fired}, {its}"
+    if mark is None and unjudged:
+        tail = ("its first price could not be judged: its levels were not "
+                "re-checked")
+        return {"clause": f"{clause}; {tail}",
+                "line": f"Fired {fired}, {the}. Its first price since the "
+                        f"open could not be judged: its levels were not "
+                        f"re-checked.",
+                "words": f"Announced at the open: {clause}; {tail}."}
     if mark is None:
         tail = "no price since the open: its levels were not re-checked"
         return {"clause": f"{clause}; {tail}",
@@ -424,20 +437,46 @@ def _judge(hold, now) -> tuple:
                 "never announced.", None)
     ends = signal.created_at + life()
     if now >= ends:
+        # The words claim nothing about the market: a signal can age
+        # inside the no-price grace, after its market opened and settled.
         return ("drop", SignalHold.AGED_SHUT,
-                f"Its {SIGNAL_BACKING_HOURS} hours ended {utc_words(ends)}, "
-                f"before its market had opened and settled: it was never "
+                f"Its {SIGNAL_BACKING_HOURS} hours ended {utc_words(ends)} "
+                f"before it could be announced at the open: it was never "
                 f"announced.", None)
     st = market_state(inst, now=now)
     if not st["tradeable"]:
         return ("wait",)
     since = st["opened"] or hold.reopens_at or hold.held_at
-    mark = _first_price(inst, since, now)
+    # Rule 4 in its own fence (the review of 2026-11-12): a price that
+    # cannot be read or judged is no price, so rule 5 decides. Left to
+    # raise, the row stayed held on every pass, then aged and was dropped:
+    # a failure that lasted swallowed the signal. The pass still counts
+    # the failure (hold.unjudged, read by release_due).
+    unjudged = False
+    try:
+        priced = _judge_price(signal, hold, since, now)
+    except Exception:  # noqa: BLE001 — a signal is never swallowed
+        logger.exception("[market hold] signal #%s: its first price could "
+                         "not be judged", signal.pk)
+        priced, unjudged = None, True
+        hold.unjudged = True
+    if priced is not None:
+        return priced
+    if now < since + SETTLE + NO_PRICE_GRACE:
+        return ("wait",)
+    note = _release_note(signal, hold, None, unjudged=unjudged)
+    return ("release", SignalHold.UNCHECKED, note["words"], None, note)
+
+
+def _judge_price(signal, hold, since, now):
+    """Rule 4: the first price of the session that opened at `since`,
+    against the signal's plan. None while no such price exists, else the
+    ("drop", ...) or ("release", ...) verdict. May raise: _judge fences
+    it."""
+    from signals.models_hold import SignalHold
+    mark = _first_price(signal.instrument, since, now)
     if mark is None:
-        if now < since + SETTLE + NO_PRICE_GRACE:
-            return ("wait",)
-        note = _release_note(signal, hold, None)
-        return ("release", SignalHold.UNCHECKED, note["words"], None, note)
+        return None
 
     def f(value):
         return None if value is None else float(value)
@@ -450,6 +489,23 @@ def _judge(hold, now) -> tuple:
         return ("drop", why, _drop_words(why, signal, mark), mark)
     note = _release_note(signal, hold, mark)
     return ("release", SignalHold.VALID, note["words"], mark, note)
+
+
+#: What the row of a release nobody heard says.
+ANNOUNCE_FAILED_WORDS = "Released at the open, but its announcement failed."
+
+
+def _went_out(said) -> bool:
+    """Whether an announcement (what signals.announce returned) reached
+    at least one place: the banner pushed to someone, the bell written,
+    or the channels step run (its own guard may still hold a Telegram
+    message, and counts it)."""
+    if not isinstance(said, dict):
+        return False
+    banner, channels = said.get("banner"), said.get("channels")
+    return (said.get("bell") == "ok"
+            or (isinstance(banner, int) and banner > 0)
+            or isinstance(channels, dict) or channels == "ok")
 
 
 def _settle(hold, state, reason, words, mark, now) -> bool:
@@ -477,7 +533,8 @@ def _record(counts) -> None:
                 f"{counts['released']} announced at the open · "
                 f"{counts['dropped']} dropped")
         if counts["errors"]:
-            said += f" · {counts['errors']} could not be judged"
+            said += (f" · {counts['errors']} could not be judged or "
+                     f"announced")
         row.mark_run(success=not counts["errors"], message=said)
     except Exception as e:  # noqa: BLE001 — a note, never the pass
         logger.debug("[market hold] the pass could not be recorded: %s", e)
@@ -513,6 +570,8 @@ def release_due(now=None) -> dict:
                              hold.signal_id)
             counts["errors"] += 1
             continue
+        if getattr(hold, "unjudged", False):
+            counts["errors"] += 1
         if verdict[0] == "wait":
             counts["waiting"] += 1
         elif verdict[0] == "drop":
@@ -531,12 +590,33 @@ def release_due(now=None) -> dict:
     for hold, (_kind, reason, words, mark, note) in releases:
         if not _settle(hold, SignalHold.RELEASED, reason, words, mark, now):
             continue
-        counts["released"] += 1
+        # The row is settled first, so that a release is announced at
+        # most once. One that reached nobody then says so on its row,
+        # where it would read "announced at the open" (the review of
+        # 2026-11-12); it is not tried again.
         try:
             from signals.announce import announce_released
-            announce_released(hold.signal, note)
+            heard = _went_out(announce_released(hold.signal, note))
+            if not heard:
+                logger.error("[market hold] signal #%s was released and "
+                             "its announcement reached nobody",
+                             hold.signal_id)
         except Exception:  # noqa: BLE001 — the next one still goes out
             logger.exception("[market hold] signal #%s was released and "
                              "its announcement failed", hold.signal_id)
+            heard = False
+        if heard:
+            counts["released"] += 1
+            continue
+        counts["errors"] += 1
+        try:
+            (SignalHold.objects
+             .filter(pk=hold.pk, state=SignalHold.RELEASED)
+             .update(reason=SignalHold.ANNOUNCE_FAILED,
+                     words=ANNOUNCE_FAILED_WORDS))
+        except Exception as e:  # noqa: BLE001 — a note, never the pass
+            logger.warning("[market hold] signal #%s: the failed "
+                           "announcement could not be written on its row "
+                           "(%s)", hold.signal_id, e)
     _record(counts)
     return counts
