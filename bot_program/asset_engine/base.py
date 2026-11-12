@@ -2256,6 +2256,40 @@ class AssetBot(ABC):
         except Exception:  # noqa: BLE001
             return None
 
+    def _own_holding_at_the_send(self, symbol: str, *, paper: bool):
+        """(code, words) when THIS config already holds `symbol`, or may
+        hold it (an order in doubt), so the entry about to be sent would be
+        its second position on it; None otherwise (2026-11-12).
+
+        The proposal's own two refusals (propose_entry: ALREADY_OPEN,
+        ORDER_IN_DOUBT) read again at the send, by the proposal's rule: a
+        real row refuses every entry of this config, a paper row only an
+        entry booked on paper (`paper`: this entry's venue). A row or a
+        note found here was written after the proposal, which refused on
+        them: by an earlier candidate of the same pass, or by another pass.
+        Reads this config's rows and the note on it, never the venue."""
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        rows = AssetBotTrade.objects.filter(
+            config=self.cfg, symbol=symbol,
+            status__in=("OPEN", "CLOSE_PENDING"))
+        real = rows.filter(paper=False).exists()
+        if real or (paper and rows.exists()):
+            what = ("a position" if real or self.cfg.mode == "paper"
+                    else "a paper position")
+            return (skips.ALREADY_OPEN,
+                    f"{what} is already on: this config opened {symbol} "
+                    f"after this entry was proposed (one position per config "
+                    f"and symbol) — nothing sent")
+        doubt = self._in_doubt_note(symbol)
+        if doubt:
+            return (skips.ORDER_IN_DOUBT,
+                    f"an order under reference "
+                    f"{doubt.get('reference') or '(none)'} may already be "
+                    f"live (since {doubt.get('at')}): sent after this entry "
+                    f"was proposed — nothing sent")
+        return None
+
     #: Reads of the venue's position list — each past the venue's own lag
     #: window since the note and since the last such read — that prove an
     #: in-doubt order left no position. Then the note is cleared and the
@@ -6697,6 +6731,26 @@ class AssetBot(ABC):
                 _cut_note + "the day went past the daily loss limit after "
                 "this entry was raised to the venue's smallest size — "
                 "nothing sent")
+        # ONE POSITION PER CONFIG AND SYMBOL, READ AGAIN AT THE SEND
+        # (2026-11-12; the venue floor's money review, finding 8). The
+        # proposal refuses a symbol this config already holds (ALREADY_OPEN)
+        # or may hold (an order in doubt), but the desk's pass proposes
+        # every candidate before it sends any: two candidates of one config
+        # and one symbol (a symbol listed twice, two passes that overlap)
+        # both passed it with no row on the books, and the duplicate gate
+        # judged below (risk_gate.duplicate_state) leaves the asker's own
+        # config out by design. So the first one sent is kept — in the
+        # desk's live mode the best-ranked, in shadow the first proposed,
+        # as the loop with no desk keeps it — and the other sends nothing,
+        # with the proposal's own codes. Another config's holding is the
+        # duplicate gate's, unchanged.
+        _held = self._own_holding_at_the_send(
+            symbol, paper=(paper_now or bool((stage or {}).get(
+                "force_paper"))))
+        if _held:
+            logger.warning("[%s_bot] %s: %s", self.asset_class, symbol,
+                           _held[1])
+            return self._skip(symbol, _held[0], _held[1])
         # THE DESK'S MULTIPLIER ON A RAISED ENTRY, in the words (the
         # review of 2026-11-12): a refusal of a size the desk cut says the
         # desk cut it, never "at the venue's smallest size".
