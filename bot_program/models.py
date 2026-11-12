@@ -826,3 +826,4 @@ from .orcs.models import (  # noqa: F401
 # THE SHORTS MEASURED BY HAND (2026-10-31, bot_program/short_readback.py):
 # a hand-taken eToro short read back clean at its fill.
 from .short_models import EtoroShortObservation  # noqa: F401
+from .feed_harm_models import FeedHarmEvent  # noqa: F401
