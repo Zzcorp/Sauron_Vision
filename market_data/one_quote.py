@@ -251,6 +251,9 @@ def _head(payload: dict, side=None) -> str:
     who = str(payload.get("who") or "")
     if payload.get("src") == ETORO:
         s = side or payload.get("side") or ""
+        if s in ("bid", "ask", "mid") and (payload.get("b") is None
+                                           or payload.get("a") is None):
+            s = "last"         # a reading without sides prints its print
         return f"{who} {s}" if s in SIDES else who
     return who
 
@@ -511,7 +514,10 @@ class QuoteView:
         return self.ask - self.bid
 
     def __bool__(self):
-        return self.last is not None
+        """A quote worth a hero: a price, or a held instrument waiting for
+        eToro's (its words and the outside slot are said)."""
+        return (self.last is not None or self.shown.auth == AUTH_ETORO
+                or bool(self.shown.slot))
 
 
 # ── the rule ─────────────────────────────────────────────────────────────
@@ -908,11 +914,56 @@ def shown_many(symbols, *, user=None, now=None) -> dict:
     if not asked:
         return {}
     now_at = now if now is not None else _clock()
+    upper = sorted({s.upper() for s in asked})
+    return _answer(asked, _held_rows(upper, user), now_at)
+
+
+def _held_of(rows) -> dict:
+    """{SYMBOL: rows} of the open eToro rows among `rows` (the trades a
+    caller already read): the same filter as _held_rows, no query."""
+    out: dict = {}
+    for t in rows or ():
+        meta = getattr(t, "metadata", None) or {}
+        if getattr(t, "paper", True) or getattr(t, "status", "") not in (
+                "OPEN", "CLOSE_PENDING") or meta.get("broker") != ETORO:
+            continue
+        out.setdefault((getattr(t, "symbol", "") or "").upper(), []).append(t)
+    return out
+
+
+def shown_from(symbols, *, rows=(), quotes=None, instruments=None,
+               now=None) -> dict:
+    """The rule from what a caller already read (the Horde's book): `rows`
+    the viewer's open trades (its eToro real and demo ones are what it
+    holds), `quotes` {SYMBOL: LiveQuote} and `instruments` {SYMBOL: an
+    object with asset_class, exchange, symbol}; without `quotes`, one read
+    of the instruments with their quotes. The previous-close events are
+    read only when a poller's row is shown."""
+    asked = [str(s or "") for s in symbols if s]
+    if not asked:
+        return {}
+    now_at = now if now is not None else _clock()
+    insts = None
+    if quotes is not None:
+        insts = {k.upper(): v for k, v in (instruments or {}).items()}
+        quotes = {k.upper(): v for k, v in quotes.items()}
+    return _answer(asked, _held_of(rows), now_at, insts=insts, quotes=quotes)
+
+
+def _answer(asked, held, now_at, *, insts=None, quotes=None) -> dict:
+    """The rule for `asked` given the open eToro rows `held` ({SYMBOL:
+    rows}): the instruments with their LiveQuote rows (one query, unless
+    the caller hands them) and the previous-close events (one query, none
+    without a poller's row)."""
     keys = {s: s.upper() for s in asked}
     upper = sorted(set(keys.values()))
-    insts = _instruments(upper)
-    held = _held_rows(upper, user)
-    quotes = {k: (_quote_of(insts[k]) if k in insts else None) for k in upper}
+    if quotes is None:
+        insts = _instruments(upper)
+        quotes = {k: (_quote_of(insts[k]) if k in insts else None)
+                  for k in upper}
+    else:
+        insts = insts or {}
+        quotes = {k: quotes.get(k) for k in upper}
     prev = _previous_closes(quotes)
     prev_rows = {}
     for k, q in quotes.items():
@@ -945,6 +996,15 @@ def shown_many(symbols, *, user=None, now=None) -> dict:
             logger.warning("[one quote] %s could not be answered: %s", s, e)
             out[s] = Shown(symbol=k)
     return out
+
+
+def shown_held(*, user=ALL, now=None) -> dict:
+    """{symbol: Shown} for every instrument `user` (ALL: anyone) holds open
+    at eToro, at one instant: the display relay's read (three queries)."""
+    held = _held_rows(None, user)
+    if not held:
+        return {}
+    return _answer(sorted(held), held, now if now is not None else _clock())
 
 
 def shown(symbol, *, user=None, now=None) -> Shown:

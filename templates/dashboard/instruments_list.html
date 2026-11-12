@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Instruments & Live Quotes — Sauron Vision{% endblock %}
+{% load quote_tags %}{% block title %}Instruments & Live Quotes — Sauron Vision{% endblock %}
 {% block page_title %}INSTRUMENTS & LIVE QUOTES{% endblock %}
 
 {% block content %}
@@ -157,10 +157,8 @@
             </div>
             <div class="inst-card-price">
                 {% if item.last is not None %}
-                    <span class="inst-card-last">{{ item.last|floatformat:2 }}</span>
-                    <span class="inst-card-chg {% if item.change_pct >= 0 %}up{% else %}down{% endif %}">
-                        {% if item.change_pct >= 0 %}+{% endif %}{{ item.change_pct|floatformat:2 }}%
-                    </span>
+                    <span class="inst-card-last" data-q="{{ item.symbol }}">{% q item.symbol %}</span>
+                    <span class="inst-card-chg{% if item.chg is not None %} {% if item.chg >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ item.symbol }}" data-q-f="chg">{% q item.symbol "chg" %}</span>
                 {% else %}
                     <span style="color:var(--text-muted);font-size:12px;">No data</span>
                 {% endif %}
@@ -171,10 +169,10 @@
             </div>
             {% if item.last is not None %}
             <div class="inst-card-details">
-                <div class="inst-card-row"><span class="k">Bid</span><span class="v">{% if item.bid %}{{ item.bid|floatformat:4 }}{% else %}&mdash;{% endif %}</span></div>
-                <div class="inst-card-row"><span class="k">Ask</span><span class="v">{% if item.ask %}{{ item.ask|floatformat:4 }}{% else %}&mdash;{% endif %}</span></div>
+                <div class="inst-card-row"><span class="k">Bid</span><span class="v" data-q="{{ item.symbol }}" data-q-f="bid">{% q item.symbol "bid" %}</span></div>
+                <div class="inst-card-row"><span class="k">Ask</span><span class="v" data-q="{{ item.symbol }}" data-q-f="ask">{% q item.symbol "ask" %}</span></div>
                 <div class="inst-card-row"><span class="k">Volume</span><span class="v">{{ item.volume|default_if_none:"&mdash;" }}</span></div>
-                <div class="inst-card-row"><span class="k">Source</span><span class="v" style="color:var(--accent);">{{ item.source }}</span></div>
+                <div class="inst-card-row"><span class="k">Source</span><span class="v" data-q="{{ item.symbol }}" data-q-f="who" style="color:var(--accent);">{% q item.symbol "who" %}</span></div>
             </div>
             {% endif %}
         </a>
@@ -254,16 +252,16 @@
                     {% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
                 </td>
                 <td style="font-family:var(--font-mono);font-weight:700;font-size:13px;">
-                    {% if item.last is not None %}{{ item.last|floatformat:2 }}{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
+                    {% if item.last is not None %}<span data-q="{{ item.symbol }}">{% q item.symbol %}</span>{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
                 </td>
                 {# An em-dash, never 0.00%: an instrument with no LiveQuote row has not reported flat, it has not reported at all — and the mover buckets skip it on the same grounds. #}
                 <td style="font-family:var(--font-mono);font-weight:600;color:{% if item.change_pct is not None %}{% if item.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}{% else %}var(--text-muted){% endif %};">
-                    {% if item.change_pct is not None %}{% if item.change_pct >= 0 %}+{% endif %}{{ item.change_pct|floatformat:2 }}%{% else %}&mdash;{% endif %}
+                    {% if item.change_pct is not None %}<span data-q="{{ item.symbol }}" data-q-f="chg">{% q item.symbol "chg" %}</span>{% else %}&mdash;{% endif %}
                 </td>
-                <td style="font-family:var(--font-mono);font-size:12px;">{% if item.bid %}{{ item.bid|floatformat:4 }}{% else %}&mdash;{% endif %}</td>
-                <td style="font-family:var(--font-mono);font-size:12px;">{% if item.ask %}{{ item.ask|floatformat:4 }}{% else %}&mdash;{% endif %}</td>
+                <td style="font-family:var(--font-mono);font-size:12px;" data-q="{{ item.symbol }}" data-q-f="bid">{% q item.symbol "bid" %}</td>
+                <td style="font-family:var(--font-mono);font-size:12px;" data-q="{{ item.symbol }}" data-q-f="ask">{% q item.symbol "ask" %}</td>
                 <td style="font-family:var(--font-mono);font-size:12px;">{{ item.volume|default_if_none:"&mdash;" }}</td>
-                <td style="color:var(--text-muted);font-size:11px;">{{ item.source }}</td>
+                <td style="color:var(--text-muted);font-size:11px;" data-q="{{ item.symbol }}" data-q-f="who">{% q item.symbol "who" %}</td>
             </tr>
             {% endfor %}
             </tbody>

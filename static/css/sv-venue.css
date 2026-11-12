@@ -27,5 +27,13 @@
 .sv-q-dot { fill: var(--text-primary); stroke: var(--text-primary); stroke-width: 1; }
 .sv-q-dot--other { fill: none; }
 
+/* A spark beside a price whose own source gives no day change (eToro's):
+   neither green nor red, it says nothing about the day. */
+.wl-spark[data-up=""] svg path,
+.pop-spark[data-up=""] svg path {
+    stroke: var(--text-muted);
+    filter: none;
+}
+
 /* The chart's "now" caption (chart_widget, data-role="now"). */
 .sv-src-now { display: block; color: var(--text-secondary); }

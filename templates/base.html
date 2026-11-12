@@ -1386,9 +1386,9 @@
                         {% for w in ui_watchlist %}
                         <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                             <span class="ipr-sym">{{ w.symbol }}</span>
-                            <span class="ipr-qty">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                            <span class="ipr-qty" data-q="{{ w.symbol }}">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                             {% if w.last %}
-                            <span class="ipr-pct {% if w.change_pct >= 0 %}up{% else %}down{% endif %}">{{ w.change_pct|floatformat:2 }}%</span>
+                            <span class="ipr-pct{% if w.change_pct is not None %} {% if w.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ w.symbol }}" data-q-f="chg">{{ w.q_chg }}</span>
                             {% comment %} No quote, no change: a dash, never 0.00%, which is a different claim. {% endcomment %}
                             {% else %}<span class="ipr-pct sv-unknown" title="No quote for this instrument">&mdash;</span>{% endif %}
                         </div>
@@ -1581,7 +1581,7 @@
             <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                 <div class="wl-row1">
                     <span class="wl-sym">{{ w.symbol }}</span>
-                    <span class="wl-last">{% px w.last w.asset_class w.symbol %}</span>
+                    <span class="wl-last" data-q="{{ w.symbol }}">{% px w.last w.asset_class w.symbol %}</span>
                 </div>
                 {% if w.name and w.name != w.symbol %}
                 <div class="wl-rowname">
@@ -1591,11 +1591,11 @@
                 {% endif %}
                 <div class="wl-row2">
                     {% if w.spark and w.spark|length > 1 %}
-                    <span class="wl-spark"
+                    <span class="wl-spark" data-q-spark="{{ w.symbol }}" data-q-fam="{{ w.spark_fam }}"
                           data-points="{% for v in w.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
                           data-min="{{ w.spark_min|floatformat:6 }}"
                           data-max="{{ w.spark_max|floatformat:6 }}"
-                          data-up="{% if w.change_pct >= 0 %}1{% else %}0{% endif %}">
+                          data-up="{% if w.change_pct is None %}{% elif w.change_pct >= 0 %}1{% else %}0{% endif %}">
                         <svg viewBox="0 0 80 18" preserveAspectRatio="none">
                             <path d=""/>
                         </svg>
@@ -1603,9 +1603,7 @@
                     {% else %}
                     <span class="wl-spark wl-spark-empty">·</span>
                     {% endif %}
-                    <span class="wl-chg {% if w.change_pct >= 0 %}up{% else %}down{% endif %}">
-                        {% if w.change_pct >= 0 %}+{% endif %}{{ w.change_pct|floatformat:2 }}%
-                    </span>
+                    <span class="wl-chg{% if w.change_pct is not None %} {% if w.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ w.symbol }}" data-q-f="chg">{{ w.q_chg }}</span>
                 </div>
                 {% comment %}Hover popup — same portal pattern as the
                 headband's. Reuses .dh-pop styling; .wl-pop is the JS
@@ -1621,23 +1619,23 @@
                         </div>
                     </div>
                     <div class="dh-pop-big">
-                        <span class="dh-pop-price">{% if w.last %}{{ w.last|floatformat:4 }}{% else %}—{% endif %}</span>
+                        <span class="dh-pop-price" data-q="{{ w.symbol }}">{{ w.q_text }}</span>
                         <span class="dh-pop-pct" style="color:{% if w.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
                             {% if w.change_pct >= 0 %}+{% endif %}{{ w.change_pct|floatformat:2 }}%
                         </span>
                     </div>
                     {% if w.spark and w.spark|length > 1 %}
-                    <div class="pop-spark"
+                    <div class="pop-spark" data-q-spark="{{ w.symbol }}" data-q-fam="{{ w.spark_fam }}"
                          data-points="{% for v in w.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
                          data-min="{{ w.spark_min|floatformat:6 }}"
                          data-max="{{ w.spark_max|floatformat:6 }}"
-                         data-up="{% if w.change_pct >= 0 %}1{% else %}0{% endif %}"
+                         data-up="{% if w.change_pct is None %}{% elif w.change_pct >= 0 %}1{% else %}0{% endif %}"
                          data-w="330" data-h="34">
                         <svg viewBox="0 0 330 34" preserveAspectRatio="none"><path d=""/></svg>
                     </div>
                     {% endif %}
                     <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ w.asset_class|default:"—"|upper }}</span></div>
-                    {% if w.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{{ w.bid|floatformat:4 }} / {{ w.ask|floatformat:4 }}</span></div>{% endif %}
+                    {% if w.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v" data-q="{{ w.symbol }}" data-q-f="sides">{{ w.q_sides }}</span></div>{% endif %}
                     <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if w.volume %}{{ w.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
                     <div class="sr-pop-actions sr-pop-actions-react" style="margin-top:12px;">
                         <button type="button" class="sr-pop-btn sr-pop-btn-act"
@@ -1686,6 +1684,7 @@
    sparks and the 330x56 popup charts. */
 (function(){
   function renderSparks() {
+    if (window.SVVenue) { window.SVVenue.drawSparks(); return; }  /* the one painter: a dot at the price shown */
     document.querySelectorAll('.wl-spark[data-points], .pop-spark[data-points]').forEach(function(el) {
       var svg = el.querySelector('svg'); if (!svg) return;
       var path = svg.querySelector('path'); if (!path) return;
@@ -4023,7 +4022,7 @@
         ['Entry', p.entry],
         /* An unmeasured number is a dash, never a zero — a legacy row with
            no entry stop has no R, and "0.00R" would read as a scratch. */
-        ['Mark now', p.mark === null ? '—' : p.mark],
+        ['Mark now', p.mark === null ? '—' : (window.SVVenue ? SVVenue.px(p.mark, SVVenue.decimals(p.mark, p.asset_class, p.symbol)) : p.mark)],
         ['Books at', p.exit === undefined || p.exit === null ? '—' : p.exit],
         ['Realises', (p.pnl === null || p.pnl === undefined ? '—' : p.pnl) +
                      '  ·  ' + (p.r === null || p.r === undefined ? '—' : p.r + 'R')],
@@ -4638,10 +4637,11 @@
             .then(r => r.json())
             .then(data => {
                 if (!previewEl) return;
+                if (window.SVVenue && data.q) SVVenue.ingest(data.q, data.t);
                 previewEl.innerHTML = `
                     <div class="preview-header">
                         <span class="preview-symbol">${data.symbol}</span>
-                        <span class="preview-price" style="color:${data.change_pct >= 0 ? 'var(--accent)' : 'var(--accent-red)'}">
+                        <span class="preview-price" data-q="${data.symbol}" style="color:${data.change_pct >= 0 ? 'var(--accent)' : 'var(--accent-red)'}">
                             ${data.price || '—'}
                         </span>
                     </div>
@@ -5046,6 +5046,7 @@ window.svWheelMarquee = function (frame, track) {
     dhPaint(el);
   }
   function dhPaint(el) {
+    if (window.SVVenue) return;   /* the one painter keeps the card (sv-venue.js) */
     const pop = el.querySelector('.dh-pop') || el._portalPop;
     if (!pop) return;
     const f = {};
@@ -5107,6 +5108,8 @@ window.svWheelMarquee = function (frame, track) {
      and spread; a record at another price waits until a tick with a
      time gives the item one. */
   window.svDhIngest = function (doc) {
+    const engine = window.SVVenue;   /* the one painter takes the prices */
+    if (engine) engine.ingestDoc(doc);
     const seen = {};
     let redraw = false;
     doc.querySelectorAll('.dh-item[data-symbol]').forEach(fresh => {
@@ -5126,7 +5129,7 @@ window.svWheelMarquee = function (frame, track) {
         redraw = true;
       });
       const rec = k => fresh.getAttribute('data-' + k) || '';
-      if (!(dhNum(rec('last')) > 0)) return;
+      if (engine || !(dhNum(rec('last')) > 0)) return;
       const dec = rec('decimals');
       if (dec) mine.forEach(el => {
         if (el.getAttribute('data-decimals') !== dec) el.setAttribute('data-decimals', dec);
@@ -5639,7 +5642,8 @@ window.svWheelMarquee = function (frame, track) {
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
+        if (window.SVVenue && SVVenue.tick(msg)) { /* the one painter (sv-venue.js) */ }
+        else if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
         else if (msg.type === 'signal') railSoon();
         else if (msg.type === 'news') refreshTicker();
         else if (msg.type === 'watchlist') applyWatchlistCount(msg.data);
@@ -8946,6 +8950,6 @@ never nags. He never acts.{% endcomment %}
 })();
 </script>
 {% endif %}
-
+{% include "_partials/sv_venue.html" %}
 </body>
 </html>

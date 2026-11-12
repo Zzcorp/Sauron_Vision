@@ -281,6 +281,12 @@
             var priceCell = el(line, "span", "rp",
                                r.price === null ? DASH : r.raw);
             if (r.price === null) priceCell.className += " sv-unknown";
+            /* The MARK rung is the row's Current cell (2026-11-12): the one
+               price painter (sv-venue.js) keeps it on the newest value. */
+            if (r.role === "mark" && r.price !== null && val(row, "q")) {
+                priceCell.setAttribute("data-q", val(row, "q"));
+                if (val(row, "q-side")) priceCell.setAttribute("data-q-side", val(row, "q-side"));
+            }
             var note = "";
             if (r.role === "mark") {
                 /* "now" said WHEN the number is from and nothing about what

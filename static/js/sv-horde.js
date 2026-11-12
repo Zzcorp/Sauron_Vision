@@ -668,6 +668,9 @@
     return null;
   }
   function paintBoard(d) {
+    /* The seats' prices to the one painter first (sv-venue.js): a seat's
+       mark is the same cell as every other price of its instrument. */
+    if (window.SVVenue && d && d.quotes) window.SVVenue.ingestBlock(d.quotes);
     state.board = d;
     state.lastGoodAt = Date.now();
     root.classList.remove('hd-stale');
@@ -1024,8 +1027,15 @@
         var mk = el('span', 'hd-mark', s.mark.t);
         mk.title = s.mark.title || '';
         mk.setAttribute('data-flash', s.key + ':mark');
+        /* the one price painter's cell (sv-venue.js, 2026-11-12) */
+        var q = s.mark.q || {};
+        if (q.s) { mk.setAttribute('data-q', q.s); if (q.side) mk.setAttribute('data-q-side', q.side); }
         markBits.push(mk);
-        if (s.mark.word && s.world !== 'paper') markBits.push(el('span', 'hd-muted', s.mark.word));
+        if (s.mark.word && s.world !== 'paper') {
+          var wd = el('span', 'hd-muted', s.mark.word);
+          if (q.s) { wd.setAttribute('data-q', q.s); wd.setAttribute('data-q-f', 'words'); if (q.side) wd.setAttribute('data-q-side', q.side); }
+          markBits.push(wd);
+        }
       }
     }
     var notFilled = s.working ? el('span', 'hd-wait', s.money.note) : null;

@@ -359,6 +359,41 @@ def _fresh_mark(inst, now):
     return last, fresh
 
 
+def _shown(request, signals) -> dict:
+    """{SYMBOL: the one price every screen prints} for the rail's cards
+    (market_data.one_quote, 2026-11-12): the response's answers, so the
+    popup's `mark` and the R:R now beside it read the price the headband,
+    the Horde and the hero print. {} when it cannot be read."""
+    syms = sorted({(s.instrument.symbol or "").upper() for s in signals
+                   if getattr(s, "instrument", None)} - {""})
+    if not syms:
+        return {}
+    try:
+        from market_data.one_quote import for_request
+        return {k.upper(): v for k, v in
+                for_request(request).many(syms).items()}
+    except Exception as e:  # noqa: BLE001 — the quote rows' marks stand
+        logger.debug("[rail] one-price answers unread: %s", e)
+        return {}
+
+
+def _shown_mark(ctx, inst, now):
+    """(mark, fresh) for a card's progress and R:R now (display figures
+    beside the popup's price): the one price every screen prints, fresh
+    within the engine's own bound (signals.performance); without an
+    answer, the quote row (_fresh_mark). The departures keep _fresh_mark:
+    a verdict is not a display figure."""
+    sh = (ctx.get("quotes") or {}).get((inst.symbol or "").upper())
+    if sh is None:
+        return _fresh_mark(inst, now)
+    from signals.performance import MAX_QUOTE_AGE_SECONDS
+    if sh.price is None:
+        return None, False
+    fresh = bool(sh.at and sh.state != "none"
+                 and (now - sh.at).total_seconds() <= MAX_QUOTE_AGE_SECONDS)
+    return float(sh.price), fresh
+
+
 def _levels(s):
     """entry, stop, target as floats — entry is the suggested entry or the
     price at the signal, the convention signals.performance grades with."""
@@ -758,7 +793,7 @@ def _facts(s, ctx, now) -> RailFacts:
     votes = may_vote and now <= vote_until
     stage = badge.get("stage") or ""
     held = ctx["held"].get((inst.symbol or "").upper(), "")
-    mark, fresh = _fresh_mark(inst, now)
+    mark, fresh = _shown_mark(ctx, inst, now)
     entry, stop, target = _levels(s)
     progress = rr_now = None
     order = _order_side(side)
@@ -998,7 +1033,8 @@ def _build(request) -> dict:
 
     ctx = {"now": now, "mine": mine, "life": life, "newest": newest,
            "last_flag": last_flag, "rules": rule_facts,
-           "demotions": demotions, "held": held, "hold": _hold_on()}
+           "demotions": demotions, "held": held, "hold": _hold_on(),
+           "quotes": _shown(request, candidates)}
 
     # 4. The verdicts. The rail's own lifecycle judges every candidate, the
     #    ones this operator passed included (the lifecycle is the rail's, a

@@ -35,7 +35,8 @@
  *    .words is the mirror of one_quote.words, and one case table
  *    (tests/one_quote_words.json) pins the two.
  *  * CHARTS draw "now" as one price line at the same value (SVVenue.chart),
- *    and SPARKLINES end with a dot at it (SVVenue.drawSparks).
+ *    and SPARKLINES end with a dot at it (SVVenue.drawSparks). A spark is
+ *    keyed by data-q-spark, never data-q: it is drawn, not written into.
  *
  * Display only: it reads values and writes text. No request is sent.
  */
@@ -100,6 +101,8 @@
     var who = String(p.who || '');
     if (p.src === 'etoro') {
       var s = side || p.side || '';
+      /* a reading without sides prints its print */
+      if ((s === 'bid' || s === 'ask' || s === 'mid') && (nil(p.b) || nil(p.a))) s = 'last';
       return SIDES[s] ? who + ' ' + s : who;
     }
     return who;
@@ -376,6 +379,8 @@
     if (!doc) return;
     var all = doc.querySelectorAll('[data-q]');
     for (var i = 0; i < all.length; i++) {
+      /* a sparkline is drawn, never written into (its svg would go) */
+      if (all[i].hasAttribute('data-points')) continue;
       var k = key(all[i].getAttribute('data-q'));
       if (!k) continue;
       (cells[k] || (cells[k] = [])).push(all[i]);
@@ -535,8 +540,14 @@
     var title = p.state === 'shut' ? 'closed · ' + head(p, '') : head(p, '');
     var opts = { price: v, title: title, color: lineColor(p), lineWidth: 1,
                  lineStyle: 2, axisLabelVisible: true, lineVisible: true };
-    if (!h._svLine) h._svLine = series.createPriceLine(opts);
-    else h._svLine.applyOptions({ price: v, title: title, color: lineColor(p) });
+    if (h._svLine && typeof h._svLine.applyOptions === 'function') {
+      h._svLine.applyOptions({ price: v, title: title, color: lineColor(p) });
+    } else {
+      if (h._svLine) {
+        try { series.removePriceLine(h._svLine); } catch (e) { /* gone with its series */ }
+      }
+      h._svLine = series.createPriceLine(opts);
+    }
     nowCaption(h, p, nowMs());
   }
 
@@ -588,7 +599,7 @@
     var pts = String(el.getAttribute('data-points') || '').split(',')
       .map(parseFloat).filter(function (v) { return !isNaN(v); });
     if (pts.length < 2) return;
-    var k = key(el.getAttribute('data-q'));
+    var k = key(el.getAttribute('data-q-spark'));
     var p = k ? map[k] : null;
     var v = p ? valueNum(p, '') : null;
     var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
@@ -616,6 +627,9 @@
     var yd = H - pad - ((v - lo) / span) * (H - 2 * pad);
     dot.setAttribute('cx', (W - pad - 1).toFixed(2));
     dot.setAttribute('cy', yd.toFixed(2));
+    /* its colour is the shown price's own day change; none: neutral */
+    var up = nil(p.chg) ? '' : (+p.chg >= 0 ? '1' : '0');
+    if (el.getAttribute('data-up') !== up) el.setAttribute('data-up', up);
     var barsFam = el.getAttribute('data-q-fam') || '';
     var other = barsFam && p.fam && barsFam !== p.fam;
     dot.setAttribute('class', 'sv-q-dot' + (other ? ' sv-q-dot--other' : ''));
@@ -626,9 +640,7 @@
 
   function sparksOf(k) {
     if (!doc) return;
-    var els = doc.querySelectorAll('.wl-spark[data-points][data-q="' + k + '"],' +
-                                   '.pop-spark[data-points][data-q="' + k + '"],' +
-                                   '[data-q-spark][data-q="' + k + '"]');
+    var els = doc.querySelectorAll('[data-q-spark="' + k + '"][data-points]');
     for (var i = 0; i < els.length; i++) drawSpark(els[i]);
   }
 
@@ -644,8 +656,10 @@
 
   function holds(node) {
     if (!node || node.nodeType !== 1) return false;
-    if (node.hasAttribute('data-q') || node.matches && node.matches('script[data-sv-quotes]')) return true;
-    return !!(node.querySelector && node.querySelector('[data-q], script[data-sv-quotes]'));
+    if (node.hasAttribute('data-q') || node.hasAttribute('data-q-spark') ||
+        node.matches && node.matches('script[data-sv-quotes]')) return true;
+    return !!(node.querySelector &&
+              node.querySelector('[data-q], [data-q-spark], script[data-sv-quotes]'));
   }
 
   function onMutations(records) {
@@ -668,6 +682,7 @@
     var at = nowMs();
     for (var k in cells) paintSymbol(k, at);
     dirty = {};
+    drawSparks();
   }
 
   function start() {

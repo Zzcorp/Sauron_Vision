@@ -1,4 +1,4 @@
-{% load sauron_tags %}
+{% load sauron_tags quote_tags %}
 {% comment %}
 The deal ticket — SHORT at the bid, the spread, LONG at the ask.
 
@@ -28,7 +28,7 @@ number sits on a button that opens a position.
             aria-label="Short {{ symbol }} at the bid"
             onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ symbol|escapejs }}', 'SELL');">
         <span class="tk-lbl">▼ SHORT</span>
-        <span class="tk-px" data-dq="bid">{% if quote.bid %}{% px quote.bid asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+        <span class="tk-px" data-dq="bid" data-q="{{ symbol }}" data-q-f="bid">{% if quote.bid %}{% px quote.bid asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </button>
     <span class="tk-mid">
         {% comment %}THE VENUE, on the ticket itself. The manual lane is armed
@@ -43,13 +43,13 @@ number sits on a button that opens a position.
         {% if lane_mode %}<span class="tk-venue tk-venue--{{ lane_mode }}"
               title="{% if lane_mode == 'live' %}This ticket places REAL orders — the manual lane for this asset class is armed{% else %}Simulated — the manual lane for this asset class is in paper mode{% endif %}">{% if lane_mode == 'live' %}● LIVE{% else %}◌ paper{% endif %}</span>{% endif %}
         <span class="tk-k">SPREAD</span>
-        <span class="tk-v" data-dq="spread">{% if quote.bid and quote.ask %}{% px quote.spread asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+        <span class="tk-v" data-dq="spread" data-q="{{ symbol }}" data-q-f="spread">{% if quote.bid and quote.ask %}{% q symbol "spread" %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </span>
     <button type="button" class="tk-side tk-long"
             title="LONG {{ symbol }} — lifts the ask"
             aria-label="Long {{ symbol }} at the ask"
             onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ symbol|escapejs }}', 'BUY');">
         <span class="tk-lbl">▲ LONG</span>
-        <span class="tk-px" data-dq="ask">{% if quote.ask %}{% px quote.ask asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+        <span class="tk-px" data-dq="ask" data-q="{{ symbol }}" data-q-f="ask">{% if quote.ask %}{% px quote.ask asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </button>
 </div>

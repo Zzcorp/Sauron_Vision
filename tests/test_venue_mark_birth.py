@@ -267,7 +267,10 @@ class ThePagesSayWhichMarkTests(TestCase):
         _gold(self.cfg, meta=_stamp("2649.75", age_s=2 * 3600))
         for body in self._bodies():
             self.assertIn('data-mark-source="venue_stale"', body)
-            self.assertIn("venue · 2 h old", body)
+            # ONE PRICE EVERYWHERE (2026-11-12): the cell's words are the
+            # one rule's, the Horde's and the headband's: whose (eToro,
+            # its print: the stamp has no sides) and how old.
+            self.assertIn("eToro last · 2 h", body)
             self.assertNotIn("+18.00", body)
 
     def test_a_fresh_stamp_says_venue_on_the_portfolio_page_too(self):

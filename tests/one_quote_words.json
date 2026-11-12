@@ -1007,6 +1007,36 @@
    },
    "now": 1794510836000,
    "words": "awaiting eToro"
+  },
+  {
+   "name": "a position's side on a sideless reading is its print",
+   "payload": {
+    "s": "EURUSD",
+    "p": "1.08447",
+    "v": 1.08447,
+    "b": null,
+    "a": null,
+    "l": "1.08452",
+    "side": "last",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:candle",
+    "at": 1794510236000,
+    "state": "delayed",
+    "dp": 5,
+    "cls": "forex",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "candle"
+   },
+   "now": 1794510836000,
+   "words": "eToro last · 10 min",
+   "side": "bid"
   }
  ],
  "slots": [

@@ -112,7 +112,10 @@ class RowContractTests(TestCase):
         """The card's whole reason to exist: not the levels, which the table
         already prints, but how far the mark is from each of them."""
         self.assertEqual(_attr(self.html, "entry"), "60000")
-        self.assertEqual(_attr(self.html, "mark"), "61000")
+        # The MARK rung is the row's Current cell (2026-11-12, ONE PRICE
+        # EVERYWHERE): the instrument's one price, in its px digits, the
+        # same text every screen prints for it.
+        self.assertEqual(_attr(self.html, "mark"), "61000.00")
         self.assertEqual(_attr(self.html, "stop"), "59000")
         self.assertEqual(_attr(self.html, "target"), "62000")
         self.assertEqual(_attr(self.html, "stop-pct"), "3.28")
@@ -239,7 +242,8 @@ class UnknownsRenderAsGapsTests(TestCase):
         html = self.client.get(POSITIONS).content.decode("utf-8", "replace")
         self.assertEqual(_attr(html, "entry"), "0.000012")
         self.assertEqual(_attr(html, "stop"), "0.00001")
-        self.assertEqual(_attr(html, "mark"), "0.000013")
+        # The mark in the instrument's px digits (the one price, 2026-11-12).
+        self.assertEqual(_attr(html, "mark"), "0.00001300")
 
     def test_a_never_scored_trade_shows_no_score_rather_than_zero(self):
         """composite_score defaults to 0 and a hand-taken entry never sets

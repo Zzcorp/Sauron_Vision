@@ -60,6 +60,7 @@ STAGE_OF = {
     # 2026-11-06: eToro's own bid, ask and last for the instruments of
     # the open real positions (bot_program/etoro_quotes.py).
     "refresh-etoro-quotes": ("see", "eToro's own quotes for the open real positions"),
+    "relay-held-quotes": ("see", "the held positions' one price, to every screen"),
     "fetch-commodity-live": ("see", "commodity quotes"),
     "fetch-index-live": ("see", "index quotes"),
     "fetch-crypto-prices": ("see", "crypto quotes"),

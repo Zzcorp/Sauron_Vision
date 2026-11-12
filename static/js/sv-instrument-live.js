@@ -186,6 +186,21 @@
 
   function paintQuote(d) {
     if (!d || d.error) return;
+    /* ONE PRICE EVERYWHERE (2026-11-12): the answer goes to the one price
+       painter (sv-venue.js), which paints the hero, the quote card and
+       both tickets with every other cell of the instrument, in one frame,
+       and never steps one back. This poll is its backstop; it keeps the
+       ticket's stale mark and hands the chart its tick. */
+    if (window.SVVenue && d.q) {
+      window.SVVenue.ingest(d.q, d.t);
+      var old = d.quote_age_seconds != null && d.quote_age_seconds > STALE_S;
+      document.querySelectorAll('.sv-ticket').forEach(function (tk) {
+        tk.classList.toggle('tk-stale', old);
+      });
+      var c = window.svCharts && window.svCharts['instrument-main-chart'];
+      if (c && c.tick && d.price != null) c.tick(Number(d.price), d);
+      return;
+    }
     /* BEFORE the price guard below. A row can carry a bid and an ask with
        no `last` — and the ticket trades off those two, so letting a
        missing last suppress them would freeze the only numbers on the

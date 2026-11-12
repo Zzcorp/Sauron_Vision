@@ -585,8 +585,26 @@ def _mark_t(row, mark_v, cls, symbol):
     """The mark at the instrument's one precision (core/price_format), the
     precision of its levels, its plan and its correlated row; the money
     (P&L, R, percentages) stays the positions page's own digits. Unpriced,
-    the positions page's own dash."""
+    the positions page's own dash.
+
+    ONE PRICE EVERYWHERE (2026-11-12): the seat prints the row's Current
+    cell, the instrument's one price by the rule every screen prints
+    (market_data.one_quote, at the row's closing side); the distances, the
+    R and the P&L stay on the valuation mark (`mark_v`)."""
+    if row.get("q_text"):
+        return row["q_text"]
     return row["last_text"] if mark_v is None else _price(mark_v, cls, symbol)
+
+
+def _mark_of(row, mark_v, cls, sym):
+    """The seat's mark: its text and words by the one rule, its value the
+    valuation's, and the cell's address for the browser's one painter
+    (static/js/sv-venue.js: data-q, data-q-side)."""
+    return {"t": _mark_t(row, mark_v, cls, sym), "v": mark_v,
+            "word": row.get("q_words") or row["mark_word"],
+            "title": row.get("q_title") or row["mark_title"],
+            "wait": row["mark_wait"], "source": row["mark_source"] or "",
+            "q": {"s": (sym or "").upper(), "side": row.get("q_side") or ""}}
 
 
 def _r_title(row, mark_v, entry, stop, cls, symbol):
@@ -716,7 +734,7 @@ class _Book:
     """Block A, read once: the seats' raw rows, already marked."""
     __slots__ = ("pf", "fp", "n_configs", "n_trades", "trades", "ups",
                  "rows", "legacy", "stragglers", "reviews", "switches",
-                 "now")
+                 "now", "quotes")
 
 
 def _venue_map(user, trades, ups):
@@ -776,12 +794,17 @@ def _read_book(user, pf, fp, now):
     for p in book.legacy:
         cls = getattr(p.instrument, "asset_class", "") or ""
         levs[f"pos-{p.pk}"] = _pos_leverage(cls)
+    # ONE PRICE EVERYWHERE (2026-11-12): the seats' instruments asked of
+    # the one rule at the board's instant (three queries for the board).
+    book.quotes = _quotes(user, book, now)
     book.rows = {}
     for up in book.ups:
         book.rows[f"bot:{up.trade_id}"] = _live_row(up, stops, levs,
-                                                    venues=venues)
+                                                    venues=venues,
+                                                    quotes=book.quotes)
     for p in book.legacy:
-        book.rows[f"pf:{p.pk}"] = _live_row(p, stops, levs)
+        book.rows[f"pf:{p.pk}"] = _live_row(p, stops, levs,
+                                            quotes=book.quotes)
 
     keys = list(book.rows)
     book.reviews = {}
@@ -792,6 +815,24 @@ def _read_book(user, pf, fp, now):
         book.reviews = position_review.latest_verdicts(keys=keys)
     book.switches = _switches()
     return book
+
+
+def _quotes(user, book, now):
+    """{SYMBOL: Shown} of every seat's instrument (market_data.one_quote)."""
+    syms = {(getattr(getattr(r, "instrument", None), "symbol", "") or "")
+            .upper() for r in list(book.ups) + list(book.legacy)}
+    syms.discard("")
+    if not syms:
+        return {}
+    try:
+        from market_data.one_quote import shown_from
+        # The viewer's own open rows are the book's (no second read).
+        return {k.upper(): v for k, v in
+                shown_from(sorted(syms), rows=book.trades, now=now).items()}
+    except Exception:  # noqa: BLE001 — a seat's words, never the board
+        logger.warning("[horde] the one-price rule was not read",
+                       exc_info=True)
+        return {}
 
 
 def _head_key(user, fp):
@@ -1243,9 +1284,7 @@ def _bot_seat(book, trade, up, row, sides_book, now):
         money.update(pnl_t=DASH, pnl_v=None, pnl_tone="", pct_t=DASH,
                      cap_pct_t=None, r_t=DASH, r_v=None, r_tone="", note=NOT_FILLED,
                      pnl_words="", pnl_title="")
-    mark = {"t": _mark_t(row, mark_v, pcls, sym), "v": mark_v, "word": row["mark_word"],
-            "title": row["mark_title"], "wait": row["mark_wait"],
-            "source": row["mark_source"] or ""}
+    mark = _mark_of(row, mark_v, pcls, sym)
 
     # the levels
     # A level of 0 is "none" (eToro's own spelling of no stop), never a
@@ -1495,10 +1534,7 @@ def _legacy_seat(book, p, row, sides_book, now):
         "venue": "", "class": cls, "class_label": _class_label(cls),
         "instrument_class": cls, "lane": "legacy", "config": None,
         "mission": MISSION_LEGACY, "light": lt,
-        "mark": {"t": _mark_t(row, mark_v, cls, sym), "v": mark_v,
-                 "word": row["mark_word"],
-                 "title": row["mark_title"], "wait": row["mark_wait"],
-                 "source": row["mark_source"] or ""},
+        "mark": _mark_of(row, mark_v, cls, sym),
         "money": {"pnl_t": row["pnl_text"], "pnl_v": _f(row["unrealized_pnl"]),
                   "pnl_tone": row["pnl_tone"], "pct_t": row["pct_text"],
                   "cap_pct_t": row["cap_pct_text"] or None,
@@ -2186,6 +2222,10 @@ def board(user, *, now=None) -> dict:
                  "readable": head["readable"]},
         "head": head, "groups": groups, "stragglers": _stragglers(book),
         "unseated": _unseated(raw, book, user), "empty": empty, "tab": tab,
+        # the seats' prices for the browser's one painter (sv-venue.js)
+        "quotes": {"t": int(round(now.timestamp() * 1000)),
+                   "q": {k: v.payload() for k, v in
+                         (getattr(book, "quotes", None) or {}).items()}},
     }
 
 
@@ -2625,6 +2665,26 @@ def _peers(user, symbol, side, cls, world, others, now):
     quotes = ({q.instrument.symbol.upper(): q for q in LiveQuote.objects
                .select_related("instrument").filter(instrument__symbol__in=order)}
               if order else {})
+    one = {}
+    if order:
+        # The rule from the reads above (no query of its own): the
+        # viewer's seats are what it holds, the quotes the peers' quotes.
+        try:
+            from types import SimpleNamespace
+
+            from market_data.one_quote import shown_from
+            one = {k.upper(): v for k, v in shown_from(
+                order, rows=[s["_trade"] for s in seats_by_sym.values()
+                             if s.get("_trade") is not None],
+                quotes=quotes,
+                instruments={k: SimpleNamespace(
+                    symbol=k, exchange="",
+                    asset_class=(v.get("asset_class") or ""))
+                    for k, v in insts.items()},
+                now=now).items()}
+        except Exception:  # noqa: BLE001 — the peers' old read stands
+            one = {}
+    from market_data.one_quote import closing_side
 
     rows = []
     measured = (matrix or {}).get("measured") or set()
@@ -2654,7 +2714,18 @@ def _peers(user, symbol, side, cls, world, others, now):
         # instrument's own class: the seat card, its dossier and this row
         # print NSDQ100 alike.
         pcls_s = (insts.get(s) or {}).get("asset_class") or (seat or {}).get("class", "")
-        if seat:
+        # ONE PRICE EVERYWHERE (2026-11-12): a peer prints the instrument's
+        # one price by the rule (market_data.one_quote), a seat at its own
+        # closing side; the day change only when the price's own source
+        # measured it. Another peer's price older than QUOTE_MAX_AGE_S is a
+        # dash, as before.
+        sh_s = one.get(s)
+        if sh_s is not None and sh_s.price is not None and (
+                seat or (sh_s.at is not None and
+                         (now - sh_s.at).total_seconds() <= QUOTE_MAX_AGE_S)):
+            last_t = sh_s.text(closing_side((seat or {}).get("side")) or None)
+            quoted = sh_s.chg is not None
+        elif seat:
             mark = resolve(seat["_trade"], q, now=now)
             if mark.price is not None:
                 last_t = _price(mark.price, pcls_s, s)
@@ -2665,7 +2736,9 @@ def _peers(user, symbol, side, cls, world, others, now):
             at = q.updated_at
             if at is not None and (now - at).total_seconds() <= QUOTE_MAX_AGE_S:
                 last_t = _price(q.last, pcls_s, s)
-        chg = _f(q.change_pct) if (q is not None and quoted) else None
+        chg = (float(sh_s.chg) if (sh_s is not None and sh_s.chg is not None)
+               else _f(q.change_pct) if (q is not None and quoted
+                                         and sh_s is None) else None)
         if chg is not None and chg != 0:
             change_t = "{:+.1f}%".format(chg)
         # A printed price with no day change beside it says why: a dash is
