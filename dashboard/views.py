@@ -3839,6 +3839,17 @@ RISK_LIMIT_BOUNDS = {
     # MAX_ORDER_LEVERAGE, pinned equal). Never the TAKE TRADE ticket. 1 is
     # "the bots never lever"; BLANK is no cap (RISK_LIMIT_BLANK_IS_NONE).
     "max_bot_leverage": (1, 30, "Max bot leverage"),
+    # MAX BOT FLOOR RISK (2026-11-12; the operator: "je veux tous mes bots
+    # live right now", "qu'il soit smart pour s'ajuster au marché et y
+    # pouvoir rentrer tout du moins"): the most a bot's entry RAISED TO THE
+    # VENUE'S SMALLEST SIZE may risk at its stop, in percent of the bot's
+    # pool (asset_engine.base.bot_floor_risk_pct, BOT_FLOOR_RISK_BOUNDS,
+    # pinned equal). Read only while the live-money switch
+    # bots_venue_floor_live is ON. 7 is sizing.MAX_RISK_FRACTION in
+    # percent, the hard cap of every trade, and never passed; under 0.1 no
+    # venue's minimum fits. A blank is refused like every other percentage:
+    # a ceiling nobody typed is not saved.
+    "max_bot_floor_risk_pct": (0.1, 7.0, "Max bot floor risk"),
 }
 
 # POST field -> Portfolio field. The form names are short and the model names
@@ -3854,13 +3865,14 @@ RISK_LIMIT_FIELDS = {
     "max_open_risk": "max_open_risk_pct",
     "max_notional": "max_notional_multiple",
     "max_bot_leverage": "max_bot_leverage",
+    "max_bot_floor_risk": "max_bot_floor_risk_pct",
 }
 
 # Fields a post may leave OUT (absent, not blank) and keep the stored value:
 # a card rendered before the field existed must still save the others. A
 # field that IS posted is judged like every sibling — blank is refused.
 RISK_LIMIT_OPTIONAL = {"max_pledged", "max_open_risk", "max_notional",
-                       "max_bot_leverage"}
+                       "max_bot_leverage", "max_bot_floor_risk"}
 
 # Fields whose BLANK is a value (2026-11-05): a posted blank stores NULL,
 # "no limit" — MAX BOT LEVERAGE left empty is no cap on the bots'
@@ -3891,6 +3903,12 @@ def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
     (RISK_LIMIT_BLANK_IS_NONE), and a value that is not a whole multiplier
     is refused (RISK_LIMIT_WHOLE). A card rendered before it existed posts
     nothing for it and keeps the stored value (RISK_LIMIT_OPTIONAL).
+
+    MAX BOT FLOOR RISK (2026-11-12) saves under the same rules with none
+    of its own: its bounds (0.1 to 7, never above the hard cap of every
+    trade), all or none, a posted blank refused like every percentage (a
+    blank is not the default), and a card rendered before it existed
+    keeps the stored value.
     """
     rejected: list[str] = []
     pending: dict[str, float | int | None] = {}
@@ -3925,6 +3943,12 @@ def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
                 rejected.append(
                     f"{label} must be between {low:g} and {high:g} — a "
                     f"whole multiplier, or blank for no cap")
+            elif field == "max_bot_floor_risk_pct":
+                rejected.append(
+                    f"{label} must be between {low:g} and {high:g} — the "
+                    f"most a bot's entry raised to the venue's smallest "
+                    f"size may risk, in percent of its pool; {high:g}% is "
+                    f"the hard cap of every trade")
             else:
                 rejected.append(
                     f"{label} must be between {low:g} and {high:g} — "
