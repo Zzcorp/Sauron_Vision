@@ -911,6 +911,37 @@ class TheSendChecksTests(_On):
             "the venue's smallest size was read at the proposal and is "
             "unread at the order — nothing sent"), skip)
 
+    def test_another_venue_at_the_order_sends_nothing(self):
+        """The route moved between the proposal and the order (a box
+        unticked on /brokers/): the size was raised to eToro's minimum,
+        nobody else's, so a venue that states a minimum of its own, even
+        the same one, is sent nothing."""
+        class OtherVenue(mock.MagicMock):
+            def min_tradable(self, symbol):
+                return 1000.0
+        other = OtherVenue()
+        other.ticker = mock.MagicMock(return_value={"lastPrice": "1.0800"})
+        other.get_positions = mock.MagicMock(return_value=[])
+        world = _on("forex_under_min")
+        the_venue = H.venue(world["price"], world["table"])
+        from bot_program.asset_engine.base import make_bot
+        bot = make_bot(world["cfg"])
+        with mock.patch(H.ROUTER, return_value=the_venue):
+            cand = bot.propose_entry("EURUSD")
+        self.assertEqual(cand.qty_default, 1000.0)
+        with mock.patch(H.ROUTER, return_value=other), \
+                mock.patch("time.sleep"):
+            self.assertIsNone(bot.execute_entry(cand))
+        other.market_order.assert_not_called()
+        the_venue.market_order.assert_not_called()
+        world["cfg"].refresh_from_db()
+        skip = world["cfg"].extras["skips"]["EURUSD"]
+        self.assertEqual(skip["code"], "venue_min_size")
+        self.assertEqual(
+            skip["detail"],
+            "raised to eToro's smallest size at the proposal, and the "
+            "order would go to another venue now — nothing sent")
+
     def test_a_minimum_that_moved_before_the_order_sends_nothing(self):
         world = _on("forex_under_min")
 

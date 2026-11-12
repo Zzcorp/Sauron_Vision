@@ -6918,8 +6918,9 @@ class AssetBot(ABC):
             if _floored and not (_floor is not None
                                  and float(qty) < _floor - 1e-9):
                 _vf_no = self._venue_floor_send_refusal(
-                    _vf, symbol, qty=float(qty), floor=_floor,
-                    why=_why or "", price=price, sl=sl, fractional=_fr)
+                    _vf, symbol, client=client, qty=float(qty),
+                    floor=_floor, why=_why or "", price=price, sl=sl,
+                    fractional=_fr)
             if _vf_no:
                 logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
                                symbol, _vf_no)
@@ -9690,15 +9691,23 @@ class AssetBot(ABC):
                     getattr(self.cfg, "extras", None) or {})}
 
     def _venue_floor_send_refusal(self, verdict: dict, symbol: str, *,
-                                  qty: float, floor, why: str, price: float,
-                                  sl: float, fractional=None) -> str:
+                                  client, qty: float, floor, why: str,
+                                  price: float, sl: float,
+                                  fractional=None) -> str:
         """Why a candidate RAISED at the proposal may not be sent now, or
         "". Asked by execute_entry on the client the order goes through,
         with the minimum it just read there (`floor`, `why`): nothing is
-        raised at the send, and a raised size that is no longer the
+        raised at the send, and a raised size that would go to another
+        venue than eToro (the route moved since the proposal: the size was
+        raised to eToro's minimum, nobody else's), that is no longer the
         venue's smallest size, or no longer inside the operator's bounds,
         sends nothing. (The switch is read at the top of execute_entry; a
         size under the minimum is main's own refusal.)"""
+        from bot_program.engine.capabilities import adapter_key
+        if adapter_key(client) != "etoro":
+            return ("raised to eToro's smallest size at the proposal, and "
+                    "the order would go to another venue now — nothing "
+                    "sent")
         if floor is None or why:
             return ("the venue's smallest size was read at the proposal and "
                     "is unread at the order — nothing sent"
