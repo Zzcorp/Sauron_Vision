@@ -165,8 +165,9 @@ class OculusPageTests(TestCase):
         self.client.force_login(self.user)
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
-        # Django escapes the apostrophe to &#x27;, so compare unescaped —
-        # four of these ten titles start with "L'".
+        # Django escapes apostrophes to &#x27;, so compare unescaped. (The
+        # titles were French once, four of them starting with "L'"; they are
+        # English now, and the page's qualifiers still carry apostrophes.)
         body = _html.unescape(resp.content.decode())
         for title in ("The switches", "The scan", "The promotion ladder",
                       "The signals", "Evolution", "Personalities",
@@ -550,6 +551,13 @@ class TheSwitchesAndTheForgeAreStaffsTests(TestCase):
         self.assertEqual([d for d in data["degraded"]
                           if d.startswith(("forge", "gates"))], [])
 
+        # Staff, on a COLD cache. Since O0 the scan and the plan are read
+        # once per build and stored (tests/test_oculus_truth pins the warm
+        # half), so "staff reads them" holds for the first render of a
+        # build, which an empty cache is. The meaning pinned here, never
+        # for a viewer, is unchanged.
+        from django.core.cache import cache
+        cache.clear()
         with mock.patch("pathlib.Path.rglob", return_value=iter(())) as scan, \
                 mock.patch("django.db.migrations.executor.MigrationExecutor"
                            ) as plan:

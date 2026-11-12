@@ -22,7 +22,11 @@ stated reason, and LEFT THE RAIL (hidden until its chip is pressed)
 keeps the last 24 hours of departures in words, with the TAKE TRADE
 ticket still offered while the engine holds the signal. Every row
 carries its facts as data-* attributes, which the rail's filters read
-(static/css/sv-rail.css); no row is ever edited by script. The meta
+(static/css/sv-rail.css); no row is ever edited by script. A signal
+whose market is shut now stays a card and says so (2026-11-12): the
+MARKET SHUT badge with the hour the market opens, data-market="shut" for
+the SHUT chip, and one line in its popup; an open market's card carries
+none of the three. The meta
 block paints the counts outside this body, and the <template> carries
 the headband popup's rows, so one fetch updates both lists. base.html's
 first render passes rail_initial and renders those rows itself.
@@ -60,13 +64,38 @@ first render passes rail_initial and renders those rows itself.
     drawn up to a bound, and these lines say how many more there were.{% endcomment %}
     {% if rail.gone_more %}<div class="sr-rail-note">and {{ rail.gone_more }} more engine closes in the last 24h, drawn no further: the engine closed them, so no ticket is lost. /signals/ lists every signal.</div>{% endif %}
     {% if rail.closed_unread %}<div class="sr-rail-note">{{ rail.closed_unread }} more engine closes of the last 24h were not read (the newest {{ rail.closed_fetch }} were). /signals/ lists every signal.</div>{% endif %}
-</section>
+</section>{% if rail.hold %}{# MARKET SHUT (2026-11-12, the optional hold, the switch signal_market_hold): the signals the rail would show as cards whose market cannot trade now, each with the hour it opens and its ticket. Hidden until its chip or its filter row is pressed. Not rendered at all with the switch off, and written on the line of the tag above so that render keeps its bytes. #}
+<section class="sr-shut-sec" data-sv-shut aria-label="Signals whose market cannot trade now">
+    <div class="sr-gone-head">
+        <span class="sr-gone-title">MARKET SHUT</span>
+        <span class="sr-gone-count" data-sv-rail-n="waiting">{{ rail.waiting_n|default:"0" }}</span>
+    </div>
+    {% for g in rail.waiting %}
+    <div class="sr-wait-row" data-sv-row data-waiting data-reason="{{ g.reason }}" data-signal-id="{{ g.signal_id }}" data-asset-class="{{ g.facts.asset_class }}" data-side="{{ g.facts.side }}" data-score-b="{{ g.facts.score_band }}" data-stage="{{ g.facts.stage }}" data-votes="{{ g.facts.votes|yesno:'1,0' }}" data-live="{{ g.facts.live|yesno:'1,0' }}" data-held="{{ g.facts.held|yesno:'1,0' }}" data-rule-key="{{ g.facts.rule_key }}" data-created="{{ g.created_at|date:'c' }}">
+        <div class="sr-gone-l1">
+            <span class="sr-sym">{{ g.symbol }}</span>
+            <span class="sr-badge sr-badge-{{ g.direction }}">{{ g.direction|upper|slice:":4" }}</span>
+            <span class="sr-gone-tag sr-gone-tag-{{ g.reason }}">{{ g.tag }}</span>
+            {% if g.rule %}<span class="sr-wait-rule" title="{{ g.rule }}">{{ g.rule|truncatechars:24 }}</span>{% endif %}
+        </div>
+        <div class="sr-gone-words">{{ g.words }}</div>
+        {% if g.position_words %}<div class="sr-gone-pos">{{ g.position_words }}</div>{% endif %}
+        {% if g.takeable %}
+        <div class="sr-gone-acts">
+            <button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="{% if g.reason == 'market_settling' %}The market has just opened: a paper ticket is refused in its first quarter hour; a live ticket is yours to send{% else %}The market is shut: a paper ticket is refused {% if g.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send{% endif %}" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>
+        </div>
+        {% endif %}
+    </div>
+    {% empty %}
+    <div class="sr-gone-empty">No signal is waiting for its market.</div>
+    {% endfor %}
+</section>{% endif %}
 {% if rail.ceiling_hit %}<div class="sr-rail-note sr-rail-ceiling">Showing the newest {{ rail.ceiling }} of {{ rail.total }} signals from the last 48h. /signals/ lists every one.</div>{% endif %}
 {% url 'signals_list' as signals_url %}
 <div class="sr-list" data-sv-list="signals">
 {% for g in rail.groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cscore:{{ g.o_cls }};--o-score:0">{{ g.label }}</div>{% endfor %}
 {% for s in panel_recent_signals %}
-            <div class="sr-signal-wrap{% if s.acted %} sr-acted sr-acted-{{ s.acted.by }}{% endif %}" data-signal-id="{{ s.id }}"{% if s.acted %} data-acted="{{ s.acted.by }}"{% endif %} data-sv-row data-asset-class="{{ s.rail.asset_class }}" data-side="{{ s.rail.side }}" data-score-b="{{ s.rail.score_band }}" data-stage="{{ s.rail.stage }}" data-votes="{{ s.rail.votes|yesno:'1,0' }}" data-live="{{ s.rail.live|yesno:'1,0' }}" data-held="{{ s.rail.held|yesno:'1,0' }}" data-rule-key="{{ s.rail.rule_key }}" data-created="{{ s.created_at|date:'c' }}" style="--o-score:{{ s.rail.o_score }};--o-cls:{{ s.rail.o_cls }};--o-cscore:{{ s.rail.o_cscore }}">
+            <div class="sr-signal-wrap{% if s.acted %} sr-acted sr-acted-{{ s.acted.by }}{% endif %}" data-signal-id="{{ s.id }}"{% if s.acted %} data-acted="{{ s.acted.by }}"{% endif %} data-sv-row data-asset-class="{{ s.rail.asset_class }}" data-side="{{ s.rail.side }}" data-score-b="{{ s.rail.score_band }}" data-stage="{{ s.rail.stage }}" data-votes="{{ s.rail.votes|yesno:'1,0' }}" data-live="{{ s.rail.live|yesno:'1,0' }}" data-held="{{ s.rail.held|yesno:'1,0' }}" data-rule-key="{{ s.rail.rule_key }}" data-created="{{ s.created_at|date:'c' }}"{% if s.rail.market == 'shut' %} data-market="shut"{% endif %} style="--o-score:{{ s.rail.o_score }};--o-cls:{{ s.rail.o_cls }};--o-cscore:{{ s.rail.o_cscore }}">
                 <button type="button" class="sr-x"
                         title="Pass — takes it off your rail on every device; the engine still sees it"
                         aria-label="Pass on {{ s.instrument.symbol }} signal"
@@ -96,7 +125,8 @@ first render passes rail_initial and renders those rows itself.
                         <div class="sr-row3">
                             {% if s.rail.stage_label %}<span class="sr-stage sr-stage-{{ s.rail.stage_tone }}" title="{{ s.rail.stage_reason }}">{{ s.rail.stage_label }}</span>{% endif %}
                             {% if s.rule_name %}<span class="sr-rule">{{ s.rule_name|truncatechars:28 }}</span>{% endif %}
-                        </div>
+                        </div>{% if s.rail.market == 'shut' %}{# THE MARKET IS SHUT (2026-11-12): said on the card, with the hour it opens; the card stays, and its ticket says the same. Written on one line with the tag above so an open market's card keeps its bytes. #}
+                        <div class="sr-shut" title="{{ s.rail.market_words|capfirst }}. A paper ticket is refused {% if s.instrument.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send."><span class="sr-shut-tag">MARKET SHUT</span>{% if s.rail.opens %} <span class="sr-shut-opens">{{ s.rail.opens }}</span>{% endif %}</div>{% endif %}
                         {% if s.rail.contra %}
                         <div class="sr-contra" title="A newer opposite signal from another rule on this instrument. The bots net the two sides; you decide.">⚠ CONTRA {{ s.rail.contra.rule|truncatechars:20 }} {{ s.rail.contra.side }} {{ s.rail.contra.at|timesince|truncatechars:8 }}</div>
                         {% endif %}
@@ -195,7 +225,7 @@ first render passes rail_initial and renders those rows itself.
                         <div class="sr-pop-fact"><span class="sr-pop-k">stage</span> {{ s.rail.stage_label|default:"—" }} · {{ s.rail.vote_words }}</div>
                         <div class="sr-pop-fact"><span class="sr-pop-k">graded</span> {{ s.rail.record_words }}</div>
                         {% if s.rail.live_words %}<div class="sr-pop-fact"><span class="sr-pop-k">real money</span> {{ s.rail.live_words }}</div>{% endif %}
-                        {% if s.rail.held %}<div class="sr-pop-fact"><span class="sr-pop-k">held</span> you hold {{ s.instrument.symbol }} ({{ s.rail.held_venue }})</div>{% endif %}
+                        {% if s.rail.held %}<div class="sr-pop-fact"><span class="sr-pop-k">held</span> you hold {{ s.instrument.symbol }} ({{ s.rail.held_venue }})</div>{% endif %}{% if s.rail.market == 'shut' %}<div class="sr-pop-fact sr-pop-fact-shut"><span class="sr-pop-k">market</span> shut{% if s.rail.opens %} · {{ s.rail.opens }}{% endif %} · a paper ticket is refused {% if s.instrument.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send</div>{% endif %}
                     </div>
                     {% comment %}Reaction row (take trade / pass) — primary
                     decisions. TAKE TRADE only for directional signals: a
