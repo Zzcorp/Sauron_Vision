@@ -107,6 +107,7 @@ LIVE_MONEY_SWITCHES = (
     "aragorn",                      # benches/promotes pairs, closes positions
     "crisis_mode",                  # the market posture binds real money
     "smart_money",                  # moves stops, sizes real-money entries
+    "bots_venue_floor_live",        # a bot opens at the venue's smallest size
 )
 
 #: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and
@@ -586,6 +587,24 @@ DEFAULT_COMPONENTS = [
     # (< 300).
     {"key": "etoro_leverage_live", "name": "eToro Leverage (per config)",
      "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED; 'auto' and the TAKE TRADE ticket go at 1x. On: up to the class ceiling (forex 30x, index 20x, commodity 10x, stock 5x, crypto 2x) if in the LIVE leverageValues, its class in the proven set. MAX BOT LEVERAGE (/setup/) caps bots only.",
+     "category": "system"},
+
+    # ── The venue floor for bots (2026-11-12) ──────────────────────────
+    # The operator: "je veux tous mes bots live right now", "qu'il soit
+    # smart pour s'ajuster au marché et y pouvoir rentrer tout du moins".
+    # A bot risks 0.25% of its pool per trade, and on a small account that
+    # size is under eToro's minimum exposure (venue_min_size) or rounds to
+    # zero (sized_to_zero). ON, asset_engine/base.AssetBot._venue_floor
+    # raises such an order to the venue's MEASURED smallest size at the
+    # proposal, when its risk at the stop is inside MAX BOT FLOOR RISK on
+    # /setup/ (base.bot_floor_risk_pct) and its notional inside the class's
+    # cap; every gate then judges the raised size. LIVE MONEY: more and
+    # larger real entries, so it is in LIVE_MONEY_SWITCHES (the trading
+    # PIN at /ops/, never "all on", never the shell). OFF on arrival (no
+    # is_enabled key); a missing row reads OFF and nothing changes.
+    # Description measured at 295 chars (< 300).
+    {"key": "bots_venue_floor_live", "name": "Bots: Venue Floor",
+     "description": "Off (default): a bot order under the venue's smallest size is refused, as before. On: it opens at that size when its loss at the stop is at most MAX BOT FLOOR RISK (/setup/, 2% of its pool by default) and every other limit passes on that size; a bot with no multiplier lets the chooser pick one.",
      "category": "system"},
 
     # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ──

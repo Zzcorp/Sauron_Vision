@@ -557,6 +557,29 @@ def bot_leverage_cap(cfg=None):
     return whole
 
 
+#: THE VENUE FLOOR FOR BOTS (2026-11-12): the live-money switch
+#: (core.platform_control.LIVE_MONEY_SWITCHES; the trading PIN at /ops/,
+#: never "all on"). OFF, or with no row, nothing below it runs: no bot
+#: order is raised, no row is read for it, no word and no stored key is
+#: added, and every decision is the one it was. ON, AssetBot._venue_floor
+#: raises a bot's order that is under the venue's measured smallest size
+#: to that size, inside MAX BOT FLOOR RISK.
+VENUE_FLOOR_SWITCH_KEY = "bots_venue_floor_live"
+
+
+def venue_floor_on() -> bool:
+    """The venue floor's switch, read at call time. A missing row is OFF
+    (core.platform_control.is_component_enabled); so is a row that cannot
+    be read: the floor is never on by a failure."""
+    try:
+        from core.platform_control import is_component_enabled
+        return bool(is_component_enabled(VENUE_FLOOR_SWITCH_KEY))
+    except Exception as e:  # noqa: BLE001 (unread is OFF; said)
+        logger.warning("[bot-floor] %s unreadable (%s) — read as OFF",
+                       VENUE_FLOOR_SWITCH_KEY, type(e).__name__)
+        return False
+
+
 #: MAX BOT FLOOR RISK (2026-11-12): the default and the bounds, in percent
 #: of the bot's pool — the /setup/ card's own
 #: (dashboard.views.RISK_LIMIT_BOUNDS["max_bot_floor_risk_pct"], pinned
