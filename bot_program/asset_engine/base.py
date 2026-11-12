@@ -556,6 +556,69 @@ def bot_leverage_cap(cfg=None):
         return None
     return whole
 
+
+#: MAX BOT FLOOR RISK (2026-11-12): the default and the bounds, in percent
+#: of the bot's pool — the /setup/ card's own
+#: (dashboard.views.RISK_LIMIT_BOUNDS["max_bot_floor_risk_pct"], pinned
+#: equal). The upper bound is sizing.MAX_RISK_FRACTION in percent: the
+#: ceiling of a floor entry is never above the hard cap of every trade.
+BOT_FLOOR_RISK_DEFAULT_PCT = 2.0
+BOT_FLOOR_RISK_BOUNDS = (0.1, 7.0)
+
+
+def bot_floor_risk_pct():
+    """MAX BOT FLOOR RISK (2026-11-12): the most a bot's entry RAISED TO
+    THE VENUE'S SMALLEST SIZE may risk at its stop, in percent of the
+    bot's pool, or None.
+
+    The operator, 2026-11-12: "je veux tous mes bots live right now",
+    "qu'il soit smart pour s'ajuster au marché et y pouvoir rentrer tout
+    du moins". A bot risks sizing.DEFAULT_RISK_FRACTION (0.25%) of its
+    pool per trade unless its extras say otherwise, and on a small account
+    the size that gives is under eToro's minimum exposure. THE VENUE FLOOR
+    FOR BOTS (AssetBot._venue_floor, behind the live-money switch
+    VENUE_FLOOR_SWITCH_KEY) opens at the venue's minimum instead; this is
+    the operator's ceiling on what that size may risk: the limits book's
+    max_bot_floor_risk_pct (the /setup/ Risk Limits card, default
+    BOT_FLOOR_RISK_DEFAULT_PCT), read here at CALL time, never copied.
+
+    None is NO CEILING TO JUDGE BY, AND THEREFORE NO FLOOR ENTRY AT ALL —
+    it fails closed, because main opens no floor entry: a book that cannot
+    be read, a stored value that is not a number, or one outside
+    BOT_FLOOR_RISK_BOUNDS or above sizing.MAX_RISK_FRACTION (read at call
+    time; only a write past the card can put one there) raises nothing,
+    and the failure is logged at WARNING. Never the default in its place,
+    never a clamp: a ceiling nobody set is not one to trade real money
+    on."""
+    from bot_program.asset_engine import sizing as _sizing
+    try:
+        from portfolio.risk_gate import limits_book
+        raw = getattr(limits_book(), "max_bot_floor_risk_pct", None)
+    except Exception as e:  # noqa: BLE001 (no floor entry answers; said)
+        logger.warning("[bot-floor] MAX BOT FLOOR RISK unreadable (%s) — no "
+                       "entry is raised to a venue's smallest size",
+                       type(e).__name__)
+        return None
+    value = None
+    # a NUMBER only: a bool, a string or a stand-in object is not one
+    if isinstance(raw, (int, float, Decimal)) and not isinstance(raw, bool):
+        try:
+            value = float(raw)
+        except (ValueError, OverflowError, InvalidOperation):
+            value = None
+    low, high = BOT_FLOOR_RISK_BOUNDS
+    high = min(float(high), float(_sizing.MAX_RISK_FRACTION) * 100.0)
+    # the 1e-9 is float noise at the bounds (0.07 x 100), not tolerance
+    if value is None or value != value \
+            or not (low - 1e-9 <= value <= high + 1e-9):
+        logger.warning("[bot-floor] MAX BOT FLOOR RISK %r is not a number "
+                       "from %g to %g — no entry is raised to a venue's "
+                       "smallest size until it is set on /setup/", raw, low,
+                       high)
+        return None
+    return value
+
+
 #: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
 #: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
 #: missing row reads OFF (core.platform_control.is_component_enabled).
