@@ -23,13 +23,18 @@ lead an operator to two different actions.
 A LIVE OPERATION IS NAMED AS ONE (2026-11-12). With a bot armed for real
 money the two paper checks (a live-action switch ON, no paper bot) are the
 operator's decision, and this printed them under "BLOCKERS — 90 days would
-produce nothing gradeable". For a live operation it now prints three groups:
+produce nothing gradeable". For a live operation it now prints its groups:
 
     CHAIN FAULTS — evidence is not being produced
+    NO PAPER BOT FOR A RULE AT THE PAPER STAGE
     LIVE BY DECISION — not a paper campaign, and no fault
     WORTH READING
 
-and heads section 3 "LIVE-ACTION SWITCHES". For a paper campaign, or none,
+The second is the one paper check a live operation keeps. It has a heading
+of its own: with the chain whole and a rule waiting for a paper bot, "CHAIN
+FAULTS — evidence is not being produced" was false of everything else.
+
+It heads section 3 "LIVE-ACTION SWITCHES". For a paper campaign, or none,
 the output is what it was, the heading "3. MONEY MUST NOT MOVE" and the one
 BLOCKERS list included.
 """
@@ -84,12 +89,22 @@ class Command(BaseCommand):
             # campaign's blocker list.
             w(f"A LIVE OPERATION, NOT A PAPER CAMPAIGN — "
               f"{fleet_words(report['fleet'])}.")
-            if report["blockers"]:
+            # The chain's own faults, and apart from them the one paper
+            # check a live operation keeps (a rule at the paper stage with
+            # no paper bot): the chain is not broken by it.
+            chain = {id(f) for f in report["chain_faults"]}
+            faults = [f for f in report["blockers"] if id(f) in chain]
+            waiting = [f for f in report["blockers"] if id(f) not in chain]
+            if faults:
                 w("\nCHAIN FAULTS — evidence is not being produced:")
-                for i, m in enumerate(report["blockers"], 1):
+                for i, m in enumerate(faults, 1):
                     w(f"  {i}. {m}")
             else:
                 w("\nNO CHAIN FAULTS — the chain is complete end to end.")
+            if waiting:
+                w("\nNO PAPER BOT FOR A RULE AT THE PAPER STAGE:")
+                for i, m in enumerate(waiting, 1):
+                    w(f"  {i}. {m}")
             if report["campaign_gaps"]:
                 w("\nLIVE BY DECISION — not a paper campaign, and no fault:")
                 for i, m in enumerate(report["campaign_gaps"], 1):

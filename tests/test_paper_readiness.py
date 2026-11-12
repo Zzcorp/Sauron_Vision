@@ -583,25 +583,55 @@ class ALiveOperationIsNamedAsOneTests(_Fleet):
                       "armed for real money; 1 hand lane is in live mode.",
                       self._body())
 
-    def test_a_rule_stuck_at_the_paper_stage_is_listed_with_the_faults(self):
+    STUCK_HEADING = "\nNO PAPER BOT FOR A RULE AT THE PAPER STAGE:\n"
+    STUCK_LINE = ("  1. po3_london_sweep_short is at the paper stage with no "
+                  "paper bot to trade on")
+
+    def _stuck_rule(self):
         from django.utils import timezone
 
         from signals.models_control import RuleControl
         _bot(self.user, "l1", "live", ["AAPL"])
-        _bar("AAPL", 1.0)
         RuleControl.objects.create(
             rule_name="po3_london_sweep_short", promotion_stage="paper",
             stage_entered_at=timezone.now())
+
+    def test_a_rule_stuck_at_the_paper_stage_has_a_heading_of_its_own(self):
+        """Never under "CHAIN FAULTS — evidence is not being produced":
+        the chain is whole and every other rule is producing evidence."""
+        self._stuck_rule()
+        _bar("AAPL", 1.0)
         report = self._report()
         self.assertEqual(report["paper_stage_stuck"],
                          ["po3_london_sweep_short"])
+        self.assertEqual(report["chain_faults"], [])
         self.assertEqual([b.key for b in report["blockers"]],
                          [("stuck", ("po3_london_sweep_short",))])
         body = self._body()
-        faults = body[body.index("CHAIN FAULTS"):body.index(
-            "LIVE BY DECISION")]
-        self.assertIn("po3_london_sweep_short is at the paper stage with no "
-                      "paper bot to trade on", faults)
+        self.assertNotIn("CHAIN FAULTS — evidence is not being produced",
+                         body)
+        clean = body.index("NO CHAIN FAULTS — the chain is complete end to "
+                           "end.")
+        at = body.index(self.STUCK_HEADING)
+        self.assertLess(clean, at)
+        self.assertIn(self.STUCK_LINE,
+                      body[at:body.index("LIVE BY DECISION")])
+
+    def test_a_chain_fault_and_a_stuck_rule_are_listed_apart(self):
+        self._stuck_rule()                            # AAPL: no bar at all
+        body = self._body()
+        start = body.index("CHAIN FAULTS — evidence is not being produced:")
+        at = body.index(self.STUCK_HEADING)
+        faults = body[start:at]
+        self.assertIn("  1. 1 symbol(s) have no 4h bars at all", faults)
+        self.assertNotIn("po3_london_sweep_short", faults)
+        self.assertIn(self.STUCK_LINE,
+                      body[at:body.index("LIVE BY DECISION")])
+        self.assertNotIn("NO CHAIN FAULTS", body)
+
+    def test_with_no_stuck_rule_that_heading_is_not_printed(self):
+        _bot(self.user, "l1", "live", ["AAPL"])
+        self.assertNotIn("NO PAPER BOT FOR A RULE", self._body())
 
 
 class APaperCampaignReadsAsBeforeTests(_Fleet):

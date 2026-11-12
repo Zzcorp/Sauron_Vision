@@ -1656,7 +1656,20 @@ def grade_capital_desk() -> dict:
 #: long the sends took, which is exactly how the old key missed.
 CHAIN_REMIND_AFTER = timedelta(days=7)
 
-#: Where the alarm's memory lives: {"fp": fingerprint, "day": ISO date}.
+#: AN ALARM THE PHONE REFUSED IS TRIED AGAIN THE NEXT MORNING. The bell row
+#: is written whatever Telegram answers and the notifier answers True for
+#: it, so an alarm Telegram refused was remembered as said: the phone then
+#: stayed silent for the week of the reminder, where the 24-hour key let
+#: the next run through. Such a memory carries "heard": False and holds for
+#: this long only. Telegram not ASKED (quiet hours, no token, no chat id,
+#: another channel) is not a refusal: the bell row is the message, as
+#: before.
+CHAIN_RETRY_AFTER = timedelta(days=1)
+
+#: Where the alarm's memory lives: {"fp": fingerprint, "day": ISO date},
+#: with "heard": False when no phone took it (CHAIN_RETRY_AFTER) and
+#: "feeds": {symbol: its newest bar} when every fault said was a stopped
+#: bar feed (_waits_for_the_open).
 CHAIN_SAID_KEY = "campaign_watch:said"
 
 #: The 24-hour key of before 2026-11-12. Redis keeps its keys across a
@@ -1679,15 +1692,64 @@ def _chain_fingerprint(findings) -> str:
 
 def _chain_already_said(said, fingerprint: str, today) -> bool:
     """True while this same set of faults was said less than
-    CHAIN_REMIND_AFTER ago. A memory that cannot be read (another shape, a
-    day in the future) was not said."""
+    CHAIN_REMIND_AFTER ago, or less than CHAIN_RETRY_AFTER ago when no
+    phone took it. A memory that cannot be read (another shape, a day in
+    the future) was not said."""
     if not isinstance(said, dict) or said.get("fp") != fingerprint:
         return False
     try:
         day = date.fromisoformat(str(said.get("day") or ""))
     except ValueError:
         return False
-    return timedelta(0) <= (today - day) < CHAIN_REMIND_AFTER
+    wait = (CHAIN_RETRY_AFTER if said.get("heard") is False
+            else CHAIN_REMIND_AFTER)
+    return timedelta(0) <= (today - day) < wait
+
+
+def _stopped_feeds(findings, report) -> dict:
+    """{symbol: its newest 4h bar} when EVERY finding is a stopped bar
+    feed, {} otherwise: what _waits_for_the_open compares on a morning
+    with no fault."""
+    bars = report.get("bar_state") or {}
+    feeds: dict = {}
+    for finding in findings:
+        key = getattr(finding, "key", None)
+        if not (isinstance(key, tuple) and len(key) == 3
+                and key[0] == "bars_stopped"):
+            return {}
+        for symbol in key[2]:
+            feeds[str(symbol)] = str(
+                (bars.get(symbol) or {}).get("newest") or "")
+    return feeds
+
+
+def _waits_for_the_open(said, report) -> bool:
+    """A morning with no fault that proves no repair: keep the memory.
+
+    A feed that died on Thursday is alarmed on Friday. On Saturday its
+    market is shut and its bar is "correct for a shut market"
+    (preflight_live._bar_verdict, shut_stale): no fault that morning. The
+    memory was cleared, and Monday alarmed the same dead feed again, three
+    days into the week the reminder waits. Nothing was repaired; it could
+    not be judged before the open.
+
+    True only when the alarm said named stopped feeds and nothing else,
+    and each of them, this morning, sits in a shut market with the SAME
+    newest bar the alarm saw. A bar written since is a repair (forgotten,
+    so the feed dying again speaks at once), and so is a link put back ON.
+    It cannot hold for long: past the grace of a shut market the verdict is
+    a fault again (shut_dead), under the same key.
+    """
+    feeds = said.get("feeds") if isinstance(said, dict) else None
+    if not isinstance(feeds, dict) or not feeds:
+        return False
+    bars = report.get("bar_state") or {}
+    for symbol, newest in feeds.items():
+        state = bars.get(symbol) or {}
+        if (not newest or state.get("verdict") != "shut_stale"
+                or state.get("newest") != newest):
+            return False
+    return True
 
 
 def _live_notice_fingerprint(armed) -> str:
@@ -1767,6 +1829,13 @@ def watch_evidence_chain():
     switch is ON, or that no paper bot is on, is said once as a notice
     (_say_live_by_decision). A paper campaign keeps every check.
 
+    THE MASTER SWITCH IS NOT ITS TO ALARM ON. With platform_master off the
+    guard above skips this task like every other, before it reads
+    anything. readiness() lists that switch for `paper_readiness`, which
+    an operator runs by hand; the pause itself is the alarm bot's line
+    (bot_program/alarm, "Automation paused"). So the notice does not
+    promise to watch it.
+
     READ-ONLY. It measures and it notifies; it turns nothing on. A watchdog
     that repaired the chain would be a watchdog nobody could trust to report
     it honestly, and switching a pipeline back on is an operator's decision.
@@ -1795,8 +1864,14 @@ def watch_evidence_chain():
 
     if not blockers:
         # A complete chain clears the memory, so the next cold spell is
-        # heard at once rather than taken for the last one.
-        cache.delete(CHAIN_SAID_KEY)
+        # heard at once rather than taken for the last one. Unless nothing
+        # was repaired: a stopped feed whose market is shut this morning.
+        if _waits_for_the_open(cache.get(CHAIN_SAID_KEY), report):
+            logger.info("[campaign watch] no fault this morning, and the "
+                        "feed that was alarmed sits in a shut market with "
+                        "the same last bar: its alarm is not forgotten")
+        else:
+            cache.delete(CHAIN_SAID_KEY)
         return out
 
     fingerprint = _chain_fingerprint(blockers)
@@ -1824,19 +1899,30 @@ def watch_evidence_chain():
                + [f for f in blockers if id(f) not in chain])
 
     from .notifications import notify_evidence_chain_cold
+    sent = refused = False      # what Telegram answered, over every account
     for user in recipients:
+        receipt: dict = {}
         try:
-            if notify_evidence_chain_cold(user, cold=cold, blockers=ordered):
+            if notify_evidence_chain_cold(user, cold=cold, blockers=ordered,
+                                          receipt=receipt):
                 out["notified"] += 1
         except Exception as e:  # noqa: BLE001 — one failure must not eat the rest
             logger.warning("[campaign watch] notify failed for %s: %s",
                            user.id, e)
+        sent = sent or receipt.get("external") == "sent"
+        refused = refused or receipt.get("external") == "refused"
 
     if out["notified"]:
         # Remembered only once somebody was told: an alarm nobody received
-        # is tried again at the next run, not held for a week.
-        cache.set(CHAIN_SAID_KEY,
-                  {"fp": fingerprint, "day": today.isoformat()}, None)
+        # is tried again at the next run, not held for a week. A bell row
+        # with every phone refused is held for a day (CHAIN_RETRY_AFTER).
+        said = {"fp": fingerprint, "day": today.isoformat()}
+        if refused and not sent:
+            said["heard"] = False
+        feeds = _stopped_feeds(blockers, report)
+        if feeds:
+            said["feeds"] = feeds
+        cache.set(CHAIN_SAID_KEY, said, None)
     logger.warning(
         "[campaign watch] evidence chain is cold: %s — %d blocker(s), "
         "%d operator(s) told", ", ".join(cold) or "see blockers",

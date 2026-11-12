@@ -292,9 +292,11 @@ ACTUATOR_BLOCKER = (
     "actuator_mode_live is ON — the rule actuator's live mode (a superuser "
     "may apply a pause or a size cut to a rule; nothing applies by itself), "
     "which is not a paper campaign")
-STILL_WATCHED = ("Still watched every day: the master switch, the "
-                 "indicators, the signals, the bots, the promotion ladder, "
-                 "the bar feeds and the graded outcomes")
+#: Not the master switch: the watchdog's guard skips it while that switch
+#: is off, so it can never speak about it.
+STILL_WATCHED = ("Still watched every day: the indicators, the signals, the "
+                 "bots, the promotion ladder, the bar feeds and the graded "
+                 "outcomes")
 NOT_A_FAULT = ("So this is not a paper campaign: that is your decision, not "
                "a fault.")
 

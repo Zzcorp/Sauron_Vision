@@ -373,7 +373,8 @@ _BANNER_SILENT_KINDS = {"bot_fill_open", "bot_fill_close", "manual_fill_open"}
 
 def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                           url: str = "", payload=None,
-                          row_data=None, telegram=None, button=None) -> bool:
+                          row_data=None, telegram=None, button=None,
+                          receipt=None) -> bool:
     """Send a bot-event or operator-event notification to `user`.
 
     Returns True if at least one delivery channel succeeded (including in-app).
@@ -395,7 +396,18 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     without `telegram`), as _send_telegram takes it: notify_staff's
     "Close position" under an alert about one open position. A message
     written for people carries its own (`telegram["button"]`).
+
+    `receipt` (2026-11-12) is a dict a caller hands over to learn what
+    TELEGRAM answered, which the return value cannot say: the bell row
+    alone makes it True. receipt["external"] becomes "sent", "refused"
+    (the account is set up for Telegram and the message did not get
+    through: an answer that is not OK, a post that raised) or "none"
+    (Telegram was not asked: quiet hours, another channel, no token, no
+    chat id). The evidence-chain watchdog reads it, so an alarm the phone
+    refused is tried again the next morning instead of counting as said.
     """
+    if isinstance(receipt, dict):
+        receipt["external"] = "none"
     if kind not in BOT_KINDS and kind not in OPERATOR_KINDS:
         logger.warning("dispatch_notification: unknown kind=%r", kind)
         return False
@@ -451,6 +463,9 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         tg = telegram if isinstance(telegram, dict) else {}
         # a plain call without a button keeps its three-argument shape
         extra = {"button": button} if button else {}
+        # ...and so does a call without a receipt: only a caller that asked
+        # what Telegram answered hands its dict down
+        heard = {"receipt": receipt} if isinstance(receipt, dict) else {}
         if tg.get("title"):
             # A message written for people (the fills, 2026-09-27): its
             # own title in words, a sentence, the facts, the folded record
@@ -462,13 +477,14 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                 subtitle=str(tg.get("subtitle") or ""),
                 summary=str(tg.get("summary") or ""),
                 details=tg.get("details") or None,
-                button=tg.get("button")) or delivered
+                button=tg.get("button"), **heard) or delivered
         elif rd.get("items") or rd.get("mark"):
             delivered = _send_telegram(
                 user, title, body, lines=_telegram_lines(rd.get("items")),
-                mark=str(rd.get("mark") or ""), **extra) or delivered
+                mark=str(rd.get("mark") or ""), **extra, **heard) or delivered
         else:
-            delivered = _send_telegram(user, title, body, **extra) or delivered
+            delivered = _send_telegram(user, title, body, **extra,
+                                       **heard) or delivered
     elif channel == "email":
         # Phase-45 — when delivering a briefing via email, render the
         # Sauron-themed HTML template instead of a plain-text dump.
@@ -661,7 +677,7 @@ def _telegram_text(title: str, body: str = "", *, lines=None,
 
 def _send_telegram(user, title: str, body: str, *, lines=None,
                    mark: str = "", subtitle: str = "", summary: str = "",
-                   details=None, button=None) -> bool:
+                   details=None, button=None, receipt=None) -> bool:
     """Send via the platform Telegram bot to the user's chat_id.
 
     Requires `TELEGRAM_BOT_TOKEN` env var (platform-wide) and the user's
@@ -680,7 +696,13 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
     without them, each page as a line (message_parts, post_message).
     Never a callback button: nothing is done from Telegram but the Eye's
     commands and the alarm bot's /stopall.
+
+    `receipt` (2026-11-12): a dict whose "external" becomes "sent" or
+    "refused" once the account is set up for Telegram (a token and a chat
+    id), and is left alone when it is not: nothing was asked
+    (dispatch_notification).
     """
+    meant = False   # a token and a chat id: this message is meant to arrive
     try:
         import os
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -689,6 +711,7 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
         chat_id = getattr(user.notification_prefs, "telegram_chat_id", "")
         if not chat_id:
             return False
+        meant = True
         # Cut under Telegram's 4,096 characters like every other path:
         # fit_text renders through _telegram_text and returns it as it is
         # whenever it fits (2026-09-26). The button is not text.
@@ -712,8 +735,12 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
                            getattr(r, "status_code", "?"),
                            _plain_title(title),
                            str(getattr(r, "text", ""))[:200])
+        if isinstance(receipt, dict):
+            receipt["external"] = "sent" if r.ok else "refused"
         return bool(r.ok)
     except Exception as e:
+        if meant and isinstance(receipt, dict):
+            receipt["external"] = "refused"
         # A connection error quotes the address, and the address carries
         # the bot token: scrubbed before the line is logged (2026-09-26),
         # as alerts.channels.telegram_alert.send_to_chat does.
@@ -2674,7 +2701,8 @@ def notify_broker_cells_unanswered(user, *, label: str, misses: int,
     )
 
 
-def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
+def notify_evidence_chain_cold(user, *, cold: list, blockers: list,
+                               receipt=None) -> bool:
     """A link in the paper-campaign evidence chain has gone cold.
 
     Filed under system_health for the same reason as the broker alert: it is
@@ -2709,6 +2737,10 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
     The findings behind the first are counted ("And 2 more findings"): only
     the first was ever shown, so a dead bar feed could sit behind a switch.
     "A link that is off is a decision…" is said only when a link is named.
+
+    `receipt` is dispatch_notification's: what Telegram answered, for the
+    watchdog's memory (an alarm the phone refused is tried again the next
+    morning).
     """
     # In words since 2026-09-27 ("Evidence chain cold: pipeline_promotion"
     # before): the links as LINK_WORDS names them, what each does, the
@@ -2771,6 +2803,7 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
         telegram={"title": _plain_title(title), "mark": mark,
                   "summary": summary, "lines": items, "details": details,
                   "button": ("Open ops page", "/ops/")},
+        **({"receipt": receipt} if isinstance(receipt, dict) else {}),
     )
 
 
@@ -2786,7 +2819,9 @@ def notify_live_by_decision(user, *, armed: list, live_configs: int,
     armed for real money they stand down, and this says so: which switches
     are armed, each in its own words (campaign_readiness.LIVE_ACTION_WORDS,
     the keys folded as code), whether a paper bot is on, and what is still
-    watched every day.
+    watched every day. NOT the master switch: the watchdog's guard skips it
+    while that switch is off, as it skips every task, so it can never
+    speak about it (the pause is the alarm bot's line, bot_program/alarm).
 
     `live_configs` are the enabled live-mode bots that move real money,
     `demo_configs` those whose broker row answers the demo world ("in live
@@ -2820,9 +2855,9 @@ def notify_live_by_decision(user, *, armed: list, live_configs: int,
     if not int(paper_configs or 0):
         items.append("No paper bot is on: "
                      + no_paper_bot_words(int(paper_lanes or 0)))
-    items.append("Still watched every day: the master switch, the "
-                 "indicators, the signals, the bots, the promotion ladder, "
-                 "the bar feeds and the graded outcomes")
+    items.append("Still watched every day: the indicators, the signals, "
+                 "the bots, the promotion ladder, the bar feeds and the "
+                 "graded outcomes")
     details = ([("Keys", ", ".join(keys))] if keys else [])
     details.append(("Full check", "manage.py paper_readiness"))
     mark = NOTIFY_MARKS["live_by_decision"]

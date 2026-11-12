@@ -138,18 +138,23 @@ def ensure_research_row(rule_name: str):
     return ctrl
 
 
-def _born_rows() -> dict:
+def _born_rows(*, running: bool = False) -> dict:
     """{rule_name: promotion_stage} of every row of a born name or a fork
-    of one."""
+    of one. With `running`, only the rules that fire today
+    (RuleControl.running_q: not paused, or a pause that has ended), in the
+    same one read."""
     from django.db.models import Q
 
     from signals.models_control import RuleControl
     q = Q(rule_name__in=sorted(BORN_AT_RESEARCH))
     for name in sorted(BORN_AT_RESEARCH):
         q |= Q(rule_name__startswith=f"{name}_evolved_v")
+    rows = RuleControl.objects.filter(q)
+    if running:
+        rows = rows.filter(RuleControl.running_q())
     return {name: str(stage or "")
-            for name, stage in RuleControl.objects.filter(q)
-            .values_list("rule_name", "promotion_stage")
+            for name, stage in rows.values_list("rule_name",
+                                                "promotion_stage")
             if born_at_research(name)}
 
 
@@ -184,9 +189,13 @@ def at_paper_stage() -> list:
     fails closed by returning every born name: one failed read of the two
     would name rules that sit at a live stage. A read that raises returns
     nothing here and is logged. Failing closed is right for a vote and
-    wrong for an alarm, which must not name a rule it could not read."""
+    wrong for an alarm, which must not name a rule it could not read.
+
+    RUNNING RULES ONLY. A paused rule fires nothing, so a paper bot would
+    give it no fill either: naming it as "needs a paper bot" would be
+    false. It is named the day its pause has ended."""
     try:
-        rows = _born_rows()
+        rows = _born_rows(running=True)
     except Exception as e:  # noqa: BLE001
         logger.warning("[birth] born rows unread (%s): no rule is named at "
                        "the paper stage", e)

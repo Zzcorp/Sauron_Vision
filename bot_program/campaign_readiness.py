@@ -352,6 +352,11 @@ def readiness(window_days: int = 30) -> dict:
       "paper_stage_stuck"  rules born at research, at the paper stage, with
                            no paper bot to trade on (_stuck_at_paper)
       "fleet"              the counts behind the kind (fleet_words)
+      "bar_state"          {symbol: {"verdict", "newest"}} for every listed
+                           symbol that has a 4h bar: the bar verdict and
+                           the newest bar's time. The watchdog reads it to
+                           tell a feed that was repaired from one whose
+                           market is merely shut (tasks._waits_for_the_open)
 
     "blockers" is what the watchdog alarms on. For a paper campaign, or
     none, it holds what it always held, in the order the checks run. For a
@@ -526,6 +531,7 @@ def readiness(window_days: int = 30) -> dict:
     rows, seen = [], set()
     grouped: dict = {}
     no_bars: list = []
+    bar_state: dict = {}
     for cfg in enabled:
         for sym in list(cfg.symbols or [])[:SYMBOLS_PER_CONFIG]:
             if sym in seen:
@@ -545,6 +551,7 @@ def readiness(window_days: int = 30) -> dict:
             age = (now - newest).total_seconds() / 3600.0
             rows.append((sym, f"{age:.1f}h", _market_note(row, newest, now)))
             kind, name, _age = _bar_verdict(row, newest, now)
+            bar_state[sym] = {"verdict": kind, "newest": newest.isoformat()}
             if kind not in ("ok", "unknown"):
                 grouped.setdefault((kind, name), []).append((sym, age))
     sections.append(("BARS FOR ENABLED CONFIGS", rows))
@@ -620,4 +627,5 @@ def readiness(window_days: int = 30) -> dict:
             "cold_links": cold, "window_days": window,
             "campaign": campaign, "chain_faults": chain_faults,
             "campaign_gaps": campaign_gaps, "armed": armed,
-            "paper_stage_stuck": stuck_rules, "fleet": fleet}
+            "paper_stage_stuck": stuck_rules, "fleet": fleet,
+            "bar_state": bar_state}

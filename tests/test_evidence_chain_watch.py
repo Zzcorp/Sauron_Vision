@@ -317,6 +317,40 @@ class TheWatchdogIsWiredTests(TestCase):
         self.assertIn("from bot_program.campaign_readiness import", cmd)
         self.assertIn("from .campaign_readiness import readiness", tasks)
 
+    def test_with_the_master_switch_off_it_is_skipped_like_every_task(self):
+        """The master switch is not this watchdog's to alarm on. Its guard
+        skips it while platform_master is off, before it reads anything, so
+        it cannot speak; the pause is the alarm bot's line ("Automation
+        paused", bot_program/alarm.py). Run THROUGH the guard: every other
+        test here calls the function under it, which is how the notice came
+        to say the master switch was "still watched every day"."""
+        from alerts.models import Notification
+        from bot_program.tasks import watch_evidence_chain
+        cache.clear()
+        self.addCleanup(cache.clear)
+        _warm_chain()
+        _component("pipeline_campaign_watch", True)
+        user = User.objects.create_user("wired_ops", password="x",
+                                        is_staff=True)
+        _config(user, ["WATCHED"])
+        _bar("WATCHED", 1.0)
+        _component("pipeline_promotion", False)   # a fault it alarms on
+        _component("platform_master", False)
+        cache.clear()
+        with mock.patch("core.exchange_status.market_status_for",
+                        return_value=OPEN), \
+                mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": ""}):
+            out = watch_evidence_chain()
+            self.assertEqual(out, {"status": "skipped",
+                                   "reason": "platform_disabled"})
+            self.assertFalse(Notification.objects.exists())
+            # The same morning with the master switch on: it speaks.
+            _component("platform_master", True)
+            cache.clear()
+            out = watch_evidence_chain()
+        self.assertEqual(out["notified"], 1)
+        self.assertEqual(Notification.objects.count(), 1)
+
 
 # ── 2026-11-12: a decision is said once, a fault is alarmed ─────────────────
 
@@ -413,10 +447,11 @@ class _Watch(TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def _run(self, day=0, fresh=("WATCHED",)):
+    def _run(self, day=0, fresh=("WATCHED",), market=OPEN):
         """The run of `day`. Each `fresh` symbol gets a one-hour-old bar
         first, so a feed that is not the subject of a test never becomes
-        one as the days pass."""
+        one as the days pass. `market` is what the market clock answers
+        that morning: open, unless a test shuts it (a weekend)."""
         from bot_program.tasks import watch_evidence_chain
         now = self.base + timedelta(days=day)
         clock = _CacheClock(now)
@@ -424,7 +459,7 @@ class _Watch(TestCase):
                 mock.patch("django.core.cache.backends.base.time", clock), \
                 mock.patch("django.core.cache.backends.locmem.time", clock), \
                 mock.patch("core.exchange_status.market_status_for",
-                           return_value=OPEN):
+                           return_value=market):
             for sym in fresh:
                 _bar(sym, 1.0)
             return watch_evidence_chain.__wrapped__.__wrapped__()
@@ -768,6 +803,25 @@ class APaperCampaignKeepsItsChecksTests(_Watch):
         self.assertIn("NOBARS", _first_problem(alarm))
         self.assertNotIn(CLOSING_LINE, alarm.data["items"])
 
+    def test_a_fault_found_after_the_switches_still_leads(self):
+        """The checks run the switches before the bars. The message shows
+        the first finding and takes its title from it, so the watchdog
+        hands the chain's faults first: a symbol with no bars must not sit
+        behind an armed switch, under the switch's title. (A cold link
+        proves nothing here: it already comes first in the checks' own
+        order.)"""
+        from bot_program.models import AssetBotConfig
+        _component("actuator_mode_live", True)
+        AssetBotConfig.objects.filter(name="p1").update(
+            symbols=["WATCHED", "NOBARS"])
+        out = self._run()
+        self.assertEqual(out["blockers"], 2)
+        alarm = _rows(BROKEN_TITLE).get()
+        self.assertIn("NOBARS", _first_problem(alarm))
+        self.assertIn("And 1 more finding: run the full check",
+                      alarm.data["items"])
+        self.assertEqual(_titles(), [BROKEN_TITLE])
+
     def test_the_old_daily_key_is_deleted_and_silences_nothing(self):
         """Before 2026-11-12 a 24-hour cache key was the cooldown. Redis
         keeps it across a deploy."""
@@ -906,6 +960,67 @@ class ItSpeaksWhenSomethingChangesTests(_Watch):
             self._run(2)
         self.assertEqual(alarm.call_count, 2)
 
+    def test_a_dead_feed_is_not_forgotten_over_the_weekend(self):
+        """A feed that died on Thursday is alarmed on Friday. On Saturday
+        and Sunday its market is shut and its bar is 'correct for a shut
+        market': no fault those mornings, the memory was cleared, and
+        Monday alarmed the same dead feed again. Nothing was repaired: it
+        could not be judged before the open. Said once, then the weekly
+        reminder."""
+        from bot_program.tasks import CHAIN_SAID_KEY
+        self._lists("WATCHED", "STALE")
+        self._stale_from_the_start("STALE")
+        with self._alarm() as alarm:
+            out = self._run(0)                          # Friday, open
+            self.assertEqual(out["notified"], 1)
+            said = cache.get(CHAIN_SAID_KEY)
+            for day in (1, 2):                          # the weekend, shut
+                out = self._run(day, fresh=(), market=SHUT)
+                self.assertEqual((out["status"], out["blockers"]), ("ok", 0))
+                self.assertEqual(cache.get(CHAIN_SAID_KEY), said)
+            out = self._run(3)                          # Monday, open
+            self.assertEqual((out["status"], out["blockers"]),
+                             ("cooldown", 1))
+            for day in (4, 5, 6):
+                self._run(day)
+            self.assertEqual(alarm.call_count, 1)
+            self._run(7)                                # the weekly reminder
+            self.assertEqual(alarm.call_count, 2)
+
+    def test_a_feed_that_wrote_again_before_the_close_is_forgotten(self):
+        """Repaired on Friday afternoon: its newest bar is no longer the one
+        the alarm saw. The weekend clears the memory, and the same feed
+        dying again is a new cold spell that speaks at once."""
+        from bot_program.tasks import CHAIN_SAID_KEY
+        self._lists("WATCHED", "STALE")
+        self._stale_from_the_start("STALE")
+        with self._alarm() as alarm:
+            self._run(0)
+            with mock.patch("django.utils.timezone.now",
+                            return_value=self.base + timedelta(days=1)):
+                _bar("STALE", 10.0)           # it wrote until the close
+            out = self._run(1, fresh=(), market=SHUT)
+            self.assertEqual((out["status"], out["blockers"]), ("ok", 0))
+            self.assertIsNone(cache.get(CHAIN_SAID_KEY))
+            out = self._run(3)                # open, and nothing since
+            self.assertEqual(out["notified"], 1)
+        self.assertEqual(alarm.call_count, 2)
+
+    def test_only_a_stopped_feed_waits_for_the_open(self):
+        """A link put back ON is repaired, shut market or not: forgotten,
+        and the link going off again speaks at once."""
+        from bot_program.tasks import CHAIN_SAID_KEY
+        _component("pipeline_promotion", False)
+        with self._alarm() as alarm:
+            self._run(0)
+            _component("pipeline_promotion", True)
+            out = self._run(1, fresh=(), market=SHUT)
+            self.assertEqual(out["status"], "ok")
+            self.assertIsNone(cache.get(CHAIN_SAID_KEY))
+            _component("pipeline_promotion", False)
+            self._run(2)
+        self.assertEqual(alarm.call_count, 2)
+
     def test_an_emptied_cache_repeats_one_alarm_at_most(self):
         _component("pipeline_promotion", False)
         with self._alarm() as alarm:
@@ -929,6 +1044,120 @@ class ItSpeaksWhenSomethingChangesTests(_Watch):
             self.assertEqual(out["notified"], 1)
             self._run(2)
         self.assertEqual(alarm.call_count, 2)
+
+
+class AnAlarmThePhoneRefusedTests(_Watch):
+    """The bell row is written whatever Telegram answers, and the notifier
+    answers True for it. So an alarm Telegram REFUSED was remembered as
+    said, and the phone stayed silent for the seven days of the reminder
+    (the 24-hour key of before let the next run through). It is now held
+    for one day and tried again; a phone that was never asked (quiet hours,
+    no token) is not a refusal."""
+
+    POST = "alerts.channels.telegram_alert.post_message"
+
+    def setUp(self):
+        super().setUp()
+        self.user = self._on_telegram(self.user, "100")
+        env = mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "TESTTOKEN"})
+        env.start()
+        self.addCleanup(env.stop)
+        _config(self.user, ["WATCHED"])
+        _component("pipeline_promotion", False)
+
+    @staticmethod
+    def _on_telegram(user, chat_id):
+        from alerts.models import UserNotificationPrefs
+        from portfolio.trader_profile import TraderProfile
+        prefs, _ = UserNotificationPrefs.objects.get_or_create(user=user)
+        prefs.telegram_chat_id = chat_id
+        prefs.save()
+        profile, _ = TraderProfile.objects.get_or_create(user=user)
+        profile.notify_channel = "telegram"
+        profile.save()
+        return User.objects.get(pk=user.pk)
+
+    @staticmethod
+    def _answer(ok):
+        from types import SimpleNamespace
+        return (SimpleNamespace(ok=ok, status_code=200 if ok else 502,
+                                text="" if ok else "Bad Gateway"), None)
+
+    def test_a_refused_alarm_is_tried_again_the_next_morning(self):
+        answers = [self._answer(False), self._answer(True),
+                   self._answer(True)]
+        with mock.patch(self.POST, side_effect=answers) as post:
+            out = self._run(0)
+            self.assertEqual(out["notified"], 1)        # the bell row
+            self.assertEqual(post.call_count, 1)
+            self.assertEqual(self._run(0)["status"], "cooldown")  # same day
+            out = self._run(1)                          # the next morning
+            self.assertEqual(out["notified"], 1)
+            self.assertEqual(post.call_count, 2)
+            for day in range(2, 8):                     # heard: a quiet week
+                self.assertEqual(self._run(day)["status"], "cooldown")
+            self.assertEqual(post.call_count, 2)
+            self._run(8)                                # 7 days after day 1
+            self.assertEqual(post.call_count, 3)
+        self.assertEqual(_rows(COLD_PROMOTION_TITLE).count(), 3)
+
+    def test_a_post_that_raised_is_a_refusal_too(self):
+        with mock.patch(self.POST, side_effect=[OSError("no route"),
+                                                self._answer(True)]) as post:
+            self.assertEqual(self._run(0)["notified"], 1)
+            self.assertEqual(self._run(1)["notified"], 1)
+            self.assertEqual(self._run(2)["status"], "cooldown")
+        self.assertEqual(post.call_count, 2)
+
+    def test_one_phone_that_heard_it_is_enough(self):
+        other = User.objects.create_user("watch_ops2", password="x",
+                                         is_staff=True)
+        self._on_telegram(other, "200")
+        with mock.patch(self.POST, side_effect=[self._answer(False),
+                                                self._answer(True)]) as post:
+            self.assertEqual(self._run(0)["notified"], 2)
+            self.assertEqual(self._run(1)["status"], "cooldown")
+        self.assertEqual(post.call_count, 2)
+
+    def test_inside_quiet_hours_nothing_is_asked_and_nothing_retried(self):
+        """Unchanged: the bell row is the message, Telegram is not asked,
+        and the alarm counts as said."""
+        with mock.patch(self.POST) as post, \
+                mock.patch("bot_program.notifications._in_quiet_hours",
+                           return_value=True):
+            self.assertEqual(self._run(0)["notified"], 1)
+            self.assertEqual(self._run(1)["status"], "cooldown")
+        post.assert_not_called()
+        self.assertEqual(_rows(COLD_PROMOTION_TITLE).count(), 1)
+
+    def test_a_phone_with_no_token_was_never_asked(self):
+        with mock.patch(self.POST) as post, \
+                mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": ""}):
+            self.assertEqual(self._run(0)["notified"], 1)
+            self.assertEqual(self._run(1)["status"], "cooldown")
+        post.assert_not_called()
+
+    def test_the_receipt_says_what_the_channel_answered(self):
+        """dispatch_notification answers True for the bell row alone; a
+        caller that hands a `receipt` learns what Telegram said."""
+        from bot_program.notifications import notify_evidence_chain_cold
+        blockers = [cr.Finding(("no_symbol",), "no enabled config lists a "
+                                                "symbol")]
+        for answer, word in ((self._answer(True), "sent"),
+                             (self._answer(False), "refused")):
+            receipt = {}
+            with mock.patch(self.POST, return_value=answer):
+                self.assertTrue(notify_evidence_chain_cold(
+                    self.user, cold=[], blockers=blockers, receipt=receipt))
+            self.assertEqual(receipt, {"external": word})
+        receipt = {}
+        with mock.patch(self.POST) as post, \
+                mock.patch("bot_program.notifications._in_quiet_hours",
+                           return_value=True):
+            self.assertTrue(notify_evidence_chain_cold(
+                self.user, cold=[], blockers=blockers, receipt=receipt))
+        post.assert_not_called()
+        self.assertEqual(receipt, {"external": "none"})
 
 
 class TheRuleWithNowhereToTradeTests(_Watch):
@@ -974,6 +1203,21 @@ class TheRuleWithNowhereToTradeTests(_Watch):
         _rule_at(BORN_RULE, "paper")
         _config(self.user, [], name="manual", asset_class="forex")
         self._stuck(self._run())
+
+    def test_a_paused_rule_is_not_named(self):
+        """A paused rule fires nothing: a paper bot would give it no fill
+        either, so "it needs a paper bot" would be false of it. It is
+        named the morning its pause has ended."""
+        from signals.models_control import RuleControl
+        rule = _rule_at(BORN_RULE, "paper")
+        rule.status = RuleControl.STATUS_PAUSED     # with no end set
+        rule.save(update_fields=["status"])
+        self.assertEqual(self._run(0)["blockers"], 0)
+        rule.paused_until = self.base + timedelta(days=2)
+        rule.save(update_fields=["paused_until"])
+        self.assertEqual(self._run(1)["blockers"], 0)
+        self.assertEqual(_titles(), [NOTICE_TITLE])
+        self._stuck(self._run(2))                   # the pause has ended
 
     def test_a_fork_of_a_born_rule_is_named_too(self):
         _rule_at(BORN_RULE + "_evolved_v2", "paper")
@@ -1052,12 +1296,10 @@ class TheRuleWithNowhereToTradeTests(_Watch):
 
 
 class ALiveFleetWithEveryLinkOnTests(_Watch):
-    """A live operation of the kind the false alarm was reported from
-    (2026-11-11), in synthetic rows: the master switch and the four links
-    ON; the meta-allocator, the share allocator and the capital desk in
-    live mode; the rule actuator's live mode and the automatic de-risk off;
-    26 enabled live configs of which 4 are hand lanes that scan nothing; 2
-    enabled paper hand lanes and no paper bot.
+    """A live operation with every link ON, in invented rows: the master
+    switch and the four links ON; two of the five live-action switches on
+    and three off; 8 enabled live configs of which 2 are hand lanes that
+    scan nothing; 1 enabled paper hand lane and no paper bot.
 
     On main that state is "The evidence chain is broken" every morning the
     24-hour key has expired, for ever. It is one notice, then silence day
@@ -1067,38 +1309,33 @@ class ALiveFleetWithEveryLinkOnTests(_Watch):
     MARKETS = (("EURUSD", "forex", "FOREX"), ("BTCUSD", "crypto", "CRYPTO"),
                ("AAPL", "stock", "NASDAQ"), ("XAUUSD", "commodity", "COMEX"))
     SYMBOLS = tuple(m[0] for m in MARKETS)
-    ARMED = ("meta_allocator_mode_live", "share_allocator_mode_live",
-             "capital_desk_mode_live")
+    ARMED = ("meta_allocator_mode_live", "share_allocator_auto_derisk")
     SAID = [
         "Armed: the meta-allocator's live mode (a superuser may apply rule "
         "weights, 0.1x to 3x, to future entries)",
-        "Armed: the share allocator's live mode (a share plan may be applied "
-        "with the PIN, which re-sizes the pools)",
-        "Armed: the capital desk's live mode (the bots obey the desk's plan: "
-        "displaced entries are skipped and sizes cut)",
+        "Armed: the share allocator's automatic de-risk (a shock plan that "
+        "only lowers shares applies itself)",
         NO_PAPER_BOT_LINE + " and trades taken by hand on a paper lane",
-        "Still watched every day: the master switch, the indicators, the "
-        "signals, the bots, the promotion ladder, the bar feeds and the "
-        "graded outcomes",
+        "Still watched every day: the indicators, the signals, the bots, "
+        "the promotion ladder, the bar feeds and the graded outcomes",
     ]
 
     def setUp(self):
         super().setUp()
-        # actuator_mode_live and share_allocator_auto_derisk stay off
-        # (_warm_chain); the three others are in live mode.
+        # The three other live-action switches stay off (_warm_chain).
         for key in self.ARMED:
             _component(key, True)
         for symbol, asset_class, exchange in self.MARKETS:
             _bar(symbol, 1.0, asset_class=asset_class, exchange=exchange)
-        for i in range(22):                       # 22 bots that scan
+        for i in range(6):                        # 6 bots that scan
             symbol, asset_class, _exchange = self.MARKETS[i % 4]
             _config(self.user, [symbol], name=f"bot{i + 1:02d}", mode="live",
                     asset_class=asset_class)
-        for _symbol, asset_class, _exchange in self.MARKETS:
+        for asset_class in ("forex", "crypto"):   # 2 live hand lanes
             _config(self.user, [], name="manual", mode="live",
-                    asset_class=asset_class)      # 4 live hand lanes
-        for asset_class in ("index", "etf"):      # 2 paper hand lanes
-            _config(self.user, [], name="manual", asset_class=asset_class)
+                    asset_class=asset_class)
+        _config(self.user, [], name="manual",     # 1 paper hand lane
+                asset_class="index")
 
     def _morning(self, day, stale=()):
         """The run of `day`; the feeds of `stale` wrote nothing since the
@@ -1116,11 +1353,11 @@ class ALiveFleetWithEveryLinkOnTests(_Watch):
         from bot_program.models import AssetBotConfig
         on = AssetBotConfig.objects.filter(enabled=True)
         live = on.filter(mode="live")
-        self.assertEqual(live.count(), 26)
-        self.assertEqual(live.filter(name="manual", symbols=[]).count(), 4)
+        self.assertEqual(live.count(), 8)
+        self.assertEqual(live.filter(name="manual", symbols=[]).count(), 2)
         self.assertEqual(
             list(on.filter(mode="paper").values_list("name", "symbols")),
-            [("manual", [])] * 2)
+            [("manual", [])])
         with mock.patch("core.exchange_status.market_status_for",
                         return_value=OPEN):
             report = cr.readiness()
@@ -1130,8 +1367,8 @@ class ALiveFleetWithEveryLinkOnTests(_Watch):
         self.assertEqual(report["cold_links"], [])
         self.assertEqual(
             report["fleet"],
-            {"live_bots": 22, "demo_bots": 0, "hand_lanes": 4,
-             "paper_bots": 0, "paper_lanes": 2})
+            {"live_bots": 6, "demo_bots": 0, "hand_lanes": 2,
+             "paper_bots": 0, "paper_lanes": 1})
 
     def test_live_by_decision_is_said_once_then_silence_day_after_day(self):
         outs = [self._morning(day) for day in range(10)]
@@ -1148,13 +1385,16 @@ class ALiveFleetWithEveryLinkOnTests(_Watch):
             self._quiet(out)
         row = _rows(NOTICE_TITLE).get()
         self.assertEqual(
-            row.body, "22 bots are armed for real money; 4 hand lanes are in "
+            row.body, "6 bots are armed for real money; 2 hand lanes are in "
                       "live mode. " + NOT_A_FAULT)
         self.assertEqual(row.data["items"], self.SAID)
         said = (row.body + " ".join(row.data["items"])).lower()
         self.assertNotIn("actuator", said)
-        self.assertNotIn("de-risk", said)
+        self.assertNotIn("capital desk", said)
         self.assertNotIn("broken", said)
+        # The guard skips this task while the master switch is off: the
+        # notice must not promise to watch it.
+        self.assertNotIn("master switch", said)
 
     def test_a_link_going_off_alarms_that_morning(self):
         for day in range(5):
@@ -1302,3 +1542,9 @@ class TheWordsOnTheSwitchTests(SimpleTestCase):
         for broken in (None, 1, "abc", {}, {"fp": "abc"},
                        {"fp": "abc", "day": "yesterday"}):
             self.assertFalse(said(broken, "abc", today), broken)
+        # An alarm the phone refused is held for the day, not for the week.
+        refused = dict(mine, heard=False)
+        self.assertTrue(said(refused, "abc", date(2026, 3, 2)))
+        self.assertFalse(said(refused, "abc", date(2026, 3, 3)))
+        self.assertTrue(said(dict(mine, heard=True), "abc",
+                             date(2026, 3, 8)))
