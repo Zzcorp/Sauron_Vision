@@ -18,6 +18,10 @@ Six questions, and the first did not exist anywhere:
     (e) DID ANYONE ACT?           `acted_index`
     (f) ITS OWN GRADE             on the Signal row itself
 
+And one more since 2026-11-12, because a signal is announced the moment it
+fires whether or not its market is open: CAN ITS MARKET TRADE NOW —
+`market_block`, the MARKET SHUT badge with the hour the market opens.
+
 NO SECOND IMPLEMENTATION OF ANYTHING. (a) calls
 `signals.rule_actuator.stage_policy` and `is_rule_active` — the same two
 functions the ENTRY path calls, so the badge cannot drift from the gate. (b)
@@ -506,6 +510,40 @@ COST_SYMBOL_CAVEAT = (
 # An unknown VALUE is ignored rather than raising. A filter value arrives in a
 # URL an operator typed, a bookmark that outlived a vocabulary change, or a
 # link someone pasted; a 500 there teaches nothing and loses the page.
+
+# ── (g) CAN ITS MARKET TRADE NOW? ─────────────────────────────────────────
+
+MARKET_TICKET_WORDS = ("A paper ticket is refused until it opens; a live "
+                       "ticket warns and is yours to send.")
+
+
+def market_block(signal, now=None) -> dict:
+    """{"shut", "opens", "title"} — whether the signal's market is shut
+    NOW, for the MARKET SHUT badge of /signals/ and the `signals` command
+    (2026-11-12). The operator keeps receiving every signal the moment it
+    fires, so one whose market is shut says so, with the hour it opens
+    ("opens Sun 22:00 UTC", "" when the clock does not know it).
+
+    One clock: signals.market_hold.market_state, the bots' own, which
+    reads no table. A signal the engine has closed is no longer something
+    to act on and carries no badge; a market in its first quarter hour is
+    open. Never raises."""
+    out = {"shut": False, "opens": "", "title": ""}
+    try:
+        if not getattr(signal, "is_active", False):
+            return out
+        from signals.market_hold import market_state
+        st = market_state(signal.instrument, now=now)
+    except Exception as e:  # noqa: BLE001 — a badge is never worth a page
+        logger.warning("[signals] market state unread for signal #%s: %s",
+                       getattr(signal, "pk", None), e)
+        return out
+    if st.get("state") != "shut":
+        return out
+    words = str(st.get("words") or "its market is shut")
+    return {"shut": True, "opens": st.get("opens") or "",
+            "title": f"{words[:1].upper()}{words[1:]}. {MARKET_TICKET_WORDS}"}
+
 
 STATES = ("active", "closed", "graded", "ungraded")
 ACTED = ("yes", "no")

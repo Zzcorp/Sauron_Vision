@@ -545,6 +545,10 @@ def _signal_rows(signals, configs=None, user=None):
             # its honest refusal where no config context answers it.
             "cost": signal_surface.cost_block(s, configs),
             "flag": flag,
+            # CAN ITS MARKET TRADE NOW (2026-11-12): the MARKET SHUT badge
+            # and the hour the market opens, from the market clock (no
+            # query); nothing for a closed signal or an open market.
+            "market": signal_surface.market_block(s),
             "trades": acted.get(s.pk) or [],
             "graded": graded,
             # A closed signal with no realized_r is not a zero-R signal: it is

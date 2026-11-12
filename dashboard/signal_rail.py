@@ -72,6 +72,15 @@ functions the entry path calls; the loser is promotion_pipeline's
 measured_loser on the floor's own grouped record; the real-money record is
 bot_grading's own summary, world="live".
 
+THE MARKET'S STATE (2026-11-12). The operator asked to keep receiving
+every signal the moment it fires, also when its market is shut, so a
+signal whose market is shut stays a card, and says so: MARKET SHUT and the
+hour the market opens, on the card, in its popup and on the headband row
+(signals.market_hold.market_state, the bots' own clock, read once per
+instrument and never from the database). One chip, SHUT, shows or hides
+those cards (shown by default, the `shut_off` choice of the operator's
+prefs) and counts them. An open market's card carries nothing new.
+
 DISPLAY ONLY. It never writes Signal (any field), RuleControl,
 PromotionEvent, AssetBotConfig, AssetBotTrade, Instrument, alerts or
 notification preferences, and it never pushes or announces. A retired
@@ -185,6 +194,17 @@ class RailFacts:
     contra: Optional[dict] = None
     record_words: str = ""
     live_words: str = ""
+    #: "shut" while the instrument's market is shut now, "settling" in the
+    #: quarter hour after an open, "" while it can trade (2026-11-12,
+    #: signals.market_hold.market_state). The MARKET SHUT badge is drawn
+    #: for "shut" alone: a settling market is open.
+    market: str = ""
+    #: One sentence for a market that cannot trade now, else "".
+    market_words: str = ""
+    #: "opens Sun 22:00 UTC" beside the badge; "" when the clock does not
+    #: know the hour, and while the market is open.
+    opens: str = ""
+    opens_at: object = None
     o_score: int = 0
     o_cls: int = 0
     o_cscore: int = 0
@@ -723,6 +743,7 @@ def _facts(s, ctx, now) -> RailFacts:
     aff = _affirmed(s, ctx["last_flag"])
     cls = inst.asset_class or ""
     pool = _pool_class(cls)
+    market = _market(inst, ctx, now)
     if aff > s.created_at:
         leaves = (f"It leaves the rail {RAIL_FRESH_HOURS}h after the scanner "
                   f"last matched its setup, unless the scanner matches it "
@@ -746,7 +767,21 @@ def _facts(s, ctx, now) -> RailFacts:
         affirmed_at=aff, leaves_at=aff + timedelta(hours=RAIL_FRESH_HOURS),
         record_words=_record_words(s.rule_name, rf.get("stats")),
         live_words=_live_words(s.rule_name, pool,
-                               (rf.get("live") or {}).get(pool)))
+                               (rf.get("live") or {}).get(pool)),
+        market="" if market["tradeable"] else market["state"],
+        market_words=market["words"], opens=market["opens"],
+        opens_at=market["reopens"])
+
+
+def _market(inst, ctx, now) -> dict:
+    """The instrument's market state, read once per instrument and render
+    (signals.market_hold.market_state: the market clock, no query)."""
+    seen = ctx.setdefault("markets", {})
+    key = getattr(inst, "pk", None) or id(inst)
+    if key not in seen:
+        from signals.market_hold import market_state
+        seen[key] = market_state(inst, now=now)
+    return seen[key]
 
 
 def _class_index(cls) -> int:
@@ -802,13 +837,13 @@ def _empty(error="") -> dict:
     classes = [(k, CLASS_SHORT.get(k, k.upper()), 0) for k in CLASS_ORDER]
     meta = {"ok": not error, "n": 0, "long": 0, "short": 0, "active": 0,
             "gone": 0, "older": 0, "new24": 0, "classes": [], "rules": [],
-            "votes": 0, "live": 0, "held": 0, "ceiling": False,
+            "votes": 0, "live": 0, "held": 0, "shut": 0, "ceiling": False,
             "title": "The rail could not be read." if error else "No signal on the rail."}
     return {"cards": [], "rows": [], "gone": [], "gone_n": 0, "gone_more": 0,
             "gone_tags": [], "gone_tags_words": "", "n": 0, "long_n": 0,
             "short_n": 0, "active_n": 0, "older_n": 0, "new24": 0,
             "classes": classes, "rules": [], "groups": [], "votes_n": 0, "live_n": 0,
-            "held_n": 0, "ceiling_hit": False, "evaluated": 0, "total": 0,
+            "held_n": 0, "shut_n": 0, "ceiling_hit": False, "evaluated": 0, "total": 0,
             "unevaluated": 0, "closed_unread": 0,
             "closed_fetch": GONE_CLOSED_FETCH,
             "ceiling": RAIL_SAFETY_CEILING, "error": error, "meta": meta,
@@ -1075,6 +1110,8 @@ def _build(request) -> dict:
     votes_n = sum(1 for s in cards if s.rail.votes)
     live_n = sum(1 for s in cards if s.rail.live)
     held_n = sum(1 for s in cards if s.rail.held)
+    # The cards whose market is shut now: the SHUT chip's number.
+    shut_n = sum(1 for s in cards if s.rail.market == "shut")
     title = (f"{n} on the rail · {active_n} active in the engine · "
              f"{gone_n} left in the last 24h · {older_n} left earlier")
     if closed_unread:
@@ -1114,7 +1151,7 @@ def _build(request) -> dict:
             "classes": [[k, c] for k, _label, c in classes if c],
             "rules": [[name, key, cnt] for name, key, cnt in rule_list],
             "votes": votes_n, "live": live_n, "held": held_n,
-            "ceiling": ceiling_hit, "title": title}
+            "shut": shut_n, "ceiling": ceiling_hit, "title": title}
 
     tags_words = " · ".join(f"{t.lower()} {c}" for t, c in gone_tags)
     if closed_unread:
@@ -1129,7 +1166,7 @@ def _build(request) -> dict:
         "older_n": older_n, "new24": new24, "classes": classes,
         "rules": rule_list, "groups": groups,
         "votes_n": votes_n, "live_n": live_n,
-        "held_n": held_n, "ceiling_hit": ceiling_hit,
+        "held_n": held_n, "shut_n": shut_n, "ceiling_hit": ceiling_hit,
         "evaluated": len(candidates), "total": total,
         "unevaluated": unevaluated, "closed_unread": closed_unread,
         "closed_fetch": GONE_CLOSED_FETCH,

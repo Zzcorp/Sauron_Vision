@@ -745,8 +745,13 @@ class TheFiltersInTheBrowserTests(TestCase):
         sig = r["post"]["body"]["prefs"]["sig"]
         self.assertEqual(sig["cls"], ["forex"])
         self.assertEqual(sig["side"], "short")
+        # 2026-11-12, on purpose: "shut_off" joined the saved choices with
+        # the SHUT chip (the cards whose market is shut now, shown or
+        # hidden; tests/test_rail_market_shut.py).
         self.assertEqual(set(sig), {"cls", "side", "score", "stage", "held",
-                                    "rules_off", "sort", "group", "dense", "gone"})
+                                    "rules_off", "sort", "group", "dense", "gone",
+                                    "shut_off"})
+        self.assertIs(sig["shut_off"], False)
         self.assertEqual(r["posts_after_rule"], 2)
 
     def test_a_locked_save_engages_the_lock(self):
