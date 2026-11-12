@@ -416,8 +416,10 @@ body:not(.light-mode) .sidebar-brand h1 { text-shadow: none; }
    and the brand's subtitle in Rajdhani 600, which at the base size + 2
    takes Inter's width at the base size within 1.5 px on the longest
    labels, so nothing reflows; the section heads join the display face
-   (the last block). The 2 px edge stays. */
-.sidebar-brand .subtitle { font-family: var(--sv-font-frame); font-weight: 600; font-size: 12px; letter-spacing: .3em; }
+   (the last block). The 2 px edge stays. The subtitle is spaced .15em,
+   so it ends under the wordmark (at .3em it ran 34 px past it; review
+   2026-11-12, his decision). */
+.sidebar-brand .subtitle { font-family: var(--sv-font-frame); font-weight: 600; font-size: 12px; letter-spacing: .15em; }
 .nav-link { font-family: var(--sv-font-frame); font-weight: 600; font-size: var(--sv-fs-nav); letter-spacing: .02em; border-left-width: 2px; }
 body:not(.light-mode) .nav-link { color: var(--sv-ink-2); }
 body:not(.light-mode) .nav-link:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-line-3); }
@@ -1345,14 +1347,16 @@ body:not(.light-mode) .card-title { color: var(--sv-ink-2); }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar-brand h1 { text-shadow: var(--sv-glow-brand-text); }
 
 /* The active nav row: the Eye's 2 px edge with its glow, a spill of light
-   fading to the right, the icon in the Eye's green. */
+   fading to the right, the icon in the Eye's green. The icon takes no
+   glow: a lit glyph read as a live dot, the sign of "eToro · live" (review
+   2026-11-12, his decision); the edge and the spill say "chosen". */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active { background: var(--sv-spill-active), var(--sv-bg-3); }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active::after {
     content: ""; position: absolute; left: -2px; top: 4px; bottom: 4px; width: 2px;
     background: var(--sv-eye); box-shadow: var(--sv-glow-edge);
 }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active .icon {
-    color: var(--sv-eye); filter: drop-shadow(0 0 4px rgba(0,232,104,.55));
+    color: var(--sv-eye);
 }
 
 /* Live dots: a price LIVE, a feed alive, a component healthy. Still: one
@@ -1401,7 +1405,9 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
    S2; /design/kit/ shows it). A 1 px edge of light on top and a glow above
    it, outside the card. Lit only while its figure is live: a stale,
    closed, reference or estimated value puts the light out. And dark around
-   a world marker: a card that holds REAL is never a hero. */
+   a world marker: a card that holds REAL is never a hero. The glow is half
+   its box wide, so it reaches nothing at both ends (at 60 % its ends were
+   cut square; review 2026-11-12, his decision). */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero { position: relative; border-color: var(--sv-line-3); }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero::before {
     content: ""; position: absolute; left: 14px; right: 14px; top: -1px; height: 1px;
@@ -1409,7 +1415,7 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
 }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero::after {
     content: ""; position: absolute; top: -14px; height: 13px; left: 12%; right: 12%;
-    background: radial-gradient(60% 100% at 50% 100%, rgba(0,232,104,.30), rgba(0,232,104,0));
+    background: radial-gradient(50% 100% at 50% 100%, rgba(0,232,104,.30), rgba(0,232,104,0));
     pointer-events: none;
 }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-fresh--stale, .sv-fresh--closed, .sv-fresh--ref, .sv-est)::before,
@@ -1509,10 +1515,14 @@ body:not(.light-mode) .sv-void-pill {
    top of this sheet). Magic and Calm bring the halo back as a gradient (no
    blur filter); under Magic, where motion is allowed, it breathes: opacity
    and transform only, so the compositor runs it. The mark itself never
-   floats. Its iris looks toward the pointer (sv-moments.js). */
+   floats. Its iris looks toward the pointer (sv-moments.js).
+   The halo holds .16 to half its radius, so the breath reads at arm's
+   length (review 2026-11-12, his decision). It fades out at 70 %: the
+   halo is a 70 px circle whose gradient runs to the box's corner, so its
+   own circle cuts it at 70.7 %, and a later end leaves a hard edge. */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap::before {
     opacity: .7; filter: none;
-    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.12) 36%, rgba(0,232,104,0) 68%);
+    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 50%, rgba(0,232,104,0) 70%);
 }
 @media (prefers-reduced-motion: no-preference) {
     body:not(.light-mode)[data-sv-ambience="magic"] .brand-eye-wrap::before {

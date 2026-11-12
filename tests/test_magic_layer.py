@@ -268,8 +268,19 @@ class EyeLitTokenTests(SimpleTestCase):
         self.assertEqual(focus, {"outline": "2px solid var(--sv-eye)", "outline-offset": "2px"})
 
     def test_the_void_and_the_motion_tokens(self):
+        """The Eye's light from above reaches the page. Updated deliberately
+        (2026-11-12): the operator's brief ("magique dans l'esprit de
+        Sauron, high end et financier") and his decision on the review's
+        CR2. C1's light, 900 x 360 px centred 110 px above the window,
+        faded out at y = 156 px, where the chrome ends at 142 and the first
+        card starts at 184: it added 0.0 levels to the page. Centred 150 px
+        down, 1000 x 420 px, it lights the empty page just under the chrome
+        and is gone by y = 460 (LightFromAboveMeasuredTests). The cards are
+        opaque and it is behind them: no figure takes it."""
         r = self.root
-        self.assertIn("rgba(0,232,104,.10)", r["--sv-void-light"])
+        self.assertEqual(r["--sv-void-light"],
+                         "radial-gradient(1000px 420px at 46% 150px, rgba(0,232,104,.06), "
+                         "rgba(0,232,104,.02) 50%, rgba(0,232,104,0) 74%)")
         self.assertIn("rgba(0,0,0,.42)", r["--sv-void-vignette"])
         self.assertIn("feTurbulence", r["--sv-void-grain"])
         self.assertEqual(r["--sv-grain-opacity"], ".07")
@@ -374,6 +385,18 @@ class FrameFaceTests(SimpleTestCase):
                          ("var(--sv-font-frame)", "var(--sv-fs-nav)", "2px"))
         plain = block(kit, ".sv-plain,\n.topbar-title .pd-title-long")
         self.assertEqual(plain["font-family"], "var(--sv-font-sans)")
+
+    def test_the_brand_s_subtitle_ends_under_the_wordmark(self):
+        """Updated deliberately (2026-11-12): the operator's brief and his
+        decision on the review's CR7. Spaced at C2's .3em, "TRADING
+        INTELLIGENCE" ran 34 px past SAURON, out of the lockup. At .15em
+        it ends under the wordmark's last letter (measured with the
+        production faces: 0.1 px apart). The face and the size stay C2's,
+        in both themes, as C2 built them: light mode's colours are not
+        touched."""
+        sub = block(read(KIT), ".sidebar-brand .subtitle")
+        self.assertEqual((sub["font-family"], sub["font-weight"], sub["font-size"], sub["letter-spacing"]),
+                         ("var(--sv-font-frame)", "600", "12px", ".15em"))
 
     def test_the_lock_s_clock_is_a_figure_and_its_words_reach_11px(self):
         css = read(SAURON)
@@ -579,6 +602,35 @@ class LightOnTheFrameTests(SimpleTestCase):
             has = "%s:has(%s)" % (hero, ", ".join(marks))
             self.assertEqual(block(kit, "%s::before,\n%s::after" % (has, has)), {"content": "none"})
 
+    def test_the_hero_s_glow_fades_to_nothing_at_both_ends(self):
+        """Updated deliberately (2026-11-12): the operator's brief and his
+        decision on the review's CR5. As wide as 60 % of its box, the
+        glow's ellipse still held about .05 at the box's two sides: a
+        vertical step at 12 % and 88 % of the card. Half the box wide and
+        centred, it reaches 0 at both ends, and above them."""
+        glow = block(read(KIT), LIT + " .sv-panel--hero::after")
+        self.assertEqual(glow["background"],
+                         "radial-gradient(50% 100% at 50% 100%, rgba(0,232,104,.30), rgba(0,232,104,0))")
+        m = re.match(r"radial-gradient\(([\d.]+)% ([\d.]+)% at ([\d.]+)% 100%,", glow["background"])
+        rx, at = float(m.group(1)), float(m.group(3))
+        self.assertLessEqual(at + rx, 100)          # the right end, inside the box
+        self.assertGreaterEqual(at - rx, 0)         # the left end
+
+    def test_the_active_row_s_icon_takes_the_eye_s_colour_and_no_glow(self):
+        """Updated deliberately (2026-11-12): the operator's brief and his
+        decision on the review's CR6. Its drop-shadow made the active row's
+        glyph a lit green disc on /command/ ("◉"), the sign of "eToro ·
+        live" and "Engine healthy". The icon keeps the Eye's colour; the
+        2 px edge with its glow and the spill say "chosen"."""
+        kit = read(KIT)
+        self.assertEqual(block(kit, LIT + " .nav-link.active .icon"), {"color": "var(--sv-eye)"})
+        for prelude, body, ctx in kit_rules():
+            if not any(re.search(r"\.nav-link\b[^,]*\.icon\b", s) for s in selectors(prelude)):
+                continue
+            for prop, value in decls(body):
+                with self.subTest(rule=prelude, prop=prop):
+                    self.assertNotIn(prop, ("filter", "text-shadow", "box-shadow"))
+
     def test_no_template_makes_a_hero_of_a_card_that_holds_a_world_marker(self):
         """A card that holds REAL is never a hero. The kit's own proof that
         such a card stays dark is the one pairing a template may spell."""
@@ -764,6 +816,35 @@ class MomentsSheetTests(SimpleTestCase):
         # S1a's rule stays for Off: no halo, nothing moves.
         self.assertEqual(block(kit, ".brand-eye-wrap::before"), {"animation": "none", "opacity": "0"})
         self.assertEqual(block(kit, ".sidebar-brand .brand-eye"), {"animation": "none", "filter": "none"})
+
+    def test_the_eye_s_breath_reads_and_fades_inside_its_own_circle(self):
+        """Updated deliberately (2026-11-12): the operator's brief and his
+        decision on the review's CR4. The breath barely read: outside the
+        36 px mark its halo was a ring 8.5 to 15.5 px wide, +10 to +25
+        levels. It now holds .16 to half its radius (it held .12 to 36 %):
+        11 to 17.5 px, +20 to +43 (measured, DPR 2).
+
+        Its last stop is 70 %, not the review's 84 %: the halo is a 70 px
+        circle (sauron.css: border-radius 50 %) whose gradient runs to the
+        box's corner, 35 x sqrt(2) = 49.5 px, so its own circle cuts it at
+        70.7 %. At 84 % it still held .0625 there: a hard circular edge,
+        a step of 9 to 10 levels under Calm and at the breath's peak
+        (measured, DPR 2). At 70 % it fades out inside its circle and,
+        grown to the breath's 1.06, inside the window: the mark's centre
+        sits 38 px from the window's top and left edges."""
+        kit = read(KIT)
+        still = block(kit, LIT + " .brand-eye-wrap::before")
+        self.assertEqual(still["background"],
+                         "radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 50%, "
+                         "rgba(0,232,104,0) 70%)")
+        box = block(read(SAURON), ".brand-eye-wrap::before")
+        self.assertEqual((box["width"], box["height"], box["border-radius"]), ("70px", "70px", "50%"))
+        radius = 70 / 2
+        end = float(re.findall(r"rgba\(0,232,104,0\) ([\d.]+)%\)$", still["background"])[0]) / 100
+        fades_at = end * radius * 2 ** 0.5        # circle: its gradient runs to the farthest corner
+        self.assertLessEqual(fades_at, radius)
+        grown = max(float(s) for s in re.findall(r"scale\(([\d.]+)\)", self.frames()["sv-eye-breath"]))
+        self.assertLessEqual(fades_at * grown, 38)
 
     def test_the_only_infinite_animation_the_magic_adds_is_the_breath(self):
         kit = read(KIT)
@@ -1538,6 +1619,7 @@ LIGHT_PROBE = r"""(async function () {
     out[m] = {
       wordmark: px(document.querySelector('.sidebar-brand h1'), null, 'textShadow'),
       navBg: px(nav, null, 'backgroundImage'), navEdge: px(nav, '::after', 'boxShadow'), navEdgeContent: px(nav, '::after', 'content'),
+      navIcon: px(nav && nav.querySelector('.icon'), null, 'filter') + ' | ' + px(nav && nav.querySelector('.icon'), null, 'textShadow'),
       halo: px(wrap, '::before', 'opacity'), haloFilter: px(wrap, '::before', 'filter'),
       voidLight: px(document.body, '::before', 'content') + ' ' + px(document.body, '::before', 'backgroundImage') + ' ' + px(document.body, '::before', 'position'),
       grain: px(document.body, '::after', 'content') + ' ' + px(document.body, '::after', 'opacity') + ' ' + px(document.body, '::after', 'position'),
@@ -1586,6 +1668,9 @@ class LightMeasuredTests(TestCase):
                 self.assertRegex(got["wordmark"], r"rgba\(0, 232, 104, 0\.45\) 0px 0px 12px")
                 self.assertIn("linear-gradient", got["navBg"])
                 self.assertRegex(got["navEdge"], r"rgba\(0, 232, 104, 0\.75\) 0px 0px 8px")
+                # The active row's icon: the Eye's colour, no glow (CR6,
+                # his decision of 2026-11-12): a lit disc read as "live".
+                self.assertEqual(got["navIcon"], "none | none")
                 self.assertEqual(got["haloFilter"], "none")
                 self.assertRegex(got["voidLight"], r'^"" radial-gradient\(.*radial-gradient\(.* fixed$')
                 self.assertEqual(got["grain"], '"" 0.07 fixed')
@@ -1634,6 +1719,117 @@ class LightMeasuredTests(TestCase):
                     self.assertNotRegex(shadow, r"0, 232, 104|36, 181, 130")
                     self.assertNotRegex(shadow, r"\) 0px 0px [1-9]")
         self.assertGreater(seen, 0)
+
+
+#: Down the light's column (46 % of the window): the chrome (opaque), the
+#: empty page (no opaque ground under the point) and the first opaque box
+#: below it; a run of empty page under 8 px is a seam, not the page. And
+#: the boxes, in the window, of every figure (a text node with a digit)
+#: the eye can see: a closed popup's figures are laid out, unseen.
+ABOVE_PROBE = r"""(function () {
+  function ground(n) {
+    for (; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      var c = getComputedStyle(n), bg = __sv.rgba(c.backgroundColor), img = c.backgroundImage;
+      if (img && img !== 'none' && /gradient/.test(img) && !/transparent/.test(img)
+          && __sv.every(img).every(function (s) { return s && s.a >= 0.999; })) return n;
+      if (bg && bg.a >= 0.999) return n;
+    }
+    return null;
+  }
+  var x = Math.round(innerWidth * 0.46), top = null, bottom = null, run = 0;
+  for (var y = 0; y < innerHeight; y++) {
+    var el = document.elementFromPoint(x, y), g = el && ground(el);
+    if (!g) { if (!run) top = y; run++; }
+    else { if (run >= 8) { bottom = y; break; } run = 0; top = null; }
+  }
+  var boxes = [];
+  __sv.figureNodes().forEach(function (f) {
+    if (!f[1].checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+    var range = document.createRange(); range.selectNodeContents(f[0]);
+    Array.prototype.forEach.call(range.getClientRects(), function (q) {
+      if (q.width > 0 && q.height > 0 && q.bottom > 0 && q.right > 0 && q.top < innerHeight && q.left < innerWidth)
+        boxes.push([Math.max(0, Math.floor(q.left)), Math.max(0, Math.floor(q.top)),
+                    Math.min(innerWidth, Math.ceil(q.right)), Math.min(innerHeight, Math.ceil(q.bottom))]);
+    });
+  });
+  var f = __sv.figures();
+  return { x: x, top: bottom === null ? null : top, bottom: bottom, boxes: boxes, figures: f.figures, lit: f.lit, onVoid: f.onVoid };
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class LightFromAboveMeasuredTests(TestCase):
+    """The Eye's light from above reaches the page (2026-11-12, the
+    operator's brief and his decision on the review's CR2). On /positions/
+    and /command/ at 1440 and 1920, each picture is taken twice with
+    nothing else moving, the light on, then its token set to none: what
+    differs is the light alone. On the empty page above the first card, at
+    the light's column, it adds at least 2 levels of green at its brightest
+    point (C1's light, centred 110 px above the window, added 0.0 there);
+    Off has none. And no pixel of any figure in the window moves with it,
+    while every figure computes no light and none sits on the void: the
+    light is behind the opaque cards."""
+
+    URLS = (POSITIONS, COMMAND)
+    VIEWPORTS = ((1440, 900), (1920, 1080))
+    MODES = ("magic", "calm", "off")
+
+    @classmethod
+    def setUpTestData(cls):
+        pages = {u: _file_page(m) for u, m in _pages(_book("magic_above"), cls.URLS).items()}
+        b = _Browser(pages, "sv-magic-above-")
+        try:
+            cls.got = {}
+            for width, height in cls.VIEWPORTS:
+                sid = b.tab(width, height)
+                for url in cls.URLS:
+                    b.open(sid, url, PROBES)
+                    for mode in cls.MODES:
+                        b.js(sid, "__sv.mode('%s'); __sv.settle()" % mode)
+                        got = b.js(sid, ABOVE_PROBE)
+                        on = b.shot(sid)
+                        b.js(sid, "document.documentElement.style.setProperty('--sv-void-light', 'none'); __sv.settle()")
+                        none = b.shot(sid)
+                        b.js(sid, "document.documentElement.style.removeProperty('--sv-void-light'); __sv.settle()")
+                        got["brightest"], got["figurePixels"] = cls._light(got, on, none)
+                        cls.got[(url, width, mode)] = got
+        finally:
+            b.close()
+
+    @staticmethod
+    def _light(got, on, none):
+        """The light alone (green, on minus none: it only adds) at its
+        brightest on the empty page above the first card, as a 5 x 5 mean,
+        within 160 px of the light's column; and the most any pixel of any
+        figure's box moved with it."""
+        from PIL import ImageChops, ImageFilter
+        brightest = None
+        if got["bottom"] is not None:
+            added = ImageChops.subtract(on.split()[1], none.split()[1])
+            band = added.crop((max(0, got["x"] - 160), got["top"], got["x"] + 160, got["bottom"]))
+            brightest = band.filter(ImageFilter.BoxBlur(2)).getextrema()[1]
+        moved = ImageChops.difference(on, none)
+        figure = max((max(hi for _lo, hi in moved.crop(tuple(box)).getextrema()) for box in got["boxes"]),
+                     default=None)
+        return brightest, figure
+
+    def test_the_light_from_above_lights_the_empty_page_above_the_first_card(self):
+        for (url, width, mode), got in sorted(self.got.items()):
+            with self.subTest(url=url, width=width, mode=mode):
+                self.assertIsNotNone(got["bottom"], "no empty page above a first card down the light's column")
+                if mode == "off":
+                    self.assertEqual(got["brightest"], 0)
+                else:
+                    self.assertGreaterEqual(got["brightest"], 2, (got["top"], got["bottom"]))
+
+    def test_every_figure_stays_unlit(self):
+        for (url, width, mode), got in sorted(self.got.items()):
+            with self.subTest(url=url, width=width, mode=mode):
+                self.assertGreater(got["figures"], 20)
+                self.assertGreater(len(got["boxes"]), 20)
+                self.assertEqual(got["figurePixels"], 0)
+                self.assertEqual(got["lit"], [])
+                self.assertEqual(got["onVoid"], [])
 
 
 FACE_PROBE = r"""(function () {
