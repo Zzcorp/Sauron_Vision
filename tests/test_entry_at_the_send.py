@@ -15,8 +15,9 @@ prices, round invented pools; no broker, no model, no HTTP):
     sent;
   * the 12-hour note after a refused levered order: written exactly when
     eToro refused an order that reached it, whoever reads the refusal;
-  * eToro's minimum at the order in units with one dollar rate per entry,
-    and in eToro's own figure for a pair whose base is the dollar.
+  * eToro's minimum at the order: eToro's own figure in units for a pair
+    whose base is the dollar, any other pair at the rate read at the
+    order.
 
 Run with:  python manage.py test tests.test_entry_at_the_send
 """
@@ -130,6 +131,136 @@ class OnePositionPerConfigAndSymbolTests(TestCase):
             skip)
         self.assertTrue(skip["detail"].endswith(
             ": sent after this entry was proposed — nothing sent"), skip)
+
+    def test_a_note_another_process_wrote_holds_the_send(self):
+        """The bot reads its config once, when the pass builds it. An order
+        sent for this config by another process since (an admin "run now"
+        tick, a pass that outlived the fleet's lock) left its in-doubt note
+        in the database, not on this copy: the send reads the note there,
+        and the note stands (the review of 2026-11-12)."""
+        from bot_program.models import AssetBotConfig
+        H.switch(H.SWITCH, None)
+        H.switch(H.LEVERAGE, True)
+        world = H.arm("crypto_clear", "stored")
+        cfg = world["cfg"]
+
+        def another_process():
+            row = AssetBotConfig.objects.get(pk=cfg.pk)
+            row.extras = dict(row.extras or {}, entry_in_doubt={
+                "BTCUSD": {"reference": "ref-9",
+                           "at": timezone.now().isoformat(), "side": "BUY"}})
+            row.save(update_fields=["extras"])
+        with mock.patch("bot_program.notifications.notify_staff"):
+            out = H.run(world, between=another_process)
+        self.assertIsNotNone(out.cand)
+        self.assertIsNone(out.res)
+        self.assertEqual(H.orders(out), [])
+        skip = H.skip_of(out)
+        self.assertEqual(skip["code"], "order_in_doubt")
+        self.assertTrue(skip["detail"].startswith(
+            "an order under reference ref-9 may already be live (since "),
+            skip)
+        self.assertEqual(
+            out.cfg.extras["entry_in_doubt"]["BTCUSD"]["reference"], "ref-9")
+
+    def _other(self, world, name="F other"):
+        """Another live config of the account on the world's symbol, its
+        pool and legs the world config's own."""
+        cfg = world["cfg"]
+        other = H._live_cfg(world["user"], "crypto", name=name)
+        other.symbols = [world["symbol"]]
+        other.capital = cfg.capital
+        other.stop_loss_pct, other.take_profit_pct = (cfg.stop_loss_pct,
+                                                      cfg.take_profit_pct)
+        other.save()
+        return other
+
+    def test_another_configs_order_in_doubt_holds_the_same_bet(self):
+        """Config A's order did not come back: it MAY be live at eToro, and
+        no row says so, only the note on A. The duplicate gate reads rows,
+        so config B of the same account met no holder and sent the same
+        bet, in the same pass and on the next (main's own; the review of
+        2026-11-12). B now sends nothing on the symbol and side while A's
+        note is fresh: at the send, and at the proposal of the next
+        pass."""
+        from bot_program.asset_engine.base import make_bot
+        H.switch(H.SWITCH, None)
+        H.switch(H.LEVERAGE, True)
+        world = H.arm("crypto_clear", "elsewhere")
+        cfg_a = world["cfg"]
+        cfg_b = self._other(world)
+        err = RuntimeError("the request did not come back")
+        err.in_doubt, err.reference = True, "ref-7"
+        v_a = H.venue(world["price"], world["table"], raises=err)
+        v_b = H.venue(world["price"], world["table"])
+        venues = {cfg_a.pk: v_a, cfg_b.pk: v_b}
+
+        def route(user, symbol, cfg=None, *args, **kwargs):
+            return venues[cfg.pk]
+        bot_a, bot_b = make_bot(cfg_a), make_bot(cfg_b)
+        with mock.patch(H.ROUTER, side_effect=route), \
+                mock.patch("time.sleep"), \
+                mock.patch("bot_program.notifications.notify_staff"), \
+                mock.patch("bot_program.notifications.notify_bot_fill_open"):
+            cand_a = bot_a.propose_entry("BTCUSD")
+            cand_b = bot_b.propose_entry("BTCUSD")
+            self.assertIsNotNone(cand_a)
+            self.assertIsNotNone(cand_b, cfg_b.extras.get("skips"))
+            self.assertIsNone(bot_a.execute_entry(cand_a))   # in doubt
+            res_b = bot_b.execute_entry(cand_b)
+            # the next pass: B proposes again while A's note is fresh
+            again_b = make_bot(cfg_b).propose_entry("BTCUSD")
+        cfg_a.refresh_from_db()
+        cfg_b.refresh_from_db()
+        self.assertEqual(v_a.market_order.call_count, 1)
+        v_b.market_order.assert_not_called()
+        self.assertIsNone(res_b)
+        self.assertIsNone(again_b)
+        note = cfg_a.extras["entry_in_doubt"]["BTCUSD"]
+        self.assertEqual((note["reference"], note["side"]), ("ref-7", "BUY"))
+        skip = cfg_b.extras["skips"]["BTCUSD"]
+        self.assertEqual(skip["code"], "order_in_doubt")
+        self.assertTrue(skip["detail"].startswith(
+            f"BTCUSD long: an order of config #{cfg_a.pk} under reference "
+            f"ref-7 may already be live (since "), skip)
+        self.assertTrue(skip["detail"].endswith(
+            "a second ticket could double that bet; nothing sent"), skip)
+
+    def test_an_order_in_doubt_elsewhere_holds_its_own_side(self):
+        """One expression per symbol AND SIDE across configs, as the
+        duplicate gate counts a row: a note on a long holds a long, not a
+        short. A note written before the side was kept holds both; a note
+        past IN_DOUBT_QUIET_HOURS holds nothing; the asker's own note is
+        the proposal's (ORDER_IN_DOUBT there), not this reader's."""
+        from datetime import timedelta
+        from bot_program.asset_engine.base import make_bot
+        from bot_program.models import AssetBotConfig
+        world = H.arm("crypto_clear", "sides")
+        cfg_a = world["cfg"]
+        bot = make_bot(self._other(world))
+
+        def note_on_a(**note):
+            AssetBotConfig.objects.filter(pk=cfg_a.pk).update(
+                extras=dict(cfg_a.extras or {}, entry_in_doubt={
+                    "BTCUSD": dict({"reference": "ref-s",
+                                    "at": timezone.now().isoformat()},
+                                   **note)}))
+        note_on_a(side="BUY")
+        held = bot._in_doubt_elsewhere("BTCUSD", side="BUY")
+        self.assertEqual((held["config_id"], held["reference"]),
+                         (cfg_a.pk, "ref-s"))
+        self.assertIsNone(bot._in_doubt_elsewhere("BTCUSD", side="SELL"))
+        self.assertIsNone(bot._in_doubt_elsewhere("ETHUSD", side="BUY"))
+        note_on_a()
+        self.assertEqual(
+            bot._in_doubt_elsewhere("BTCUSD", side="SELL")["config_id"],
+            cfg_a.pk)
+        note_on_a(side="BUY", at=(timezone.now() - timedelta(
+            hours=bot.IN_DOUBT_QUIET_HOURS + 1)).isoformat())
+        self.assertIsNone(bot._in_doubt_elsewhere("BTCUSD", side="BUY"))
+        mine = make_bot(cfg_a)
+        note_on_a(side="BUY")
+        self.assertIsNone(mine._in_doubt_elsewhere("BTCUSD", side="BUY"))
 
 
 class TheDailyLossAtTheSendTests(TestCase):
@@ -328,6 +459,60 @@ class TheTwelveHourNoteTests(TestCase):
         self.assertEqual(
             out.cfg.extras["leverage_refusals"]["EURUSD"]["leverage"], 10)
 
+    def test_a_refusal_whose_words_say_not_sent_is_still_a_refusal(self):
+        """eToro's answer rides the exception's words ("eToro refused
+        (400): " and the start of its body), and a body may say anything,
+        "was not sent" included. It is still eToro's refusal of an order
+        that reached it: noted, and the same order does not go out on the
+        next pass (the review of 2026-11-12)."""
+        world = self._world("words")
+        out = H.run(world, the_venue=H.venue(
+            world["price"], world["table"], raises=RuntimeError(
+                'eToro refused (400): {"errorCode": 746, "errorMessage": '
+                '"the order was not sent to the market"}')))
+        self.assertEqual(len(H.orders(out)), 1)
+        self.assertIn("leverage_refusals", out.cfg.extras, H.skip_of(out))
+        self.assertEqual(
+            out.cfg.extras["leverage_refusals"]["EURUSD"]["leverage"], 10)
+        again = H.run(world)
+        self.assertEqual(H.orders(again), [])
+        self.assertEqual(H.skip_of(again)["code"], "leverage_refused")
+
+    def test_a_row_cancelled_or_expired_at_the_poll_is_no_refusal(self):
+        """eToro refuses an order with Rejected and an errorCode. Canceled
+        is the answer to a withdrawal (Sauron's own whose answer was not
+        read, measured 202 then Canceled; the operator's, in the app), and
+        Expired an order that lapsed: neither refuses this order at this
+        multiplier. The row is cancelled as before, no 12-hour note is
+        written, and the next pass may send again (the review of
+        2026-11-12): for a levered row, and for a raised one."""
+        from tests.test_bot_venue_floor import _on
+        working = {"orderId": "o-9", "status": "NEW", "working": True,
+                   "executedQty": "0"}
+        for status in ("Canceled", "Expired"):
+            for kind in ("levered", "raised"):
+                with self.subTest(status=status, kind=kind):
+                    tag = f"poll_{kind}_{status.lower()}"
+                    world = (self._world(tag) if kind == "levered"
+                             else _on("forex_under_min", tag=tag))
+                    v = H.venue(world["price"], world["table"],
+                                fill=working)
+                    with mock.patch("bot_program.notifications."
+                                    "notify_staff"):
+                        out = H.run(world, the_venue=v)
+                    (row,) = H.trade_rows(out)
+                    self.assertTrue(row.metadata.get("entry_working"))
+                    v.order_status = (lambda oid, s=status: {
+                        "state": "dead", "status": s, "filled": 0})
+                    out.bot._poll_working_entry(row, v)
+                    out.cfg.refresh_from_db()
+                    row.refresh_from_db()
+                    self.assertNotIn("leverage_refusals", out.cfg.extras)
+                    self.assertNotIn(row.status, ("OPEN", "CLOSE_PENDING"))
+                    again = H.run(world)
+                    self.assertEqual(len(H.orders(again)), 1,
+                                     H.skip_of(again))
+
 
 def _pair_row(iid, symbol):
     """An eligibility row for a forex pair the harness does not carry,
@@ -345,10 +530,11 @@ class TheMinimumAtTheOrderTests(TestCase):
     check). eToro states its minimum in dollars, and the order turned it
     into units with the candidate's price and a SECOND read of the
     platform's dollar rate: a bot whose own size was exactly the minimum
-    could be refused on the noise between the two feeds. One rate per
-    entry (the candidate's, the sizer's), as the floor reads it for a
-    raised entry; for a pair whose base is the dollar, eToro's figure in
-    units."""
+    could be refused on the noise between the two feeds. For a pair whose
+    base is the dollar, eToro's figure in units: no price and no rate in
+    it. Any other pair is judged at the rate read at the order, the one
+    nearest eToro's own (the review of 2026-11-12 measured the proposal's
+    rate, minutes older, agreeing less with eToro on crosses)."""
 
     def _world(self, tag, symbol, price, pool, **changes):
         H.switch(H.SWITCH, None)
@@ -384,13 +570,20 @@ class TheMinimumAtTheOrderTests(TestCase):
             "sized 900 units from the stop distance; this venue's minimum "
             "is 1000. "), skip)
 
-    def test_the_rate_of_the_proposal_is_the_rate_at_the_order(self):
+    def test_a_cross_is_judged_at_the_rate_read_at_the_order(self):
         """EURGBP at 0.8500, Fractional Units on (forex by the unit), a
         6,005 pool: the risk budget sizes 927 units at the proposal's pound
-        rate of 1.2700, where eToro's minimum is 926.4 units. The
-        platform's rate reads 1.2690 when the order is built: read again,
-        the minimum was 927.1 and the entry was refused. One rate per
-        entry: sent, at the bot's own 927."""
+        rate of 1.2700, where eToro's minimum is 926.36 units. The
+        platform's rate reads 1.2690 when the order is built, and eToro
+        judges a cross at its own rate at the order: there 927 units are
+        999.9 USD (927 x 0.85 x 1.2690), under its 1,000, and the minimum
+        is 927.085. Refused before the POST, as main refused it; the next
+        pass sizes again at the new rate. (Changed on purpose by the
+        review of 2026-11-12: this test pinned the order SENT at the
+        proposal's rate, minutes older, and eToro refuses such an order
+        after the POST, which at 10x also writes the 12-hour note.) The
+        other way, a rate that rose by the order clears the minimum
+        there: sent."""
         rate = {"v": 1.2700}
         out = H.run(
             self._world("gbp", "EURGBP", "0.8500", "6005", fractions=True),
@@ -398,6 +591,22 @@ class TheMinimumAtTheOrderTests(TestCase):
                 bot, "_value_per_unit", lambda symbol: rate["v"]),
             between=lambda: rate.update(v=1.2690))
         self.assertEqual(out.cand.qty_default, 927.0)
-        self.assertIsNotNone(out.res, H.skip_of(out))
-        self.assertEqual([o[:3] for o in H.orders(out)],
+        self.assertIsNone(out.res)
+        self.assertEqual(H.orders(out), [])
+        skip = H.skip_of(out)
+        self.assertEqual(skip["code"], "venue_min_size")
+        self.assertTrue(skip["detail"].startswith(
+            "sized 927 units from the stop distance; this venue's minimum "
+            "is 927.085. "), skip)
+        # the rate rose between the proposal and the order
+        rate["v"] = 1.2690
+        up = H.run(
+            self._world("gbp_up", "EURGBP", "0.8500", "6002",
+                        fractions=True),
+            prepare=lambda bot: setattr(
+                bot, "_value_per_unit", lambda symbol: rate["v"]),
+            between=lambda: rate.update(v=1.2700))
+        self.assertEqual(up.cand.qty_default, 927.0)
+        self.assertIsNotNone(up.res, H.skip_of(up))
+        self.assertEqual([o[:3] for o in H.orders(up)],
                          [["EURGBP", "BUY", 927.0]])

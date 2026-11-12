@@ -201,12 +201,17 @@ class TheDenominatorIsCheckedAgainstTheAccountTests(TestCase):
         self.assertIn("nothing here converts", out)
 
     def test_a_followers_wrong_label_is_said_to_be_corrected_by_the_sync(self):
-        """A pool that FOLLOWS the account holds the account's own figure:
-        only its label is wrong, and the account sync writes the reading's
-        currency over it (tasks._follow_the_account, 2026-11-12). Its line
-        says so, and not that every limit is off by an exchange rate."""
+        """A pool that FOLLOWS the account takes its figure from the
+        account's reading: only its label is wrong, and the account sync
+        writes the reading's currency over it (tasks._follow_the_account,
+        2026-11-12). Its line says so, and not that every limit is off by
+        an exchange rate. (The review of 2026-11-12: the IBKR row is
+        primary for stocks here, so the follower trades at the book and
+        the sync does write its label, as the line says; the line names
+        the cash check only for an eToro book, the one it judges.)"""
+        from bot_program.tasks import _follow_the_account
         u = _user()
-        _acct(u, equity=50000, currency="USD")
+        _acct(u, equity=50000, currency="USD", is_primary_for_stocks=True)
         follower = _cfg(u, name="follower", capital="50000",
                         base_currency="EUR")
         follower.extras = {"capital_tracks_broker": True}
@@ -222,9 +227,141 @@ class TheDenominatorIsCheckedAgainstTheAccountTests(TestCase):
         self.assertEqual(len(mine), 1, _blockers(out))
         self.assertIn("follows the account and is labelled EUR while the "
                       "account reads in USD", mine[0])
-        self.assertIn("the label is wrong, not the figure", mine[0])
+        self.assertIn("its figure is taken from the account's reading (the "
+                      "whole of it, or its share), so the label is wrong, "
+                      "not the figure", mine[0])
         self.assertIn("the next sync writes USD", mine[0])
         self.assertNotIn("wrong by the FX rate", mine[0])
+        self.assertNotIn("cash check", mine[0])
+        # and the sync does what the line says
+        _follow_the_account(u, 50000.0, "USD")
+        follower.refresh_from_db()
+        self.assertEqual(follower.base_currency, "USD")
+
+    def _follower(self, user, *, name="follower", capital="50000",
+                  share=None, enabled=True, symbols=("AAPL",)):
+        cfg = _cfg(user, name=name, capital=capital, base_currency="EUR",
+                   enabled=enabled, symbols=symbols)
+        cfg.extras = {"capital_tracks_broker": True}
+        if share is not None:
+            cfg.extras["account_share_pct"] = share
+        cfg.save(update_fields=["extras"])
+        return cfg
+
+    @staticmethod
+    def _mismatch(out, cfg):
+        return [b for b in _blockers(out).splitlines()
+                if f"config {cfg.id} ({cfg.name})" in b
+                and ("account reads in" in b or "account is in" in b)]
+
+    def test_a_follower_at_another_venue_is_told_the_sync_never_writes_it(
+            self):
+        """The sync retunes no follower that trades at another venue than
+        the book (capital_truth.foreign_venue, per symbol), its label
+        included. An IBKR book that no class is routed to: the router
+        sends AAPL to Alpaca, and the line says the sync never writes this
+        pool; it never promised USD (the review of 2026-11-12: preflight
+        asked the class flags, the sync asks the router)."""
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        _acct(u, equity=50000, currency="USD")
+        follower = self._follower(u)
+        _pin(u)
+        _bars()
+        out = _run()
+        mine = self._mismatch(out, follower)
+        self.assertEqual(len(mine), 1, _blockers(out))
+        self.assertIn("follows the account but trades at alpaca, so the sync "
+                      "never writes its pool: its pool of 50,000.00 is read "
+                      "in EUR while the account is in USD", mine[0])
+        self.assertNotIn("writes USD", out)
+        _follow_the_account(u, 50000.0, "USD")
+        follower.refresh_from_db()
+        self.assertEqual(follower.base_currency, "EUR")
+
+    def test_followers_whose_shares_do_not_fit_are_told_the_label_stays(
+            self):
+        """Shares that do not fit in one account retune nothing (shared
+        capital OFF), the label included: the line says the label stays
+        until the shares fit, never that the next sync writes USD."""
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        _acct(u, equity=50000, currency="USD", is_primary_for_stocks=True)
+        a = self._follower(u, name="sixty_a", capital="30000", share=60)
+        b = self._follower(u, name="sixty_b", capital="30000", share=60)
+        _pin(u)
+        _bars()
+        out = _run()
+        for cfg in (a, b):
+            mine = self._mismatch(out, cfg)
+            self.assertEqual(len(mine), 1, _blockers(out))
+            self.assertIn("follows the account and is labelled EUR while the "
+                          "account reads in USD, and the sync retunes "
+                          "nothing, its label included, until the "
+                          "followers' shares fit in 100%: its label stays "
+                          "EUR until then", mine[0])
+        self.assertNotIn("writes USD", out)
+        _follow_the_account(u, 50000.0, "USD")
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertEqual((a.base_currency, b.base_currency), ("EUR", "EUR"))
+
+    def test_a_disabled_follower_is_told_the_first_sync_once_enabled(self):
+        """The sync retunes enabled followers only: a disabled one is told
+        the first sync after it is enabled writes the label, which it
+        does."""
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        _acct(u, equity=50000, currency="USD", is_primary_for_stocks=True)
+        sleeper = self._follower(u, name="sleeper", enabled=False)
+        _pin(u)
+        _bars()
+        out = _run()
+        mine = self._mismatch(out, sleeper)
+        self.assertEqual(len(mine), 1, _blockers(out))
+        self.assertIn("the first sync after it is enabled writes USD",
+                      mine[0])
+        _follow_the_account(u, 50000.0, "USD")
+        sleeper.refresh_from_db()
+        self.assertEqual(sleeper.base_currency, "EUR")
+        sleeper.enabled = True
+        sleeper.save(update_fields=["enabled"])
+        _follow_the_account(u, 50000.0, "USD")
+        sleeper.refresh_from_db()
+        self.assertEqual(sleeper.base_currency, "USD")
+
+    def test_a_follower_on_an_etoro_book_is_told_the_cash_check_refuses_it(
+            self):
+        """On an eToro book the cash check refuses every order of a pool
+        labelled otherwise than the account: the line says so until the
+        sync writes the label. Its figure is its share of the reading (40%
+        here), not the whole account. Once synced, no mismatch is left."""
+        from bot_program.models import EtoroAccount
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        acct = EtoroAccount.objects.create(
+            user=u, demo=False, label="Main", is_primary_for_stocks=True)
+        acct.set_credentials("k", "u")
+        acct.last_equity = Decimal("50000")
+        acct.last_equity_currency = "USD"
+        acct.last_equity_at = timezone.now()
+        acct.save()
+        follower = self._follower(u, capital="20000", share=40)
+        _pin(u)
+        _bars()
+        out = _run()
+        mine = self._mismatch(out, follower)
+        self.assertEqual(len(mine), 1, _blockers(out))
+        self.assertIn("its figure is taken from the account's reading (the "
+                      "whole of it, or its share)", mine[0])
+        self.assertTrue(mine[0].rstrip().endswith(
+            "the next sync writes USD (until then the cash check refuses "
+            "its eToro orders)"), mine[0])
+        _follow_the_account(u, 50000.0, "USD")
+        follower.refresh_from_db()
+        self.assertEqual((float(follower.capital), follower.base_currency),
+                         (20000.0, "USD"))
+        self.assertEqual(_run().count("CURRENCY MISMATCH"), 0)
 
     def test_a_fixed_pool_keeps_the_warning_on_its_typed_figure(self):
         """A pool that does not follow the account carries a figure the

@@ -3610,9 +3610,16 @@ class EtoroTrader:
             log.error("eToro order NOT SENT for %s %s — the connection was "
                       "never made (%s): %s", symbol, side,
                       type(e).__name__, e)
-            raise RuntimeError(
+            err = RuntimeError(
                 f"eToro unreachable ({type(e).__name__}): the order for "
-                f"{symbol} was not sent — {str(e)[:120]}") from e
+                f"{symbol} was not sent — {str(e)[:120]}")
+            # SAID ON THE EXCEPTION, NOT ONLY IN ITS WORDS (the review of
+            # 2026-11-12): the engine writes no 12-hour note for an order
+            # that never left, and reads this flag duck-typed as it reads
+            # `in_doubt` — a refusal's words carry eToro's own body, which
+            # may say anything, "was not sent" included.
+            err.not_sent = True
+            raise err from e
         except TRANSPORT as e:
             self._note_health("order", detail=f"in doubt: "
                                               f"{type(e).__name__}")

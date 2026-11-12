@@ -2108,11 +2108,15 @@ class AssetBot(ABC):
     #: leverage_refusals with both numbers; never re-sent at 1.
     LEVERAGE_QUIET_HOURS = 12
 
-    def _remember_in_doubt(self, symbol: str, reference: str) -> None:
+    def _remember_in_doubt(self, symbol: str, reference: str,
+                           side=None) -> None:
         """Note on the config that `symbol` has an order nobody can account
         for. Read by propose_entry, which refuses the symbol while it is
         fresh — because the idempotency key buckets by the minute, so the
-        next tick would send a SECOND order under a new reference."""
+        next tick would send a SECOND order under a new reference. `side`
+        (2026-11-12) is the order's, kept for the account's OTHER configs
+        (_in_doubt_elsewhere): the same bet is theirs to refuse, the
+        opposite one is not."""
         try:
             extras = dict(self.cfg.extras or {})
             book = dict(extras.get("entry_in_doubt") or {})
@@ -2120,6 +2124,8 @@ class AssetBot(ABC):
                 "reference": reference,
                 "at": timezone.now().isoformat(),
             }
+            if side:
+                book[str(symbol).upper()]["side"] = str(side).upper()
             extras["entry_in_doubt"] = book
             self.cfg.extras = extras
             self.cfg.save(update_fields=["extras"])
@@ -2240,12 +2246,16 @@ class AssetBot(ABC):
         except Exception:  # noqa: BLE001
             return None
 
-    def _in_doubt_note(self, symbol: str):
+    def _in_doubt_note(self, symbol: str, extras=None):
         """The fresh in-doubt note for `symbol`, or None. Expires by itself:
         a note that never expired would retire the symbol permanently, which
-        is the failure mode this whole file argues against."""
+        is the failure mode this whole file argues against. `extras`
+        (2026-11-12): a config's extras as the database holds them (the
+        send's own read, another config's); None reads this bot's copy,
+        loaded when the pass built it."""
         try:
-            book = (self.cfg.extras or {}).get("entry_in_doubt") or {}
+            book = ((self.cfg.extras if extras is None else extras)
+                    or {}).get("entry_in_doubt") or {}
             note = book.get(str(symbol).upper())
             if not note:
                 return None
@@ -2267,9 +2277,16 @@ class AssetBot(ABC):
         entry booked on paper (`paper`: this entry's venue). A row or a
         note found here was written after the proposal, which refused on
         them: by an earlier candidate of the same pass, or by another pass.
-        Reads this config's rows and the note on it, never the venue."""
+        Reads this config's rows and the note on it, never the venue.
+
+        THE NOTE AS THE DATABASE HOLDS IT (the review of 2026-11-12), like
+        the rows: this bot's copy of the config was loaded when the pass
+        built it, and an order another process sent for this config since
+        (an admin "run now" tick, a pass that outlived the fleet's lock)
+        left its note on the row only. No row read (a config not saved):
+        this copy's note."""
         from bot_program.asset_engine import skips
-        from bot_program.models import AssetBotTrade
+        from bot_program.models import AssetBotConfig, AssetBotTrade
         rows = AssetBotTrade.objects.filter(
             config=self.cfg, symbol=symbol,
             status__in=("OPEN", "CLOSE_PENDING"))
@@ -2281,7 +2298,11 @@ class AssetBot(ABC):
                     f"{what} is already on: this config opened {symbol} "
                     f"after this entry was proposed (one position per config "
                     f"and symbol) — nothing sent")
-        doubt = self._in_doubt_note(symbol)
+        stored = (AssetBotConfig.objects.filter(pk=self.cfg.pk)
+                  .values_list("extras", flat=True).first()
+                  if self.cfg.pk is not None else None)
+        doubt = self._in_doubt_note(
+            symbol, extras=stored if isinstance(stored, dict) else None)
         if doubt:
             return (skips.ORDER_IN_DOUBT,
                     f"an order under reference "
@@ -2289,6 +2310,37 @@ class AssetBot(ABC):
                     f"live (since {doubt.get('at')}): sent after this entry "
                     f"was proposed — nothing sent")
         return None
+
+    def _in_doubt_elsewhere(self, symbol: str, *, side):
+        """The freshest in-doubt note ANOTHER live config of this account
+        holds on `symbol` for the same side (a note written before the
+        side was kept counts for both), as the note plus "config_id", or
+        None (the review of 2026-11-12).
+
+        An order in doubt MAY be live at the broker and leaves no row, so
+        the duplicate gate (risk_gate.duplicate_state, rows only) let
+        another config of the account send the same bet. Read beside that
+        gate (_judge_final_size), at the proposal and at the send, with
+        the gate's rule: the same side refuses, the opposite does not.
+        The asker's own note is the proposal's and the send's
+        (ORDER_IN_DOUBT there). One query, from the database; each note
+        by _in_doubt_note's age rule."""
+        from bot_program.models import AssetBotConfig
+        want_long = str(side or "").upper() in ("BUY", "LONG")
+        best = None
+        for pk, extras in (AssetBotConfig.objects
+                           .filter(user=self.user, mode="live")
+                           .exclude(pk=self.cfg.pk)
+                           .values_list("pk", "extras")):
+            note = self._in_doubt_note(symbol, extras=extras or {})
+            if not isinstance(note, dict):
+                continue
+            noted = str(note.get("side") or "").upper()
+            if noted and (noted in ("BUY", "LONG")) != want_long:
+                continue
+            if best is None or str(note.get("at")) > str(best.get("at")):
+                best = dict(note, config_id=pk)
+        return best
 
     #: Reads of the venue's position list — each past the venue's own lag
     #: window since the note and since the last such read — that prove an
@@ -2428,7 +2480,17 @@ class AssetBot(ABC):
                            or 1)
             except (TypeError, ValueError):
                 _lev = 1
-            if _raised or _lev > 1:
+            # A REFUSAL, NOT A WITHDRAWAL (the review of 2026-11-12). eToro
+            # refuses an order with Rejected (4; 10 with a part filled) and
+            # its errorCode words (`refusal`). Canceled (7) read here is the
+            # answer to a withdrawal — Sauron's own, whose answer was not
+            # read (MEASURED: DELETE 202, then Canceled), or the
+            # operator's in the app — and Expired (8) an order that lapsed:
+            # neither refuses this order at this multiplier, so neither
+            # quiets the symbol. The row is cancelled below either way.
+            _refused = (str(st.get("status") or "").lower()
+                        .startswith("rejected") or bool(st.get("refusal")))
+            if (_raised or _lev > 1) and _refused:
                 # A REFUSAL READ HERE IS A REFUSAL AT THE ORDER (the review
                 # of 2026-11-12, and main's own levered order since the
                 # same day): eToro accepted the order, the lookup was not
@@ -6639,6 +6701,28 @@ class AssetBot(ABC):
                         self.asset_class, symbol, dup["reason"])
             self._skip(symbol, skips.GATE_BLOCKED, dup["reason"])
             return False
+        # AN ORDER IN DOUBT ON ANOTHER CONFIG IS A HOLDER TOO (the review
+        # of 2026-11-12). The gate above reads rows, and an order in doubt
+        # leaves none: config A's order may be live at eToro while only a
+        # note on A says so, and config B of the account met no holder and
+        # sent the same bet, in the same pass or the next. While A's note
+        # is fresh (until A's own proposal reads the venue flat twice, or
+        # IN_DOUBT_QUIET_HOURS), B's entry on the symbol and side is
+        # refused like a holder's; the opposite side is not, as the gate
+        # counts it. A paper entry doubles no real bet and is not asked.
+        if paper is not True:
+            held = self._in_doubt_elsewhere(symbol, side=decision.direction)
+            if held:
+                direction = ("long" if str(decision.direction or "").upper()
+                             in ("BUY", "LONG") else "short")
+                words = (f"{str(symbol).upper()} {direction}: an order of "
+                         f"config #{held['config_id']} under reference "
+                         f"{held.get('reference') or '(none)'} may already "
+                         f"be live (since {held.get('at')}) — a second "
+                         f"ticket could double that bet; nothing sent")
+                logger.warning("[%s_bot] %s", self.asset_class, words)
+                self._skip(symbol, skips.ORDER_IN_DOUBT, words)
+                return False
         theme = theme_state(self.user, symbol=symbol,
                             side=decision.direction,
                             asset_class=self.asset_class, paper=paper)
@@ -7115,30 +7199,28 @@ class AssetBot(ABC):
                 if _floor is not None and not _why and _fm.get("need"):
                     _floor = float(_fm["need"])
             else:
-                # ONE DOLLAR RATE PER ENTRY, AT THE ORDER TOO (2026-11-12;
-                # main's own, recorded by the venue floor's reviews).
-                # eToro states its minimum in dollars and it is turned into
-                # units here with the candidate's price and the candidate's
-                # OWN rate (the sizer's, on the candidate), never a second
-                # read of the platform's feed: read again, the rate moved
-                # the minimum between the proposal and the order, and a bot
-                # whose own size was exactly the minimum was refused on the
-                # noise between two feeds. A pair whose base is the dollar
+                # eToro's MINIMUM AT THE ORDER (2026-11-12; main's own,
+                # recorded by the venue floor's reviews, and the review of
+                # this fix). eToro states its minimum in dollars and it is
+                # turned into units here with the candidate's price and the
+                # platform's dollar rate read now, the one nearest the rate
+                # eToro judges at. A pair whose base is the dollar
                 # (_usd_base_pair) takes eToro's figure in units: N units of
-                # it are N dollars whatever the price. A candidate built by
-                # hand, with no rate, reads one as before.
-                try:
-                    _cand_vpu = float(
-                        (sizing or {}).get("value_per_unit") or 0.0)
-                except (TypeError, ValueError):
-                    _cand_vpu = 0.0
-                if not _cand_vpu > 0:
-                    _cand_vpu = self._value_per_unit(symbol)
+                # it are N dollars whatever the price and the rate, so a bot
+                # whose own size is exactly the minimum is no longer refused
+                # on the noise between eToro's price and the platform's rate
+                # (1,000 units of USDJPY read 1,000.2). Any other pair keeps
+                # the rate read here: there the rate is part of eToro's own
+                # check, and the proposal's, minutes older, agreed with
+                # eToro less (the review's replay of 124 crosses near the
+                # minimum: 120 against 123, three orders sent that eToro
+                # refuses, one of them at 10x and noted for 12 hours).
+                _vpu_now = self._value_per_unit(symbol)
                 _floor, _why = self._venue_size_floor(
                     client, symbol, price=price,
                     min_notional=self._extras_float("venue_min_notional",
                                                     0.0),
-                    value_per_unit=_cand_vpu)
+                    value_per_unit=_vpu_now)
                 from bot_program.engine.capabilities import has_capability
                 if (_floor is not None and not _why
                         and self._usd_base_pair(symbol)
@@ -7147,7 +7229,7 @@ class AssetBot(ABC):
                     # eToro's own figure: the division by the price and
                     # the rate undone, to the sixth decimal (_floor_minimum)
                     _floor = round(float(_floor) * float(price)
-                                   * float(_cand_vpu), 6)
+                                   * float(_vpu_now), 6)
             if _floor is None:
                 logger.info("[%s_bot] %s: no venue size floor measured (%s) "
                             "— an under-minimum order, if this venue has "
@@ -8071,7 +8153,8 @@ class AssetBot(ABC):
                 # promise, rather than importing one venue's exception.
                 if getattr(e, "in_doubt", False):
                     ref = str(getattr(e, "reference", "") or "")
-                    self._remember_in_doubt(symbol, ref)
+                    self._remember_in_doubt(symbol, ref,
+                                            side=decision.direction)
                     logger.error("[%s_bot] %s: the order request did not come "
                                  "back — it MAY be live at the broker under "
                                  "reference %s. NOT retried.",
@@ -10609,19 +10692,23 @@ class AssetBot(ABC):
 
     @staticmethod
     def _order_never_left(exc) -> bool:
-        """True when the adapter's own words say the order never reached
-        the venue (2026-11-12), so no 12-hour note is written for it:
-        the connection was never made (etoro_client.market_order raises
-        "... the order for X was not sent ..."), the adapter refused the
-        order before its POST ("eToro NOT SENT: ...", a level or a
-        multiplier it cannot send), or it could not name the instrument (a
-        plain LookupError from instrument_id, before the POST). Anything
-        else reached eToro, or may have: an answer eToro gave ("eToro
-        refused (400): ...") is a refusal, and an order in doubt has its
-        own note."""
+        """True when the adapter says the order never reached the venue
+        (2026-11-12), so no 12-hour note is written for it: the connection
+        was never made (etoro_client.market_order flags its raise
+        `not_sent`, read duck-typed as `in_doubt` is; its words START
+        "eToro unreachable ("), the adapter refused the order before its
+        POST (words that START "eToro NOT SENT", a level or a multiplier it
+        cannot send), or it could not name the instrument (a plain
+        LookupError from instrument_id, before the POST). Anything else
+        reached eToro, or may have: an answer eToro gave ("eToro refused
+        (400): " and the start of eToro's own body, which may say anything,
+        "was not sent" included: the review of 2026-11-12) is a refusal, and
+        an order in doubt has its own note. Never a phrase found anywhere
+        in the words."""
         words = str(exc)
-        return ("was not sent" in words
-                or words.startswith("eToro NOT SENT")
+        return (getattr(exc, "not_sent", False) is True
+                or words.startswith(("eToro unreachable (",
+                                     "eToro NOT SENT"))
                 or type(exc) is LookupError)
 
     @staticmethod

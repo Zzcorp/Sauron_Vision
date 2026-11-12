@@ -715,7 +715,11 @@ def _follow_the_account(user, value, currency) -> None:
     follower already at the figure whose label differs is relabelled too.
     A reading with no currency writes no label (the last one a reading
     carried stands); a pool that does not follow the account carries a
-    figure typed in its own label and is never relabelled here.
+    figure typed in its own label and is never relabelled here. The
+    operator is told (_alert_relabelled, the review of 2026-11-12): one
+    alert for a sync that relabels, naming each pool and its old label,
+    because the label is a field he types on /asset-bots/ and the sync
+    writes over it within a minute.
     """
     from decimal import Decimal
 
@@ -758,6 +762,7 @@ def _follow_the_account(user, value, currency) -> None:
         # The reading's currency, the label every follower's figure is in
         # ("" when the reading carries none: no label is written).
         label = _reading_label(currency)
+        relabelled = []
 
         for cfg in followers:
             foreign = foreign_venue(user, cfg, _book_kind, _venue_of)
@@ -790,8 +795,36 @@ def _follow_the_account(user, value, currency) -> None:
                 logger.warning("broker sync: %s pool relabelled %s -> %s: "
                                "its figure is the account's reading, in %s",
                                cfg.name, old_label or "(none)", label, label)
+                relabelled.append(f"{cfg.name}: "
+                                  f"{old_label.strip() or '(none)'} -> "
+                                  f"{label}")
+        if relabelled:
+            _alert_relabelled(user, label, relabelled)
     except Exception as e:  # noqa: BLE001 — the stored reading must stand
         logger.warning("broker sync: pool-follow failed: %s", e)
+
+
+def _alert_relabelled(user, label: str, lines) -> None:
+    """One alert to the pools' owner for a sync that relabelled followers
+    (the review of 2026-11-12): which pools, from what label to `label`.
+    The label is a field the operator types on /asset-bots/, and the sync
+    writes over it on a follower within a minute; a log line in the
+    worker was its only trace. The owner's own system_health alert, as
+    notify_broker_unreachable sends one: the pools are his, and a relabel
+    happens once per label written, so it needs no cooldown."""
+    try:
+        from .notifications import dispatch_notification
+        dispatch_notification(
+            user, "system_health",
+            title=f"Pool label set to {label} by the account sync",
+            body=("; ".join(lines)
+                  + f". A pool that follows the account holds the "
+                    f"account's reading, which is in {label}, so its label "
+                    f"is the reading's currency. To keep a label of your "
+                    f"own, stop the pool following the account."),
+            url="/asset-bots/")
+    except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
+        logger.warning("broker sync: relabel alert failed: %s", e)
 
 
 def _reading_label(currency) -> str:

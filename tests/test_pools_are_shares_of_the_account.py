@@ -269,6 +269,31 @@ class TheSyncWritesTheLabelTooTests(TestCase):
         self.assertEqual([o[:3] for o in H.orders(after)],
                          [["BTCUSD", "BUY", 0.001]])
 
+    def test_a_relabel_is_told_to_the_operator_once(self):
+        """The sync writes over a label the operator may have typed on
+        /asset-bots/: the pools' owner is told which pools, from what to
+        what, in one alert for the sync that relabels them; a sync with
+        nothing to relabel says nothing (the review of 2026-11-12). A pool
+        that does not follow the account is not named."""
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        _cfg(u, name="manual", tracks=True)                  # EUR
+        _cfg(u, name="second", tracks=True, share=40)        # EUR
+        _cfg(u, name="typed", capital="150")                 # EUR, fixed
+        with patch("bot_program.notifications.dispatch_notification") \
+                as told:
+            _follow_the_account(u, 500.0, "USD")
+            _follow_the_account(u, 500.0, "USD")
+        self.assertEqual(told.call_count, 1, told.call_args_list)
+        self.assertEqual(told.call_args.args, (u, "system_health"))
+        kw = told.call_args.kwargs
+        self.assertEqual(kw["title"],
+                         "Pool label set to USD by the account sync")
+        self.assertIn("manual: EUR -> USD", kw["body"])
+        self.assertIn("second: EUR -> USD", kw["body"])
+        self.assertNotIn("typed", kw["body"])
+        self.assertEqual(kw["url"], "/asset-bots/")
+
 
 def _acct(user, equity="500.00", currency="EUR"):
     from bot_program.models import IBKRAccount
