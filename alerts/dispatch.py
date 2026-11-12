@@ -99,7 +99,7 @@ def _market_line(signal) -> str:
     return said[:1].upper() + said[1:]
 
 
-def signal_telegram(signal) -> tuple:
+def signal_telegram(signal, note: str = "") -> tuple:
     """(title, lines, mark): one signal as the house message.
 
         📈 Signal · MSFT · BUY
@@ -128,7 +128,10 @@ def signal_telegram(signal) -> tuple:
     the hour the market opens when the clock knows it; a message cut to
     fit loses its last lines first, so this one stays. An open market's
     message keeps its bytes, and the buttons are the same either way: the
-    ticket says the market is shut itself.
+    ticket says the market is shut itself. A signal the optional hold
+    released at the open carries its `note` on that line instead ("Fired
+    Sunday 09:00 UTC, while the market was shut. First price since the
+    open: 1.08450.").
     """
     import math
 
@@ -143,7 +146,7 @@ def signal_telegram(signal) -> tuple:
     side = SIGNAL_SIDES.get(direction) or (direction.upper() or "SIGNAL")
     mark = MARKS.get(f"signal_{direction}") or MARKS["signal"]
     lines = []
-    market = _market_line(signal)
+    market = note or _market_line(signal)
     if market:
         lines.append(market)
     lines.append(f"Score: {float(signal.score or 0):.2f}")
@@ -266,7 +269,7 @@ def _add_chat(chats: list, user) -> None:
         chats.append(chat)
 
 
-def _telegram_signal(signal, chats: list) -> dict:
+def _telegram_signal(signal, chats: list, note: str = "") -> dict:
     """Post the signal's house message to each chat once, flood-guarded."""
     import os
     from html import escape
@@ -274,7 +277,8 @@ def _telegram_signal(signal, chats: list) -> dict:
     if not chats or not os.getenv("TELEGRAM_BOT_TOKEN", ""):
         return out
     from alerts.channels.telegram_alert import fit_text, send_to_chat
-    title, lines, mark = signal_telegram(signal)
+    title, lines, mark = (signal_telegram(signal, note) if note
+                          else signal_telegram(signal))
     try:
         extras = signal_extras(signal)
     except Exception:  # noqa: BLE001 — the facts go out without the sentence
@@ -305,8 +309,12 @@ def _telegram_signal(signal, chats: list) -> dict:
     return out
 
 
-def dispatch_signal_alert(signal):
+def dispatch_signal_alert(signal, note: str = ""):
     """Send a signal notification to all users whose rules match.
+
+    `note` (2026-11-12): one more line for a signal the optional market
+    hold released at the open (signals/market_hold), in the Telegram
+    message and in the email and WhatsApp copies; a birth passes none.
 
     The rules, receive_signals, email and WhatsApp work as they always
     did. Telegram changed on 2026-09-26:
@@ -332,11 +340,17 @@ def dispatch_signal_alert(signal):
     chats = []  # the Telegram chats, in the order first met, each once
     later = []  # the emails and WhatsApp messages, sent after Telegram
     out = {"chats": 0, "sent": 0, "held": 0, "refused": 0}
+    # A birth keeps the calls it always made; only a release hands its
+    # note on.
     try:
-        _match_users(signal, chats, later)
+        if note:
+            _match_users(signal, chats, later, note)
+        else:
+            _match_users(signal, chats, later)
     finally:
         try:
-            out = _telegram_signal(signal, chats)
+            out = (_telegram_signal(signal, chats, note) if note
+                   else _telegram_signal(signal, chats))
         except Exception:  # noqa: BLE001 — the other channels still go out
             logger.exception("signal #%s: the Telegram step failed", pk)
             out = {"chats": len(chats), "sent": 0, "held": 0, "refused": 0}
@@ -349,7 +363,7 @@ def dispatch_signal_alert(signal):
     return out
 
 
-def _match_users(signal, chats: list, later: list) -> None:
+def _match_users(signal, chats: list, later: list, note: str = "") -> None:
     """The users walked as dispatch_signal_alert always walked them: a
     user's first matching rule, else their preferences when they have no
     rule. Each user's Telegram chat joins `chats` once (_add_chat); each
@@ -362,8 +376,8 @@ def _match_users(signal, chats: list, later: list) -> None:
 
     # A SHUT MARKET IS SAID (2026-11-12): the email and WhatsApp copies
     # carry the words the Telegram message carries; "" on an open market,
-    # whose copies keep their bytes.
-    market = shut_label(signal.instrument)
+    # whose copies keep their bytes. A released signal carries its note.
+    market = note or shut_label(signal.instrument)
 
     for user in User.objects.filter(is_active=True):
         # Check user's alert rules

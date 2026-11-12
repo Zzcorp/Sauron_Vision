@@ -603,6 +603,24 @@ DEFAULT_COMPONENTS = [
      "description": "On (default): at most one step every 25 min, on eToro's DEMO account only, never the real one: a short of the venue minimum on a class no code proves, filled, closed and recorded; a clean one lets the bots short that class at that multiplier. Off: nothing is sent. /short-proofs/ revokes.",
      "category": "pipeline", "is_enabled": True},
 
+    # ── The signal market hold (2026-11-12, signals/market_hold.py) ──────
+    # The operator, 2026-11-11: signals announced while their market is
+    # shut. Told the announcements would wait for the open, he asked to
+    # keep receiving every signal live (2026-11-12), so a shut market is
+    # SAID on every announcement, with no switch, and the hold itself is
+    # this option. OFF on arrival: a signal is announced at birth, as
+    # before. ON: hold_at_birth keeps the announcement of a signal whose
+    # market cannot trade, and the lifecycle task's release pass sends it
+    # once, 15 minutes after the open, or drops it (closed, aged, or its
+    # first price past its plan). It gates no task of its own (the pass
+    # writes its counts on this row when something is held), reads no
+    # order path and writes no Signal field, so it is not a live-money
+    # switch and not a PIN switch; "all on" may turn it on. Description
+    # measured at 299 chars (< 300).
+    {"key": "signal_market_hold", "name": "Signal Market Hold",
+     "description": "Off (default): every signal is announced the moment it fires; one whose market is shut says so. On: such a signal's banner, bell and Telegram wait for the open, then go out once if it is under 24h old and the first price leaves its plan valid; else it is dropped, the reason kept. It moves no money.",
+     "category": "pipeline"},
+
     # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────
     # Information only: no order, size, stop or gate reads it, so it is not
     # in LIVE_MONEY_SWITCHES and the Wall's live-money count does not move.

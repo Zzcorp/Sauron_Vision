@@ -49,12 +49,47 @@ market opens when the clock knows it (shut_label):
 while the market is open, its first quarter hour included, so an open
 market's announcement keeps main's bytes.
 
+OPTIONAL, BEHIND A SWITCH: THE HOLD. For an operator who would rather
+hear of a signal when he can act on it, the switch signal_market_hold
+(OFF on arrival, read with is_component_enabled, so a missing row is OFF)
+makes the announcement wait for the market:
+
+  at birth      hold_at_birth: a signal whose market cannot trade now
+                (shut, or in its first quarter hour) is written exactly
+                as today, nothing is announced, and one SignalHold row
+                says why and when the market opens. A hold that cannot be
+                written announces as before: a signal is never swallowed.
+  every 5 min   release_due, called by the signal lifecycle task after its
+                grading loop. For each held row, first match wins:
+                  1  the engine closed the signal          drop  closed
+                  2  it is 24 hours old or more            drop  aged_shut
+                  3  its market is shut or settling        wait
+                  4  a price of the new session exists     judge it
+                     (a quote written after the open plus the settle and
+                     no older than the grader's own bound, else the close
+                     of a 1h or 4h bar opened since the open): drop
+                     (stop_crossed, target_reached, chased) or release
+                  5  no such price 30 minutes after the    release, saying
+                     settle                                its levels were
+                                                           not re-checked
+  a release     announces once, through the same three steps as a birth,
+                with one more sentence ("fired Sunday 09:00 UTC, while its
+                market was shut"), best score first, so the 20 Telegram
+                messages an hour go to the best ones.
+
+The switch gates the hold at birth only: turned off while rows are held,
+the pass still settles them. The 24 hours are the vote's and the ticket's
+(manual_trade.SIGNAL_BACKING_HOURS); the three price reasons are the
+judgment the operator's own signal list already makes of a card
+(levels_reason; a test compares the two on a grid).
+
 GATE is read at call time: tests/__init__.py turns it off for a suite
 whose signals are announced at whatever hour the wall clock says, and
 tests/test_signal_market_hold.py turns it back on at a fixed clock.
 
-DISPLAY AND WORDS ONLY. Nothing here writes a Signal, moves an order, a
-size, a stop or a gate, or changes a bot's vote or a grade.
+WORDS AND TIMING OF AN ANNOUNCEMENT ONLY. Nothing here writes a field of
+a Signal, moves an order, a size, a stop or a gate, or changes a bot's
+vote or a grade: decide() reads the same rows with the same filter.
 """
 from __future__ import annotations
 
@@ -79,6 +114,13 @@ HOLD_CLASSES = entry_timing.SHUT_CLASSES
 #: price from before the shut: the bots' own.
 SETTLE_MINUTES = entry_timing.OPEN_SETTLE_MINUTES
 SETTLE = timedelta(minutes=SETTLE_MINUTES)
+
+#: The optional hold's switch (core.platform_control): OFF on arrival.
+SWITCH = "signal_market_hold"
+#: Past the settling window, how long the release pass waits for a first
+#: price before it announces a signal unchecked: many instruments have no
+#: quote poller, and a feed that cannot be read must not swallow a signal.
+NO_PRICE_GRACE = timedelta(minutes=30)
 
 #: The label's weekday, from a fixed table: no locale can change the words.
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -195,3 +237,306 @@ def shut_label(instrument, now=None) -> str:
                        "for %s (%s): nothing is said",
                        getattr(instrument, "symbol", "?"), e)
         return ""
+
+
+# ── the optional hold (the switch signal_market_hold) ────────────────────
+
+def enabled() -> bool:
+    """The switch. OFF on arrival, and a row that is not seeded yet reads
+    OFF (is_component_enabled): then every signal is announced at birth."""
+    try:
+        from core.platform_control import is_component_enabled
+        return bool(is_component_enabled(SWITCH))
+    except Exception:  # noqa: BLE001 — an unread switch is off
+        return False
+
+
+def life() -> timedelta:
+    """How long a signal counts: the hours of the bots' vote and of the
+    hand ticket's backing (manual_trade.SIGNAL_BACKING_HOURS)."""
+    from bot_program.manual_trade import SIGNAL_BACKING_HOURS
+    return timedelta(hours=SIGNAL_BACKING_HOURS)
+
+
+def quote_max_age() -> timedelta:
+    """Past this a stored quote is not a price any more: the grader's own
+    bound (signals.performance.MAX_QUOTE_AGE_SECONDS)."""
+    from signals.performance import MAX_QUOTE_AGE_SECONDS
+    return timedelta(seconds=MAX_QUOTE_AGE_SECONDS)
+
+
+def levels_reason(direction, entry, stop, target, mark) -> str:
+    """"" while a plan is still valid at `mark`, else why it is past:
+    stop_crossed (the mark at or through the stop), target_reached (at or
+    through the target) or chased (the reward to risk from the mark under
+    the ticket's line, manual_trade.REWARD_RISK_WARN, when the plan
+    cleared it at its entry). Floats, or None for a level the signal does
+    not carry; a direction that is neither bullish nor bearish has no
+    plan to judge."""
+    from bot_program.manual_trade import (REWARD_RISK_WARN,
+                                          reward_risk_advisory)
+    order = {"bullish": "BUY", "bearish": "SELL"}.get(direction or "")
+    if order is None or mark is None:
+        return ""
+    if stop is not None and ((order == "BUY" and mark <= stop)
+                             or (order == "SELL" and mark >= stop)):
+        return "stop_crossed"
+    if target is not None and ((order == "BUY" and mark >= target)
+                               or (order == "SELL" and mark <= target)):
+        return "target_reached"
+    if None in (entry, stop, target):
+        return ""
+    now_rr = reward_risk_advisory(order, mark, stop, target).get("ratio")
+    born_rr = reward_risk_advisory(order, entry, stop, target).get("ratio")
+    if (now_rr is not None and born_rr is not None
+            and now_rr < REWARD_RISK_WARN <= born_rr):
+        return "chased"
+    return ""
+
+
+def hold_at_birth(signal, now=None) -> str:
+    """Hold the announcement of a freshly created signal when its market
+    cannot trade now.
+
+    Returns the hold's words when the announcement must wait (one
+    SignalHold row, state held, was written or was already there), else
+    "": announce now, as before. "" as well while GATE or the switch is
+    off, and when the row cannot be written. Never raises."""
+    if not GATE or not enabled():
+        return ""
+    pk = getattr(signal, "pk", None)
+    try:
+        st = market_state(signal.instrument, now=now)
+        if st["tradeable"]:
+            return ""
+        from django.db import transaction
+
+        from signals.models_hold import SignalHold
+        reason = (SignalHold.MARKET_SHUT if st["state"] == "shut"
+                  else SignalHold.MARKET_SETTLING)
+        # Its own savepoint: a database refusal here must not poison the
+        # transaction of the creator that has just written the signal.
+        with transaction.atomic():
+            hold, created = SignalHold.objects.get_or_create(
+                signal=signal,
+                defaults={"state": SignalHold.HELD, "reason": reason,
+                          "words": st["words"][:300],
+                          "reopens_at": st["reopens"],
+                          "held_at": now or timezone.now()})
+    except Exception as e:  # noqa: BLE001 — a signal is never swallowed
+        logger.warning("[market hold] signal #%s: the hold could not be "
+                       "written (%s): announced now, as before", pk, e)
+        return ""
+    if hold.state != SignalHold.HELD:
+        return ""               # already settled: nothing waits any more
+    if created:
+        logger.info("[market hold] signal #%s (%s) is not announced yet: %s",
+                    pk, getattr(signal.instrument, "symbol", "?"), hold.words)
+    return hold.words or st["words"]
+
+
+def _price(value, instrument) -> str:
+    from core.price_format import format_price
+    return format_price(value, getattr(instrument, "asset_class", "") or "",
+                        getattr(instrument, "symbol", "") or "")
+
+
+def _first_price(instrument, since, now):
+    """The first usable price of the session that opened at `since`, or
+    None: the stored quote when it was written after the open plus the
+    settle and is no older than the grader's bound, else the close of the
+    newest 1h or 4h bar opened since the open (bars are stamped with
+    their open)."""
+    try:
+        quote = instrument.live_quote
+    except Exception:  # noqa: BLE001 — no quote row is no quote
+        quote = None
+    if quote is not None:
+        last, at = quote.last, quote.updated_at
+        if (last is not None and last > 0 and at is not None
+                and at >= since + SETTLE and now - at <= quote_max_age()):
+            return last
+    try:
+        from market_data.models import PriceData
+        return (PriceData.objects
+                .filter(instrument=instrument, timeframe__in=("1h", "4h"),
+                        timestamp__gte=since, timestamp__lte=now)
+                .order_by("-timestamp")
+                .values_list("close", flat=True).first())
+    except Exception as e:  # noqa: BLE001 — unread bars are no price
+        logger.debug("[market hold] bars unread for %s: %s",
+                     getattr(instrument, "symbol", "?"), e)
+        return None
+
+
+def _release_note(signal, hold, mark) -> dict:
+    """What a release says: {"clause" (the banner and the bell), "line"
+    (the Telegram message and the copies), "words" (kept on the row)}."""
+    from signals.models_hold import SignalHold
+    fired = utc_words(signal.created_at)
+    if hold.reason == SignalHold.MARKET_SETTLING:
+        its, the = ("in its market's first quarter hour",
+                    "in the market's first quarter hour")
+    else:
+        its, the = "while its market was shut", "while the market was shut"
+    clause = f"fired {fired}, {its}"
+    if mark is None:
+        tail = "no price since the open: its levels were not re-checked"
+        return {"clause": f"{clause}; {tail}",
+                "line": f"Fired {fired}, {the}. No price since the open: "
+                        f"its levels were not re-checked.",
+                "words": f"Announced at the open: {clause}; {tail}."}
+    px = _price(mark, signal.instrument)
+    return {"clause": clause,
+            "line": f"Fired {fired}, {the}. First price since the open: "
+                    f"{px}.",
+            "words": f"Announced at the open: {clause}; first price since "
+                     f"the open {px}."}
+
+
+def _drop_words(why, signal, mark) -> str:
+    inst = signal.instrument
+    px = _price(mark, inst)
+    if why == "stop_crossed":
+        return (f"At the open the first price, {px}, was at or through its "
+                f"stop, {_price(signal.suggested_stop, inst)}: it was never "
+                f"announced.")
+    if why == "target_reached":
+        return (f"At the open the first price, {px}, had already reached "
+                f"its target, {_price(signal.suggested_target, inst)}: it "
+                f"was never announced.")
+    return (f"At the open the first price, {px}, left a reward to risk "
+            f"under the ticket's 1.00 line, when its plan cleared it at the "
+            f"entry: it was never announced.")
+
+
+def _judge(hold, now) -> tuple:
+    """The release pass's verdict on one held row, first match wins:
+    ("wait",) | ("drop", reason, words, mark) | ("release", reason,
+    words, mark, note)."""
+    from bot_program.manual_trade import SIGNAL_BACKING_HOURS
+    from signals.models_hold import SignalHold
+    signal = hold.signal
+    inst = signal.instrument
+    if not signal.is_active:
+        return ("drop", SignalHold.CLOSED,
+                "The engine closed it before its market opened: it was "
+                "never announced.", None)
+    ends = signal.created_at + life()
+    if now >= ends:
+        return ("drop", SignalHold.AGED_SHUT,
+                f"Its {SIGNAL_BACKING_HOURS} hours ended {utc_words(ends)}, "
+                f"before its market had opened and settled: it was never "
+                f"announced.", None)
+    st = market_state(inst, now=now)
+    if not st["tradeable"]:
+        return ("wait",)
+    since = st["opened"] or hold.reopens_at or hold.held_at
+    mark = _first_price(inst, since, now)
+    if mark is None:
+        if now < since + SETTLE + NO_PRICE_GRACE:
+            return ("wait",)
+        note = _release_note(signal, hold, None)
+        return ("release", SignalHold.UNCHECKED, note["words"], None, note)
+
+    def f(value):
+        return None if value is None else float(value)
+
+    entry = (signal.suggested_entry if signal.suggested_entry is not None
+             else signal.price_at_signal)
+    why = levels_reason(signal.direction, f(entry), f(signal.suggested_stop),
+                        f(signal.suggested_target), float(mark))
+    if why:
+        return ("drop", why, _drop_words(why, signal, mark), mark)
+    note = _release_note(signal, hold, mark)
+    return ("release", SignalHold.VALID, note["words"], mark, note)
+
+
+def _settle(hold, state, reason, words, mark, now) -> bool:
+    """Write the decision on a row that is still held; False when another
+    pass got there first (so a release is announced once)."""
+    from signals.models_hold import SignalHold
+    return bool(SignalHold.objects
+                .filter(pk=hold.pk, state=SignalHold.HELD)
+                .update(state=state, reason=reason, words=(words or "")[:300],
+                        mark=mark, decided_at=now))
+
+
+def _record(counts) -> None:
+    """What the pass did, on the switch's own row: /ops/ and the system
+    map show a switch's last run, and this switch gates no task of its
+    own, so without this an enabled switch would read "has never run".
+    Written while the switch is on or something is still held; with the
+    switch off and nothing held the pass writes nothing."""
+    try:
+        from core.platform_control import get_component
+        row = get_component(SWITCH)
+        if row is None:
+            return
+        said = (f"{counts['waiting']} waiting for their market · "
+                f"{counts['released']} announced at the open · "
+                f"{counts['dropped']} dropped")
+        if counts["errors"]:
+            said += f" · {counts['errors']} could not be judged"
+        row.mark_run(success=not counts["errors"], message=said)
+    except Exception as e:  # noqa: BLE001 — a note, never the pass
+        logger.debug("[market hold] the pass could not be recorded: %s", e)
+
+
+def release_due(now=None) -> dict:
+    """Settle the held announcements: release (announce once), drop, or
+    wait. Called by the signal lifecycle task every five minutes, after
+    its grading loop. Not gated by the switch: rows held before it was
+    turned off are still settled. Returns {"held", "waiting", "released",
+    "dropped", "errors"}."""
+    counts = {"held": 0, "waiting": 0, "released": 0, "dropped": 0,
+              "errors": 0}
+    if not GATE:
+        return counts
+    from signals.models_hold import SignalHold
+    now = now or timezone.now()
+    holds = list(SignalHold.objects.filter(state=SignalHold.HELD)
+                 .select_related("signal", "signal__instrument",
+                                 "signal__instrument__live_quote"))
+    counts["held"] = len(holds)
+    if not holds:
+        if enabled():
+            _record(counts)
+        return counts
+    releases = []
+    for hold in holds:
+        # One bad row must not starve the rest of the pass.
+        try:
+            verdict = _judge(hold, now)
+        except Exception:  # noqa: BLE001
+            logger.exception("[market hold] signal #%s could not be judged",
+                             hold.signal_id)
+            counts["errors"] += 1
+            continue
+        if verdict[0] == "wait":
+            counts["waiting"] += 1
+        elif verdict[0] == "drop":
+            _kind, reason, words, mark = verdict
+            if _settle(hold, SignalHold.DROPPED, reason, words, mark, now):
+                counts["dropped"] += 1
+                logger.info("[market hold] signal #%s dropped (%s): %s",
+                            hold.signal_id, reason, words)
+        else:
+            releases.append((hold, verdict))
+    # Best score first: when many are released at one open, the 20
+    # Telegram messages an hour (alerts/dispatch) are the best ones, and
+    # its guard counts the rest.
+    releases.sort(key=lambda r: (-float(r[0].signal.score or 0),
+                                 r[0].signal_id))
+    for hold, (_kind, reason, words, mark, note) in releases:
+        if not _settle(hold, SignalHold.RELEASED, reason, words, mark, now):
+            continue
+        counts["released"] += 1
+        try:
+            from signals.announce import announce_released
+            announce_released(hold.signal, note)
+        except Exception:  # noqa: BLE001 — the next one still goes out
+            logger.exception("[market hold] signal #%s was released and "
+                             "its announcement failed", hold.signal_id)
+    _record(counts)
+    return counts
