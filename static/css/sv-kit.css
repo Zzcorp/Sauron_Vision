@@ -1152,6 +1152,27 @@ input[type=checkbox], input[type=radio] { accent-color: var(--sv-eye); }
 }
 .sv-seg-btn.is-active, .sv-seg-btn[aria-pressed="true"] { background: var(--sv-bg-3); color: var(--sv-ink-1); box-shadow: inset 0 -2px 0 var(--sv-eye); }
 
+/* His choice of Ambience, in the user menu (the magic kept, 2026-11-12):
+   Magic, Calm or Off, saved on his profile (static/js/sv-ambience.js posts
+   the click; only the server's answer changes the page). The kit's label
+   and its segmented control at the menu's width, three equal thirds; "Not
+   saved" beside the label in the warning's colour when a save fails (the
+   row keeps its height, so the menu does not move), and nothing else: the
+   menu explains nothing. The light theme's sweep takes every button's
+   shadow away: the pressed value keeps the Eye's underline there, flat. A
+   phone's buttons take the menu rows' 44 px. */
+.um-ambience { padding: 10px 16px 12px; }
+.um-ambience-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 18px; }
+.um-ambience-note { font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); font-weight: 600; color: var(--sv-warn); white-space: nowrap; }
+.um-ambience .sv-seg { display: flex; margin-top: 8px; }
+.um-ambience .sv-seg-btn { flex: 1 1 0; min-width: 0; justify-content: center; font-family: var(--sv-font-sans); font-weight: 600; }
+.um-ambience .sv-seg-btn:hover { color: var(--sv-ink-1); }
+.um-ambience[aria-busy="true"] .sv-seg-btn { cursor: progress; }
+body.light-mode .um-ambience .sv-seg-btn[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--sv-eye); }
+@media (max-width: 768px) {
+    .um-ambience .sv-seg-btn { height: 44px; }
+}
+
 .sv-popover {
     background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
     border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);

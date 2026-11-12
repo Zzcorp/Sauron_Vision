@@ -367,6 +367,11 @@ nothing, saves nothing and announces nothing.
         });
     }
     pressed();
+    /* The user menu's control changes the page's Ambience too (it saves
+       it): the preview's pressed button follows the attribute. */
+    if (window.MutationObserver) {
+        new MutationObserver(pressed).observe(document.body, { attributes: true, attributeFilter: ['data-sv-ambience'] });
+    }
     document.addEventListener('click', function (e) {
         var t = e.target && e.target.closest ? e.target.closest('[data-kit-play], [data-kit-ambience]') : null;
         if (!t) return;

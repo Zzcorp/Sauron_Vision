@@ -767,6 +767,19 @@
                                 <span class="um-icon">&#9680;</span> Light / dark mode
                             </a>
                         </div>
+                        {# His choice of Ambience (the magic kept, 2026-11-12): Magic, Calm or Off, saved on his profile. static/js/sv-ambience.js posts a click to set_ambience; only the server's 200 that echoes the value changes the body's attribute and the pressed button, and a failure writes "Not saved" into the note. Display only. The menu explains nothing more. #}
+                        {% get_ambience as sv_ambience %}
+                        <div class="um-section um-ambience" id="umAmbience" data-sv-ambience-url="{% url 'set_ambience' %}">
+                            <div class="um-ambience-head">
+                                <span class="sv-label" id="umAmbienceLabel">Ambience</span>
+                                <span class="um-ambience-note" role="status"></span>
+                            </div>
+                            <div class="sv-seg" role="group" aria-labelledby="umAmbienceLabel">
+                                <button type="button" class="sv-seg-btn" data-sv-ambience-set="magic" aria-pressed="{% if sv_ambience == 'magic' %}true{% else %}false{% endif %}">Magic</button>
+                                <button type="button" class="sv-seg-btn" data-sv-ambience-set="calm" aria-pressed="{% if sv_ambience == 'calm' %}true{% else %}false{% endif %}">Calm</button>
+                                <button type="button" class="sv-seg-btn" data-sv-ambience-set="off" aria-pressed="{% if sv_ambience == 'off' %}true{% else %}false{% endif %}">Off</button>
+                            </div>
+                        </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'notifications_inbox' %}" role="menuitem">
                                 <span class="um-icon um-icon-svg">
@@ -4276,6 +4289,8 @@
 {# The embers, calm (the magic kept, 2026-11-12): static/js/sv-embers.js draws them on the pages that opted in, under Ambience Magic, in the dark theme, and schedules nothing anywhere else, nor while the tab is hidden, the lock is up or a dialog holds the page. It replaces main's ember loop, the hidden globe's pupil and parallax loops and the water-light layer. sv-moments.js: the Eye's gaze and flare, and the lights of proven events. #}
 <script src="{% static 'js/sv-embers.js' %}" defer></script>
 <script src="{% static 'js/sv-moments.js' %}" defer></script>
+{# His choice of Ambience, from the user menu: sv-ambience.js saves it on his profile and changes the body's attribute on the server's answer only; the two scripts above and the sheets follow the attribute at once. #}
+<script src="{% static 'js/sv-ambience.js' %}" defer></script>
 
 <script>
 /* The topbar's clock, on its own. */

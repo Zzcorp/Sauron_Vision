@@ -4,6 +4,7 @@ import logging
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 from django.utils import timezone
 from datetime import timedelta
@@ -4138,6 +4139,37 @@ def toggle_theme(request):
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return JsonResponse({"theme": profile.theme_mode})
     return redirect(request.META.get("HTTP_REFERER", "dashboard"))
+
+
+@require_POST
+@csrf_protect
+@login_required
+def set_ambience(request):
+    """POST /ambience/ — the operator's Ambience (Magic, Calm or Off), saved
+    on his profile from the user menu (the magic kept, 2026-11-12).
+
+    Takes the form field "ambience"; a value that is not one of the three
+    answers 400 and saves nothing. Otherwise the one column is written
+    (update_fields=["ambience"], so a display choice never rewrites a limit
+    or a setting another request is saving) and the answer is
+    {"ambience": value}: the page changes only on that echo
+    (static/js/sv-ambience.js). A GET answers 405; an anonymous user is
+    sent to the login; a request without the CSRF token is refused.
+
+    DISPLAY ONLY: no engine, bot, Orc, alert, gate or ticket reads the
+    Ambience (tests/test_ambience_pref.py scans for it).
+    """
+    from django.http import JsonResponse
+
+    from portfolio.trader_profile import TraderProfile
+
+    ambience = request.POST.get("ambience", "")
+    if ambience not in dict(TraderProfile.AMBIENCE_CHOICES):
+        return JsonResponse({"error": "ambience must be magic, calm or off"}, status=400)
+    profile, _ = TraderProfile.objects.get_or_create(user=request.user)
+    profile.ambience = ambience
+    profile.save(update_fields=["ambience"])
+    return JsonResponse({"ambience": profile.ambience})
 
 
 @login_required

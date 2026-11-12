@@ -97,11 +97,22 @@ def get_theme(context):
 @register.simple_tag(takes_context=True)
 def get_ambience(context):
     """How much of Sauron's theme the page shows: "magic" (embers, light,
-    moments), "calm" or "off", printed onto <body data-sv-ambience>
-    (the magic kept, 2026-11-12). Display only: no engine, bot, Orc,
-    alert, gate or ticket reads it. It answers "magic" for everyone until
-    the operator's choice is stored with his profile's other display
-    preferences."""
+    moments), "calm" or "off", printed onto <body data-sv-ambience> and
+    onto the user menu's control (the magic kept, 2026-11-12). The
+    operator's own choice, from his profile like the theme, which the same
+    request has already read. "magic" for an anonymous user, for a user
+    with no profile yet, on any error, and for a value that is not one of
+    the three: the page never carries an Ambience its sheets and scripts
+    do not know. Display only: no engine, bot, Orc, alert, gate or ticket
+    reads it."""
+    request = context.get("request")
+    if request and hasattr(request, "user") and request.user.is_authenticated:
+        try:
+            ambience = request.user.trader_profile.ambience
+        except Exception:
+            return "magic"
+        if ambience in ("magic", "calm", "off"):
+            return ambience
     return "magic"
 
 @register.simple_tag(takes_context=True)

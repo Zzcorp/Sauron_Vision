@@ -650,15 +650,17 @@ class VoidAndEmbersSourceTests(SimpleTestCase):
             self.assertIn("{% block sv_embers %} data-sv-embers{% endblock %}", read(rel))
 
     def test_get_ambience_answers_magic(self):
-        """Until the profile carries the choice (the next commit), the tag
-        answers "magic" and reads no profile."""
+        """With nobody signed in the tag answers "magic". Updated
+        deliberately (Ambience Magic, Calm or Off, 2026-11-12): the tag
+        now reads the operator's own choice from his profile, as get_theme
+        reads his theme; tests/test_ambience_pref.py holds that."""
         from django.template import Context, Template
         out = Template("{% load sauron_tags %}{% get_ambience %}").render(Context({}))
         self.assertEqual(out, "magic")
         src = read("core/templatetags/sauron_tags.py")
         fn = src[src.index("def get_ambience"):]
         fn = fn[:fn.index("\n@register") if "\n@register" in fn else len(fn)]
-        self.assertNotIn("trader_profile", fn.split('"""')[-1])
+        self.assertIn("request.user.trader_profile.ambience", fn.split('"""')[-1])
 
     def test_the_ember_and_moment_scripts_load_once_deferred(self):
         base = read(BASE)
