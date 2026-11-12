@@ -377,6 +377,17 @@ thead th,
 .sv-list-note,
 .ip-dropdown .ip-dd-note { font-size: var(--sv-fs-micro); }
 
+/* MARKET SHUT (sv-rail.css; main's #99, #100 and #101, merged 2026-11-12):
+   the badge on a card whose market is shut and the hour beside it, the
+   line under its headband row, a waiting row's rule, and on /signals/ the
+   hour and the line for a held announcement: 6 rules, from 7.5 to 10 px. */
+.sr-shut,
+.sr-shut-tag,
+.ipr-shut,
+.sr-wait-rule,
+.sig-shut-opens,
+.sig-hold { font-size: var(--sv-fs-micro); }
+
 /* A few shell spans carry their size inline in base.html's markup (a
    strategy's status in the bottom band's list, the news list, the empty
    watchlist, the instrument preview's "Loading..."). Only !important
@@ -547,6 +558,24 @@ body:not(.light-mode) .rf-peek { color: var(--sv-ink-1); }
 /* A muted rule stays struck through, at full strength in ink-3: dimmed to
    55 % it fell under 4.5:1. */
 body:not(.light-mode) .rf-rule[aria-pressed="false"] { opacity: 1; color: var(--sv-ink-3); }
+/* MARKET SHUT (main's #99, #100 and #101, merged 2026-11-12). A signal
+   whose market is shut says so: a badge on its card with the hour the
+   market opens, a line in the card's facts, a line under its headband row,
+   a badge on /signals/; with the optional hold on, those signals wait in a
+   MARKET SHUT section shaped like LEFT THE RAIL. The hour is a figure: the
+   number face, and never cut (where it cannot sit beside the badge it
+   takes the line under it, whole; main's line clipped it). The section's
+   ground is opaque and its rows part on hairlines, as LEFT THE RAIL's do.
+   The colours are below, with the chips. Never a display, an order or a
+   visibility: the SHUT chip and the section's switch own those. */
+.sr-shut { letter-spacing: 0; flex-wrap: wrap; row-gap: 2px; }
+.sr-shut-opens, .sig-shut-opens {
+    font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums;
+    letter-spacing: 0; white-space: nowrap;
+}
+.ipr-shut { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+body:not(.light-mode) .sr-shut-sec { background: var(--sv-bg-0); }
+body:not(.light-mode) .sr-wait-row { border-top-color: var(--sv-line-1); }
 /* The ⚙ is a calm control; open, its panel is selected (the Eye's edge). */
 body:not(.light-mode) .rail-head .rh-gear:hover { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
 body:not(.light-mode) .rail-head .rh-gear[aria-expanded="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-eye); }
@@ -781,6 +810,21 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
     border: 1.5px solid var(--sv-down);
 }
 .sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+/* MARKET SHUT's ▶ TICKET (main's #99-#101, merged 2026-11-12) is LEFT THE
+   RAIL's control in the section beside it: it opens the same ticket, so it
+   wears the same side, to the letter. */
+.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-up);
+    border: 1.5px solid var(--sv-up);
+}
+.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); }
+.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-down);
+    border: 1.5px solid var(--sv-down);
+}
+.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
 
 
 /* ══ §7 Buttons: the kit's variants (on .btn, sauron.css) ════════════════ */
@@ -963,6 +1007,35 @@ body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: va
 :where(body:not(.light-mode)) .sr-gone-tag-rule_paused,
 :where(body:not(.light-mode)) .sr-gone-tag-rule_demoted,
 :where(body:not(.light-mode)) .sr-stage-high { color: var(--sv-warn); border-color: color-mix(in srgb, var(--sv-warn) 50%, transparent); }
+
+/* MARKET SHUT's badge, lines and tags (main's #99, #100 and #101, merged
+   2026-11-12): the warning amber, the badge an outline at half strength.
+   Never a fill (REAL is the only solid red) and never the Eye (a shut
+   market is not live). Main drew them in --accent-gold-ink, which is
+   DEMO's gold in the dark theme since S1a: a shut market is no demo
+   account. The hour beside the badge stays ink-2. On /signals/ the badge
+   is main's .badge-high, the same gold on a wash: the same outline here,
+   its ring drawn inside, so the badge keeps its size. Nothing lights any
+   of them, in any Ambience. Light mode keeps main's colours. */
+.sr-shut-tag {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+:where(body:not(.light-mode)) .sr-shut,
+:where(body:not(.light-mode)) .sr-shut-tag,
+:where(body:not(.light-mode)) .sr-pop-fact-shut,
+:where(body:not(.light-mode)) .ipr-shut,
+:where(body:not(.light-mode)) .sr-gone-tag-market_shut,
+:where(body:not(.light-mode)) .sr-gone-tag-market_settling { color: var(--sv-warn); }
+:where(body:not(.light-mode)) .sr-shut-tag,
+:where(body:not(.light-mode)) .sr-gone-tag-market_shut,
+:where(body:not(.light-mode)) .sr-gone-tag-market_settling { border-color: color-mix(in srgb, var(--sv-warn) 50%, transparent); }
+:where(body:not(.light-mode)) .sig-shut {
+    color: var(--sv-warn);
+    background: transparent;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sv-warn) 50%, transparent);
+}
 
 
 /* ══ §7 Data ═════════════════════════════════════════════════════════════
@@ -1304,15 +1377,18 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
    (no shadow). The focus ring stays the 2 px outline above: no halo. No
    light at all on the primary button (it is also the PIN-guarded TURN ON
    that arms real money), on the protective outline (CLOSE, CLOSE ALL, turn
-   off), on the dialog's confirm or on the REAL family. */
+   off), on the dialog's confirm or on the REAL family. MARKET SHUT's
+   ▶ TICKET (merged 2026-11-12) is LEFT THE RAIL's control: the same light. */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-long:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-buy:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-in); }
 /* Coral after jade: a bearish card's TAKE TRADE is a SELL. */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-short:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-short:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-sell:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-in); }
 

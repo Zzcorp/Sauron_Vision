@@ -35,7 +35,7 @@ from django.urls import reverse
 
 from core.templatetags.sauron_tags import qty, src_name
 from tests.test_close_advice import CHROME, HOST
-from tests.test_design_tokens import PALETTE, rgb
+from tests.test_design_tokens import PALETTE, rgb, rgba_of
 from tests.test_ui_s0_fixes import _measure
 
 ROOT = pathlib.Path(settings.BASE_DIR)
@@ -104,6 +104,18 @@ COMPONENTS = {
     "the departures' tags": "sr-gone-tag sr-gone-tag-target_reached",
     "TICKET by side": "sr-gone-btn sr-gone-btn-ticket",
     "BRING BACK": "↺ BRING BACK",
+    # MARKET SHUT on the kit (2026-11-12, at the merge of main's #99, #100
+    # and #101): the badge on a card and the hour beside it, the SHUT chip
+    # in both states, the section's tags and its ▶ TICKET, /signals/'
+    # badge. Inert like the rest of the rail's samples.
+    "the MARKET SHUT samples": 'data-kit="rail-shut"',
+    "the badge on a card": '<span class="sr-shut-tag">MARKET SHUT</span>',
+    "the hour a market opens": '<span class="sr-shut-opens">opens Sun 22:00 UTC</span>',
+    "the SHUT chip, pressed": 'class="rf-chip rf-shut" aria-pressed="true"',
+    "the SHUT chip, not pressed": 'class="rf-chip rf-shut" aria-pressed="false"',
+    "the waiting rows' tags": "sr-gone-tag sr-gone-tag-market_shut",
+    "MARKET SHUT's TICKET by side": '<div class="sr-wait-row" data-side="short">',
+    "the signals page's badge": "badge badge-high sig-shut",
     # The magic kept (2026-11-12): the faces, the light and the moments.
     "the face specimen": 'data-kit="faces"',
     "an Orbitron title with a figure in it": 'data-kit="face-display">SYN100 · 30D WINDOW #12<',
@@ -209,7 +221,10 @@ class DesignKitContentTests(TestCase):
         # The rail's samples are out of every filter bar and host, so the
         # rail's script neither reads nor presses them (2026-11-07).
         for hook in ("data-f-kind", "data-sv-fhost", "data-f-toggle", "data-sv-gone",
-                     "data-sv-row", "data-sv-unpass", "data-sv-list"):
+                     "data-sv-row", "data-sv-unpass", "data-sv-list",
+                     # MARKET SHUT's (2026-11-12): no host state, no section,
+                     # no row a filter or a count would read.
+                     "data-sv-shut", "data-f-shut", "data-market", "data-waiting", "data-sv-rail-n"):
             with self.subTest(hook=hook):
                 self.assertNotIn(hook, self.page)
 
@@ -311,6 +326,11 @@ KIT_PROBE = r"""(function () {
     out.ticketShort = paint('.sr-gone-row[data-side="short"] .sr-gone-btn-ticket');
     out.stageTrade = paint('.sr-stage-bearish'); out.stagePaused = paint('.sr-stage-high');
     out.pressed = paint('.rf-chip[aria-pressed="true"]');
+    out.shutTag = paint('.sr-shut-tag'); out.shutHour = paint('.sr-shut-opens'); out.shutBadge = paint('.sig-shut');
+    out.shutSettling = paint('.sr-gone-tag-market_settling');
+    out.shutChip = paint('.rf-chip.rf-shut[aria-pressed="true"]'); out.shutChipRest = paint('.rf-chip.rf-shut[aria-pressed="false"]');
+    out.waitLong = paint('.sr-wait-row[data-side="long"] .sr-gone-btn-ticket');
+    out.waitShort = paint('.sr-wait-row[data-side="short"] .sr-gone-btn-ticket');
     return JSON.stringify(out);
 })()"""
 
@@ -377,3 +397,24 @@ class DesignKitMeasuredTests(TestCase):
         self.assertEqual(got["stagePaused"]["color"], rgb(PALETTE["--sv-warn"]))
         self.assertEqual((got["pressed"]["bg"], got["pressed"]["border"]),
                          (rgb(PALETTE["--sv-bg-3"]), rgb(PALETTE["--sv-eye"])))
+
+    def test_the_market_shut_samples_wear_the_kit(self):
+        """MARKET SHUT (2026-11-12): the badge the warning amber on no fill,
+        its line the amber at half strength; the hour in ink-2; the SHUT
+        chip the filter chip it is; the section's ▶ TICKET in its signal's
+        side, as LEFT THE RAIL's."""
+        got = self.got[1440]
+        warn = rgb(PALETTE["--sv-warn"])
+        half = rgba_of(warn)[:3] + (0.5,)
+        for name in ("shutTag", "shutSettling"):
+            with self.subTest(sample=name):
+                self.assertEqual((got[name]["color"], got[name]["bg"], got[name]["top"]),
+                                 (warn, "rgba(0, 0, 0, 0)", "1px"))
+                self.assertEqual(rgba_of(got[name]["border"]), half)
+        self.assertEqual((got["shutBadge"]["color"], got["shutBadge"]["bg"]), (warn, "rgba(0, 0, 0, 0)"))
+        self.assertEqual(got["shutHour"]["color"], rgb(PALETTE["--sv-ink-2"]))
+        self.assertEqual(got["shutChip"], got["pressed"])
+        self.assertEqual((got["shutChipRest"]["bg"], got["shutChipRest"]["border"]),
+                         ("rgba(0, 0, 0, 0)", rgb(PALETTE["--sv-line-3"])))
+        self.assertEqual(got["waitLong"], got["ticketLong"])
+        self.assertEqual(got["waitShort"], got["ticketShort"])

@@ -825,6 +825,142 @@ class RailFiltersOnTheKitTests(SimpleTestCase):
                             self.assertNotIn(bad, body)
 
 
+class MarketShutOnTheKitTests(SimpleTestCase):
+    """MARKET SHUT on the kit (main's #99, #100 and #101, merged into this
+    branch on 2026-11-12). A signal whose market is shut says so on its
+    rail card, on its headband row and on /signals/; a SHUT chip shows or
+    hides those cards; with the optional hold on (the switch
+    signal_market_hold) they wait in a MARKET SHUT section. Main drew them
+    on the old look: sizes from 7.5 to 10 px, a colour that is DEMO's gold
+    in the dark theme since S1a (--accent-gold-ink reads --accent-gold
+    there), a line the hour is clipped by, and a see-through ground under
+    the section. On the kit: every size meets the
+    micro size; what says MARKET SHUT is the warning amber, an outline and
+    never a fill (REAL is the only solid red), never the Eye's green (a
+    shut market is not live), never DEMO's gold; the hour a market opens is
+    a figure, in the number face, unlit and never cut; the section sits on
+    an opaque ground. The SHUT chip is a filter chip like the others, on
+    the kit already. Light mode keeps main's own colours (frozen)."""
+
+    RAIL = "static/css/sv-rail.css"
+    WHERE = ":where(body:not(.light-mode)) "
+    DARK = "body:not(.light-mode) "
+    HALF = "color-mix(in srgb, var(--sv-warn) 50%, transparent)"
+    #: Main's sizes under 11 px, each at its own selector.
+    SMALL = (".sr-shut", ".sr-shut-tag", ".ipr-shut", ".sig-shut-opens", ".sig-hold", ".sr-wait-rule")
+    #: What says MARKET SHUT.
+    SAYS = (".sr-shut", ".sr-shut-tag", ".sr-pop-fact-shut", ".ipr-shut",
+            ".sr-gone-tag-market_shut", ".sr-gone-tag-market_settling", ".sig-shut")
+    #: The classes main added: a kit rule that names one is read below.
+    MARK = re.compile(r"\.(sr-shut(-tag|-opens|-sec)?|sr-pop-fact-shut|ipr-shut|sig-shut(-opens)?|sig-hold"
+                      r"|sr-wait-(row|rule)|rf-shut|sr-gone-tag-market_(shut|settling))(?![\w-])")
+    #: What a rule may set on them in both themes: a size, a face, a shape.
+    BOTH_THEMES = ("font-size", "font-family", "font-weight", "font-variant-numeric", "letter-spacing",
+                   "border-radius", "white-space", "flex-wrap", "row-gap")
+
+    value = staticmethod(RailFiltersOnTheKitTests.value)
+
+    def named(self):
+        """(selector, declarations) of every kit rule naming one of main's
+        MARKET SHUT classes. The section's ▶ TICKET is a money control,
+        which wears its signal's side: tests/test_money_controls_look.py
+        and tests/test_magic_layer.py hold it, not this class."""
+        out = []
+        for prelude, body, ctx in rules(read(KIT)):
+            for sel in prelude.split(","):
+                if self.MARK.search(sel) and "sr-gone-btn" not in sel:
+                    out.append((sel.strip(), decls(body)))
+        return out
+
+    def test_main_s_sizes_under_11px_meet_the_micro_size(self):
+        rail = read(self.RAIL)
+        floored = set()
+        for prelude, body, ctx in rules(read(KIT)):
+            if not ctx and ("font-size", "var(--sv-fs-micro)") in decls(body):
+                floored.update(s.strip() for s in prelude.split(","))
+        for sel in self.SMALL:
+            with self.subTest(selector=sel):
+                self.assertLess(px(block(rail, sel)["font-size"]), 11)      # main's own, on the old look
+                self.assertIn(sel, floored)
+
+    def test_what_says_market_shut_is_the_warning_amber(self):
+        css = read(KIT)
+        for sel in self.SAYS:
+            with self.subTest(selector=sel):
+                self.assertEqual(self.value(css, self.WHERE + sel, "color"), "var(--sv-warn)")
+        for sel in (".sr-shut-tag", ".sr-gone-tag-market_shut", ".sr-gone-tag-market_settling"):
+            with self.subTest(outline=sel):
+                self.assertEqual(self.value(css, self.WHERE + sel, "border-color"), self.HALF)
+        # /signals/' badge is main's .badge-high, DEMO's gold on its wash:
+        # the amber outline here, its ring drawn inside so no badge grows.
+        self.assertEqual(block(css, self.WHERE + ".sig-shut"),
+                         {"color": "var(--sv-warn)", "background": "transparent",
+                          "box-shadow": "inset 0 0 0 1px " + self.HALF})
+        # Main's own colour: --accent-gold-ink, which the dark theme reads
+        # from --accent-gold, DEMO's gold since S1a. Gold says DEMO.
+        self.assertEqual(block(read(self.RAIL), ".sr-shut")["color"], "var(--accent-gold-ink, #e8a33d)")
+        sauron = read(SAURON)
+        self.assertIn("--accent-gold-ink: var(--accent-gold);", sauron)
+        self.assertIn("--accent-gold: var(--sv-demo, #d8b020);", sauron)
+
+    def test_no_rule_gives_it_a_fill_a_red_the_eye_s_green_or_gold(self):
+        named = self.named()
+        self.assertGreater(len(named), 12)
+        for sel, pairs in named:
+            for prop, value in pairs:
+                with self.subTest(selector=sel, prop=prop):
+                    for bad in ("--sv-real", "--sv-down", "--sv-danger", "--accent", "--sv-eye", "--sv-up",
+                                "--sv-demo", "#", "rgb(", "rgba(", "gradient"):
+                        self.assertNotIn(bad, value)
+                    if prop in ("background", "background-color", "background-image"):
+                        self.assertIn(value, ("transparent", "var(--sv-bg-0)"))
+        # The chip takes no rule of its own: it is the kit's filter chip.
+        self.assertEqual([sel for sel, _ in named if "rf-shut" in sel], [])
+
+    def test_the_hour_is_a_figure_in_the_number_face_and_nothing_lights_it(self):
+        css = read(KIT)
+        for sel in (".sr-shut-opens", ".sig-shut-opens"):
+            with self.subTest(selector=sel):
+                self.assertEqual(self.value(css, sel, "font-family"), "var(--sv-font-mono)")
+                self.assertEqual(self.value(css, sel, "font-variant-numeric"), "tabular-nums")
+                self.assertEqual(self.value(css, sel, "letter-spacing"), "0")
+        # On a card the hour is never cut: it takes the line under the
+        # badge, whole, when the two cannot sit side by side.
+        self.assertEqual(self.value(css, ".sr-shut", "flex-wrap"), "wrap")
+        self.assertEqual(self.value(css, ".sr-shut-opens", "white-space"), "nowrap")
+        for sel, pairs in self.named():
+            for prop, value in pairs:
+                with self.subTest(selector=sel, prop=prop):
+                    self.assertNotIn(prop, ("text-shadow", "filter", "animation", "animation-name",
+                                            "background-image"))
+                    self.assertNotIn("--sv-glow", value)
+                    self.assertNotIn("data-sv-ambience", sel)       # the magic adds nothing to it
+                    if prop == "box-shadow":                        # a ring with no blur is no light
+                        self.assertEqual(value, "inset 0 0 0 1px " + self.HALF)
+
+    def test_the_section_sits_on_an_opaque_ground(self):
+        css = read(KIT)
+        self.assertEqual(self.value(css, self.DARK + ".sr-shut-sec", "background"), "var(--sv-bg-0)")
+        self.assertEqual(self.value(css, self.DARK + ".sr-wait-row", "border-top-color"), "var(--sv-line-1)")
+        # Main's own ground is see-through: its counts would sit on glass.
+        self.assertEqual(block(read(self.RAIL), ".sr-shut-sec")["background"], "rgba(0, 0, 0, 0.18)")
+
+    def test_light_mode_keeps_main_s_colours(self):
+        """Every colour the kit gives a MARKET SHUT class wears the dark
+        scope; what reaches both themes is a size, a face or a shape."""
+        seen = 0
+        for sel, pairs in self.named():
+            if sel.startswith((self.WHERE, self.DARK)):
+                continue
+            seen += 1
+            self.assertNotIn("light-mode", sel)
+            for prop, value in pairs:
+                with self.subTest(selector=sel, prop=prop):
+                    self.assertIn(prop, self.BOTH_THEMES)
+                    self.assertNotIn("--sv-warn", value)
+        self.assertGreater(seen, 6)
+
+
 class AmbientSourceTests(SimpleTestCase):
 
     def test_the_ambient_layers_are_not_displayed_on_work_pages(self):

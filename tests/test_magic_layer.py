@@ -432,11 +432,15 @@ LIGHT_SOURCES = {
     "--sv-glow-up-in": tuple(LIT + " " + s + ":not([disabled], .disabled):is(:hover, :focus-visible)" for s in (
         ".sr-pop-btn.sr-pop-btn-act",
         '.sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket',
+        # MARKET SHUT's ▶ TICKET (2026-11-12, the merge of main's #99-#101):
+        # LEFT THE RAIL's control in the section beside it, the same light.
+        '.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket',
         ".tk-long", ".btn.btn-buy")),
     "--sv-glow-down-in": tuple(LIT + " " + s + ":not([disabled], .disabled):is(:hover, :focus-visible)" for s in (
         ".sr-pop-btn.sr-pop-btn-short",
         ".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act",
         '.sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket',
+        '.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket',
         ".tk-short", ".btn.btn-sell")),
 }
 

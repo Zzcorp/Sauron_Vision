@@ -21,6 +21,12 @@ under that name. LEFT THE RAIL landed as three hooks, recorded instead
 (data-sv-gone), the chip that toggles it, a data-f-toggle like the other
 toggling chips, and the host's own state (data-f-gone).
 
+MARKET SHUT joined the same way on 2026-11-12, when origin/main (#99, #100
+and #101: the badge on a card whose market is shut, the SHUT chip, the
+optional MARKET SHUT section) merged into this branch: four hooks, named
+with their readers in DATA_ATTRS, and four counts that rose with main's
+markup, written above RECORDED.
+
 How each kind is counted, per file (templates, scripts, the template tags):
   * a data attribute: every occurrence of the attribute's name, as a whole
     token (data-sv-live is not counted inside data-sv-live-key);
@@ -65,6 +71,27 @@ DATA_ATTRS = (
     # them (data-f-toggle), and the host's own state that shows or hides
     # the section (data-f-gone). Counted on origin/main ede54d0.
     "data-sv-gone", "data-f-toggle", "data-f-gone",
+    # MARKET SHUT (main's #99, #100 and #101), joined at their merge into
+    # this branch (2026-11-12, counted on origin/main 4c1ebcc). Each is
+    # read by the rail's sheet, by its script or by main's own tests:
+    #   data-market     "shut" on a rail card and on a headband row whose
+    #                   market is shut now. The SHUT chip's rule hides
+    #                   exactly those rows (sv-rail.css), and the badge is
+    #                   found by it (tests/test_rail_market_shut.py);
+    #   data-f-shutoff  the host's state for that chip (the badged cards
+    #                   hidden): the server writes it on both hosts
+    #                   (rail_host_attrs.html), sv-rail-filters.js rewrites
+    #                   it on a press, the sheet reads it;
+    #   data-f-shut     the host's state that shows the MARKET SHUT section
+    #                   (the optional hold, the switch signal_market_hold):
+    #                   written the same way, read by the sheet, and by the
+    #                   script to count the section's filtered rows;
+    #   data-sv-shut    that section: the sheet hides it until its host
+    #                   says shown, the script counts the rows inside it.
+    # Not held: data-waiting, main's marker on a row of that section. No
+    # script, no rule and no test reads it today, so nothing breaks without
+    # it; it joins when something does.
+    "data-market", "data-f-shutoff", "data-f-shut", "data-sv-shut",
 )
 
 IDS = (
@@ -228,6 +255,20 @@ def inventory():
 # same as the S0 tip's or higher, and railfilters' hooks joined above.
 # LEFT THE RAIL's three hooks (data-sv-gone, data-f-toggle, data-f-gone)
 # joined on 2026-11-07 from the same tree, at the review of the merge.
+# MARKET SHUT (2026-11-12, origin/main 4c1ebcc: #99, #100 and #101 merged
+# into this branch). Updated deliberately, from inventory() on that tree,
+# so the pull request is held to main's own counts again. Four hooks
+# joined, each explained where DATA_ATTRS names it: data-market,
+# data-f-shutoff, data-f-shut, data-sv-shut. Four counts rose with main's
+# markup and are recorded at main's number: data-f-toggle in the signals'
+# chips, 5 -> 7 (the SHUT chip, in its two spellings: the badged cards'
+# and, with the optional hold on, the section's); data-sv-rail-n in the
+# same partial, 4 -> 6 (the chip's two counts, "shut" and "waiting"), in
+# the rail partial, 0 -> 1 (the MARKET SHUT section's count) and in
+# base.html, 6 -> 7 (the headband's MARKET SHUT cell). No count fell: on
+# that day the merged tree held every hook of main's in every file, and
+# more only where the magic's own files read one (sv-moments.js, the kit
+# page).
 # A file may gain a hook; it may not lose one. Each hook below must also be
 # found somewhere (no hook is recorded at zero), so a hook renamed
 # everywhere at once fails too.
@@ -514,9 +555,17 @@ RECORDED = {
         'templates/_partials/rail_host_attrs.html': 1,
         'templates/base.html': 1,
     },
+    'data-f-shut': {
+        'static/js/sv-rail-filters.js': 2,
+        'templates/_partials/rail_host_attrs.html': 2,
+    },
+    'data-f-shutoff': {
+        'static/js/sv-rail-filters.js': 1,
+        'templates/_partials/rail_host_attrs.html': 1,
+    },
     'data-f-toggle': {
         'static/js/sv-rail-filters.js': 1,
-        'templates/_partials/rail_sig_chips.html': 5,
+        'templates/_partials/rail_sig_chips.html': 7,
         'templates/_partials/rail_watch_chips.html': 2,
     },
     'data-flash': {
@@ -530,6 +579,11 @@ RECORDED = {
         'templates/dashboard/instrument_detail.html': 1,
         'templates/dashboard/portfolio_overview.html': 2,
         'templates/dashboard/positions_list.html': 2,
+    },
+    'data-market': {
+        'static/js/sv-rail-filters.js': 2,
+        'templates/_partials/signal_rail_items.html': 2,
+        'templates/_partials/signal_rows_compact.html': 2,
     },
     'data-nav-page-id': {
         'static/js/sv-nav-activity.js': 2,
@@ -656,8 +710,13 @@ RECORDED = {
         'templates/base.html': 3,
     },
     'data-sv-rail-n': {
-        'templates/_partials/rail_sig_chips.html': 4,
-        'templates/base.html': 6,
+        'templates/_partials/rail_sig_chips.html': 6,
+        'templates/_partials/signal_rail_items.html': 1,
+        'templates/base.html': 7,
+    },
+    'data-sv-shut': {
+        'static/js/sv-rail-filters.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
     },
     'data-ticket': {
         'templates/_partials/deal_ticket.html': 1,
@@ -768,6 +827,19 @@ class LiveHooksInventoryTests(SimpleTestCase):
         self.assertEqual(count_data_attr(rail.replace("data-sv-gone ", "data-sv-left "),
                                          "data-sv-gone"), 0)
         self.assertEqual(count_data_attr('<b data-sv-gone-n>3</b>', "data-sv-gone"), 0)
+        # MARKET SHUT's hooks (2026-11-12) are whole tokens too: the host's
+        # data-f-shut is never counted inside data-f-shutoff, nor the rail's
+        # data-market inside the instrument pages' data-market-session.
+        host = (ROOT / "templates/_partials/rail_host_attrs.html").read_text(encoding="utf-8")
+        self.assertEqual(count_data_attr(host, "data-f-shutoff"), 1)
+        self.assertEqual(count_data_attr(host, "data-f-shut"), 2)
+        self.assertEqual(count_data_attr(host.replace("data-f-shutoff", "data-f-hidden"), "data-f-shut"), 2)
+        self.assertEqual(count_data_attr(host.replace("data-f-shut=", "data-f-held="), "data-f-shut"), 1)
+        self.assertEqual(count_data_attr('<i data-market-session="x" data-market-compact="1">',
+                                         "data-market"), 0)
+        self.assertEqual(count_data_attr('<div data-sv-row data-market="shut">', "data-market"), 1)
+        self.assertEqual(count_data_attr(rail, "data-sv-shut"), 1)
+        self.assertEqual(count_data_attr(rail.replace("data-sv-shut ", "data-sv-held "), "data-sv-shut"), 0)
 
     def test_counting_reads_through_django_tags_in_a_class(self):
         html = ('<span class="ip-x {% if a > 0 %}up{% elif a < 0 %}down{% endif %}">'

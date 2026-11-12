@@ -50,6 +50,15 @@ with hover and focus forced; a BUY or a SELL lights in its own side's
 colour, inside its own box only (inset), so nothing beside it changes;
 TURN ON, CLOSE, CLOSE ALL, the dialog's confirm and PASS take no light.
 
+MARKET SHUT (2026-11-12, at the merge of main's #99, #100 and #101). A
+signal whose market is shut says so on its card, its headband row and
+/signals/, and with the optional hold on it waits in a MARKET SHUT section.
+On the kit: the badge is the warning amber, an outline, never a fill (REAL
+is the only solid red) and never the Eye's green; the hour is a figure, on
+an opaque ground, unlit in every Ambience, never cut; nothing is under
+11 px; the section's ▶ TICKET wears its signal's side like LEFT THE RAIL's.
+Main's words, hooks and calls are as main wrote them.
+
 Run with:  python manage.py test tests.test_money_controls_look
 """
 import json
@@ -270,6 +279,68 @@ class LeftTheRailLookTests(SimpleTestCase):
                       html)
         self.assertIn('class="sr-gone-btn" data-sv-unpass="{{ g.signal_id }}"', html)
         self.assertIn("↺ BRING BACK", html)
+
+
+class MarketShutLookTests(SimpleTestCase):
+    """MARKET SHUT (main's #99, #100 and #101, on the kit at their merge,
+    2026-11-12). The section's ▶ TICKET is LEFT THE RAIL's: it opens the
+    ticket TAKE TRADE opens, so it wears its signal's side, an outline,
+    never the Eye's wash main's sheet gives every .sr-gone-btn. And nothing
+    main wrote is touched: its words, its hooks, its calls."""
+
+    def test_the_section_s_ticket_wears_the_signal_s_side(self):
+        css = read(KIT)
+        for side, token, wash in (("long", "var(--sv-up)", "var(--sv-up-wash)"),
+                                  ("short", "var(--sv-down)", "var(--sv-down-wash)")):
+            sel = '.sr-wait-row[data-side="%s"] .sr-gone-btn.sr-gone-btn-ticket' % side
+            left = sel.replace(".sr-wait-row", ".sr-gone-row")
+            with self.subTest(side=side):
+                rule, hover = block(css, sel), block(css, sel + ":hover")
+                self.assertEqual(rule, block(css, left))                # LEFT THE RAIL's, to the letter
+                self.assertEqual(hover, block(css, left + ":hover"))
+                self.assertEqual(rule["background"], "transparent")
+                self.assertEqual(rule["color"], token)
+                self.assertIn(token, rule["border"])
+                self.assertEqual(hover["background"], wash)
+                for value in list(rule.values()) + list(hover.values()):
+                    self.assertNotIn("--sv-eye", value)
+                    self.assertNotIn("--accent", value)
+
+    def test_main_s_words_hooks_and_calls_are_as_main_wrote_them(self):
+        rail = read("templates/_partials/signal_rail_items.html")
+        chips = read("templates/_partials/rail_sig_chips.html")
+        rows = read("templates/_partials/signal_rows_compact.html")
+        base = read("templates/base.html")
+        signals = read("templates/dashboard/signals_list.html")
+        for html, marker in (
+                (rail, '<section class="sr-shut-sec" data-sv-shut aria-label="Signals whose market cannot trade now">'),
+                (rail, '<span class="sr-gone-title">MARKET SHUT</span>'),
+                (rail, '<span class="sr-gone-count" data-sv-rail-n="waiting">'),
+                (rail, '<div class="sr-wait-row" data-sv-row data-waiting data-reason="{{ g.reason }}"'),
+                (rail, '<span class="sr-shut-tag">MARKET SHUT</span>{% if s.rail.opens %} '
+                       '<span class="sr-shut-opens">{{ s.rail.opens }}</span>{% endif %}</div>'),
+                (rail, "{% if s.rail.market == 'shut' %} data-market=\"shut\"{% endif %}"),
+                (rail, '<div class="sr-pop-fact sr-pop-fact-shut"><span class="sr-pop-k">market</span> shut'),
+                (rail, "No signal is waiting for its market."),
+                (rows, "{% if sig.rail.market == 'shut' %} data-market=\"shut\"{% endif %}"),
+                (rows, 'MARKET SHUT{% if sig.rail.opens %} · {{ sig.rail.opens }}{% endif %}</span>'),
+                (chips, 'class="rf-chip rf-shut" data-f-key="shut" data-f-val="1" data-f-toggle'),
+                (chips, 'class="rf-chip rf-shut" data-f-key="shut_off" data-f-val="0" data-f-toggle'),
+                (chips, '>SHUT <b data-sv-rail-n="waiting">'),
+                (chips, '>SHUT <b data-sv-rail-n="shut">'),
+                (base, '<span class="dk">MARKET SHUT</span><span class="dv" data-sv-rail-n="waiting">'),
+                (base, '<span class="rf-k">MARKET SHUT</span><button type="button" class="rf-opt" '
+                       'data-f-key="shut" data-f-val="0"'),
+                (base, '(d.market ? " · " + d.market : "")'),
+                (signals, '<span class="badge badge-high sig-shut" title="{{ r.market.title }}">MARKET SHUT</span>'),
+                (signals, '<span class="sig-shut-opens">{{ r.market.opens }}</span>'),
+                (signals, '<div class="sig-hold" title="{{ r.hold.title }}">{{ r.hold.text }}</div>')):
+            with self.subTest(marker=marker[:56]):
+                self.assertIn(marker, html)
+        # Both ▶ TICKET buttons, LEFT THE RAIL's and MARKET SHUT's, open the
+        # ticket TAKE TRADE opens, and neither is given a word more.
+        self.assertEqual(rail.count("window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});\">"
+                                    "▶ TICKET</button>"), 2)
 
 
 class ProtectiveButtonsLookTests(SimpleTestCase):
@@ -811,6 +882,419 @@ class ShellMoneyMarksMeasuredTests(TestCase):
         self.assertEqual(marks["sr-stage sr-stage-high"]["color"], WARN)
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Measured: MARKET SHUT on the kit (the merge of 2026-11-12)
+# ══════════════════════════════════════════════════════════════════════════
+
+MARKET_SHUT_PROBE = r"""(async function () {
+  function frame() { return new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); }); }
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+  function rgba(c) {
+    var m = /rgba?\(([^)]+)\)/.exec(c || '');
+    if (m) { var p = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; }
+    m = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)/.exec(c || '');
+    if (m) return { r: Math.round(m[1] * 255), g: Math.round(m[2] * 255), b: Math.round(m[3] * 255), a: m[4] === undefined ? 1 : Number(m[4]) };
+    return null;
+  }
+  function name(n) {
+    return n.tagName.toLowerCase() + (typeof n.className === 'string' && n.className.trim()
+      ? '.' + n.className.trim().split(/\s+/).slice(0, 3).join('.') : '');
+  }
+  function over(t, u) { return { r: t.r * t.a + u.r * (1 - t.a), g: t.g * t.a + u.g * (1 - t.a), b: t.b * t.a + u.b * (1 - t.a), a: 1 }; }
+  function lum(c) {
+    function f(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  }
+  function own(el) {
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var n = el.childNodes[i];
+      if (n.nodeType === 3 && n.nodeValue.trim()) return true;
+    }
+    return false;
+  }
+  // A shadow that is a light: any layer with a blur. A ring (no blur) is a line.
+  function lights(shadow) {
+    if (!shadow || shadow === 'none') return false;
+    return shadow.split(/,(?![^(]*\))/).some(function (layer) {
+      var px = (layer.replace(/rgba?\([^)]+\)|color\([^)]+\)/, '').match(/-?[\d.]+px/g) || []).map(parseFloat);
+      return !!px[2];
+    });
+  }
+  // The ground an element sits on: the first opaque colour behind it, what
+  // lies see-through in between (glass), and how strongly the element itself
+  // is drawn (its own opacity and its ancestors', up to that ground).
+  function ground(el) {
+    var layers = [], glass = null, alpha = 1, solid = null;
+    for (var n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
+      var cs = getComputedStyle(n), c = rgba(cs.backgroundColor), img = cs.backgroundImage;
+      if (img && img !== 'none' && /gradient/.test(img)) {
+        var stops = (img.match(/rgba?\([^)]+\)|color\(srgb [^)]+\)/g) || []).map(rgba);
+        var clear = /transparent/.test(img) || stops.some(function (k) { return k && k.a < 0.999; });
+        if (!clear) { solid = stops[0] || c; break; }
+        if (!glass) glass = 'a gradient on ' + name(n);
+      }
+      if (c && c.a >= 0.999) { solid = c; break; }
+      if (c && c.a > 0) { layers.push(c); if (!glass) glass = cs.backgroundColor + ' on ' + name(n); }
+      alpha *= parseFloat(cs.opacity);
+    }
+    var g = solid || { r: 0, g: 0, b: 0, a: 1 };
+    while (layers.length) g = over(layers.pop(), g);
+    return { colour: g, glass: glass, onVoid: !solid || n === document.body, alpha: alpha };
+  }
+  // Everything open, as the operator opens it: the rail, MARKET SHUT's
+  // section, the ⚙ panel, the headband's SIGNALS list, a shut card's own
+  // card (pinned, shown: a hover card is not displayed where the browser
+  // reports no hover).
+  var still = document.createElement('style');
+  still.textContent = '*, *::before, *::after { transition: none !important; }';
+  document.head.appendChild(still);
+  document.getElementById('signalsRail').classList.add('open');
+  each('[data-sv-fhost="signals"][data-f-shut]', function (h) { h.setAttribute('data-f-shut', '1'); });
+  document.getElementById('railSigPanel').hidden = false;
+  document.getElementById('hbSignalsDD').style.display = 'block';
+  each('.sr-signal-wrap[data-market="shut"] .sr-popup', function (p) { p.classList.add('sv-pinned', 'show'); });
+  // And landed: what plays once (the rail's body fades in as it opens) is
+  // at its end before a colour is read; what loops is left to be counted.
+  async function settle() {
+    for (var round = 0; round < 6; round++) {
+      var moving = 0;
+      document.getAnimations().forEach(function (a) {
+        var t = a.effect && a.effect.getComputedTiming();
+        if (t && t.iterations === Infinity) return;
+        if (a.playState !== 'finished') { moving++; try { a.finish(); } catch (e) {} }
+      });
+      await frame();
+      if (!moving) return;
+    }
+  }
+  await frame();
+  await settle();
+
+  function byText(sel, text) {
+    return Array.prototype.filter.call(document.querySelectorAll(sel), function (e) { return e.textContent.trim() === text; });
+  }
+  var cellKey = byText('#hbSignalsDD .ip-dd-cell .dk', 'MARKET SHUT'), rowKey = byText('#railSigPanel .rf-k', 'MARKET SHUT');
+  var groups = {
+    line: '.sr-signal .sr-shut', tag: '.sr-signal .sr-shut-tag', opens: '.sr-signal .sr-shut-opens',
+    fact: '.sr-pop-fact-shut', hbLine: '#hbSignalRows .ipr-shut',
+    chip: '.rf-chip.rf-shut', chipCount: '.rf-chip.rf-shut b',
+    section: '.sr-shut-sec', head: '.sr-shut-sec .sr-gone-head', count: '.sr-shut-sec .sr-gone-count',
+    row: '.sr-wait-row', rowTag: '.sr-wait-row .sr-gone-tag', rule: '.sr-wait-rule', words: '.sr-wait-row .sr-gone-words',
+    ticket: '.sr-wait-row .sr-gone-btn-ticket', empty: '.sr-shut-sec .sr-gone-empty',
+    opt: '.rf-opt[data-f-key="shut"]', cellValue: '#hbSignalsDD [data-sv-rail-n="waiting"]',
+    badge: '.sig-shut', hour: '.sig-shut-opens', hold: '.sig-hold'
+  };
+  function look(e) {
+    var c = getComputedStyle(e), r = e.getBoundingClientRect();
+    return { text: (e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 48), side: (e.closest('[data-side]') || e).getAttribute('data-side'),
+             pressed: e.getAttribute('aria-pressed'), size: parseFloat(c.fontSize), family: c.fontFamily.split(',')[0].replace(/["']/g, '').trim(),
+             weight: c.fontWeight, tracking: c.letterSpacing, nums: c.fontVariantNumeric, color: c.color, bg: c.backgroundColor, img: c.backgroundImage,
+             border: c.borderTopColor, borderWidth: c.borderTopWidth, borderStyle: c.borderTopStyle, shadow: c.boxShadow,
+             opacity: c.opacity, box: [r.left, r.top, r.right, r.bottom] };
+  }
+  var out = { els: {}, refs: {}, small: [], low: [], figures: [], onVoid: [], glass: [], lit: [], spins: [], cut: [] };
+  Object.keys(groups).forEach(function (k) { out.els[k] = Array.prototype.map.call(document.querySelectorAll(groups[k]), look); });
+  out.els.cellKey = cellKey.map(look); out.els.rowKey = rowKey.map(look);
+  // The neighbours a new control must be drawn like: the ALL chip (pressed)
+  // and the LEFT chip (not pressed), LEFT THE RAIL's row in the ⚙ panel,
+  // the headband's NEW 24H cell.
+  var refs = {
+    chipPressed: '#railSigFacets .rf-chip.rf-all[aria-pressed="true"]', chipRest: '#railSigFacets .rf-chip.rf-gone[aria-pressed="false"]',
+    chipCount: '#railSigFacets .rf-chip.rf-gone b', optPressed: '.rf-opt[data-f-key="gone"][aria-pressed="true"]',
+    optRest: '.rf-opt[data-f-key="gone"][aria-pressed="false"]', cellValue: '#hbSignalsDD [data-sv-rail-n="new24"]'
+  };
+  Object.keys(refs).forEach(function (k) { var e = document.querySelector(refs[k]); out.refs[k] = e ? look(e) : null; });
+  out.refs.cellKey = byText('#hbSignalsDD .ip-dd-cell .dk', 'NEW 24H').map(look)[0] || null;
+  out.refs.rowKey = byText('#railSigPanel .rf-k', 'LEFT THE RAIL').map(look)[0] || null;
+
+  // Every element that is MARKET SHUT's, with its own text.
+  var mine = [];
+  each('.sr-shut, .sr-shut *, .sr-pop-fact-shut, .sr-pop-fact-shut *, .ipr-shut, .rf-shut, .rf-shut *, .sr-shut-sec, .sr-shut-sec *,'
+       + ' .sig-shut, .sig-shut-opens, .sig-hold', function (e) { mine.push(e); });
+  cellKey.forEach(function (k) { mine.push(k); each('*', function (e) { mine.push(e); }, k.parentElement); });
+  rowKey.forEach(function (k) { mine.push(k); each('*', function (e) { mine.push(e); }, k.parentElement); });
+  mine = mine.filter(function (e, i) { return mine.indexOf(e) === i; });
+  out.mine = mine.length;
+  mine.forEach(function (el) {
+    if (!own(el)) return;
+    var c = getComputedStyle(el), label = name(el) + ' "' + el.textContent.trim().slice(0, 24) + '"';
+    if (parseFloat(c.fontSize) < 11) out.small.push(label + ' ' + c.fontSize);
+    if (!el.getClientRects().length) return;           // not rendered on this page
+    var g = ground(el), fg = rgba(c.color);
+    fg = over({ r: fg.r, g: fg.g, b: fg.b, a: fg.a * g.alpha }, g.colour);
+    var x = lum(fg), y = lum(g.colour), ratio = (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+    if (ratio < 4.5) out.low.push(label + ' ' + ratio.toFixed(2));
+    if (/\d/.test(Array.prototype.filter.call(el.childNodes, function (n) { return n.nodeType === 3; })
+                  .map(function (n) { return n.nodeValue; }).join(''))) {
+      out.figures.push(label);
+      if (g.onVoid) out.onVoid.push(label);
+      if (g.glass) out.glass.push(label + ': ' + g.glass);
+    }
+  });
+  // The hour on a card: inside its line, the line inside the card, at the
+  // rail's own width and again with the line squeezed to 150 px.
+  each('.sr-signal .sr-shut', function (line) {
+    var opens = line.querySelector('.sr-shut-opens'), tag = line.querySelector('.sr-shut-tag');
+    function fit(label) {
+      var range = document.createRange(); range.selectNodeContents(opens);
+      var ink = range.getBoundingClientRect(), box = line.getBoundingClientRect(),
+          card = line.closest('.sr-signal').getBoundingClientRect();
+      if (ink.left < box.left - 0.5 || ink.right > box.right + 0.5 || box.right > card.right + 0.5
+          || line.scrollWidth > line.clientWidth + 1 || opens.scrollWidth > opens.clientWidth + 1) {
+        out.cut.push(label + ': ' + [ink.left, ink.right, box.left, box.right, card.right].map(Math.round).join(' '));
+      }
+      return { under: ink.top >= tag.getBoundingClientRect().bottom - 0.5, lines: opens.getClientRects().length };
+    }
+    var wide = fit('at the rail width');
+    line.style.width = '150px';
+    var narrow = fit('squeezed to 150 px');
+    line.style.width = '';
+    out.fit = { wide: wide, narrow: narrow };
+  });
+  // Nothing lights it, in any Ambience: no text-shadow, no filter, no
+  // shadow with a blur, no animation that never ends, on it or inside it.
+  var modes = ['magic', 'calm', 'off'];
+  for (var i = 0; i < modes.length; i++) {
+    document.body.setAttribute('data-sv-ambience', modes[i]);
+    await frame();
+    mine.forEach(function (el) {
+      ['', '::before', '::after'].forEach(function (pseudo) {
+        var c = getComputedStyle(el, pseudo || null);
+        if (c.textShadow !== 'none' || c.filter !== 'none' || lights(c.boxShadow)) {
+          out.lit.push(modes[i] + ' ' + name(el) + pseudo + ' ' + c.textShadow + ' | ' + c.filter + ' | ' + c.boxShadow);
+        }
+      });
+    });
+    document.getAnimations().forEach(function (a) {
+      var t = a.effect && a.effect.getComputedTiming(), target = a.effect && a.effect.target;
+      if (t && t.iterations === Infinity && target && mine.indexOf(target) >= 0) out.spins.push(modes[i] + ' ' + name(target));
+    });
+  }
+  // Light mode, read last: what main drew there.
+  document.body.classList.add('light-mode');
+  await frame();
+  out.light = {};
+  ['line', 'tag', 'opens', 'fact', 'hbLine', 'section', 'row', 'rowTag', 'badge', 'hour'].forEach(function (k) {
+    out.light[k] = Array.prototype.map.call(document.querySelectorAll(groups[k]), look);
+  });
+  document.body.classList.remove('light-mode');
+  return JSON.stringify(out);
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class MarketShutMeasuredTests(TestCase):
+    """MARKET SHUT as the browser computes it, at 1440, on synthetic
+    signals at one fixed Saturday noon (forex is shut, crypto never is):
+    the rail with the optional hold off (the badge on a card, its line in
+    the card's facts, the headband row, the SHUT chip), the rail with it on
+    (the section, its rows and ▶ TICKET, the chip, the ⚙ row, the
+    headband's count) and /signals/ (the badge, the hour, the hold's line).
+    The clock is the market clock's own gate, which the suite keeps off."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from signals.models import SignalHold
+        from tests.test_signal_market_hold import SAT_NOON, SUN_OPEN, _at, _db_inst, _sig, _switch, _t
+        born = _t(2026, 11, 7, 11, 0)
+        user = get_user_model().objects.create_user("s1a_shut", password="x", is_staff=True)
+        down = _sig(_db_inst("SYNFXA"), born, rule="s1a_shut_down")
+        _sig(_db_inst("SYNFXB"), born, rule="trend_breakout_crossover", direction="bullish",
+             entry="1.08500", stop="1.08000", target="1.09500")
+        _sig(_db_inst("SYNCOIN", "crypto"), born, rule="s1a_always_open", direction="bullish",
+             entry="100", stop="95", target="110")
+        SignalHold.objects.create(signal=down, state=SignalHold.HELD, reason=SignalHold.MARKET_SHUT,
+                                  words="The forex market is shut: it opens Sunday 22:00 UTC",
+                                  reopens_at=SUN_OPEN, held_at=born)
+        client = Client()
+        client.force_login(user)
+        pages = {}
+        with _at(SAT_NOON):
+            pages["cards"] = _get(client, "/positions/")
+            pages["signals"] = _get(client, "/signals/")
+        _switch(True)
+        with _at(SAT_NOON):
+            pages["section"] = _get(client, "/positions/")
+        cls.got = {key: got for (key, _w), got in
+                   _measure(pages, ((1440, 900),), MARKET_SHUT_PROBE, "sv-s1a-shut-").items()}
+
+    def test_the_fixture_reaches_every_one_of_them(self):
+        cards, section, signals = (self.got[k]["els"] for k in ("cards", "section", "signals"))
+        self.assertEqual([len(cards[k]) for k in ("line", "tag", "opens", "fact", "hbLine", "chip", "chipCount")],
+                         [2, 2, 2, 2, 2, 1, 1])
+        self.assertEqual([e["text"] for e in cards["opens"]], ["opens Sun 22:00 UTC"] * 2)
+        self.assertEqual(cards["chip"][0]["pressed"], "true")            # the badged cards show by default
+        self.assertEqual((len(cards["section"]), len(cards["opt"]), len(cards["cellKey"])), (0, 0, 0))
+        # With the hold on they wait in the section, off the cards.
+        self.assertEqual([len(section[k]) for k in ("section", "head", "count", "row", "rowTag", "rule",
+                                                    "words", "ticket", "opt", "cellKey", "cellValue", "rowKey")],
+                         [1, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 1])
+        self.assertEqual((len(section["line"]), section["chip"][0]["pressed"]), (0, "false"))
+        self.assertEqual(sorted(e["side"] for e in section["ticket"]), ["long", "short"])
+        self.assertEqual({e["text"] for e in section["rowTag"]}, {"SHUT"})
+        self.assertEqual([len(signals[k]) for k in ("badge", "hour", "hold")], [2, 2, 1])
+        for key in ("cards", "section", "signals"):
+            self.assertGreater(len(self.got[key]["figures"]), 2, key)
+
+    def test_nothing_of_it_is_under_11px(self):
+        for key, got in sorted(self.got.items()):
+            with self.subTest(page=key):
+                self.assertGreater(got["mine"], 4)
+                self.assertEqual(got["small"], [])
+
+    def test_the_badge_is_the_warning_amber_outline_never_a_fill(self):
+        cards, section, signals = (self.got[k]["els"] for k in ("cards", "section", "signals"))
+        half = (242, 155, 56, 0.5)
+        for tag in cards["tag"] + section["rowTag"]:
+            with self.subTest(tag=tag["text"]):
+                self.assertEqual(tag["color"], WARN)
+                self.assertEqual((tag["bg"], tag["img"], tag["shadow"]), (CLEAR, "none", "none"))
+                self.assertEqual((tag["borderWidth"], tag["borderStyle"]), ("1px", "solid"))
+                self.assertEqual(_rgba(tag["border"]), half)
+                self.assertEqual(tag["family"], "Inter")
+        for said in cards["line"] + cards["fact"] + cards["hbLine"]:
+            with self.subTest(said=said["text"]):
+                self.assertEqual(said["color"], WARN)
+                self.assertEqual((said["bg"], said["img"]), (CLEAR, "none"))
+        # /signals/: main's .badge-high was DEMO's gold on a gold wash.
+        for badge in signals["badge"]:
+            self.assertEqual((badge["color"], badge["bg"], badge["img"]), (WARN, CLEAR, "none"))
+            self.assertRegex(badge["shadow"], r"0px 0px 0px 1px inset$")
+            self.assertEqual(_rgba(re.sub(r" 0px 0px 0px 1px inset$", "", badge["shadow"])), half)
+        for key in ("cards", "section", "signals"):
+            for group, els in self.got[key]["els"].items():
+                for e in els:
+                    with self.subTest(page=key, group=group, text=e["text"]):
+                        self.assertFalse(is_red(e["bg"], 0.05), e)       # REAL is the only solid red
+                        self.assertNotEqual(e["color"], GOLD, e)         # gold is DEMO's
+                        if group not in ("chip", "opt"):                 # a pressed filter is selected: the Eye's edge
+                            self.assertFalse(is_green(e["bg"], 0.05) or e["color"] == EYE or e["border"] == EYE, e)
+
+    def test_the_hour_is_a_figure_on_an_opaque_ground(self):
+        cards, signals = self.got["cards"]["els"], self.got["signals"]["els"]
+        for hour in cards["opens"] + signals["hour"]:
+            with self.subTest(hour=hour["text"]):
+                self.assertEqual(hour["family"], "JetBrains Mono")
+                self.assertIn("tabular-nums", hour["nums"])
+                self.assertIn(hour["tracking"], ("normal", "0px"))
+        self.assertEqual({h["color"] for h in cards["opens"]}, {rgb_of(PALETTE["--sv-ink-2"])})
+        self.assertEqual({h["color"] for h in signals["hour"]}, {rgb_of(PALETTE["--sv-ink-3"])})
+        for key, got in sorted(self.got.items()):
+            with self.subTest(page=key):
+                self.assertEqual(got["onVoid"], [])
+                self.assertEqual(got["glass"], [])
+
+    def test_the_hour_on_a_card_is_never_cut(self):
+        got = self.got["cards"]
+        self.assertEqual(got["cut"], [])
+        self.assertEqual(got["fit"]["wide"]["lines"], 1)
+        # Too narrow to sit beside the badge, it takes the line under it, whole.
+        self.assertEqual(got["fit"]["narrow"], {"under": True, "lines": 1})
+
+    def test_nothing_lights_it_in_any_ambience(self):
+        for key, got in sorted(self.got.items()):
+            with self.subTest(page=key):
+                self.assertEqual(got["lit"], [])
+                self.assertEqual(got["spins"], [])
+
+    def test_every_word_of_it_keeps_4_5_to_1(self):
+        for key, got in sorted(self.got.items()):
+            with self.subTest(page=key):
+                self.assertEqual(got["low"], [])
+
+    def test_the_section_is_the_kit_s(self):
+        """An opaque recessed ground, hairlines between its rows, its head a
+        label, its count and its rule in the number face; ▶ TICKET in its
+        signal's side, an outline; the ⚙ row and the headband's cell as the
+        kit draws every other one."""
+        els = self.got["section"]["els"]
+        self.assertEqual(els["section"][0]["bg"], rgb_of(PALETTE["--sv-bg-0"]))
+        for row in els["row"]:
+            self.assertEqual(row["border"], rgb_of(PALETTE["--sv-line-1"]))
+        self.assertEqual((els["head"][0]["family"], els["head"][0]["color"]),
+                         ("Inter", rgb_of(PALETTE["--sv-ink-3"])))
+        self.assertEqual(els["count"][0]["family"], "JetBrains Mono")
+        for rule in els["rule"]:
+            self.assertEqual((rule["family"], rule["color"]), ("JetBrains Mono", rgb_of(PALETTE["--sv-ink-3"])))
+        for ticket in els["ticket"]:
+            want = UP if ticket["side"] == "long" else DOWN
+            with self.subTest(side=ticket["side"]):
+                self.assertEqual((ticket["color"], ticket["border"], ticket["bg"], ticket["img"], ticket["shadow"]),
+                                 (want, want, CLEAR, "none", "none"))
+
+    #: What two controls drawn alike share: everything but their own words.
+    SAME = ("size", "family", "weight", "tracking", "nums", "color", "bg", "img", "border", "borderWidth",
+            "borderStyle", "shadow", "opacity")
+
+    def assertDrawnLike(self, got, ref):
+        self.assertTrue(got and ref, (got, ref))
+        self.assertEqual({k: got[k] for k in self.SAME}, {k: ref[k] for k in self.SAME})
+
+    def test_light_mode_keeps_main_s_colours(self):
+        """Frozen (plan §15): in light mode the badge, its lines and the
+        tags print in main's gold ink on main's line, the section sits on
+        main's own ground and /signals/' badge is main's .badge-high. The
+        sizes are the kit's in both themes: nothing under 11 px."""
+        ink, line = "rgb(138, 106, 0)", "rgba(232, 163, 61, 0.45)"       # --accent-gold-ink in light mode; main's border
+        cards, section, signals = (self.got[k]["light"] for k in ("cards", "section", "signals"))
+        self.assertEqual([len(cards[k]) for k in ("line", "tag", "fact", "hbLine")], [2, 2, 2, 2])
+        for said in cards["line"] + cards["tag"] + cards["fact"] + cards["hbLine"] + section["rowTag"]:
+            with self.subTest(said=said["text"]):
+                self.assertEqual(said["color"], ink)
+                self.assertGreaterEqual(said["size"], 11)
+        for tag in cards["tag"] + section["rowTag"]:
+            self.assertEqual(tag["border"], line)
+        self.assertEqual(section["section"][0]["bg"], "rgba(0, 0, 0, 0.18)")
+        self.assertEqual({row["border"] for row in section["row"]}, {"rgba(19, 48, 32, 0.6)"})
+        self.assertEqual(len(signals["badge"]), 2)
+        for badge in signals["badge"]:
+            self.assertEqual((badge["color"], badge["bg"], badge["shadow"]),
+                             ("rgb(216, 176, 32)", "rgba(216, 176, 32, 0.15)", "none"))
+
+    def test_the_shut_chip_is_a_filter_chip_like_the_others(self):
+        """Pressed, it is selected like ALL (bg-3, ink-1, the Eye's edge);
+        not pressed, it is LEFT's neutral outline; its count a figure."""
+        cards, section = self.got["cards"], self.got["section"]
+        pressed, rest = cards["els"]["chip"][0], section["els"]["chip"][0]
+        self.assertDrawnLike(pressed, cards["refs"]["chipPressed"])
+        self.assertDrawnLike(rest, section["refs"]["chipRest"])
+        self.assertEqual((pressed["bg"], pressed["border"], pressed["color"]),
+                         (rgb_of(PALETTE["--sv-bg-3"]), EYE, INK1))
+        self.assertEqual((rest["bg"], rest["border"], rest["color"]),
+                         (CLEAR, LINE3, rgb_of(PALETTE["--sv-ink-2"])))
+        self.assertDrawnLike(section["els"]["chipCount"][0], section["refs"]["chipCount"])
+        for key in ("cards", "section"):
+            count = self.got[key]["els"]["chipCount"][0]
+            self.assertEqual(count["family"], "JetBrains Mono")
+            self.assertIn("tabular-nums", count["nums"])
+
+    def test_the_panel_s_row_and_the_headband_s_cell_are_their_neighbours(self):
+        """MARKET SHUT's row in the ⚙ panel is LEFT THE RAIL's row, and its
+        cell in the headband list is NEW 24H's: the kit's, with nothing of
+        their own."""
+        got = self.got["section"]
+        els, refs = got["els"], got["refs"]
+        self.assertDrawnLike(els["rowKey"][0], refs["rowKey"])
+        self.assertDrawnLike(els["cellKey"][0], refs["cellKey"])
+        self.assertDrawnLike(els["cellValue"][0], refs["cellValue"])
+        by_state = {o["pressed"]: o for o in els["opt"]}
+        self.assertDrawnLike(by_state["true"], refs["optPressed"])
+        self.assertDrawnLike(by_state["false"], refs["optRest"])
+        self.assertEqual((els["cellValue"][0]["color"], els["cellValue"][0]["family"]), (INK1, "JetBrains Mono"))
+
+
+def _rgba(css_colour):
+    """(r, g, b, a) of a computed colour in either spelling: rgba(), or the
+    color(srgb …) a color-mix() computes to."""
+    p = parse(css_colour)
+    if p:
+        return (round(p[0]), round(p[1]), round(p[2]), round(p[3], 3))
+    m = re.fullmatch(r"color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: / ([\d.]+))?\)", css_colour.strip())
+    if not m:
+        raise AssertionError("not a colour: %r" % css_colour)
+    return tuple(round(float(x) * 255) for x in m.group(1, 2, 3)) + (round(float(m.group(4) or 1), 3),)
+
+
 PHONE_PROBE = r"""(function () {
     function shown(e) {
         var r = e.getBoundingClientRect();
@@ -907,6 +1391,10 @@ SIDE_CONTROLS = (
     (".dk-page .btn.btn-buy:not([disabled])", "up"), (".dk-page .btn.btn-sell:not([disabled])", "down"),
     ('.sr-gone-row[data-side="long"] .sr-gone-btn-ticket', "up"),
     ('.sr-gone-row[data-side="short"] .sr-gone-btn-ticket', "down"),
+    # MARKET SHUT's ▶ TICKET (2026-11-12): the same control in the section
+    # beside it, so the same side and the same light.
+    ('.sr-wait-row[data-side="long"] .sr-gone-btn-ticket', "up"),
+    ('.sr-wait-row[data-side="short"] .sr-gone-btn-ticket', "down"),
 )
 #: The controls that take no light at all: the protective ones, TURN ON,
 #: the dialog's confirm, PASS, and a BUY or a SELL that is disabled.
