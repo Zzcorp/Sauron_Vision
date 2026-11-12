@@ -38,7 +38,6 @@ import io
 import logging
 import sys
 import threading
-import time
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -913,12 +912,27 @@ class TheWriterThreadTests(_Autocommit):
     (_background) and its insert recorded: which thread, and what the
     drain had sent to eToro by then."""
 
-    def _drain(self, events, inserted):
+    #: The most a wait on the other thread lasts, in seconds. A bound, never
+    #: a pace: nothing here sleeps and a passing run never reaches it. It
+    #: turns a writer that never writes, or a drain that waits on the
+    #: writer, into a failure instead of a suite that hangs.
+    BOUND_S = 60
+
+    def _three_pending(self):
+        """Three real rows left CLOSE_PENDING, and nothing of theirs in
+        the writer's queue. Each save is itself counted (exit_close_pending:
+        once per row and kind, by design), so the rows are made before a
+        test patches the insert, and what their saves counted is written
+        by then: at once on SQLite, and no later than this flush where
+        the rows are queued for the writer (PostgreSQL)."""
         from bot_program.models import AssetBotTrade
-        from bot_program.pending_closes import retry_all_pending_closes
         AssetBotTrade.objects.all().delete()
         for i in (1, 2, 3):
             self._row(status="CLOSE_PENDING", position_id=f"d-{i}")
+        _fh().flush()
+
+    def _drain(self, events):
+        from bot_program.pending_closes import retry_all_pending_closes
 
         class _Rec(H.EtoroTrader):
             def _note(self_, method, *args):
@@ -932,30 +946,51 @@ class TheWriterThreadTests(_Autocommit):
         autocommit. Before, the drain read get_positions, ticker, INSERT,
         get_positions, ticker, INSERT... on its own thread; now every eToro
         request goes out first and every insert runs on the writer thread.
-        The insert is held shut until the drain has returned: had one run
-        on the drain's thread, the drain would have waited on it and the
-        insert been recorded before the drain's end."""
+        The writer's insert is held shut until the drain has returned; the
+        drain's own thread is never held: had an insert run there, it would
+        have been recorded at once, before the drain's end.
+
+        NOTHING HERE IS LEFT TO THE THREADS' TIMING (2026-11-12). The
+        scenario counts six rows, not three — each row's CLOSE_PENDING
+        save, then its booking — and the set-up's three used to pass
+        through the patched insert as well: the count read 3 only when the
+        writer's first batch happened to be exactly those three and the
+        patch was gone before its second (a first batch of one read 6).
+        Now the set-up's rows are written before the insert is patched,
+        the patched insert is given the drain's three bookings and nothing
+        else, in however many batches the writer takes them, and the patch
+        stays until the third is recorded and the writer's pass is over."""
         fh = _fh()
+        self._three_pending()
         events, inserted = [], []
         main = threading.get_ident()
-        gate = threading.Event()
+        gate, written = threading.Event(), threading.Event()
+        # whatever fails below, the writer is let go before the class's
+        # own flush waits for it
+        self.addCleanup(gate.set)
 
-        def slow_insert(rows):
-            gate.wait(5)
+        def held_insert(rows):
+            if threading.get_ident() != main:
+                gate.wait(self.BOUND_S)
             inserted.append((threading.get_ident(),
                              tuple(r["kind"] for r in rows)))
             events.append(("harm insert", len(rows)))
-            time.sleep(0.25)
+            if sum(len(k) for _, k in inserted) >= 3:
+                written.set()
         with mock.patch.object(fh, "_background", return_value=True), \
-                mock.patch.object(fh, "_insert", side_effect=slow_insert):
-            out = self._drain(events, inserted)
+                mock.patch.object(fh, "_insert", side_effect=held_insert):
+            out = self._drain(events)
             self.assertEqual(inserted, [], "nothing written during the drain")
             gate.set()
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline and \
-                    sum(len(k) for _, k in inserted) < 3:
-                time.sleep(0.02)
-        self.assertEqual(sum(len(k) for _, k in inserted), 3)
+            self.assertTrue(written.wait(self.BOUND_S),
+                            f"the writer writes the drain's rows: {inserted}")
+            # the writer's pass is over and its queue empty before the
+            # patch goes: no insert is left to run unrecorded, and a row
+            # past the third would be recorded here, whoever wrote it
+            fh.flush()
+        self.assertEqual([k for _, batch in inserted for k in batch],
+                         ["exit_at_mark"] * 3,
+                         "the drain's three bookings and no other row")
         self.assertTrue(all(tid != main for tid, _ in inserted),
                         "every insert on the writer thread")
         kinds = [e[0] for e in events]
