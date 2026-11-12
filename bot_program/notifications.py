@@ -77,6 +77,10 @@ NOTIFY_MARKS = {
     "staff_warning": "\u26A0\uFE0F",
     "broker_unreachable": "\U0001F50C",
     "evidence_chain_cold": "\u2744\uFE0F",
+    # Live trading by decision, said once (2026-11-12): information. Never
+    # the alarm's mark, and never one of the activity feed's "warn" marks
+    # (dashboard/activity_feed._alert_marks).
+    "live_by_decision": "\u2139\uFE0F",
     # A bank: money asked for in advance, sent, or released (2026-09-28).
     "withdrawal": "\U0001F3E6",
     # The position reviewer's call, and the free pass's dead thesis
@@ -369,7 +373,8 @@ _BANNER_SILENT_KINDS = {"bot_fill_open", "bot_fill_close", "manual_fill_open"}
 
 def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                           url: str = "", payload=None,
-                          row_data=None, telegram=None, button=None) -> bool:
+                          row_data=None, telegram=None, button=None,
+                          receipt=None) -> bool:
     """Send a bot-event or operator-event notification to `user`.
 
     Returns True if at least one delivery channel succeeded (including in-app).
@@ -391,7 +396,18 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     without `telegram`), as _send_telegram takes it: notify_staff's
     "Close position" under an alert about one open position. A message
     written for people carries its own (`telegram["button"]`).
+
+    `receipt` (2026-11-12) is a dict a caller hands over to learn what
+    TELEGRAM answered, which the return value cannot say: the bell row
+    alone makes it True. receipt["external"] becomes "sent", "refused"
+    (the account is set up for Telegram and the message did not get
+    through: an answer that is not OK, a post that raised) or "none"
+    (Telegram was not asked: quiet hours, another channel, no token, no
+    chat id). The evidence-chain watchdog reads it, so an alarm the phone
+    refused is tried again the next morning instead of counting as said.
     """
+    if isinstance(receipt, dict):
+        receipt["external"] = "none"
     if kind not in BOT_KINDS and kind not in OPERATOR_KINDS:
         logger.warning("dispatch_notification: unknown kind=%r", kind)
         return False
@@ -447,6 +463,9 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         tg = telegram if isinstance(telegram, dict) else {}
         # a plain call without a button keeps its three-argument shape
         extra = {"button": button} if button else {}
+        # ...and so does a call without a receipt: only a caller that asked
+        # what Telegram answered hands its dict down
+        heard = {"receipt": receipt} if isinstance(receipt, dict) else {}
         if tg.get("title"):
             # A message written for people (the fills, 2026-09-27): its
             # own title in words, a sentence, the facts, the folded record
@@ -458,13 +477,14 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                 subtitle=str(tg.get("subtitle") or ""),
                 summary=str(tg.get("summary") or ""),
                 details=tg.get("details") or None,
-                button=tg.get("button")) or delivered
+                button=tg.get("button"), **heard) or delivered
         elif rd.get("items") or rd.get("mark"):
             delivered = _send_telegram(
                 user, title, body, lines=_telegram_lines(rd.get("items")),
-                mark=str(rd.get("mark") or ""), **extra) or delivered
+                mark=str(rd.get("mark") or ""), **extra, **heard) or delivered
         else:
-            delivered = _send_telegram(user, title, body, **extra) or delivered
+            delivered = _send_telegram(user, title, body, **extra,
+                                       **heard) or delivered
     elif channel == "email":
         # Phase-45 — when delivering a briefing via email, render the
         # Sauron-themed HTML template instead of a plain-text dump.
@@ -657,7 +677,7 @@ def _telegram_text(title: str, body: str = "", *, lines=None,
 
 def _send_telegram(user, title: str, body: str, *, lines=None,
                    mark: str = "", subtitle: str = "", summary: str = "",
-                   details=None, button=None) -> bool:
+                   details=None, button=None, receipt=None) -> bool:
     """Send via the platform Telegram bot to the user's chat_id.
 
     Requires `TELEGRAM_BOT_TOKEN` env var (platform-wide) and the user's
@@ -676,7 +696,13 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
     without them, each page as a line (message_parts, post_message).
     Never a callback button: nothing is done from Telegram but the Eye's
     commands and the alarm bot's /stopall.
+
+    `receipt` (2026-11-12): a dict whose "external" becomes "sent" or
+    "refused" once the account is set up for Telegram (a token and a chat
+    id), and is left alone when it is not: nothing was asked
+    (dispatch_notification).
     """
+    meant = False   # a token and a chat id: this message is meant to arrive
     try:
         import os
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -685,6 +711,7 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
         chat_id = getattr(user.notification_prefs, "telegram_chat_id", "")
         if not chat_id:
             return False
+        meant = True
         # Cut under Telegram's 4,096 characters like every other path:
         # fit_text renders through _telegram_text and returns it as it is
         # whenever it fits (2026-09-26). The button is not text.
@@ -708,8 +735,12 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
                            getattr(r, "status_code", "?"),
                            _plain_title(title),
                            str(getattr(r, "text", ""))[:200])
+        if isinstance(receipt, dict):
+            receipt["external"] = "sent" if r.ok else "refused"
         return bool(r.ok)
     except Exception as e:
+        if meant and isinstance(receipt, dict):
+            receipt["external"] = "refused"
         # A connection error quotes the address, and the address carries
         # the bot token: scrubbed before the line is logged (2026-09-26),
         # as alerts.channels.telegram_alert.send_to_chat does.
@@ -2677,7 +2708,8 @@ def notify_broker_cells_unanswered(user, *, label: str, misses: int,
     )
 
 
-def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
+def notify_evidence_chain_cold(user, *, cold: list, blockers: list,
+                               receipt=None) -> bool:
     """A link in the paper-campaign evidence chain has gone cold.
 
     Filed under system_health for the same reason as the broker alert: it is
@@ -2692,6 +2724,30 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
     The body names the links rather than a count, because "2 links cold" sends
     an operator to a page and "pipeline_promotion is off" sends them to a
     switch.
+
+    FOUR TITLES, EACH TRUE OF WHAT IT ANNOUNCES (2026-11-12). One title and
+    one summary served every blocker that was not a cold link: "The evidence
+    chain is broken", "The paper campaign is not complete, so the days
+    passing now give the promotion ladder nothing to grade". For an operator
+    with every link ON both were false. The first finding decides
+    (campaign_readiness.Finding.key; the watchdog hands the chain's faults
+    first):
+
+      a link named            "… is broken at <the links>", as before
+      a live-action switch    "The paper campaign is no longer paper-only"
+                              (a paper campaign only: for a live operation
+                              the switch is a decision, never sent here)
+      a rule stuck at paper   "No paper bot for the rules at the paper stage"
+      any other fault         "The evidence chain is broken", and the ladder
+                              has LESS to grade, not nothing
+
+    The findings behind the first are counted ("And 2 more findings"): only
+    the first was ever shown, so a dead bar feed could sit behind a switch.
+    "A link that is off is a decision…" is said only when a link is named.
+
+    `receipt` is dispatch_notification's: what Telegram answered, for the
+    watchdog's memory (an alarm the phone refused is tried again the next
+    morning).
     """
     # In words since 2026-09-27 ("Evidence chain cold: pipeline_promotion"
     # before): the links as LINK_WORDS names them, what each does, the
@@ -2701,7 +2757,9 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
     # sentence.
     keys = [str(k) for k in (cold or []) if str(k or "").strip()]
     names = [_link_words(k) for k in keys]
-    first = str(blockers[0]) if blockers else ""
+    found = list(blockers or [])
+    first = found[0] if found else ""
+    kind = _finding_kind(first)
     if names:
         title = f"▲ The evidence chain is broken at {_and(names)}"
         subject = _and(names)
@@ -2709,10 +2767,19 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
                    + (" is" if len(names) == 1 else " are")
                    + " not running, so the days passing now give the "
                      "promotion ladder nothing to grade.")
+    elif kind == "armed":
+        title = "▲ The paper campaign is no longer paper-only"
+        summary = ("A switch that lets real money move is on while every "
+                   "enabled bot trades on paper.")
+    elif kind == "stuck":
+        title = "▲ No paper bot for the rules at the paper stage"
+        summary = ("A rule born at research trades only on a paper bot "
+                   "until it is promoted, and no paper bot that is on lists "
+                   "a market it fires on.")
     else:
         title = "▲ The evidence chain is broken"
-        summary = ("The paper campaign is not complete, so the days passing "
-                   "now give the promotion ladder nothing to grade.")
+        summary = ("Evidence is not being produced, so the days passing now "
+                   "give the promotion ladder less to grade.")
     try:
         from bot_program.campaign_readiness import EVIDENCE_CHAIN
         jobs = dict(EVIDENCE_CHAIN)
@@ -2724,17 +2791,88 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
              for key, name in zip(keys, names)]
     if first:
         items.append("First problem: " + _plain_blocker(first))
-    items.append("A link that is off is a decision; a link with no row "
-                 "was never set up")
+    more = len(found) - 1
+    if more > 0:
+        items.append(f"And {more} more finding{'' if more == 1 else 's'}: "
+                     f"run the full check")
+    if names:
+        items.append("A link that is off is a decision; a link with no row "
+                     "was never set up")
     details = ([("Links", ", ".join(keys))] if keys else [])
     if first:
-        details.append(("Blocker", first))
+        details.append(("Blocker", str(first)))
     details.append(("Full check", "manage.py paper_readiness"))
     mark = NOTIFY_MARKS["evidence_chain_cold"]
     return dispatch_notification(
         user, "system_health",
         title=title, body=summary, url="/ops/",
         row_data={"items": items, "mark": mark},
+        telegram={"title": _plain_title(title), "mark": mark,
+                  "summary": summary, "lines": items, "details": details,
+                  "button": ("Open ops page", "/ops/")},
+        **({"receipt": receipt} if isinstance(receipt, dict) else {}),
+    )
+
+
+def notify_live_by_decision(user, *, armed: list, live_configs: int,
+                            hand_lanes: int, paper_configs: int,
+                            fingerprint: str, demo_configs: int = 0,
+                            paper_lanes: int = 0) -> bool:
+    """Live trading is the operator's decision: it is said once, as a
+    notice, and never alarmed (2026-11-12).
+
+    Two checks of the evidence-chain watchdog ask whether the campaign is
+    PAPER: the five live-action switches off, one paper bot on. With a bot
+    armed for real money they stand down, and this says so: which switches
+    are armed, each in its own words (campaign_readiness.LIVE_ACTION_WORDS,
+    the keys folded as code), whether a paper bot is on, and what is still
+    watched every day. NOT the master switch: the watchdog's guard skips it
+    while that switch is off, as it skips every task, so it can never
+    speak about it (the pause is the alarm bot's line, bot_program/alarm).
+
+    `live_configs` are the enabled live-mode bots that move real money,
+    `demo_configs` those whose broker row answers the demo world ("in live
+    mode on the demo world", never "armed for real money"), `hand_lanes`
+    the TAKE TRADE lanes in live mode (named apart: a lane scans nothing,
+    it is not a bot), `paper_configs` the enabled paper bots that scan and
+    `paper_lanes` the paper hand lanes.
+
+    `fingerprint` names the set of armed switches and rides in the bell
+    row's data: the bell table is the watchdog's memory of what it said
+    (tasks.watch_evidence_chain), so a cache that is emptied cannot make it
+    say it twice. Filed under system_health like the alarm; the bell title
+    leads with the platform's LIVE mark, never the warning's.
+    """
+    from bot_program.campaign_readiness import (fleet_words,
+                                                live_action_words,
+                                                no_paper_bot_words)
+    keys = [str(k) for k in (armed or []) if str(k or "").strip()]
+    fleet = fleet_words({"live_bots": live_configs,
+                         "demo_bots": demo_configs,
+                         "hand_lanes": hand_lanes}) or "A bot is in live mode"
+    title = "● Live by decision: the paper-campaign checks stand down"
+    summary = (f"{fleet}. So this is not a paper campaign: that is your "
+               f"decision, not a fault.")
+    items = []
+    for key in keys:
+        words = live_action_words(key)
+        # a key with no words of its own is still never sent as a key
+        items.append("Armed: " + (_link_words(key) if "_" in words
+                                  else words))
+    if not int(paper_configs or 0):
+        items.append("No paper bot is on: "
+                     + no_paper_bot_words(int(paper_lanes or 0)))
+    items.append("Still watched every day: the indicators, the signals, "
+                 "the bots, the promotion ladder, the bar feeds and the "
+                 "graded outcomes")
+    details = ([("Keys", ", ".join(keys))] if keys else [])
+    details.append(("Full check", "manage.py paper_readiness"))
+    mark = NOTIFY_MARKS["live_by_decision"]
+    return dispatch_notification(
+        user, "system_health",
+        title=title, body=summary, url="/ops/",
+        row_data={"items": items, "mark": mark,
+                  "fingerprint": str(fingerprint or "")},
         telegram={"title": _plain_title(title), "mark": mark,
                   "summary": summary, "lines": items, "details": details,
                   "button": ("Open ops page", "/ops/")},
@@ -2755,10 +2893,28 @@ def _link_words(key) -> str:
     return LINK_WORDS.get(key) or ("the " + key.replace("_", " "))
 
 
+def _finding_kind(finding) -> str:
+    """The first word of a readiness finding's key ("link", "armed",
+    "stuck", …: campaign_readiness.Finding), "" for a bare sentence."""
+    key = getattr(finding, "key", None)
+    return str(key[0]) if isinstance(key, tuple) and key else ""
+
+
 def _plain_blocker(text) -> str:
     """A readiness blocker (campaign_readiness.readiness) in the group's
     words: the links as LINK_WORDS names them, "n=0" as what it means,
-    every other key split (telegram_eye.plain_detail)."""
+    every other key split (telegram_eye.plain_detail). A live-action
+    switch reads in its own words (2026-11-12, LIVE_ACTION_WORDS): "the
+    rule actuator's live mode is on (a superuser may apply …)", and its
+    key stays in the folded record."""
+    key = getattr(text, "key", None)
+    if _finding_kind(text) == "armed" and len(key) == 2:
+        try:
+            from bot_program.campaign_readiness import LIVE_ACTION_WORDS
+            name, allows = LIVE_ACTION_WORDS[key[1]]
+            return f"{name} is on ({allows})"
+        except Exception:  # noqa: BLE001 — the words, never the message
+            pass
     s = str(text or "")
     for key in sorted(LINK_WORDS, key=len, reverse=True):
         s = s.replace(key, LINK_WORDS[key])

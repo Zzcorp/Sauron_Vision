@@ -546,6 +546,12 @@ class BulkEnableExemptTests(_Fixture):
     #: and the frontier's, whose ON opens Fable's gate (r5 beside its r4
     #: blind twin), a gate that cannot open in O2.
     MINDS = ("orcs_minds", "orcs_router", "orcs_probes", "orcs_frontier")
+    #: The operator's-choice switches (2026-11-12, the F1 review): a
+    #: seeded Pipeline row each, OFF, moving no money, spending none and
+    #: taking no PIN, whose ON undoes something he asked to keep. The
+    #: market hold makes a shut market's announcement wait for the open,
+    #: and he keeps every signal live.
+    CHOICES = ("signal_market_hold",)
 
     def setUp(self):
         super().setUp()
@@ -562,22 +568,28 @@ class BulkEnableExemptTests(_Fixture):
                                            DEFAULT_COMPONENTS,
                                            LIVE_MONEY_SWITCHES,
                                            LORE_READER_SWITCHES,
-                                           ORC_MIND_SWITCHES)
+                                           OPERATOR_CHOICE_SWITCHES,
+                                           ORC_MIND_SWITCHES, PIN_SWITCHES)
         self.assertEqual(set(LIVE_MONEY_SWITCHES), set(self.LIVE))
         self.assertEqual(set(ORC_MIND_SWITCHES), set(self.MINDS))
+        self.assertEqual(OPERATOR_CHOICE_SWITCHES, self.CHOICES)
         # Beside the brake and the live switches, the two Lore readers
         # (Agents group): each is armed by its own decision (lore/policy.py);
         # and the Orcs' mind switches (System group), each turned on with
-        # the trading PIN (core/switch_pin.py).
+        # the trading PIN (core/switch_pin.py). Grown on purpose
+        # (2026-11-12, the F1 review): the operator's-choice switches,
+        # which move no money and take no PIN (CHOICES, above).
         self.assertEqual(BULK_ENABLE_EXEMPT,
                          frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES,
                                     *LORE_READER_SWITCHES,
-                                    *ORC_MIND_SWITCHES}))
+                                    *ORC_MIND_SWITCHES,
+                                    *OPERATOR_CHOICE_SWITCHES}))
         system = {c["key"]: c for c in DEFAULT_COMPONENTS
                   if c["category"] == "system"}
         agent = {c["key"] for c in DEFAULT_COMPONENTS
                  if c["category"] == "agent"}
-        for key in BULK_ENABLE_EXEMPT - set(LORE_READER_SWITCHES):
+        for key in (BULK_ENABLE_EXEMPT - set(LORE_READER_SWITCHES)
+                    - set(OPERATOR_CHOICE_SWITCHES)):
             self.assertIn(key, system, key)
         for key in LORE_READER_SWITCHES:
             self.assertIn(key, agent, key)
@@ -592,6 +604,41 @@ class BulkEnableExemptTests(_Fixture):
             row = PlatformComponent.objects.get(key=key)
             self.assertEqual((row.category, row.is_enabled),
                              ("system", False), key)
+        # Each operator's-choice switch is a seeded Pipeline row, OFF, and
+        # no PIN switch: its own toggle turns it on.
+        for key in self.CHOICES:
+            row = PlatformComponent.objects.get(key=key)
+            self.assertEqual((row.category, row.is_enabled),
+                             ("pipeline", False), key)
+            self.assertNotIn(key, PIN_SWITCHES, key)
+
+    def test_all_on_for_pipeline_leaves_the_market_hold_off(self):
+        """One tap of the Pipeline group's "all on" turned the optional
+        market hold ON (the F1 review, 2026-11-12), and his shut-market
+        announcements would then have waited for the open, against his
+        word of that day. The button now leaves it OFF; its own toggle
+        still turns it on, with no PIN, and "all off" turns it off."""
+        from core.platform_control import PlatformComponent
+        key = "signal_market_hold"
+        resp = self.client.post("/admin-dashboard/bulk-toggle/",
+                                {"category": "pipeline", "action": "enable",
+                                 "next": "ops"})
+        self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
+        self.assertEqual(self._state(key), {key: False})
+        # ...and everything else in the group did turn on.
+        self.assertFalse(PlatformComponent.objects.filter(
+            category="pipeline", is_enabled=False).exclude(key=key).exists())
+        self.assertTrue(PlatformComponent.objects.filter(
+            category="pipeline", is_enabled=True).exists())
+        resp = self.client.post("/admin-dashboard/toggle/",
+                                {"key": key, "next": "ops"})
+        self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
+        self.assertEqual(self._state(key), {key: True})
+        self.client.post("/admin-dashboard/bulk-toggle/",
+                         {"category": "pipeline", "action": "disable",
+                          "next": "ops"})
+        self.assertFalse(PlatformComponent.objects.filter(
+            category="pipeline", is_enabled=True).exists())
 
     def test_all_on_for_system_leaves_every_live_switch_off(self):
         resp = self.client.post("/admin-dashboard/bulk-toggle/",
@@ -656,14 +703,24 @@ class BulkEnableExemptTests(_Fixture):
         self.assertEqual(set(groups["agent"]["held"]),
                          {"lore_staff", "lore_background"})
         self.assertEqual(groups["scraper"]["held"], [])
-        # One line per group that holds something: System, then Agents.
+        self.assertEqual(groups["pipeline"]["held"], list(self.CHOICES))
+        # One line per group that holds something: System, Pipeline (since
+        # 2026-11-12, the optional market hold), then Agents.
         lines = [ln for ln in resp.content.decode().splitlines()
                  if "all on leaves" in ln]
-        self.assertEqual(len(lines), 2, lines)
+        self.assertEqual(len(lines), 3, lines)
         system_line = next(ln for ln in lines if "morgul_brake" in ln)
         for key in self.LIVE + self.MINDS + ("morgul_brake",):
             self.assertIn(key, system_line)
-        agent_line = next(ln for ln in lines if ln is not system_line)
+        pipeline_line = next(ln for ln in lines
+                             if "signal_market_hold" in ln)
+        self.assertIsNot(pipeline_line, system_line)
+        self.assertIn("all on leaves signal_market_hold OFF", pipeline_line)
+        self.assertIn("by its own toggle or <code>component on "
+                      "&lt;key&gt;</code>", pipeline_line)
+        self.assertNotIn("trading PIN", pipeline_line)
+        agent_line = next(ln for ln in lines
+                          if ln not in (system_line, pipeline_line))
         self.assertIn("lore_staff", agent_line)
         self.assertIn("lore_background", agent_line)
         self.assertNotIn("morgul_brake", agent_line)
