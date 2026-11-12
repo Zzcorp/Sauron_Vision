@@ -174,6 +174,17 @@ class Command(BaseCommand):
 
         self.stdout.write("\n(a) CAN ANYTHING ACT ON IT?")
         self.stdout.write(f"    {badge['label']} — {badge['reason']}")
+        # Its market, as the page's MARKET SHUT badge says it (2026-11-12).
+        market = signal_surface.market_block(s)
+        if market["shut"]:
+            self.stdout.write("    MARKET SHUT"
+                              + (f" · {market['opens']}" if market["opens"]
+                                 else "") + f" — {market['title']}")
+        # What the optional market hold did with its announcement, if it
+        # held it (the page's line under the stage badge).
+        hold = signal_surface.hold_blocks([s]).get(s.pk)
+        if hold:
+            self.stdout.write(f"    {hold['text']}")
 
         self.stdout.write("\n(b) WHAT IS THIS RULE WORTH?")
         self.stdout.write(f"    {rec['text'] if rec else 'unmeasured — this rule has no row in the evidence ledger at all'}")

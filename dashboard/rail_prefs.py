@@ -26,6 +26,11 @@ Signals (`sig`):
   group      group by class
   dense      the compact density
   gone       LEFT THE RAIL shown
+  shut_off   the cards whose market is shut now are HIDDEN (2026-11-12);
+             off by default: every signal is shown the moment it fires,
+             a shut market's with its MARKET SHUT badge
+  shut       the MARKET SHUT section shown (the optional market hold,
+             the switch signal_market_hold); hidden by default
 
 Watchlist (`watch`): cls, held, sort (class | symbol | held), group, dense.
 
@@ -52,7 +57,8 @@ MAX_RULE_LEN = 100
 
 SIG_DEFAULT = {"cls": [], "side": "all", "score": 0, "stage": "all",
                "held": "all", "rules_off": [], "sort": "new", "group": False,
-               "dense": False, "gone": False}
+               "dense": False, "gone": False, "shut_off": False,
+               "shut": False}
 WATCH_DEFAULT = {"cls": [], "held": "all", "sort": "class", "group": False,
                  "dense": False}
 
@@ -123,6 +129,8 @@ def _sig(raw) -> dict:
         "group": _bool(raw.get("group")),
         "dense": _bool(raw.get("dense")),
         "gone": _bool(raw.get("gone")),
+        "shut_off": _bool(raw.get("shut_off")),
+        "shut": _bool(raw.get("shut")),
     }
 
 
