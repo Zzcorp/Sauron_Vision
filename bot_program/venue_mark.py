@@ -98,6 +98,9 @@ from typing import NamedTuple, Optional
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from bot_program import feed_fence
+from market_data.venue_source import EXACT, is_venue_source
+
 logger = logging.getLogger(__name__)
 
 #: A venue mark older than this is not preferred over the platform's quote.
@@ -346,11 +349,15 @@ def quote_stand_in(symbol, quote=None, *, carrier="") -> str:
     YF_SYMBOL_MAP, the one record of what Yahoo quotes for each symbol) —
     or "" when it is the same instrument. A quote the row's own venue wrote
     (its source is the carrier's key) is the venue's rate, whatever the
-    symbol."""
+    symbol. THE ONE VENUE-SOURCE RULE (the eToro feed spec, F1:
+    market_data.venue_source.is_venue_source, imported with this module so
+    it can never fail here and waive the check), read EXACTLY as before: the
+    source equals the carrier, in any case, untrimmed — an OANDA row's
+    "oanda_stream" quote is not "oanda"'s own write, and "etoro_ws" is not
+    "etoro" (tests/feed/test_venue_source_one_rule.py)."""
     try:
-        if quote is not None and carrier and \
-                str(getattr(quote, "source", "") or "").lower() == \
-                str(carrier).lower():
+        if quote is not None and carrier and is_venue_source(
+                getattr(quote, "source", ""), carrier, reading=EXACT):
             return ""
         from market_data.public_feed import yf_stand_in
         return yf_stand_in(symbol)
@@ -535,6 +542,13 @@ def for_booking(trade, quote, *, now=None) -> Optional[Mark]:
     now = now or timezone.now()
     mk = resolve(trade, quote, now=now)
     if bookable(mk, trade, now=now):
+        if mk.source == QUOTE and not getattr(trade, "paper", True):
+            # THE HARM COUNTER (the eToro feed spec, F1, bot_program
+            # .feed_harms): the quote's source noted on the row object, in
+            # memory and never saved, so the booking's save is counted as
+            # an exit at an outside quote when it is one. Through the
+            # fence: never the answer.
+            feed_fence.count("booking", "note_booking_quote", trade, quote)
         return mk
     if mk.source == QUOTE and not getattr(trade, "paper", True):
         vm = last(trade, now=now)
