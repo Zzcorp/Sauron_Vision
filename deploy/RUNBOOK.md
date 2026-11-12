@@ -2561,6 +2561,55 @@ with too little daily history for any evaluator; give it a year at once:
 `./deploy/dc exec web python manage.py backfill_bars --from-configs
 --intervals 1d,4h --bars 300`, then the indicator recalculation it prints.
 
+**The venue floor for bots (`bots_venue_floor_live`, OFF on arrival).** A
+bot risks a small share of its pool per trade (`extras["risk_per_trade_pct"]`,
+0.25% unless set). On a small account the size that gives is often under
+eToro's smallest size: 1,000 USD of exposure on forex, indices and
+commodities, 10 USD on stocks and crypto, and one whole share on a stock
+while Fractional Units is off. The bot then opens nothing and records
+`venue_min_size` or `sized_to_zero`. With the switch ON, such an order opens
+at the venue's smallest size instead.
+
+- *What bounds it.* The loss at the stop of that size must be at most
+  **MAX BOT FLOOR RISK (%)** of the bot's pool, set on `/setup/` beside MAX
+  BOT LEVERAGE (2 by default, 0.1 to 7, never above the 7% hard cap of every
+  trade). Its notional must also stay inside the class's own cap (4 times the
+  pool on forex, 2 on indices and commodities, 0.2 on stocks and crypto, or
+  the bot's `extras["max_notional_fraction"]`). So an index or a commodity
+  is still refused on a pool under about 500 USD, and a forex pair on a pool
+  under about 250 to 300. Then every other limit judges the raised size as
+  it judges any size:
+  the single position, the open risk, the notional multiple, duplicates,
+  theme legs, eToro's own row, the fees, the cash, the margin and the pledge
+  ceiling, the last look.
+- *What is never raised.* A paper bot, and a live bot's entry that its rule's
+  stage sends to paper. The hand-taken TAKE TRADE ticket, which has its own
+  smallest size. An instrument whose minimum eToro did not state today. A day
+  past MAX DAILY LOSS. A symbol eToro refused in the last 12 hours.
+- *Leverage.* A bot with no `extras["leverage"]` lets the chooser of the
+  attack mode pick the multiplier for such an entry, inside every leverage
+  rule (the switch `etoro_leverage_live`, the class ceilings, eToro's list,
+  MAX BOT LEVERAGE). With `etoro_leverage_live` off it goes unlevered, and
+  the full notional must then fit the single-position limit and the free
+  cash. A bot with a typed number keeps it.
+- *An index in a stock bot* is rounded to whole units while Fractional Units
+  is off. One unit of an index is far above any small pool's ceiling, so
+  indices need `fractional_units_live` on to be raised.
+- *Where it is said.* The fill message carries a line "Smallest size: raised
+  to ..." with the risk in percent of the pool beside the bot's usual risk.
+  The trade row keeps the whole record (`metadata["venue_floor"]`) and so
+  does the audit log. `why_no_trade` and `preflight_live` print one line
+  under each bot: the switch's state and the ceiling. When the switch is ON
+  and an order is still refused for its size, the skip keeps its code and its
+  words begin with the reason, for example "the venue's smallest size would
+  risk 4.63% of the pool, above your 2% ceiling".
+- *Turning it on.* From `/ops/` (Switches, System, "Bots: Venue Floor") with
+  your trading PIN. The shell and "all on" never turn it on; turning it off
+  is free and takes effect on the next order. Set the ceiling on `/setup/`
+  first. Each raised entry risks more than the bot's own setting, up to the
+  ceiling, and MAX OPEN RISK still bounds what all open positions may lose
+  together.
+
 **Watch `/health/` and `/forensics/`** rather than tailing logs: the first
 answers "is the machine running", the second answers "why did it do that".
 
