@@ -1118,12 +1118,13 @@ class MoneyDirectionTests(_Base):
     }
     RAIL_WORDS = ("RailDeparture", "signal_rail", "rail_prefs")
     #: A migration names the one before it in its dependencies: a file's
-    #: name, not a read of the rail. Updated deliberately (2026-11-12):
-    #: portfolio 0020, the Ambience field (display only), follows
-    #: 0019_traderprofile_rail_prefs and must say so. That one line of a
-    #: migration is let through, whole; anything else it says of the rail
-    #: is still a hit.
-    RAIL_DEPENDENCY = re.compile(r'\s*\("portfolio", "0019_traderprofile_rail_prefs"\),?\s*')
+    #: name, not a read of the rail. Updated deliberately (2026-11-12): the
+    #: portfolio migrations after 0019_traderprofile_rail_prefs (the bots'
+    #: venue-floor ceiling, then the Ambience field) must name it. That one
+    #: line of a migration is let through, whole; anything else it says of
+    #: the rail is still a hit.
+    RAIL_DEPENDENCY = re.compile(
+        r"""\s*\(["']portfolio["'], ["']0019_traderprofile_rail_prefs["']\),?\s*""")
 
     def test_no_engine_module_reads_the_rail(self):
         """A guard, not a regression test: it passed before the rail existed,
@@ -1158,17 +1159,34 @@ class MoneyDirectionTests(_Base):
 
     def test_a_migration_s_dependency_is_a_file_name_and_nothing_else_is(self):
         """The one line the guard lets through in a migration is the
-        dependency on the rail's own migration; a migration that reads or
-        writes the field is still caught, on the same line or another."""
-        ambience = (Path(settings.BASE_DIR) / "portfolio/migrations"
-                    / "0020_traderprofile_ambience.py").read_text(encoding="utf-8")
-        named = [ln for ln in ambience.splitlines()
-                 if any(word in ln for word in self.RAIL_WORDS)]
-        self.assertEqual(len(named), 1)
-        self.assertTrue(self.RAIL_DEPENDENCY.fullmatch(named[0]), named[0])
+        dependency on the rail's own migration: every portfolio migration
+        after it names the rail on that line only, and a migration that
+        reads, writes or imports the rail is still caught, on the same line
+        or another."""
+        base = Path(settings.BASE_DIR)
+        following = 0
+        for path in sorted((base / "portfolio" / "migrations").glob("0*.py")):
+            rel = path.relative_to(base).as_posix()
+            if rel in self.RAIL_READERS:
+                continue
+            named = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+                     if any(word in ln for word in self.RAIL_WORDS)]
+            if not named:
+                continue
+            following += 1
+            with self.subTest(migration=rel):
+                self.assertEqual(len(named), 1, named)
+                self.assertTrue(self.RAIL_DEPENDENCY.fullmatch(named[0]),
+                                named[0])
+        self.assertGreaterEqual(following, 1,
+                                "no migration follows the rail's: the pin "
+                                "read nothing")
         for line in ('    rail_prefs = models.JSONField(default=dict)',
                      '        profile.rail_prefs = {}',
-                     '        ("portfolio", "0019_traderprofile_rail_prefs"), profile.rail_prefs',
+                     '        ("portfolio", "0019_traderprofile_rail_prefs"), '
+                     'profile.rail_prefs',
+                     "        ('portfolio', '0019_traderprofile_rail_prefs'); "
+                     "import dashboard.signal_rail",
                      '    from dashboard.signal_rail import rail_snapshot'):
             with self.subTest(line=line):
                 self.assertIsNone(self.RAIL_DEPENDENCY.fullmatch(line))

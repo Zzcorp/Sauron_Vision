@@ -11,7 +11,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("portfolio", "0019_traderprofile_rail_prefs"),
+        ("portfolio", "0020_portfolio_max_bot_floor_risk_pct"),
     ]
 
     operations = [

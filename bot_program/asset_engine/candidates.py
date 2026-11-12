@@ -95,6 +95,17 @@ class EntryCandidate:
     #: "n", "win_rate", "avg_r", "scale"}. Empty on an ordinary day.
     elite: dict = field(default_factory=dict)
     horizon_hours: float = DEFAULT_HORIZON_HOURS
+    #: THE VENUE FLOOR FOR BOTS (2026-11-12, AssetBot._venue_floor): the
+    #: proposal's verdict, read by execute_entry. {} for a candidate the
+    #: floor never judged (its switch OFF, a paper entry, another venue, a
+    #: size the venue takes, a candidate built by hand): nothing changes.
+    #: {"state": "raise", "qty", "record", "chooser"} when qty_default IS
+    #: the venue's smallest size, raised from the risk-sized one;
+    #: {"state": "refused", "lead"} when the size is under the venue's
+    #: minimum (or the minimum is unread) and nothing was raised: `lead`
+    #: leads the words of the refusal main already gives. Not in summary():
+    #: what the desk stores of a candidate does not move.
+    venue_floor: dict = field(default_factory=dict)
     created_at: datetime = field(default_factory=timezone.now)
 
     @property
