@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Anduin: the Great River, the page of flows</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&amp;family=JetBrains+Mono:wght@400..700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&amp;text=ABCDEFGHIJKLMNOPQRSTUVWXYZ%C3%80%C3%81%C3%82%C3%84%C3%87%C3%88%C3%89%C3%8A%C3%8B%C3%8E%C3%8F%C3%94%C3%96%C3%99%C3%9B%C3%9C%20%C2%B7%E2%80%94%E2%80%93-%26%27%E2%80%99()%2F%3A.%2C!%3F%23%2B%25&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&amp;display=swap">
+<style>
+/* Anduin, the Great River: the page of flows, at rest (board 7). Synthetic data: the fictional book of the
+   Operations Center and Barad-dur boards. Nothing under 11 px. No script and no SMIL: three price motes and one
+   refused signal move by CSS offset-path, in steps of a thirtieth of a second; the refusal replays every 12 s in
+   this preview (in the app it plays once, when it happens). Under prefers-reduced-motion nothing moves: the
+   still bed stays. The page itself draws its flows on a canvas, 30 frames a second at most, none when nothing
+   moves, and stops when hidden, locked or asked for reduced motion. */
+
+/* ANDUIN, the Great River: the page of flows (mock, 2026-11-12). Invented
+   data only: the fictional book of the Operations Center and Barad-dur
+   mocks. S1a tokens on the Eye-lit ladder, Inter for words, JetBrains Mono
+   for figures, Orbitron (no digits) for titles. Rules the page keeps:
+   REAL, DEMO and PAPER are never added, in a figure or in a shape (real
+   money sets the one scale and owns the solid basket; the rest sits apart);
+   every figure carries its age, and an age comes from its stamp, never from
+   an animation; no figure sits on the void or on a glow, or fades; nothing
+   moves without a datum or an event behind it, and no frame is asked for
+   when nothing moves; no control here moves money. Nothing under 11 px. */
+.app,.app *,.app *::before,.app *::after{box-sizing:border-box}
+body{margin:0;background:#040B07}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit}
+.m{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-family:Inter,system-ui,sans-serif;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#839B8D}
+.up{color:#24B582}.down{color:#FF6B6E}.i1{color:#E6F1EA}.i2{color:#ACC4B6}.i3{color:#839B8D}.warn{color:#F29B38}
+.disp{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;text-transform:uppercase}
+
+/* ── the frame (S1a + the magic kept): sidebar, top bar, market band, dock, status bar ── */
+.side{grid-row:1 / 4;grid-column:1;background:#07130C;border-right:1px solid #14261D;display:flex;flex-direction:column;position:relative;z-index:2}
+.brand{height:44px;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid #14261D;position:relative}
+.mark{position:relative;width:28px;height:28px;flex:none}
+.mark svg{position:relative;display:block}
+.halo{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;
+  background:radial-gradient(circle,rgba(0,232,104,.34) 0%,rgba(0,232,104,.12) 36%,rgba(0,232,104,0) 68%);
+  animation:breath 6s ease-in-out infinite;pointer-events:none}
+@keyframes breath{0%,100%{opacity:.5;transform:scale(.88)}50%{opacity:.95;transform:scale(1.06)}}
+.word{font-family:Orbitron,Inter,sans-serif;font-weight:700;font-size:16px;letter-spacing:.24em;color:#00E868;
+  text-shadow:0 0 12px rgba(0,232,104,.45),0 0 2px rgba(0,232,104,.3)}
+.navwrap{display:flex;flex-direction:column;padding:8px 0;gap:1px}
+.sec{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#839B8D;padding:14px 18px 6px}
+.nav{position:relative;display:flex;align-items:center;gap:11px;height:32px;padding:0 14px 0 18px;color:#ACC4B6;
+  font-family:Rajdhani,Inter,sans-serif;font-weight:600;font-size:15px;letter-spacing:.02em}
+.nav svg{flex:none;color:#839B8D}
+.nav.on{color:#E6F1EA;background:linear-gradient(90deg,rgba(0,232,104,.13),rgba(0,232,104,.03) 55%,rgba(0,232,104,0) 80%),#14231B}
+.nav.on::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:2px;background:#00E868;box-shadow:0 0 8px rgba(0,232,104,.75),0 0 2px rgba(0,232,104,.9)}
+.nav.on svg{color:#00E868;filter:drop-shadow(0 0 4px rgba(0,232,104,.55))}
+.count{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;background:#14231B;border-radius:999px;padding:1px 7px;color:#E6F1EA}
+.top{grid-row:1;grid-column:2 / 4;display:flex;align-items:center;gap:14px;padding:0 16px;background:#07130C;border-bottom:1px solid #14261D;position:relative;z-index:2}
+.ptitle{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:15px;letter-spacing:.16em;text-transform:uppercase;color:#E6F1EA}
+.psub{font-size:12px;color:#839B8D;white-space:nowrap}
+.tr{margin-left:auto;display:flex;align-items:center;gap:14px}
+.pill{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px;border:1px solid #1D3528;border-radius:999px;font-size:11px;color:#ACC4B6;white-space:nowrap}
+.armed{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:2px;background:#CC3A40;color:#FFF;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.adot{width:6px;height:6px;border-radius:999px;background:#FFF;animation:armedbeat 1.6s ease-in-out infinite}
+@keyframes armedbeat{50%{opacity:.35}}
+.ib{width:28px;height:28px;border:1px solid #1D3528;border-radius:4px;background:none;color:#ACC4B6;display:flex;align-items:center;justify-content:center}
+.who{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:.06em;color:#ACC4B6}
+.dot{display:inline-block;width:6px;height:6px;border-radius:999px;flex:none;vertical-align:middle}
+.dot.live{background:#00E868;box-shadow:0 0 6px rgba(0,232,104,.7)}
+.dot.live.hb{animation:beat 2.4s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.55}}
+body.sv-locked .halo,body.sv-locked .adot,body.sv-locked .dot.live.hb{animation-play-state:paused}
+.vh{position:absolute!important;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;padding:0}
+.dot.recent{background:#ACC4B6}
+.dot.stale{background:#F29B38}
+.dot.closed{border:1px solid #839B8D}
+.band{grid-row:2;grid-column:2 / 4;display:flex;align-items:center;background:#07130C;border-bottom:1px solid #1D3528;font-size:12px;overflow:hidden;position:relative;z-index:2}
+.q{display:flex;align-items:center;gap:7px;padding:0 14px;height:32px;border-right:1px solid #14261D;white-space:nowrap}
+.q .s{font-weight:600;color:#ACC4B6}
+.q .p{font-size:13px;color:#E6F1EA}
+.news{margin-left:auto;display:flex;align-items:center;gap:8px;padding:0 14px;min-width:0}
+.news span:last-child{color:#ACC4B6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock{grid-row:3;grid-column:3;background:#07130C;border-left:1px solid #14261D;display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:12px;position:relative;z-index:2}
+.dk{position:relative;width:28px;height:28px;border:0;background:none;color:#ACC4B6;display:flex;align-items:center;justify-content:center}
+.dk .n{position:absolute;top:-6px;right:-5px;font-family:"JetBrains Mono",monospace;font-size:11px;line-height:15px;background:#1B2C23;border-radius:999px;padding:0 4px;color:#E6F1EA}
+.foot{grid-row:4;grid-column:1 / 4;display:flex;align-items:center;background:#0D1B14;border-top:1px solid #1D3528;font-size:12px;overflow:hidden;position:relative;z-index:2}
+.sb{display:flex;align-items:center;gap:8px;padding:0 14px;height:32px;border-right:1px solid #14261D;white-space:nowrap}
+.sb .v{font-size:13px;color:#E6F1EA}
+.sbsub{font-size:11px;color:#839B8D}
+.orb{margin-left:auto;margin-right:12px;width:26px;height:26px;border-radius:50%;position:relative;flex:none;
+  background:radial-gradient(circle at 38% 34%,rgba(220,255,235,.55) 0 8%,rgba(0,232,104,.35) 22%,rgba(4,30,16,.95) 62%,#040B07 100%);
+  box-shadow:inset 0 0 0 1px rgba(0,232,104,.55),0 0 10px rgba(0,232,104,.28)}
+
+/* ── the void: the Eye's light from above, a vignette, a fine grain (no embers here: every moving dot is a datum) ── */
+.main{grid-row:3;grid-column:2;position:relative;overflow:hidden;min-width:0;
+  background:
+    radial-gradient(900px 360px at 46% -110px,rgba(0,232,104,.10),rgba(0,232,104,.025) 50%,rgba(0,232,104,0) 74%),
+    radial-gradient(140% 120% at 50% 28%,rgba(0,0,0,0) 55%,rgba(0,0,0,.42) 100%),
+    #040B07}
+.grain{position:absolute;inset:0;opacity:.07;pointer-events:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55 0 0 0 0 .95 0 0 0 0 .7 0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.page{position:relative;z-index:1;height:100%;padding:12px;display:flex;flex-direction:column;gap:10px}
+.card{position:relative;background:#07130C;border:1px solid #1D3528;border-radius:6px;min-width:0}
+.chip{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:2px;font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;line-height:1;flex:none}
+.chip.long{color:#24B582;border:1px solid rgba(36,181,130,.6)}
+.chip.short{color:#FF6B6E;border:1px solid rgba(255,107,110,.6)}
+.chip.w-real{background:#CC3A40;color:#FFF}
+.chip.w-demo{border:1px solid #D6BC5E;color:#D6BC5E}
+.chip.w-paper{border:1px solid #839B8D;color:#ACC4B6}
+.chip.w-none{border:1px dashed #839B8D;color:#ACC4B6}
+
+/* ── the sky: the market's weather ── */
+.sky{flex:none;height:60px;display:grid;grid-template-columns:minmax(0,1fr) 456px 216px;align-items:center;gap:16px;padding:0 14px}
+.wx{min-width:0;display:flex;flex-direction:column;gap:5px}
+.wx1{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.over{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#839B8D}
+.lvl{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:2px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border:1px solid #2C4739;color:#E6F1EA;transition:border-color .5s,color .5s}
+.lvl.stressed{border-color:#F29B38;color:#F29B38}
+.lvl.crisis{border-color:#FF6B6E;color:#FF6B6E}
+.sc{font-size:12px;color:#E6F1EA}
+.agew{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#839B8D}
+.wx2{font-size:12px;line-height:16px;max-height:32px;color:#ACC4B6;overflow:hidden}
+.hz{min-width:0;display:flex;flex-direction:column;gap:5px}
+.hzt{display:flex;align-items:baseline;gap:8px;font-size:12px;color:#ACC4B6;white-space:nowrap;overflow:hidden}
+.hzt .lbl.on{color:#F29B38}
+.hzr{display:flex;align-items:center;gap:10px;height:24px}
+.hztrack{position:relative;flex:1;height:22px}
+.hzbase{position:absolute;left:0;right:0;top:11px;height:1px;background:#2C4739}
+.hztick{position:absolute;top:8px;width:1px;height:7px;background:#2C4739}
+.hznow{position:absolute;left:0;top:2px;width:2px;height:18px;background:#E6F1EA}
+.hzlab{position:absolute;top:12px;white-space:nowrap;font-family:"JetBrains Mono",monospace;font-size:11px;line-height:11px;color:#839B8D;transform:translateX(-50%);background:#07130C;padding:0 3px}
+.fr{position:absolute;top:2px;height:9px;border-left:1px solid rgba(242,155,56,.9);border-right:1px solid rgba(242,155,56,.45);
+  background:repeating-linear-gradient(115deg,rgba(242,155,56,.5) 0 1px,rgba(242,155,56,.08) 1px 5px);transition:left .7s cubic-bezier(.2,0,0,1),width .7s cubic-bezier(.2,0,0,1)}
+.fr.far{border-color:rgba(242,155,56,.45);background:repeating-linear-gradient(115deg,rgba(242,155,56,.3) 0 1px,rgba(242,155,56,.04) 1px 5px)}
+.hztouch{flex:none;width:178px;display:flex;flex-direction:column;font-size:11px;line-height:12px;color:#839B8D;white-space:nowrap}
+.sw{display:flex;flex-direction:column;gap:5px;align-items:stretch}
+.seg{display:flex;height:24px;border:1px solid #1D3528;border-radius:4px;overflow:hidden;background:#040B07}
+.seg button{flex:1;border:0;background:transparent;color:#ACC4B6;font-size:11px;font-weight:600;letter-spacing:.02em;cursor:pointer;padding:0 4px;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:#14231B;color:#E6F1EA;box-shadow:inset 0 -2px 0 #00E868}
+.seg button:focus-visible{outline:2px solid #00E868;outline-offset:-2px}
+
+/* ── the stage: the river, the baskets, the money lane, the banks ── */
+.stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+#bed,#flow{position:absolute;left:0;top:0;pointer-events:none;z-index:3}
+.air{flex:none;height:26px;position:relative}
+.onvoid{position:absolute;top:3px;font-family:Orbitron,Inter,sans-serif;font-weight:600;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#839B8D;
+  text-shadow:0 0 3px #040B07,0 0 8px #040B07,0 0 14px #040B07}
+.onvoid.a{left:2px}.onvoid.b{right:2px}
+/* the front over the book: the ribbon's own datum, drawn in the air above every basket it touches */
+.frontb{position:absolute;height:5px;z-index:2;pointer-events:none;border-left:1px solid rgba(242,155,56,.9);border-right:1px solid rgba(242,155,56,.9);
+  background:repeating-linear-gradient(115deg,rgba(242,155,56,.62) 0 1px,rgba(242,155,56,.1) 1px 5px)}
+.baskets{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:flex-start;gap:10px}
+/* a basket: the solid card is REAL's alone; DEMO, PAPER and rows with no venue sit apart, in a dashed annex */
+.basket{flex:none;display:flex;align-items:flex-start;gap:6px}
+.basket.stack{flex-direction:column}
+.bk{flex:none;display:flex;flex-direction:column;transition:border-color .6s}
+.annex{flex:none;display:flex;flex-direction:column;background:#07130C;border:1px dashed #2C4739;border-radius:6px;min-width:0;transition:border-color .6s}
+.bk.apart,.bk.slotc{border-style:dashed;border-color:#2C4739}
+.bhead,.ahead{height:58px;flex:none;padding:8px 10px 0;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+.bt{font-size:12px;letter-spacing:.14em;color:#ACC4B6;white-space:nowrap;line-height:16px;display:flex;align-items:center;gap:6px}
+.bt .pl{font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:none;color:#ACC4B6}
+.ahead .bt{color:#839B8D}
+.bs,.bv{display:flex;align-items:center;gap:6px;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap}
+.bv{color:#839B8D}
+.slotc .bt{display:block;white-space:normal;font-size:11px;letter-spacing:.08em;line-height:14px}
+/* the river's band: three still current lines are drawn in it; their height is the weather */
+.water{height:28px;flex:none;background:#040B07;border-top:1px solid #14261D;border-bottom:1px solid #14261D;transition:background .6s,border-color .6s}
+.bbody{padding:8px 9px;transition:background .6s}
+.cols{display:flex;gap:10px;align-items:flex-start}
+.col{display:flex;flex-direction:column;gap:8px;flex:none}
+.wband{flex:none;display:flex;flex-direction:column;font-size:11px;color:#839B8D}
+.wbandh{display:flex;align-items:center;gap:6px;height:16px;white-space:nowrap}
+.wbandh .sum{margin-left:auto;font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;font-size:11px;color:#E6F1EA}
+.wbandh .sum.nil{font-family:Inter,sans-serif;color:#839B8D}
+.wbar{position:relative;height:3px;background:linear-gradient(#1D3528,#1D3528) left bottom/100% 1px no-repeat}
+.wbar i{position:absolute;left:0;top:0;bottom:0;min-width:2px}
+.wbar.w-real i{background:#CC3A40}
+.wbar.w-demo i{box-shadow:inset 0 0 0 1px #D6BC5E}
+.wbar.w-paper i{box-shadow:inset 0 0 0 1px #839B8D}
+.wbar.w-none i{border-top:1px dashed #839B8D;border-bottom:1px dashed #839B8D}
+.wband .apn{height:13px;line-height:13px;white-space:nowrap}
+.more{flex:none;height:22px;display:flex;align-items:center;padding:0 8px;border:1px dashed #2C4739;border-radius:4px;font-size:11px;color:#ACC4B6;white-space:nowrap;overflow:hidden}
+.bfoot{border-top:1px solid #14261D;padding:6px 10px 7px;display:flex;flex-direction:column;gap:1px;font-size:11px;color:#839B8D}
+.bfoot .fw{display:flex;align-items:center;gap:6px;line-height:16px;white-space:nowrap;color:#ACC4B6}
+.bfoot .fw .m{color:#E6F1EA}
+.bfoot .un{line-height:16px;color:#ACC4B6;white-space:nowrap}
+.sg{line-height:15px}
+.sg .m{color:#ACC4B6}
+/* the weather's level tones every basket's outline: ink when calm, amber when stressed, coral in a crisis */
+.lv-stressed .bk,.lv-stressed .annex{border-color:rgba(242,155,56,.5)}
+.lv-crisis .bk,.lv-crisis .annex{border-color:rgba(255,107,110,.58)}
+.lv-stressed .water{border-color:rgba(242,155,56,.28)}
+.lv-crisis .water{border-color:rgba(255,107,110,.32)}
+/* a shut market: frost over its outline, its head, its water and its body; nothing moves in it */
+.stage .basket.shut .bk,.stage .basket.shut .annex{border-color:rgba(172,196,182,.55)}
+.basket.shut .bhead,.basket.shut .ahead{background:repeating-linear-gradient(115deg,rgba(172,196,182,.07) 0 1px,rgba(172,196,182,0) 1px 6px)}
+.stage .basket.shut .water{background:repeating-linear-gradient(115deg,rgba(172,196,182,.2) 0 1px,rgba(172,196,182,0) 1px 5px),#040B07;border-color:rgba(172,196,182,.3)}
+.basket.shut .bbody{background:repeating-linear-gradient(115deg,rgba(172,196,182,.05) 0 1px,rgba(172,196,182,0) 1px 6px)}
+.basket.shut .bt{color:#839B8D}
+.basket.grow{animation:growb .4s cubic-bezier(.2,0,0,1) both}
+@keyframes growb{from{clip-path:inset(0 34% 0 0)}to{clip-path:inset(0 0 0 0)}}
+
+/* a block: its height is its size on the page's one scale (real money sets it); under 48 px the bar at its foot says the size */
+.blk{position:relative;flex:none;background:#0D1B14;border:1px solid #1D3528;border-radius:4px;padding:4px 6px 4px 6px;display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;outline:0}
+.blk:focus-visible{outline:2px solid #00E868;outline-offset:1px}
+.blk.real{border-left:3px solid #CC3A40;padding-left:4px}
+.blk .chip{padding:0 4px}
+.blk.demo{border-color:rgba(214,188,94,.66)}
+.blk.paper{border-color:rgba(131,155,141,.7)}
+.blk.none{border:1px dashed rgba(131,155,141,.8)}
+.blk .pe,.blk .be{position:absolute;left:0;right:0;height:2px;opacity:0;pointer-events:none}
+.blk .pe{top:0;background:linear-gradient(270deg,rgba(0,232,104,.95),rgba(0,232,104,.25) 60%,rgba(0,232,104,0))}
+.blk.real .pe{left:12px}
+.blk .be{bottom:0;background:linear-gradient(90deg,rgba(230,241,234,.9),rgba(230,241,234,.2) 60%,rgba(230,241,234,0))}
+.pb{position:absolute;left:0;bottom:0;height:3px;background:#55665D;pointer-events:none}
+.blk.capd .pb{background:repeating-linear-gradient(90deg,#55665D 0 5px,rgba(85,102,93,0) 5px 7px)}
+/* the one-line row: what a floor-size block of the annex becomes when its column is full */
+.blk.mic{flex-direction:row;align-items:center;gap:5px;padding-top:0;padding-bottom:0}
+.blk.mic .l1,.blk.mic .l2{height:20px}
+.blk.mic .l2{margin-left:auto}
+.blk.mic .l1 .chip,.blk.mic .lt,.blk.mic .ov,.blk.mic .ca{display:none}
+.l1{display:flex;align-items:center;gap:5px;height:18px;flex:none}
+.sym{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:13px;color:#E6F1EA}
+.ov{font-family:"JetBrains Mono",monospace;font-size:13px;line-height:1;color:#ACC4B6}
+.lt{margin-left:auto;font-size:12px;line-height:1;flex:none}
+.lt.watch{color:#F29B38}.lt.alarm{color:#FF6B6E}.lt.unheld{color:#839B8D}
+.l2{display:flex;align-items:center;gap:4px;height:18px;flex:none}
+.rr{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:12px;color:#E6F1EA;white-space:nowrap}
+.ca{margin-left:auto;display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#ACC4B6;white-space:nowrap}
+.ca.stale{color:#F29B38}
+.t2 .ca{display:none}
+.t2 .rr{font-size:15px}
+.t3 .rr{font-size:20px}.t3 .l2{height:26px}
+.l3,.x4{font-family:"JetBrains Mono",monospace;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap;overflow:hidden;flex:none}
+.l3 b,.x4 b,.em b{font-family:Inter,sans-serif;font-weight:400;color:#839B8D}
+.pnl{font-family:"JetBrains Mono",monospace;font-size:12px;line-height:15px;color:#E6F1EA;white-space:nowrap;overflow:hidden;flex:none}
+.pnl span{display:block;font-family:Inter,sans-serif;font-size:11px;line-height:14px;color:#839B8D}
+.em{font-family:"JetBrains Mono",monospace;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap;overflow:hidden;flex:none}
+.l4{align-items:center;gap:6px;font-size:11px;line-height:14px;height:14px;color:#ACC4B6;white-space:nowrap;overflow:hidden;flex:none}
+.l4.stale{color:#F29B38}
+.trk{position:relative;height:7px;margin-top:auto;background:#040B07;border:1px solid #1D3528;border-radius:1px;flex:none}
+.trk.nil{border-style:dashed}
+.trk i{position:absolute;display:block}
+.trk .fill{top:0;bottom:0}
+.trk .fill.u{background:rgba(31,163,116,.8)}
+.trk .fill.d{background:repeating-linear-gradient(115deg,rgba(255,107,110,.95) 0 1px,rgba(255,107,110,0) 1px 3px);box-shadow:inset 0 0 0 1px rgba(255,107,110,.9)}
+.trk .en{top:-2px;bottom:-2px;width:1px;background:#839B8D}
+.trk .mk{top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#E6F1EA}
+.lv{justify-content:space-between;gap:2px;font-family:"JetBrains Mono",monospace;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap;flex:none}
+.lv b{font-family:Inter,sans-serif;font-weight:600;font-size:11px;color:#839B8D;margin-right:2px}
+.org{font-size:11px;line-height:14px;color:#839B8D;flex:none;min-width:0}
+.org span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.org .ru{color:#ACC4B6}
+.blk .l3,.blk .x4,.blk .pnl,.blk .em,.blk .l4,.blk .trk,.blk .lv,.blk .org{display:none}
+.blk.t1 .l3,.blk.t1 .org,.blk.t3 .em,.blk.t3 .pnl,.blk.t4 .x4,.blk.t2 .trk{display:block}
+.blk.t2 .l4,.blk.t2 .lv{display:flex}
+.blk.t1 .org{margin-top:auto}
+.blk.t2 .org{margin-top:0}
+.bar,.barl{display:none}
+/* a block forms: its frame opens, then its lines stand at full strength (no figure ever fades in or out) */
+.blk.forming{animation:formf .6s cubic-bezier(.2,0,0,1) both}
+@keyframes formf{from{clip-path:inset(46% 46% 46% 46% round 4px)}to{clip-path:inset(0 0 0 0 round 4px)}}
+.blk.forming>*{animation:formc .6s steps(1,end) both}
+@keyframes formc{0%{visibility:hidden}60%,100%{visibility:visible}}
+/* a close: the bet has left; its place is held, as an outline, until its money has left the basket */
+.blk.leaving{pointer-events:none;border-style:dashed;border-color:#2C4739;border-left:1px dashed #2C4739;background:transparent}
+.blk.leaving>*{visibility:hidden}
+.blk.leaving::after{content:"closed";position:absolute;left:7px;top:6px;font-size:11px;line-height:14px;color:#839B8D}
+
+.lane{flex:none;height:26px}
+.bottom{flex:none;height:130px;display:grid;grid-template-columns:1.3fr 1.25fr .75fr;gap:14px}
+.chead{display:flex;align-items:center;justify-content:space-between;gap:10px;height:28px;padding:0 12px;border-bottom:1px solid #14261D}
+.ctitle{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#ACC4B6;white-space:nowrap}
+.cmeta{font-size:11px;color:#839B8D;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pools{display:grid;grid-template-columns:1.9fr 1fr 1.05fr;height:100px}
+.pool{padding:7px 12px 0;border-right:1px solid #14261D;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pool:last-child{border-right:0}
+.pool .ph{display:flex;align-items:center;gap:6px;height:18px}
+.pool .pv{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:15px;line-height:20px;color:#E6F1EA;white-space:nowrap}
+.pool .ps{font-size:11px;line-height:15px;color:#ACC4B6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pool .ps.d{color:#839B8D}
+.cbody{padding:6px 12px 0;display:flex;flex-direction:column;gap:2px}
+.ln{font-size:12px;line-height:18px;color:#ACC4B6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ln .m{color:#E6F1EA}
+.ln.s{font-size:11px;line-height:16px;color:#839B8D}
+.ln.s .m{color:#ACC4B6}
+.ln .chip{vertical-align:1px;margin-right:6px}
+.ln .chip+.chip,.ln.s .chip{margin:0 2px}
+.signals .cbody{gap:0;padding-top:5px}.signals .ln.s{line-height:15px}
+/* a result's colour sits on its figure, and only for real money booked at eToro's price */
+.ln .m.up,.fl .m.up,.tblp .m.up{color:#24B582}.ln .m.down,.fl .m.down,.tblp .m.down{color:#FF6B6E}
+.events{display:none}
+.legend{flex:none;height:20px;display:flex;align-items:center;gap:16px;font-size:11px;color:#839B8D;white-space:nowrap;
+  text-shadow:0 0 3px #040B07,0 0 8px #040B07}
+.legend .k{display:inline-flex;align-items:center;gap:6px}
+.legend .gm{width:7px;height:7px;border-radius:50%;background:#9CFFC8;box-shadow:0 0 5px rgba(0,232,104,.8)}
+.legend .gt{width:7px;height:7px;border:1.5px solid #E6F1EA;transform:rotate(45deg)}
+.legend .gs{width:15px;height:3px;background:repeating-linear-gradient(90deg,#E6F1EA 0 3px,rgba(230,241,234,0) 3px 6px)}
+.legend .sp{margin-left:auto}
+.tbtn{height:20px;padding:0 9px;border:1px solid #1D3528;border-radius:4px;background:#07130C;color:#ACC4B6;font-size:11px;font-weight:600;cursor:pointer;text-shadow:none}
+.tbtn:focus-visible{outline:2px solid #00E868;outline-offset:1px}
+.mocknote{border:1px dashed #2C4739;border-radius:999px;background:#040B07;padding:2px 10px;font-size:11px;color:#839B8D;text-shadow:none}
+.pillb{height:20px;display:inline-flex;align-items:center;gap:5px;padding:0 9px;border:1px solid #1D3528;border-radius:999px;background:#07130C;color:#ACC4B6;font-size:11px;text-shadow:none;white-space:nowrap}
+button.pillb{cursor:pointer}button.pillb:focus-visible{outline:2px solid #00E868;outline-offset:1px}
+.pillb .m{color:#E6F1EA}
+
+/* labels that ride with a flow: opaque, so no figure ever sits on the void or on a mote */
+.fl{position:absolute;left:0;top:0;z-index:5;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 9px;border-radius:999px;background:#0D1B14;border:1px solid #2C4739;
+  font-size:11px;color:#ACC4B6;white-space:nowrap;pointer-events:none;opacity:0;will-change:transform}
+.fl.on{opacity:1}
+.fl .m{color:#E6F1EA}
+.fl .chip{height:14px}
+.fl.evl{max-width:calc(100% - 240px);overflow:hidden}
+.pop{position:absolute;z-index:6;width:292px;background:#0D1B14;border:1px solid #2C4739;border-radius:6px;box-shadow:0 12px 32px rgba(0,0,0,.5);padding:10px 12px;display:none;font-size:12px;color:#ACC4B6}
+.pop.on{display:block}
+.pop h4{margin:0 0 6px;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:#E6F1EA}
+.pop dl{margin:0;display:grid;grid-template-columns:104px 1fr;gap:3px 8px}
+.pop dt{color:#839B8D;font-size:11px;line-height:16px}
+.pop dd{margin:0;color:#E6F1EA;font-size:12px;line-height:16px}
+.pop .pf{margin-top:8px;padding-top:7px;border-top:1px solid #1D3528;font-size:11px;color:#839B8D}
+.tblp{position:absolute;inset:0;z-index:7;background:#07130C;border:1px solid #1D3528;border-radius:6px;padding:12px 14px;overflow:auto;display:none}
+.tblp.on{display:block}
+.tblp h3{margin:0 0 8px;font-family:Orbitron,Inter,sans-serif;font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#ACC4B6}
+.tblp table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px}
+.tblp th{text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#839B8D;padding:5px 8px;border-bottom:1px solid #1D3528;white-space:nowrap}
+.tblp td{padding:5px 8px;border-bottom:1px solid #14261D;color:#E6F1EA;white-space:normal}
+.tblp td.m{white-space:nowrap}
+.tblp td .chip{vertical-align:1px}
+.tblp td.w{color:#ACC4B6}
+.tblp td.w.m{white-space:normal}
+
+@media (prefers-reduced-motion:reduce){
+  .halo,.adot,.dot.live.hb{animation:none}
+  .blk.forming,.blk.forming>*,.basket.grow{animation:none}
+  .fr{transition:none}
+  .legend .k.mv{display:none}
+}
+.adflow{position:absolute;left:0;top:0;z-index:3;pointer-events:none;overflow:visible}
+.admote{position:absolute;left:0;top:0;z-index:4;width:9px;height:9px;border-radius:50%;pointer-events:none;offset-rotate:0deg;opacity:0;
+  background:radial-gradient(circle,#D6FFE6 0,rgba(0,232,104,.85) 30%,rgba(0,232,104,.22) 60%,rgba(0,232,104,0) 100%)}
+.adtokm{position:absolute;left:0;top:0;z-index:4;width:9px;height:9px;border:1.5px solid #E6F1EA;background:#040B07;pointer-events:none;offset-rotate:0deg;transform:rotate(45deg);opacity:0}
+@keyframes adpe{0%{opacity:.95}6%{opacity:.6}12%{opacity:.3}18%{opacity:0}100%{opacity:0}}
+@keyframes admv0{0%{offset-distance:0%;animation-timing-function:steps(36,end)}37.50%{offset-distance:100%}100%{offset-distance:100%}}
+@keyframes admo0{0%{opacity:1}37.50%{opacity:0}100%{opacity:0}}
+@keyframes admv1{0%{offset-distance:0%;animation-timing-function:steps(36,end)}37.50%{offset-distance:100%}100%{offset-distance:100%}}
+@keyframes admo1{0%{opacity:1}37.50%{opacity:0}100%{opacity:0}}
+@keyframes admv2{0%{offset-distance:0%;animation-timing-function:steps(36,end)}37.50%{offset-distance:100%}100%{offset-distance:100%}}
+@keyframes admo2{0%{opacity:1}37.50%{opacity:0}100%{opacity:0}}
+@keyframes adtkv{0%,8.33%{offset-distance:0%;animation-timing-function:steps(47,end)}21.36%{offset-distance:93.82%;animation-timing-function:steps(27,end)}28.86%,100%{offset-distance:100%}}
+@keyframes adtko{0%{opacity:0}8.33%{opacity:1}21.36%{opacity:1;animation-timing-function:steps(9,end)}28.86%,100%{opacity:0}}
+.fl.adchip{opacity:0;animation:adchip 12s step-end infinite}
+@keyframes adchip{0%{opacity:0}21.36%{opacity:1}59.70%{opacity:0}100%{opacity:0}}
+.fl.adtok{left:0;opacity:0;animation:adtokx 12s linear infinite,adtoko 12s step-end infinite}
+@keyframes adtokx{0%,8.33%{transform:translateX(var(--x0));animation-timing-function:steps(47,end)}21.36%,100%{transform:translateX(var(--x1))}}
+@keyframes adtoko{0%{opacity:0}8.33%{opacity:1}21.36%{opacity:0}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.admote,.adtokm,.fl.adchip,.fl.adtok{display:none}.blk .pe{animation:none!important}}
+</style>
+</helmet>
+<div class="app" style="width:1440px;height:900px;box-sizing:border-box;background:#040B07;color:#E6F1EA;font-family:Inter,system-ui,sans-serif;font-size:13px;display:grid;grid-template-columns:232px minmax(0,1fr) 40px;grid-template-rows:44px 32px minmax(0,1fr) 32px;overflow:hidden;position:relative">
+
+<aside class="side" aria-label="Sauron">
+<div class="brand">
+<span class="mark" aria-hidden="true"><span class="halo"></span>
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00E868" stroke-linecap="square" stroke-linejoin="miter" role="img" aria-label="Sauron Vision">
+<polygon points="12,1.4 21.2,6.7 21.2,17.3 12,22.6 2.8,17.3 2.8,6.7" stroke-width="1"></polygon>
+<path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z" fill="#00E868" fill-opacity="0.14" stroke="none"></path>
+<circle cx="12" cy="12" r="3.1" fill="#00E868" stroke="none"></circle>
+<circle cx="12" cy="12" r="1.25" fill="#07130C" stroke="none"></circle>
+<path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z" stroke-width="1.5"></path>
+<path d="M12 1.4V3.2M12 22.6V20.8" stroke-width="0.9"></path>
+</svg></span>
+<span class="word">SAURON</span>
+</div>
+<nav class="navwrap" aria-label="Main">
+<div class="sec">Amon Hen</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 21V9l3-6 3 6v12M7 21h10M10.5 13h3"></path></svg><span>Barad-dûr</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle></svg><span>Oculus</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1"></rect><rect x="13" y="4" width="7" height="7" rx="1"></rect><rect x="4" y="13" width="7" height="7" rx="1"></rect><rect x="13" y="13" width="7" height="7" rx="1"></rect></svg><span>Operations center</span></a>
+<a class="nav on" href="#" aria-current="page"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7c3-2.4 5 2.4 8 0s5-2.4 8 0M3 12c3-2.4 5 2.4 8 0s5-2.4 8 0M3 17c3-2.4 5 2.4 8 0s5-2.4 8 0"></path></svg><span>Anduin</span></a>
+<div class="sec">The book</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path></svg><span>Portfolio</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"></path></svg><span>Positions</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 10l9-6 9 6M5 10v9h14v-9"></path></svg><span>Treasury</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 12h4"></path></svg><span>Brokers</span></a>
+<div class="sec">What can act</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z"></path></svg><span>Signals</span><span class="count" id="navsig">13</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="7" width="14" height="11" rx="2"></rect><path d="M12 3v4M9 12h.01M15 12h.01"></path></svg><span>Asset bots</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z"></path></svg><span>Risk limits</span></a>
+<div class="sec">Watch</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v4l3 2"></path></svg><span>Orcs</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="2.5"></circle></svg><span>Morgul</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"></path></svg><span>Ops</span></a>
+</nav>
+</aside>
+
+<header class="top">
+<span class="ptitle">Anduin</span>
+<span class="psub" title="CLOSE and TAKE TRADE stay on Positions and on the ticket.">the Great River: what flows through the book · no order leaves this page</span>
+<div class="tr">
+<span class="m ck" style="font-size:12px;color:#ACC4B6" id="clock">20:46:10 UTC</span>
+<span class="ses" style="font-size:12px;color:#839B8D">sessions <span class="m" style="color:#ACC4B6" id="sess">9/14</span></span>
+<span class="pill"><span class="dot live hb"></span>eToro · live</span>
+<span class="armed"><span class="adot"></span>Real armed</span>
+<button type="button" class="ib" aria-label="Notifications"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"></path><path d="M10 20a2 2 0 004 0"></path></svg></button>
+<button type="button" class="ib" aria-label="Lock"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 018 0v3"></path></svg></button>
+<span class="who">OPERATOR <span aria-hidden="true" style="font-size:11px">▾</span></span>
+</div>
+</header>
+
+<div class="band">
+<div class="q"><span class="s">EURUSD</span><span class="p m">1.08745</span><span class="m up">+0.12%</span><span class="dot live"></span></div>
+<div class="q"><span class="s">XAUUSD</span><span class="p m">2,648.12</span><span class="m down">-0.39%</span><span class="dot recent"></span></div>
+<div class="q"><span class="s">BTCUSD</span><span class="p m">91,230.5</span><span class="m down">-1.28%</span><span class="dot live"></span></div>
+<div class="q"><span class="s">NAS100</span><span class="p m">20,872.0</span><span class="m up">+0.30%</span><span class="dot recent"></span></div>
+<div class="q"><span class="s">AAPL</span><span class="p m">227.06</span><span class="m down">-0.45%</span><span class="dot live" id="bandaapl"></span></div>
+<div class="news"><span class="lbl">News</span><span>Fed Chair speaks at 22:00 UTC · eurozone PMI beats</span></div>
+</div>
+
+<main class="main">
+<div class="grain" aria-hidden="true"></div>
+<div class="page">
+
+<section class="sky card" aria-label="The market's weather">
+<div class="wx">
+<div class="wx1"><span class="over">Weather</span><span class="lvl calm" id="lvl">calm</span><span class="m sc" id="score">score <span>18</span><span class="i3">/100</span></span><span class="agew" id="wxage"><i class="dot live"></i><span>read <span class="m">6</span> min ago</span></span></div>
+<div class="wx2" id="wxwords">Business as usual.</div>
+</div>
+<div class="hz">
+<div class="hzt" id="hzt"><span class="lbl">Next print</span><span>Fed Chair speaks · <span class="m i1">22:00 UTC</span> · in <span class="m i1">1</span> h <span class="m i1">14</span> min</span></div>
+<div class="hzr"><div class="hztrack" id="hztrack" data-t="1"><div class="hzbase"></div><div class="fr far" id="fr2" title="BoJ Governor speaks · 23:30 UTC: the care's window, 60 minutes before to 15 after" style="left: 77.2981px; width: 55.8333px;"></div><div class="fr" id="fr1" title="Fed Chair speaks · 22:00 UTC: the care's window, 60 minutes before to 15 after" style="left: 10.2981px; width: 55.8333px;"></div><div class="hznow"></div><div class="hztick" style="left:44.66666666666667px"></div><div class="hztick" style="left:89.33333333333334px"></div><div class="hztick" style="left:134px"></div><div class="hztick" style="left:178.66666666666669px"></div><div class="hztick" style="left:223.33333333333334px"></div><div class="hztick" style="left:267px"></div><span class="hzlab" style="left:134px">+3 h</span><span class="hzlab" style="left:252px">+6 h</span><span class="hzlab" style="left:14px">now</span></div><span class="hztouch" id="hztouch"><span title="By the care's own rule: forex by either leg's currency, the rest by the home currency. The ⚠ is the care's record on the rows it manages, written at its next pass.">touches <span class="m i2">7</span> open</span><span>calendar read <span class="m">2</span> h ago</span></span></div>
+</div>
+<div class="sw">
+<div class="seg" role="group" aria-label="Group the baskets by" id="segG">
+<button type="button" data-g="family" aria-pressed="true">Family</button><button type="button" data-g="world" aria-pressed="false">World</button><button type="button" data-g="lane" aria-pressed="false">Lane</button><button type="button" data-g="theme" aria-pressed="false">Theme</button>
+</div>
+<div class="seg" role="group" aria-label="Size the blocks by" id="segS">
+<button type="button" data-s="exposure" aria-pressed="true">By exposure</button><button type="button" data-s="risk" aria-pressed="false">By risk</button>
+</div>
+</div>
+</section>
+
+<div class="stage lv-calm" id="stage">
+<div class="air" id="air"><span class="onvoid a" aria-hidden="true">Upstream</span><span class="onvoid b" aria-hidden="true">Downstream</span></div>
+<div class="baskets" id="baskets" aria-label="The baskets"><section class="basket" data-k="forex" data-vol="41"><div class="card bk" data-box="card" style="width:183px"><div class="bhead"><div class="bt disp">Forex</div><div class="bs"><i class="dot live"></i><span>open · shuts Fri <span class="m">21:00 UTC</span></span></div><div class="bv" title="20-day realized volatility as a percentile of the last 120 values, for this family's held instruments (else the starred ones): the median of 3. Daily bars to 11 Nov.">vol <span class="m i2">p41</span> · <span class="m i2">3</span> inst · <span class="m i2">11</span> Nov</div></div><div class="water"></div><div class="bbody"><div class="cols"><div class="col"><div class="wband" data-w="real" style="width:163px" title="Exposure at the mark of this basket's Real rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-real">Real</span><span class="sum">$21,749.00</span></div><div class="wbar w-real"><i style="width:100.0%"></i></div></div><article class="blk real t1 t2 t3 t4" data-id="eurusd" tabindex="0" style="width:163px;height:255px" aria-label="EURUSD long, Real"><i class="pe" style="animation:adpe 3.2s step-end 1.20s infinite"></i><i class="be"></i><div class="l1"><span class="sym">EURUSD</span><span class="chip w-real">Real</span></div><div class="l2"><span class="chip long">LONG</span><span class="rr" title="R now, from the estimate">+1.25R</span><span class="ca live" data-c="" title="eToro quote, 0 s old"><i class="dot live"></i><span><span class="m">0</span> s</span></span></div><div class="l3"><b>risk</b> $52.00 <b>·</b> 20,000</div><div class="em" title="Entry, then the mark">1.08420 <b>→</b> 1.08745</div><div class="pnl">≈ +$65.00 ▲<span>estimate: eToro quote</span></div><div class="x4"><b>exposure</b> $21,749.00</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> $433.68</div><div class="x4"><b>held</b> 41 min</div><div class="l4 live" data-b=""><i class="dot live"></i><span>eToro quote · <span class="m">0</span> s</span></div><div class="trk"><i class="fill u" style="left:25.0%;width:31.3%"></i><i class="en" style="left:25.0%"></i><i class="mk" style="left:56.3%"></i></div><div class="lv"><span><b>SL</b>1.08160</span><span><b>TP</b>1.09200</span></div><div class="org" title="bot Forex #3 · rule trend_break_4h"><span class="ru">trend_break_4h</span><span class="la">Forex #3</span></div><i class="pb" style="width:100.0%" title="exposure at the mark: $21,749.00 of $21,749.00"></i><span class="barl">exposure at the mark $21,749.00</span><div class="bar"><i style="width:100%"></i></div></article></div></div></div><div class="bfoot"><div class="fw" title="Capital at work: margin when levered, cost otherwise. It is what left the reserve for these rows.">at work <span class="m">$433.68</span></div><a class="un" href="#" title="Held at eToro and not on Sauron: no row, no mark, so no block. They are part of the reserve's “outside Sauron”. The Operations Center lists them.">+<span class="m">1</span> at eToro, not on Sauron ›</a><div class="sg" title="Three readers, and they do not add up: signal rows of this family, trade rows opened, and symbols whose last recorded reason is a refusal. All in the last 24 hours."><span class="m">24</span> h · <span class="m">9</span> signals · <span class="m">5</span> taken · <span class="m">2</span> refused</div></div></div><div class="annex side" data-box="annex"><div class="ahead" title="DEMO, PAPER and rows that state no venue are drawn apart: they never set the scale and are never added to real money."><div class="bt disp">Apart</div><div class="bs">demo · paper · no venue</div><div class="bv">never added to real</div></div><div class="water"></div><div class="bbody"><div class="cols"><div class="col"><div class="wband" data-w="demo" style="width:163px" title="Exposure at the mark of this basket's Demo rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-demo">Demo</span><span class="sum">$2,000.00</span></div><div class="wbar w-demo"><i style="width:9.2%"></i></div></div><article class="blk demo" data-id="usdjpy" tabindex="0" style="width:163px;height:48px" aria-label="USDJPY long, Demo"><i class="pe"></i><i class="be"></i><div class="l1"><span class="sym">USDJPY</span><span class="chip w-demo">Demo</span></div><div class="l2"><span class="chip long">LONG</span><span class="rr" title="R now, from the estimate">+0.82R</span><span class="ca recent" data-c="" title="eToro tick, 3 min old"><i class="dot recent"></i><span><span class="m">3</span> min</span></span></div><div class="l3"><b>risk</b> $6.57 <b>·</b> 2,000</div><div class="em" title="Entry, then the mark">151.900 <b>→</b> 152.310</div><div class="pnl">≈ +$5.40 ▲<span>estimate: eToro tick</span></div><div class="x4"><b>exposure</b> $2,000.00</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> $100.00</div><div class="x4"><b>held</b> 2 d</div><div class="l4 recent" data-b=""><i class="dot recent"></i><span>eToro tick · <span class="m">3</span> min</span></div><div class="trk"><i class="fill u" style="left:33.3%;width:27.4%"></i><i class="en" style="left:33.3%"></i><i class="mk" style="left:60.7%"></i></div><div class="lv"><span><b>SL</b>151.400</span><span><b>TP</b>152.900</span></div><div class="org" title="your ticket, from its instrument page"><span class="ru">Your ticket</span><span class="la">its instrument page</span></div><i class="pb" style="width:9.2%" title="exposure at the mark: $2,000.00 of $21,749.00"></i><span class="barl">exposure at the mark $2,000.00</span><div class="bar"><i style="width:9%"></i></div></article><div class="wband" data-w="paper" style="width:163px" title="Exposure at the mark of this basket's Paper rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-paper">Paper</span><span class="sum">$12,904.40</span></div><div class="wbar w-paper"><i style="width:59.3%"></i></div><div class="apn" title="A row with no USD figure for this measure is drawn at the floor and left out of the sum.">+<span class="m">1</span> apart: no USD figure</div></div><article class="blk paper t1 t2" data-id="gbpusd" tabindex="0" style="width:163px;height:151px" aria-label="GBPUSD short, Paper"><i class="pe"></i><i class="be"></i><div class="l1"><span class="sym">GBPUSD</span><span class="chip w-paper">Paper</span></div><div class="l2"><span class="chip short">SHORT</span><span class="rr" title="R now, from the estimate">+0.18R</span><span class="ca recent" data-c="" title="Yahoo, 3 min old"><i class="dot recent"></i><span><span class="m">3</span> min</span></span></div><div class="l3"><b>risk</b> $37.00 <b>·</b> 10,000</div><div class="em" title="Entry, then the mark">1.29110 <b>→</b> 1.29044</div><div class="pnl">≈ +$6.60 ▲<span>estimate: Yahoo</span></div><div class="x4"><b>exposure</b> $12,904.40</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> <b>simulated</b></div><div class="x4"><b>held</b> 1 h</div><div class="l4 recent" data-b=""><i class="dot recent"></i><span>Yahoo · <span class="m">3</span> min</span></div><div class="trk"><i class="fill u" style="left:33.3%;width:6.0%"></i><i class="en" style="left:33.3%"></i><i class="mk" style="left:39.3%"></i></div><div class="lv"><span><b>SL</b>1.29480</span><span><b>TP</b>1.28370</span></div><div class="org" title="bot Forex paper #7 · rule fx_pivot_rejection"><span class="ru">fx_pivot_rejection</span><span class="la">Forex paper #7</span></div><i class="pb" style="width:59.3%" title="exposure at the mark: $12,904.40 of $21,749.00"></i><span class="barl">exposure at the mark $12,904.40</span><div class="bar"><i style="width:59%"></i></div></article><article class="blk paper" data-id="eurjpy" tabindex="0" style="width:163px;height:48px" aria-label="EURJPY short, Paper"><i class="pe" style="animation:adpe 3.2s step-end 2.25s infinite"></i><i class="be"></i><div class="l1"><span class="sym">EURJPY</span><span class="chip w-paper">Paper</span></div><div class="l2"><span class="chip short">SHORT</span><span class="rr" title="R now, from the estimate">+0.25R</span><span class="ca live" data-c="" title="OANDA, 0 s old"><i class="dot live"></i><span><span class="m">0</span> s</span></span></div><div class="l3"><b>risk</b> — <b>· no USD stamp</b></div><div class="em" title="Entry, then the mark">162.450 <b>→</b> 162.326</div><div class="pnl">≈ +1,240.00 JPY<span>estimate: OANDA</span></div><div class="x4"><b>exposure</b> — <b>no USD stamp</b></div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> <b>simulated</b></div><div class="x4"><b>held</b> 3 h</div><div class="l4 live" data-b=""><i class="dot live"></i><span>OANDA · <span class="m">0</span> s</span></div><div class="trk"><i class="fill u" style="left:33.3%;width:8.4%"></i><i class="en" style="left:33.3%"></i><i class="mk" style="left:41.7%"></i></div><div class="lv"><span><b>SL</b>162.950</span><span><b>TP</b>161.450</span></div><div class="org" title="bot Forex paper #7 · rule fx_pivot_rejection"><span class="ru">fx_pivot_rejection</span><span class="la">Forex paper #7</span></div><i class="pb" style="width:0.0%" title="exposure at the mark: no USD figure of $21,749.00"></i><span class="barl">exposure at the mark — not in USD</span><div class="bar"><i style="width:0%"></i></div></article></div></div></div></div></section><section class="basket slot" data-k="crypto" data-vol="78"><div class="card bk slotc" data-box="card" style="width:124px"><div class="bhead" title="open · never shuts"><div class="bt disp">Crypto</div><div class="bs"><i class="dot live"></i><span>open</span></div></div><div class="water"></div><div class="bfoot"><div class="fw"><span class="i3">Nothing open</span></div><div class="sg" title="Three readers, and they do not add up: signal rows of this family, trade rows opened, and symbols whose last recorded reason is a refusal. All in the last 24 hours."><span class="m">24</span> h · <span class="m">3</span> signals · <span class="m">1</span> taken · <span class="m">1</span> refused</div></div></div></section><section class="basket" data-k="commodity" data-vol="55"><div class="card bk" data-box="card" style="width:183px"><div class="bhead"><div class="bt disp">Commodities</div><div class="bs"><i class="dot live"></i><span>open · break <span class="m">22:00 UTC</span></span></div><div class="bv" title="20-day realized volatility as a percentile of the last 120 values, for this family's held instruments (else the starred ones): the median of 1. Daily bars to 11 Nov.">vol <span class="m i2">p55</span> · <span class="m i2">1</span> inst · <span class="m i2">11</span> Nov</div></div><div class="water"></div><div class="bbody"><div class="cols"><div class="col"><div class="wband" data-w="real" style="width:163px" title="Exposure at the mark of this basket's Real rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-real">Real</span><span class="sum">$3,972.18</span></div><div class="wbar w-real"><i style="width:18.3%"></i></div></div><article class="blk real" data-id="xauusd" tabindex="0" style="width:163px;height:48px" aria-label="XAUUSD short, Real"><i class="pe"></i><i class="be"></i><div class="l1"><span class="sym">XAUUSD</span><span class="chip w-real">Real</span></div><div class="l2"><span class="chip short">SHORT</span><span class="rr" title="R now, from the estimate">+0.44R</span><span class="ca recent" data-c="" title="eToro tick, 3 min old"><i class="dot recent"></i><span><span class="m">3</span> min</span></span></div><div class="l3"><b>risk</b> $35.40 <b>·</b> 1.5</div><div class="em" title="Entry, then the mark">2,658.40 <b>→</b> 2,648.12</div><div class="pnl">≈ +$15.42 ▲<span>estimate: eToro tick</span></div><div class="x4"><b>exposure</b> $3,972.18</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> $198.61</div><div class="x4"><b>held</b> 2 h</div><div class="l4 recent" data-b=""><i class="dot recent"></i><span>eToro tick · <span class="m">3</span> min</span></div><div class="trk"><i class="fill u" style="left:33.3%;width:14.7%"></i><i class="en" style="left:33.3%"></i><i class="mk" style="left:48.0%"></i></div><div class="lv"><span><b>SL</b>2,682.00</span><span><b>TP</b>2,611.20</span></div><div class="org" title="bot Commodities #4 · rule trend_break_4h"><span class="ru">trend_break_4h</span><span class="la">Commodities #4</span></div><i class="pb" style="width:18.3%" title="exposure at the mark: $3,972.18 of $21,749.00"></i><span class="barl">exposure at the mark $3,972.18</span><div class="bar"><i style="width:18%"></i></div></article></div></div></div><div class="bfoot"><div class="fw" title="Capital at work: margin when levered, cost otherwise. It is what left the reserve for these rows.">at work <span class="m">$198.61</span></div><a class="un" href="#" title="Held at eToro and not on Sauron: no row, no mark, so no block. They are part of the reserve's “outside Sauron”. The Operations Center lists them.">+<span class="m">1</span> at eToro, not on Sauron ›</a><div class="sg" title="Three readers, and they do not add up: signal rows of this family, trade rows opened, and symbols whose last recorded reason is a refusal. All in the last 24 hours."><span class="m">24</span> h · <span class="m">3</span> signals · <span class="m">1</span> taken · <span class="m">1</span> refused</div></div></div></section><section class="basket stack" data-k="stock" data-vol="36"><div class="card bk" data-box="card" style="width:183px"><div class="bhead"><div class="bt disp">Stocks &amp; ETFs</div><div class="bs"><i class="dot live"></i><span>open · shuts <span class="m">21:00 UTC</span></span></div><div class="bv" title="20-day realized volatility as a percentile of the last 120 values, for this family's held instruments (else the starred ones): the median of 2. Daily bars to 11 Nov.">vol <span class="m i2">p36</span> · <span class="m i2">2</span> inst · <span class="m i2">11</span> Nov</div></div><div class="water"></div><div class="bbody"><div class="cols"><div class="col"><div class="wband" data-w="real" style="width:163px" title="Exposure at the mark of this basket's Real rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-real">Real</span><span class="sum">$908.24</span></div><div class="wbar w-real"><i style="width:4.2%"></i></div></div><article class="blk real" data-id="aapl" tabindex="0" style="width:163px;height:48px" aria-label="AAPL long, Real"><i class="pe" style="animation:adpe 3.2s step-end 3.30s infinite"></i><i class="be"></i><div class="l1"><span class="sym">AAPL</span><span class="chip w-real">Real</span></div><div class="l2"><span class="chip long">LONG</span><span class="rr" title="R now, from the estimate">-0.21R</span><span class="ca live" data-c="" title="eToro quote, 3 s old"><i class="dot live"></i><span><span class="m">3</span> s</span></span></div><div class="l3"><b>risk</b> $19.60 <b>·</b> 4</div><div class="em" title="Entry, then the mark">228.10 <b>→</b> 227.06</div><div class="pnl">≈ -$4.16 ▼<span>estimate: eToro quote</span></div><div class="x4"><b>exposure</b> $908.24</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> $908.24</div><div class="x4"><b>held</b> 26 h</div><div class="l4 live" data-b=""><i class="dot live"></i><span>eToro quote · <span class="m">3</span> s</span></div><div class="trk"><i class="fill d" style="left:26.3%;width:7.0%"></i><i class="en" style="left:33.3%"></i><i class="mk" style="left:26.3%"></i></div><div class="lv"><span><b>SL</b>223.20</span><span><b>TP</b>237.90</span></div><div class="org" title="bot Stocks #2 · rule rsi_reversal_1d"><span class="ru">rsi_reversal_1d</span><span class="la">Stocks #2</span></div><i class="pb" style="width:4.2%" title="exposure at the mark: $908.24 of $21,749.00"></i><span class="barl">exposure at the mark $908.24</span><div class="bar"><i style="width:4%"></i></div></article></div></div></div><div class="bfoot"><div class="fw" title="Capital at work: margin when levered, cost otherwise. It is what left the reserve for these rows.">at work <span class="m">$908.24</span></div><div class="sg" title="Three readers, and they do not add up: signal rows of this family, trade rows opened, and symbols whose last recorded reason is a refusal. All in the last 24 hours."><span class="m">24</span> h · <span class="m">4</span> signals · <span class="m">1</span> taken · <span class="m">1</span> refused</div></div></div><div class="annex under" data-box="annex" style="width:183px" title="DEMO, PAPER and rows that state no venue are drawn apart: they never set the scale and are never added to real money."><div class="bbody"><div class="cols"><div class="col"><div class="wband" data-w="none" style="width:163px" title="Exposure at the mark of this basket's No venue rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-none">No venue</span><span class="sum">$1,246.14</span></div><div class="wbar w-none"><i style="width:5.7%"></i></div></div><article class="blk none" data-id="msft" tabindex="0" style="width:163px;height:48px" aria-label="MSFT long, No venue"><i class="pe"></i><i class="be"></i><div class="l1"><span class="sym">MSFT</span><span class="chip w-none">No venue</span><span class="lt unheld" title="Nothing on the platform manages, trails or closes this position: it is a row of your hand-kept book.">○</span></div><div class="l2"><span class="chip long">LONG</span><span class="rr" title="No stop recorded: no R, not a zero.">—</span><span class="ca recent" data-c="" title="Yahoo, 5 min old"><i class="dot recent"></i><span><span class="m">5</span> min</span></span></div><div class="l3"><b>risk</b> — <b>· no stop</b></div><div class="em" title="Entry, then the mark">410.00 <b>→</b> 415.38</div><div class="pnl">≈ +$16.14 ▲<span>estimate: Yahoo</span></div><div class="x4"><b>exposure</b> $1,246.14</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> <b>not known</b></div><div class="x4"><b>held</b> 3 d</div><div class="l4 recent" data-b=""><i class="dot recent"></i><span>Yahoo · <span class="m">5</span> min</span></div><div class="trk nil"></div><div class="lv"><span><b>SL</b>—</span><span><b>TP</b>—</span></div><div class="org" title="recorded by hand: it states no venue"><span class="ru">Recorded by hand</span><span class="la">no venue</span></div><i class="pb" style="width:5.7%" title="exposure at the mark: $1,246.14 of $21,749.00"></i><span class="barl">exposure at the mark $1,246.14</span><div class="bar"><i style="width:6%"></i></div></article></div></div></div></div></section><section class="basket stack" data-k="index" data-vol="62"><div class="card bk" data-box="card" style="width:183px"><div class="bhead"><div class="bt disp">Indices</div><div class="bs"><i class="dot live"></i><span>cash · shuts <span class="m">21:00 UTC</span></span></div><div class="bv" title="20-day realized volatility as a percentile of the last 120 values, for this family's held instruments (else the starred ones): the median of 1. Daily bars to 11 Nov.">vol <span class="m i2">p62</span> · <span class="m i2">1</span> inst · <span class="m i2">11</span> Nov</div></div><div class="water"></div><div class="bfoot"><div class="fw"><span class="chip w-real">Real</span><span class="i3">— nothing open</span></div><div class="sg" title="Three readers, and they do not add up: signal rows of this family, trade rows opened, and symbols whose last recorded reason is a refusal. All in the last 24 hours."><span class="m">24</span> h · <span class="m">2</span> signals · <span class="m">0</span> taken · <span class="m">0</span> refused</div></div></div><div class="annex under" data-box="annex" style="width:183px" title="DEMO, PAPER and rows that state no venue are drawn apart: they never set the scale and are never added to real money."><div class="bbody"><div class="cols"><div class="col"><div class="wband" data-w="demo" style="width:163px" title="Exposure at the mark of this basket's Demo rows. One sum per world, never added. The bar is this sum on the page's one scale."><div class="wbandh"><span class="chip w-demo">Demo</span><span class="sum">$20,872.00</span></div><div class="wbar w-demo"><i style="width:96.0%"></i></div></div><article class="blk demo t1 t2 t3" data-id="nas100" tabindex="0" style="width:163px;height:245px" aria-label="NAS100 long, Demo"><i class="pe"></i><i class="be"></i><div class="l1"><span class="sym">NAS100</span><span class="chip w-demo">Demo</span></div><div class="l2"><span class="chip long">LONG</span><span class="rr" title="R now, from the estimate">+0.56R</span><span class="ca recent" data-c="" title="eToro tick, 2 min old"><i class="dot recent"></i><span><span class="m">2</span> min</span></span></div><div class="l3"><b>risk</b> $110.50 <b>·</b> 1</div><div class="em" title="Entry, then the mark">20,810.5 <b>→</b> 20,872.0</div><div class="pnl">≈ +$61.50 ▲<span>estimate: eToro tick</span></div><div class="x4"><b>exposure</b> $20,872.00</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> $1,043.60</div><div class="x4"><b>held</b> 3 d</div><div class="l4 recent" data-b=""><i class="dot recent"></i><span>eToro tick · <span class="m">2</span> min</span></div><div class="trk"><i class="fill u" style="left:33.3%;width:18.7%"></i><i class="en" style="left:33.3%"></i><i class="mk" style="left:52.0%"></i></div><div class="lv"><span><b>SL</b>20,700.0</span><span><b>TP</b>21,031.5</span></div><div class="org" title="your ticket, from signal #3988"><span class="ru">Your ticket</span><span class="la">signal #3988</span></div><i class="pb" style="width:96.0%" title="exposure at the mark: $20,872.00 of $21,749.00"></i><span class="barl">exposure at the mark $20,872.00</span><div class="bar"><i style="width:96%"></i></div></article></div></div></div></div></section></div>
+<div class="lane" aria-hidden="true"></div>
+<div class="bottom">
+<section class="card reserve" aria-label="The reserve">
+<div class="chead"><span class="ctitle">Reserve</span><span class="cmeta" title="Available and used are eToro's own cells for the world the account is routed to. They change only when a new reading arrives, never by counting.">eToro's own cells, read <span id="rAge"><span class="m">40</span> s</span> ago · never added</span></div>
+<div class="pools">
+<div class="pool" data-w="real"><div class="ph"><span class="chip w-real">Real</span><span class="lbl">available</span></div><div class="pv" id="rAvail">$6,051.51</div><div class="ps">used <span class="m" id="rUsed">$4,402.10</span> · <span class="m" id="rPct">42.1%</span></div><div class="ps" title="The capital at work of the real rows drawn on this page: the baskets' own “at work” figures, summed.">on Sauron <span class="m" id="rOn">$1,540.53</span></div><div class="ps"><a href="#" title="Used at eToro by positions that have no row on Sauron: no block is drawn for them. The Operations Center lists them.">outside <span class="m" id="rOut">$2,861.57</span> · <span class="m" id="rOutN">2</span> positions ›</a></div></div>
+<div class="pool" data-w="demo"><div class="ph"><span class="chip w-demo">Demo</span></div><div class="pv" title="Not read: the sync reads the eToro account in its current world.">—</div><div class="ps">not read</div><div class="ps d" title="The sync reads the eToro account in its current world: one world at a time.">one at a time</div></div>
+<div class="pool" data-w="paper"><div class="ph"><span class="chip w-paper">Paper</span></div><div class="pv">$20,000.00</div><div class="ps" title="The capital of the two paper configs.">simulated pools</div><div class="ps d">no money moves</div></div>
+</div>
+</section>
+<section class="card signals" aria-label="Upstream, the last 24 hours">
+<div class="chead"><span class="ctitle">Upstream · <span class="m">24</span> h</span><span class="cmeta" title="Signal rows, trade rows, the last recorded reason per symbol and bot, and the rail are four separate readers.">four readers · they do not add up</span></div>
+<div class="cbody">
+<div class="ln" id="sgline"><span class="m">21</span> signals arrived · <span class="m">8</span> taken: <span class="m">3</span> real · <span class="m">5</span> paper</div>
+<div class="ln s" id="sgrail"><span class="m">6</span> on the rail, read <span class="m">20</span> s ago · <span title="Not refusals: the vote said no (hold), the bot already holds the symbol (already_open), or it traded it too recently (cooldown).">waiting <span class="m">9</span></span></div>
+<div class="ln s" id="sgwhy" title="The last reason recorded for each symbol, bot by bot, when it is a refusal and under 24 hours old: cost_filter 2, bad_timing 1, gate_blocked 1, leverage_refused 1. Not a count of refusals: only the last one per symbol is kept.">refused: <span class="m">5</span> symbols by their last reason · <span class="m">3</span> by real bots</div>
+<div class="ln s" id="sglast" title="The last refusal: AAPL long, by Stocks #2 (Real).">last: <span class="m">AAPL</span> · Stocks #2 <span class="chip w-real">Real</span> · <span class="m">bad_timing</span> · <span class="m">20:31 UTC</span></div>
+<div class="ln s" id="sgdet" style="padding-left:2px" title="The detail the bot stored with this refusal, word for word (the same line why_no_trade prints).">the stock market shuts at <span class="m">21:00 UTC</span>: no new entry in its last minutes</div>
+<div class="ln s">feeds <i class="dot live"></i> eToro <span class="m">12</span> s · <i class="dot live"></i> OANDA <span class="m">1</span> s · <i class="dot recent"></i> Yahoo <span class="m">3</span> min</div>
+</div>
+</section>
+<section class="card closed" aria-label="Downstream, closed in the last 24 hours">
+<div class="chead"><span class="ctitle">Downstream · <span class="m">24</span> h</span><span class="cmeta">in R</span></div>
+<div class="cbody" id="clbody"><div class="ln"><span class="chip w-real">Real</span><span class="m">2</span> closes · <span class="m up">+1.69R</span> · <span class="m up">+$12.40 ▲</span></div><div class="ln s" style="padding-left:2px">at eToro's price · fees not counted</div><div class="ln"><span class="chip w-demo">Demo</span><span class="i3" title="Nothing closed in this world in 24 h.">— nothing closed</span></div><div class="ln"><span class="chip w-paper">Paper</span><span class="m">5</span> simulated · <span class="m">−0.80R</span></div></div>
+</section>
+
+</div>
+
+
+
+
+
+<svg class="adflow" width="1144" height="668" viewBox="0 0 1144 668" aria-hidden="true"><path d="M31.5 525.5L1142 525.5M31.5 538L31.5 525.5M242.5 538L242.5 525.5M352.5 538L352.5 525.5" stroke="#ACC4B6" stroke-opacity=".26" stroke-dasharray="2 5" fill="none"></path><path d="M0 100.5L2 100.6L4 100.5L6 100.3L8 100L10 99.5L12 99L14 98.5L16 98.1L18 97.9L20 97.9L22 98.2L24 98.7L26 99.2L28 99.8L30 100.4L32 100.8L34 101.1L36 101.1L38 100.9L40 100.6L42 100.1L44 99.5L46 98.9L48 98.4L50 98L52 97.9L54 97.9L56 98.2L58 98.7L60 99.2L62 99.8L64 100.4L66 100.8L68 101.1L70 101.1L72 100.9L74 100.6L76 100.1L78 99.5L80 98.9L82 98.4L84 98L86 97.9L88 97.9L90 98.2L92 98.7L94 99.2L96 99.8L98 100.4L100 100.8L102 101.1L104 101.1L106 100.9L108 100.6L110 100.1L112 99.5L114 98.9L116 98.4L118 98L120 97.9L122 97.9L124 98.2L126 98.7L128 99.2L130 99.8L132 100.4L134 100.8L136 101.1L138 101.1L140 100.9L142 100.6L144 100.1L146 99.5L148 98.9L150 98.4L152 98L154 97.9L156 97.9L158 98.2L160 98.7L162 99.2L164 99.8L166 100.4L168 100.8L170 101.1L172 101.1L174 100.9L176 100.6L178 100.1L180 99.5L182 98.9L184 98.4L186 98L188 97.9L190 97.9L192 98.2L194 98.7L196 99.2L198 99.8L200 100.4L202 100.8L204 101.1L206 101.1L208 100.9L210 100.6L212 100.1L214 99.5L216 98.9L218 98.4L220 98L222 97.9L224 97.9L226 98.2L228 98.7L230 99.2L232 99.8L234 100.4L236 100.8L238 101.1L240 101.1L242 100.9L244 100.6L246 100.1L248 99.5L250 98.9L252 98.4L254 98L256 97.9L258 97.9L260 98.2L262 98.7L264 99.2L266 99.8L268 100.4L270 100.8L272 101.1L274 101.1L276 100.9L278 100.6L280 100.1L282 99.5L284 98.9L286 98.4L288 98L290 97.9L292 97.9L294 98.2L296 98.7L298 99.2L300 99.8L302 100.4L304 100.8L306 101.1L308 101.1L310 100.9L312 100.6L314 100.1L316 99.5L318 98.9L320 98.4L322 98L324 97.9L326 97.9L328 98.2L330 98.7L332 99.2L334 99.8L336 100.4L338 100.8L340 101.1L342 101.1L344 100.9L346 100.6L348 100.1L350 99.5L352 98.9L354 98.4L356 98.1L358 98L360 98.1L362 98.4L364 98.8L366 99.3L368 99.7L370 100.1L372 100.3L374 100.5L376 100.5L378 100.4L380 100.2L382 99.9L384 99.5L386 99L388 98.6L390 98.1L392 97.9L394 97.8L396 98L398 98.4L400 99.1L402 99.9L404 100.7L406 101.2L408 101.6L410 101.7L412 101.4L414 101L416 100.3L418 99.5L420 98.7L422 98L424 97.6L426 97.3L428 97.4L430 97.8L432 98.4L434 99.1L436 99.9L438 100.7L440 101.2L442 101.6L444 101.7L446 101.4L448 101L450 100.3L452 99.5L454 98.7L456 98L458 97.6L460 97.3L462 97.4L464 97.8L466 98.4L468 99.1L470 99.9L472 100.7L474 101.2L476 101.6L478 101.7L480 101.4L482 101L484 100.3L486 99.5L488 98.7L490 98.1L492 97.8L494 97.7L496 97.9L498 98.3L500 98.8L502 99.3L504 99.7L506 100L508 100.3L510 100.5L512 100.5L514 100.4L516 100.2L518 99.9L520 99.5L522 99L524 98.6L526 98.2L528 98L530 97.9L532 98.1L534 98.5L536 99.2L538 99.8L540 100.5L542 101L544 101.3L546 101.3L548 101.1L550 100.7L552 100.1L554 99.5L556 98.8L558 98.3L560 97.9L562 97.7L564 97.7L566 98.1L568 98.5L570 99.2L572 99.8L574 100.5L576 101L578 101.3L580 101.3L582 101.1L584 100.7L586 100.1L588 99.5L590 98.8L592 98.3L594 97.9L596 97.7L598 97.7L600 98.1L602 98.5L604 99.2L606 99.8L608 100.5L610 101L612 101.3L614 101.3L616 101.1L618 100.7L620 100.1L622 99.5L624 98.8L626 98.3L628 97.9L630 97.7L632 97.7L634 98.1L636 98.5L638 99.2L640 99.8L642 100.5L644 101L646 101.3L648 101.3L650 101.1L652 100.7L654 100.1L656 99.5L658 98.8L660 98.3L662 97.9L664 97.7L666 97.7L668 98.1L670 98.5L672 99.2L674 99.8L676 100.5L678 101L680 101.3L682 101.3L684 101L686 100.6L688 100L690 99.5L692 99L694 98.7L696 98.5L698 98.5L700 98.5L702 98.7L704 99L706 99.3L708 99.7L710 100L712 100.4L714 100.6L716 100.7L718 100.6L720 100.4L722 100L724 99.5L726 98.9L728 98.5L730 98.1L732 98L734 98L736 98.3L738 98.7L740 99.2L742 99.8L744 100.3L746 100.7L748 101L750 101L752 100.9L754 100.5L756 100L758 99.5L760 98.9L762 98.5L764 98.1L766 98L768 98L770 98.3L772 98.7L774 99.2L776 99.8L778 100.3L780 100.7L782 101L784 101L786 100.9L788 100.5L790 100L792 99.5L794 98.9L796 98.5L798 98.1L800 98L802 98L804 98.3L806 98.7L808 99.2L810 99.8L812 100.3L814 100.7L816 101L818 101L820 100.9L822 100.5L824 100L826 99.5L828 98.9L830 98.5L832 98.1L834 98L836 98L838 98.3L840 98.7L842 99.2L844 99.8L846 100.3L848 100.7L850 101L852 101L854 100.9L856 100.5L858 100L860 99.5L862 98.9L864 98.5L866 98.1L868 98L870 98L872 98.3L874 98.7L876 99.2L878 99.8L880 100.2L882 100.5L884 100.7L886 100.7L888 100.5L890 100.2L892 99.9L894 99.5L896 99.1L898 98.8L900 98.6L902 98.5L904 98.4L906 98.5L908 98.8L910 99.2L912 99.8L914 100.4L916 100.9L918 101.3L920 101.4L922 101.2L924 100.8L926 100.2L928 99.5L930 98.8L932 98.2L934 97.8L936 97.6L938 97.6L940 98L942 98.5L944 99.2L946 99.9L948 100.5L950 101L952 101.4L954 101.4L956 101.2L958 100.8L960 100.2L962 99.5L964 98.8L966 98.2L968 97.8L970 97.6L972 97.6L974 98L976 98.5L978 99.2L980 99.9L982 100.5L984 101L986 101.4L988 101.4L990 101.2L992 100.8L994 100.2L996 99.5L998 98.8L1000 98.2L1002 97.8L1004 97.6L1006 97.6L1008 98L1010 98.5L1012 99.2L1014 99.9L1016 100.5L1018 101L1020 101.4L1022 101.4L1024 101.2L1026 100.8L1028 100.2L1030 99.5L1032 98.8L1034 98.2L1036 97.8L1038 97.6L1040 97.6L1042 98L1044 98.5L1046 99.2L1048 99.9L1050 100.5L1052 101L1054 101.4L1056 101.4L1058 101.2L1060 100.8L1062 100.2L1064 99.5L1066 98.8L1068 98.2L1070 97.9L1072 97.8L1074 98L1076 98.3L1078 98.8L1080 99.3L1082 99.7L1084 100.1L1086 100.3L1088 100.5L1090 100.5L1092 100.4L1094 100.2L1096 99.9L1098 99.5L1100 99.1L1102 98.8L1104 98.6L1106 98.5L1108 98.5L1110 98.7L1112 99L1114 99.3L1116 99.7L1118 100L1120 100.3L1122 100.5L1124 100.5L1126 100.4L1128 100.2L1130 99.9L1132 99.5L1134 99.1L1136 98.8" stroke="#00E868" stroke-opacity=".10" stroke-width="9" stroke-linejoin="round" fill="none"></path><path d="M0 100.5L2 100.6L4 100.5L6 100.3L8 100L10 99.5L12 99L14 98.5L16 98.1L18 97.9L20 97.9L22 98.2L24 98.7L26 99.2L28 99.8L30 100.4L32 100.8L34 101.1L36 101.1L38 100.9L40 100.6L42 100.1L44 99.5L46 98.9L48 98.4L50 98L52 97.9L54 97.9L56 98.2L58 98.7L60 99.2L62 99.8L64 100.4L66 100.8L68 101.1L70 101.1L72 100.9L74 100.6L76 100.1L78 99.5L80 98.9L82 98.4L84 98L86 97.9L88 97.9L90 98.2L92 98.7L94 99.2L96 99.8L98 100.4L100 100.8L102 101.1L104 101.1L106 100.9L108 100.6L110 100.1L112 99.5L114 98.9L116 98.4L118 98L120 97.9L122 97.9L124 98.2L126 98.7L128 99.2L130 99.8L132 100.4L134 100.8L136 101.1L138 101.1L140 100.9L142 100.6L144 100.1L146 99.5L148 98.9L150 98.4L152 98L154 97.9L156 97.9L158 98.2L160 98.7L162 99.2L164 99.8L166 100.4L168 100.8L170 101.1L172 101.1L174 100.9L176 100.6L178 100.1L180 99.5L182 98.9L184 98.4L186 98L188 97.9L190 97.9L192 98.2L194 98.7L196 99.2L198 99.8L200 100.4L202 100.8L204 101.1L206 101.1L208 100.9L210 100.6L212 100.1L214 99.5L216 98.9L218 98.4L220 98L222 97.9L224 97.9L226 98.2L228 98.7L230 99.2L232 99.8L234 100.4L236 100.8L238 101.1L240 101.1L242 100.9L244 100.6L246 100.1L248 99.5L250 98.9L252 98.4L254 98L256 97.9L258 97.9L260 98.2L262 98.7L264 99.2L266 99.8L268 100.4L270 100.8L272 101.1L274 101.1L276 100.9L278 100.6L280 100.1L282 99.5L284 98.9L286 98.4L288 98L290 97.9L292 97.9L294 98.2L296 98.7L298 99.2L300 99.8L302 100.4L304 100.8L306 101.1L308 101.1L310 100.9L312 100.6L314 100.1L316 99.5L318 98.9L320 98.4L322 98L324 97.9L326 97.9L328 98.2L330 98.7L332 99.2L334 99.8L336 100.4L338 100.8L340 101.1L342 101.1L344 100.9L346 100.6L348 100.1L350 99.5L352 98.9L354 98.4L356 98.1L358 98L360 98.1L362 98.4L364 98.8L366 99.3L368 99.7L370 100.1L372 100.3L374 100.5L376 100.5L378 100.4L380 100.2L382 99.9L384 99.5L386 99L388 98.6L390 98.1L392 97.9L394 97.8L396 98L398 98.4L400 99.1L402 99.9L404 100.7L406 101.2L408 101.6L410 101.7L412 101.4L414 101L416 100.3L418 99.5L420 98.7L422 98L424 97.6L426 97.3L428 97.4L430 97.8L432 98.4L434 99.1L436 99.9L438 100.7L440 101.2L442 101.6L444 101.7L446 101.4L448 101L450 100.3L452 99.5L454 98.7L456 98L458 97.6L460 97.3L462 97.4L464 97.8L466 98.4L468 99.1L470 99.9L472 100.7L474 101.2L476 101.6L478 101.7L480 101.4L482 101L484 100.3L486 99.5L488 98.7L490 98.1L492 97.8L494 97.7L496 97.9L498 98.3L500 98.8L502 99.3L504 99.7L506 100L508 100.3L510 100.5L512 100.5L514 100.4L516 100.2L518 99.9L520 99.5L522 99L524 98.6L526 98.2L528 98L530 97.9L532 98.1L534 98.5L536 99.2L538 99.8L540 100.5L542 101L544 101.3L546 101.3L548 101.1L550 100.7L552 100.1L554 99.5L556 98.8L558 98.3L560 97.9L562 97.7L564 97.7L566 98.1L568 98.5L570 99.2L572 99.8L574 100.5L576 101L578 101.3L580 101.3L582 101.1L584 100.7L586 100.1L588 99.5L590 98.8L592 98.3L594 97.9L596 97.7L598 97.7L600 98.1L602 98.5L604 99.2L606 99.8L608 100.5L610 101L612 101.3L614 101.3L616 101.1L618 100.7L620 100.1L622 99.5L624 98.8L626 98.3L628 97.9L630 97.7L632 97.7L634 98.1L636 98.5L638 99.2L640 99.8L642 100.5L644 101L646 101.3L648 101.3L650 101.1L652 100.7L654 100.1L656 99.5L658 98.8L660 98.3L662 97.9L664 97.7L666 97.7L668 98.1L670 98.5L672 99.2L674 99.8L676 100.5L678 101L680 101.3L682 101.3L684 101L686 100.6L688 100L690 99.5L692 99L694 98.7L696 98.5L698 98.5L700 98.5L702 98.7L704 99L706 99.3L708 99.7L710 100L712 100.4L714 100.6L716 100.7L718 100.6L720 100.4L722 100L724 99.5L726 98.9L728 98.5L730 98.1L732 98L734 98L736 98.3L738 98.7L740 99.2L742 99.8L744 100.3L746 100.7L748 101L750 101L752 100.9L754 100.5L756 100L758 99.5L760 98.9L762 98.5L764 98.1L766 98L768 98L770 98.3L772 98.7L774 99.2L776 99.8L778 100.3L780 100.7L782 101L784 101L786 100.9L788 100.5L790 100L792 99.5L794 98.9L796 98.5L798 98.1L800 98L802 98L804 98.3L806 98.7L808 99.2L810 99.8L812 100.3L814 100.7L816 101L818 101L820 100.9L822 100.5L824 100L826 99.5L828 98.9L830 98.5L832 98.1L834 98L836 98L838 98.3L840 98.7L842 99.2L844 99.8L846 100.3L848 100.7L850 101L852 101L854 100.9L856 100.5L858 100L860 99.5L862 98.9L864 98.5L866 98.1L868 98L870 98L872 98.3L874 98.7L876 99.2L878 99.8L880 100.2L882 100.5L884 100.7L886 100.7L888 100.5L890 100.2L892 99.9L894 99.5L896 99.1L898 98.8L900 98.6L902 98.5L904 98.4L906 98.5L908 98.8L910 99.2L912 99.8L914 100.4L916 100.9L918 101.3L920 101.4L922 101.2L924 100.8L926 100.2L928 99.5L930 98.8L932 98.2L934 97.8L936 97.6L938 97.6L940 98L942 98.5L944 99.2L946 99.9L948 100.5L950 101L952 101.4L954 101.4L956 101.2L958 100.8L960 100.2L962 99.5L964 98.8L966 98.2L968 97.8L970 97.6L972 97.6L974 98L976 98.5L978 99.2L980 99.9L982 100.5L984 101L986 101.4L988 101.4L990 101.2L992 100.8L994 100.2L996 99.5L998 98.8L1000 98.2L1002 97.8L1004 97.6L1006 97.6L1008 98L1010 98.5L1012 99.2L1014 99.9L1016 100.5L1018 101L1020 101.4L1022 101.4L1024 101.2L1026 100.8L1028 100.2L1030 99.5L1032 98.8L1034 98.2L1036 97.8L1038 97.6L1040 97.6L1042 98L1044 98.5L1046 99.2L1048 99.9L1050 100.5L1052 101L1054 101.4L1056 101.4L1058 101.2L1060 100.8L1062 100.2L1064 99.5L1066 98.8L1068 98.2L1070 97.9L1072 97.8L1074 98L1076 98.3L1078 98.8L1080 99.3L1082 99.7L1084 100.1L1086 100.3L1088 100.5L1090 100.5L1092 100.4L1094 100.2L1096 99.9L1098 99.5L1100 99.1L1102 98.8L1104 98.6L1106 98.5L1108 98.5L1110 98.7L1112 99L1114 99.3L1116 99.7L1118 100L1120 100.3L1122 100.5L1124 100.5L1126 100.4L1128 100.2L1130 99.9L1132 99.5L1134 99.1L1136 98.8" stroke="#ACC4B6" stroke-opacity=".6" stroke-linejoin="round" fill="none"></path><path d="M0 90.8L2 90.7L4 90.5L6 90.3L8 90.1L10 89.9L12 89.8L14 89.8L16 89.9L18 90.1L20 90.3L22 90.6L24 90.9L26 91.1L28 91.3L30 91.3L32 91.2L34 91L36 90.8L38 90.5L40 90.2L42 90L44 89.8L46 89.7L48 89.7L50 89.9L52 90.1L54 90.3L56 90.6L58 90.9L60 91.1L62 91.3L64 91.3L66 91.2L68 91L70 90.8L72 90.5L74 90.2L76 90L78 89.8L80 89.7L82 89.7L84 89.9L86 90.1L88 90.3L90 90.6L92 90.9L94 91.1L96 91.3L98 91.3L100 91.2L102 91L104 90.8L106 90.5L108 90.2L110 90L112 89.8L114 89.7L116 89.7L118 89.9L120 90.1L122 90.3L124 90.6L126 90.9L128 91.1L130 91.3L132 91.3L134 91.2L136 91L138 90.8L140 90.5L142 90.2L144 90L146 89.8L148 89.7L150 89.7L152 89.9L154 90.1L156 90.3L158 90.6L160 90.9L162 91.1L164 91.3L166 91.3L168 91.2L170 91L172 90.8L174 90.5L176 90.2L178 90L180 89.8L182 89.7L184 89.7L186 89.9L188 90.1L190 90.3L192 90.6L194 90.9L196 91.1L198 91.3L200 91.3L202 91.2L204 91L206 90.8L208 90.5L210 90.2L212 90L214 89.8L216 89.7L218 89.7L220 89.9L222 90.1L224 90.3L226 90.6L228 90.9L230 91.1L232 91.3L234 91.3L236 91.2L238 91L240 90.8L242 90.5L244 90.2L246 90L248 89.8L250 89.7L252 89.7L254 89.9L256 90.1L258 90.3L260 90.6L262 90.9L264 91.1L266 91.3L268 91.3L270 91.2L272 91L274 90.8L276 90.5L278 90.2L280 90L282 89.8L284 89.7L286 89.7L288 89.9L290 90.1L292 90.3L294 90.6L296 90.9L298 91.1L300 91.3L302 91.3L304 91.2L306 91L308 90.8L310 90.5L312 90.2L314 90L316 89.8L318 89.7L320 89.7L322 89.9L324 90.1L326 90.3L328 90.6L330 90.9L332 91.1L334 91.3L336 91.3L338 91.2L340 91L342 90.8L344 90.5L346 90.2L348 90L350 89.8L352 89.7L354 89.7L356 89.9L358 90.1L360 90.4L362 90.6L364 90.8L366 91L368 91L370 91L372 90.9L374 90.8L376 90.7L378 90.5L380 90.3L382 90.2L384 90L386 89.9L388 89.8L390 89.9L392 90.1L394 90.3L396 90.7L398 91L400 91.4L402 91.5L404 91.6L406 91.5L408 91.2L410 90.9L412 90.5L414 90.1L416 89.8L418 89.5L420 89.4L422 89.5L424 89.6L426 89.9L428 90.3L430 90.7L432 91.1L434 91.4L436 91.5L438 91.6L440 91.5L442 91.2L444 90.9L446 90.5L448 90.1L450 89.8L452 89.5L454 89.4L456 89.5L458 89.6L460 89.9L462 90.3L464 90.7L466 91.1L468 91.4L470 91.5L472 91.6L474 91.5L476 91.2L478 90.9L480 90.5L482 90.1L484 89.8L486 89.5L488 89.4L490 89.5L492 89.7L494 90L496 90.3L498 90.6L500 90.9L502 91L504 91L506 91L508 90.9L510 90.8L512 90.7L514 90.5L516 90.3L518 90.1L520 90L522 89.9L524 89.8L526 89.9L528 90.1L530 90.3L532 90.7L534 91L536 91.2L538 91.4L540 91.4L542 91.3L544 91.1L546 90.8L548 90.5L550 90.2L552 89.9L554 89.7L556 89.6L558 89.6L560 89.8L562 90L564 90.3L566 90.7L568 91L570 91.2L572 91.4L574 91.4L576 91.3L578 91.1L580 90.8L582 90.5L584 90.2L586 89.9L588 89.7L590 89.6L592 89.6L594 89.8L596 90L598 90.3L600 90.7L602 91L604 91.2L606 91.4L608 91.4L610 91.3L612 91.1L614 90.8L616 90.5L618 90.2L620 89.9L622 89.7L624 89.6L626 89.6L628 89.8L630 90L632 90.3L634 90.7L636 91L638 91.2L640 91.4L642 91.4L644 91.3L646 91.1L648 90.8L650 90.5L652 90.2L654 89.9L656 89.7L658 89.6L660 89.6L662 89.8L664 90L666 90.3L668 90.7L670 91L672 91.2L674 91.4L676 91.4L678 91.3L680 91.1L682 90.8L684 90.5L686 90.2L688 90L690 89.9L692 89.8L694 89.9L696 90L698 90.2L700 90.4L702 90.6L704 90.8L706 90.9L708 91L710 91L712 91L714 90.9L716 90.7L718 90.5L720 90.3L722 90L724 89.9L726 89.7L728 89.8L730 89.9L732 90.1L734 90.4L736 90.6L738 90.9L740 91.1L742 91.2L744 91.3L746 91.2L748 91L750 90.8L752 90.5L754 90.2L756 90L758 89.8L760 89.7L762 89.8L764 89.9L766 90.1L768 90.4L770 90.6L772 90.9L774 91.1L776 91.2L778 91.3L780 91.2L782 91L784 90.8L786 90.5L788 90.2L790 90L792 89.8L794 89.7L796 89.8L798 89.9L800 90.1L802 90.4L804 90.6L806 90.9L808 91.1L810 91.2L812 91.3L814 91.2L816 91L818 90.8L820 90.5L822 90.2L824 90L826 89.8L828 89.7L830 89.8L832 89.9L834 90.1L836 90.4L838 90.6L840 90.9L842 91.1L844 91.2L846 91.3L848 91.2L850 91L852 90.8L854 90.5L856 90.2L858 90L860 89.8L862 89.7L864 89.8L866 89.9L868 90.1L870 90.4L872 90.6L874 90.9L876 91.1L878 91.2L880 91.2L882 91.1L884 90.9L886 90.7L888 90.5L890 90.3L892 90.2L894 90.1L896 90L898 90L900 90.1L902 90.2L904 90.4L906 90.6L908 90.8L910 91.1L912 91.2L914 91.3L916 91.3L918 91.1L920 90.9L922 90.5L924 90.2L926 89.9L928 89.6L930 89.5L932 89.6L934 89.7L936 90L938 90.3L940 90.7L942 91L944 91.3L946 91.4L948 91.5L950 91.4L952 91.2L954 90.9L956 90.5L958 90.2L960 89.9L962 89.6L964 89.5L966 89.6L968 89.7L970 90L972 90.3L974 90.7L976 91L978 91.3L980 91.4L982 91.5L984 91.4L986 91.2L988 90.9L990 90.5L992 90.2L994 89.9L996 89.6L998 89.5L1000 89.6L1002 89.7L1004 90L1006 90.3L1008 90.7L1010 91L1012 91.3L1014 91.4L1016 91.5L1018 91.4L1020 91.2L1022 90.9L1024 90.5L1026 90.2L1028 89.9L1030 89.6L1032 89.5L1034 89.6L1036 89.7L1038 90L1040 90.3L1042 90.7L1044 91L1046 91.3L1048 91.4L1050 91.5L1052 91.4L1054 91.2L1056 90.9L1058 90.5L1060 90.2L1062 89.9L1064 89.6L1066 89.5L1068 89.6L1070 89.8L1072 90.1L1074 90.4L1076 90.6L1078 90.9L1080 91L1082 91.1L1084 91L1086 90.9L1088 90.8L1090 90.7L1092 90.5L1094 90.3L1096 90.2L1098 90.1L1100 90L1102 90L1104 90.1L1106 90.2L1108 90.4L1110 90.6L1112 90.8L1114 90.9L1116 91L1118 91L1120 90.9L1122 90.8L1124 90.7L1126 90.5L1128 90.3L1130 90.2L1132 90.1L1134 90L1136 90" stroke="#ACC4B6" stroke-opacity=".3" stroke-linejoin="round" fill="none"></path><path d="M0 108.6L2 108.8L4 109L6 109.1L8 109.1L10 109.1L12 109L14 108.8L16 108.5L18 108.2L20 107.9L22 107.8L24 107.7L26 107.7L28 107.9L30 108.1L32 108.4L34 108.7L36 108.9L38 109.2L40 109.3L42 109.3L44 109.2L46 109L48 108.8L50 108.5L52 108.2L54 107.9L56 107.8L58 107.7L60 107.7L62 107.9L64 108.1L66 108.4L68 108.7L70 108.9L72 109.2L74 109.3L76 109.3L78 109.2L80 109L82 108.8L84 108.5L86 108.2L88 107.9L90 107.8L92 107.7L94 107.7L96 107.9L98 108.1L100 108.4L102 108.7L104 108.9L106 109.2L108 109.3L110 109.3L112 109.2L114 109L116 108.8L118 108.5L120 108.2L122 107.9L124 107.8L126 107.7L128 107.7L130 107.9L132 108.1L134 108.4L136 108.7L138 108.9L140 109.2L142 109.3L144 109.3L146 109.2L148 109L150 108.8L152 108.5L154 108.2L156 107.9L158 107.8L160 107.7L162 107.7L164 107.9L166 108.1L168 108.4L170 108.7L172 108.9L174 109.2L176 109.3L178 109.3L180 109.2L182 109L184 108.8L186 108.5L188 108.2L190 107.9L192 107.8L194 107.7L196 107.7L198 107.9L200 108.1L202 108.4L204 108.7L206 108.9L208 109.2L210 109.3L212 109.3L214 109.2L216 109L218 108.8L220 108.5L222 108.2L224 107.9L226 107.8L228 107.7L230 107.7L232 107.9L234 108.1L236 108.4L238 108.7L240 108.9L242 109.2L244 109.3L246 109.3L248 109.2L250 109L252 108.8L254 108.5L256 108.2L258 107.9L260 107.8L262 107.7L264 107.7L266 107.9L268 108.1L270 108.4L272 108.7L274 108.9L276 109.2L278 109.3L280 109.3L282 109.2L284 109L286 108.8L288 108.5L290 108.2L292 107.9L294 107.8L296 107.7L298 107.7L300 107.9L302 108.1L304 108.4L306 108.7L308 108.9L310 109.2L312 109.3L314 109.3L316 109.2L318 109L320 108.8L322 108.5L324 108.2L326 107.9L328 107.8L330 107.7L332 107.7L334 107.9L336 108.1L338 108.4L340 108.7L342 108.9L344 109.2L346 109.3L348 109.3L350 109.2L352 109L354 108.8L356 108.5L358 108.2L360 108L362 107.9L364 107.9L366 107.9L368 108.1L370 108.2L372 108.4L374 108.6L376 108.8L378 108.9L380 109L382 109L384 109L386 108.9L388 108.7L390 108.5L392 108.2L394 107.9L396 107.6L398 107.5L400 107.5L402 107.6L404 107.9L406 108.3L408 108.7L410 109.1L412 109.4L414 109.5L416 109.6L418 109.5L420 109.2L422 108.9L424 108.5L426 108.1L428 107.8L430 107.5L432 107.4L434 107.5L436 107.6L438 107.9L440 108.3L442 108.7L444 109.1L446 109.4L448 109.5L450 109.6L452 109.5L454 109.2L456 108.9L458 108.5L460 108.1L462 107.8L464 107.5L466 107.4L468 107.5L470 107.6L472 107.9L474 108.3L476 108.7L478 109.1L480 109.4L482 109.5L484 109.6L486 109.5L488 109.2L490 108.9L492 108.5L494 108.2L496 107.9L498 107.8L500 107.8L502 107.9L504 108.1L506 108.2L508 108.4L510 108.6L512 108.8L514 108.9L516 109L518 109L520 109L522 108.9L524 108.7L526 108.5L528 108.2L530 107.9L532 107.7L534 107.6L536 107.6L538 107.8L540 108L542 108.3L544 108.7L546 109L548 109.2L550 109.4L552 109.4L554 109.3L556 109.1L558 108.8L560 108.5L562 108.2L564 107.9L566 107.7L568 107.6L570 107.6L572 107.8L574 108L576 108.3L578 108.7L580 109L582 109.2L584 109.4L586 109.4L588 109.3L590 109.1L592 108.8L594 108.5L596 108.2L598 107.9L600 107.7L602 107.6L604 107.6L606 107.8L608 108L610 108.3L612 108.7L614 109L616 109.2L618 109.4L620 109.4L622 109.3L624 109.1L626 108.8L628 108.5L630 108.2L632 107.9L634 107.7L636 107.6L638 107.6L640 107.8L642 108L644 108.3L646 108.7L648 109L650 109.2L652 109.4L654 109.4L656 109.3L658 109.1L660 108.8L662 108.5L664 108.2L666 107.9L668 107.7L670 107.6L672 107.6L674 107.8L676 108L678 108.3L680 108.7L682 109L684 109.2L686 109.3L688 109.2L690 109.1L692 108.9L694 108.7L696 108.5L698 108.3L700 108.2L702 108L704 108L706 108L708 108.1L710 108.2L712 108.4L714 108.6L716 108.8L718 109L720 109.1L722 109.2L724 109.1L726 109L728 108.8L730 108.5L732 108.2L734 108L736 107.8L738 107.7L740 107.8L742 107.9L744 108.1L746 108.4L748 108.7L750 108.9L752 109.1L754 109.2L756 109.3L758 109.2L760 109L762 108.8L764 108.5L766 108.2L768 108L770 107.8L772 107.7L774 107.8L776 107.9L778 108.1L780 108.4L782 108.7L784 108.9L786 109.1L788 109.2L790 109.3L792 109.2L794 109L796 108.8L798 108.5L800 108.2L802 108L804 107.8L806 107.7L808 107.8L810 107.9L812 108.1L814 108.4L816 108.7L818 108.9L820 109.1L822 109.2L824 109.3L826 109.2L828 109L830 108.8L832 108.5L834 108.2L836 108L838 107.8L840 107.7L842 107.8L844 107.9L846 108.1L848 108.4L850 108.7L852 108.9L854 109.1L856 109.2L858 109.3L860 109.2L862 109L864 108.8L866 108.5L868 108.2L870 108L872 107.8L874 107.7L876 107.8L878 107.9L880 108.2L882 108.4L884 108.6L886 108.8L888 109L890 109L892 109L894 108.9L896 108.8L898 108.7L900 108.5L902 108.3L904 108.1L906 108L908 107.8L910 107.8L912 107.9L914 108.1L916 108.4L918 108.7L920 109L922 109.3L924 109.4L926 109.5L928 109.4L930 109.1L932 108.8L934 108.5L936 108.1L938 107.8L940 107.6L942 107.5L944 107.6L946 107.7L948 108L950 108.3L952 108.7L954 109L956 109.3L958 109.4L960 109.5L962 109.4L964 109.1L966 108.8L968 108.5L970 108.1L972 107.8L974 107.6L976 107.5L978 107.6L980 107.7L982 108L984 108.3L986 108.7L988 109L990 109.3L992 109.4L994 109.5L996 109.4L998 109.1L1000 108.8L1002 108.5L1004 108.1L1006 107.8L1008 107.6L1010 107.5L1012 107.6L1014 107.7L1016 108L1018 108.3L1020 108.7L1022 109L1024 109.3L1026 109.4L1028 109.5L1030 109.4L1032 109.1L1034 108.8L1036 108.5L1038 108.1L1040 107.8L1042 107.6L1044 107.5L1046 107.6L1048 107.7L1050 108L1052 108.3L1054 108.7L1056 109L1058 109.3L1060 109.4L1062 109.5L1064 109.4L1066 109.1L1068 108.8L1070 108.5L1072 108.2L1074 108L1076 107.8L1078 107.8L1080 107.9L1082 108L1084 108.2L1086 108.4L1088 108.6L1090 108.8L1092 108.9L1094 109L1096 109L1098 108.9L1100 108.8L1102 108.7L1104 108.5L1106 108.3L1108 108.2L1110 108L1112 108L1114 108L1116 108.1L1118 108.2L1120 108.4L1122 108.6L1124 108.8L1126 108.9L1128 109L1130 109L1132 108.9L1134 108.8L1136 108.7" stroke="#ACC4B6" stroke-opacity=".3" stroke-linejoin="round" fill="none"></path><path d="M1143 99.5L1136 95.5L1136 103.5Z" fill="#ACC4B6" fill-opacity=".8"></path><circle cx="3.5" cy="99.5" r="2.5" fill="#ACC4B6" fill-opacity=".8"></circle><path d="M0.5 93.5V105.5M189.5 93.5V105.5M382.5 93.5V105.5M516.5 93.5V105.5M709.5 93.5V105.5M902.5 93.5V105.5" stroke="#ACC4B6" stroke-opacity=".6" fill="none"></path><path d="M177.5 100.5V149H127" fill="none" stroke="#00E868" stroke-opacity=".34"></path><path d="M366.5 100.5V149H316" fill="none" stroke="#ACC4B6" stroke-opacity=".34"></path><path d="M366.5 100.5V245H316" fill="none" stroke="#ACC4B6" stroke-opacity=".34"></path><path d="M366.5 100.5V404H316" fill="none" stroke="#00E868" stroke-opacity=".34"></path><path d="M693.5 100.5V149H643" fill="none" stroke="#ACC4B6" stroke-opacity=".34"></path><path d="M886.5 100.5V149H836" fill="none" stroke="#00E868" stroke-opacity=".34"></path><path d="M886.5 100.5V309H836" fill="none" stroke="#ACC4B6" stroke-opacity=".34"></path><path d="M1079.5 100.5V218H1029" fill="none" stroke="#ACC4B6" stroke-opacity=".34"></path></svg><i class="admote" style="offset-path:path('M0 100.5L3 100.6L6 100.3L9 99.7L12 99L15 98.3L18 97.9L21 98.1L24 98.7L27 99.5L30 100.4L33 101L36 101.1L39 100.8L42 100.1L45 99.2L48 98.4L51 97.9L54 97.9L57 98.4L60 99.2L63 100.1L66 100.8L69 101.1L72 100.9L75 100.3L78 99.5L81 98.6L84 98L87 97.9L90 98.2L93 98.9L96 99.8L99 100.6L102 101.1L105 101.1L108 100.6L111 99.8L114 98.9L117 98.2L120 97.9L123 98.1L126 98.7L129 99.5L132 100.4L135 101L138 101.1L141 100.8L144 100.1L147 99.2L150 98.4L153 97.9L156 97.9L159 98.4L162 99.2L165 100.1L168 100.8L171 101.1L174 100.9L177 100.3L177.5 99.5L177.5 149L127 149');animation:admv0 3.2s linear 0.00s infinite both,admo0 3.2s step-end 0.00s infinite both"></i><i class="admote" style="offset-path:path('M189 97.9L192 98.2L195 98.9L198 99.8L201 100.6L204 101.1L207 101.1L210 100.6L213 99.8L216 98.9L219 98.2L222 97.9L225 98.1L228 98.7L231 99.5L234 100.4L237 101L240 101.1L243 100.8L246 100.1L249 99.2L252 98.4L255 97.9L258 97.9L261 98.4L264 99.2L267 100.1L270 100.8L273 101.1L276 100.9L279 100.3L282 99.5L285 98.6L288 98L291 97.9L294 98.2L297 98.9L300 99.8L303 100.6L306 101.1L309 101.1L312 100.6L315 99.8L318 98.9L321 98.2L324 97.9L327 98.1L330 98.7L333 99.5L336 100.4L339 101L342 101.1L345 100.8L348 100.1L351 99.2L354 98.4L357 98L360 98.1L363 98.6L366 99.3L366.5 99.5L366.5 404L316 404');animation:admv1 3.2s linear 1.05s infinite both,admo1 3.2s step-end 1.05s infinite both"></i><i class="admote" style="offset-path:path('M709 99.9L712 100.4L715 100.7L718 100.6L721 100.2L724 99.5L727 98.7L730 98.1L733 98L736 98.3L739 99L742 99.8L745 100.5L748 101L751 101L754 100.5L757 99.8L760 98.9L763 98.3L766 98L769 98.1L772 98.7L775 99.5L778 100.3L781 100.9L784 101L787 100.7L790 100L793 99.2L796 98.5L799 98L802 98L805 98.5L808 99.2L811 100.1L814 100.7L817 101L820 100.9L823 100.3L826 99.5L829 98.7L832 98.1L835 98L838 98.3L841 99L844 99.8L847 100.5L850 101L853 101L856 100.5L859 99.8L862 98.9L865 98.3L868 98L871 98.1L874 98.7L877 99.5L880 100.2L883 100.6L886 100.7L886.5 99.5L886.5 149L836 149');animation:admv2 3.2s linear 2.10s infinite both,admo2 3.2s step-end 2.10s infinite both"></i><i class="adtokm" style="offset-path:path('M0 99.5H510V65.5');animation:adtkv 12s linear infinite both,adtko 12s step-end infinite both"></i><div class="fl adchip" style="transform:translate(508px,3px)"><span class="m">XAGUSD</span><span>refused by Commodities #4</span><span class="chip w-real">Real</span><span>·</span><span class="m">cost_filter</span></div><div class="fl adtok" style="--x0:108px;--x1:280px;top:3px"><span class="m">XAGUSD</span><span class="chip short">SHORT</span><span>trend_break_4h</span></div></div>
+
+<div class="legend">
+<span class="k mv"><i class="gm"></i>a price update</span>
+<span class="k mv"><i class="gt"></i>a signal, or a close</span>
+<span class="k mv"><i class="gs"></i>an order's money</span>
+<span class="sp"></span>
+<button type="button" class="pillb" id="scl" title="One scale for the page: the largest real position when the page was laid out. It never shrinks by itself, and a larger real position enlarges it at once. A DEMO or PAPER block above it is capped and marked ›. Click to refit.">full height = <span class="m">$21,749.00</span> · set by real money at <span class="m">20:46 UTC</span> ↻</button>
+<span class="pillb" title="One payload, one age: the blocks, the bands' sums and the baskets' counts are read together. A reading with its own older age prints it: the reserve, each price, the weather, the calendar, the volatility's last bar.">book read <span id="bkage"><span class="m">7</span> s</span> ago</span>
+<button type="button" class="tbtn" id="tbtn" aria-expanded="false" aria-controls="tblp">Read as a table</button>
+<span class="mocknote" id="mocknote">preview · invented data</span>
+</div>
+
+</div>
+</main>
+
+<div class="dock" aria-label="Dock">
+<button type="button" class="dk" aria-label="Signals"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z"></path></svg><span class="n" id="docksig">13</span></button>
+<button type="button" class="dk" aria-label="Council"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 19c1-3 3-4 5-4s4 1 5 4m-2 0c1-3 3-4 5-4s4 1 5 4"></path></svg></button>
+<button type="button" class="dk" aria-label="Activity"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"></path></svg></button>
+</div>
+
+<footer class="foot">
+<div class="sb"><span class="lbl">Portfolio</span><span class="v m" id="fport">$10,453.61</span><span class="sbsub">eToro's own</span></div>
+<div class="sb"><span class="lbl">Real · open</span><span class="v m" id="fopen">≈ +$76.26 ▲</span></div>
+<div class="sb"><span class="lbl">Positions</span><span class="v m" id="fpos">8</span><span class="sbsub" id="fposs">3 real · 2 demo · 2 paper · 1 no venue</span></div>
+<div class="sb"><span class="lbl">Signals</span><span class="v m" id="fsig">13</span></div>
+<div class="sb"><span class="lbl">Bots</span><span style="display:inline-flex;align-items:center;gap:6px"><span class="dot live"></span>on</span></div>
+<div class="sb"><span class="lbl">Alerts</span><span class="v m">0</span></div>
+<div class="sb"><span class="lbl">Horde</span><span class="sbsub" id="fhorde">⨯ 0 alarms · ⚠ 0 watch</span></div>
+<span class="orb" role="img" aria-label="Ask Sauron"></span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

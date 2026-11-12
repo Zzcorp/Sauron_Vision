@@ -1,0 +1,1308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anduin: the Great River (mock, invented data)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&amp;family=JetBrains+Mono:wght@400..700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&amp;text=ABCDEFGHIJKLMNOPQRSTUVWXYZ%C3%80%C3%81%C3%82%C3%84%C3%87%C3%88%C3%89%C3%8A%C3%8B%C3%8E%C3%8F%C3%94%C3%96%C3%99%C3%9B%C3%9C%20%C2%B7%E2%80%94%E2%80%93-%26%27%E2%80%99()%2F%3A.%2C!%3F%23%2B%25&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&amp;display=swap">
+<style>
+/* ANDUIN, the Great River: the page of flows (mock, 2026-11-12). Invented
+   data only: the fictional book of the Operations Center and Barad-dur
+   mocks. S1a tokens on the Eye-lit ladder, Inter for words, JetBrains Mono
+   for figures, Orbitron (no digits) for titles. Rules the page keeps:
+   REAL, DEMO and PAPER are never added, in a figure or in a shape (real
+   money sets the one scale and owns the solid basket; the rest sits apart);
+   every figure carries its age, and an age comes from its stamp, never from
+   an animation; no figure sits on the void or on a glow, or fades; nothing
+   moves without a datum or an event behind it, and no frame is asked for
+   when nothing moves; no control here moves money. Nothing under 11 px. */
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#040B07}
+body{color:#E6F1EA;font-family:Inter,system-ui,sans-serif;font-size:13px;overflow:hidden}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit}
+.m{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-family:Inter,system-ui,sans-serif;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#839B8D}
+.up{color:#24B582}.down{color:#FF6B6E}.i1{color:#E6F1EA}.i2{color:#ACC4B6}.i3{color:#839B8D}.warn{color:#F29B38}
+.disp{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;text-transform:uppercase}
+
+/* ── the frame (S1a + the magic kept): sidebar, top bar, market band, dock, status bar ── */
+.app{width:100vw;height:100vh;display:grid;grid-template-columns:232px minmax(0,1fr) 40px;grid-template-rows:44px 32px minmax(0,1fr) 32px;overflow:hidden;position:relative;background:#040B07}
+.side{grid-row:1 / 4;grid-column:1;background:#07130C;border-right:1px solid #14261D;display:flex;flex-direction:column;position:relative;z-index:2}
+.brand{height:44px;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid #14261D;position:relative}
+.mark{position:relative;width:28px;height:28px;flex:none}
+.mark svg{position:relative;display:block}
+.halo{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;
+  background:radial-gradient(circle,rgba(0,232,104,.34) 0%,rgba(0,232,104,.12) 36%,rgba(0,232,104,0) 68%);
+  animation:breath 6s ease-in-out infinite;pointer-events:none}
+@keyframes breath{0%,100%{opacity:.5;transform:scale(.88)}50%{opacity:.95;transform:scale(1.06)}}
+.word{font-family:Orbitron,Inter,sans-serif;font-weight:700;font-size:16px;letter-spacing:.24em;color:#00E868;
+  text-shadow:0 0 12px rgba(0,232,104,.45),0 0 2px rgba(0,232,104,.3)}
+.navwrap{display:flex;flex-direction:column;padding:8px 0;gap:1px}
+.sec{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#839B8D;padding:14px 18px 6px}
+.nav{position:relative;display:flex;align-items:center;gap:11px;height:32px;padding:0 14px 0 18px;color:#ACC4B6;
+  font-family:Rajdhani,Inter,sans-serif;font-weight:600;font-size:15px;letter-spacing:.02em}
+.nav svg{flex:none;color:#839B8D}
+.nav.on{color:#E6F1EA;background:linear-gradient(90deg,rgba(0,232,104,.13),rgba(0,232,104,.03) 55%,rgba(0,232,104,0) 80%),#14231B}
+.nav.on::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:2px;background:#00E868;box-shadow:0 0 8px rgba(0,232,104,.75),0 0 2px rgba(0,232,104,.9)}
+.nav.on svg{color:#00E868;filter:drop-shadow(0 0 4px rgba(0,232,104,.55))}
+.count{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;background:#14231B;border-radius:999px;padding:1px 7px;color:#E6F1EA}
+.top{grid-row:1;grid-column:2 / 4;display:flex;align-items:center;gap:14px;padding:0 16px;background:#07130C;border-bottom:1px solid #14261D;position:relative;z-index:2}
+.ptitle{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:15px;letter-spacing:.16em;text-transform:uppercase;color:#E6F1EA}
+.psub{font-size:12px;color:#839B8D;white-space:nowrap}
+.tr{margin-left:auto;display:flex;align-items:center;gap:14px}
+.pill{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px;border:1px solid #1D3528;border-radius:999px;font-size:11px;color:#ACC4B6;white-space:nowrap}
+.armed{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:2px;background:#CC3A40;color:#FFF;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.adot{width:6px;height:6px;border-radius:999px;background:#FFF;animation:armedbeat 1.6s ease-in-out infinite}
+@keyframes armedbeat{50%{opacity:.35}}
+.ib{width:28px;height:28px;border:1px solid #1D3528;border-radius:4px;background:none;color:#ACC4B6;display:flex;align-items:center;justify-content:center}
+.who{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:.06em;color:#ACC4B6}
+.dot{display:inline-block;width:6px;height:6px;border-radius:999px;flex:none;vertical-align:middle}
+.dot.live{background:#00E868;box-shadow:0 0 6px rgba(0,232,104,.7)}
+.dot.live.hb{animation:beat 2.4s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.55}}
+body.sv-locked .halo,body.sv-locked .adot,body.sv-locked .dot.live.hb{animation-play-state:paused}
+.vh{position:absolute!important;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;padding:0}
+.dot.recent{background:#ACC4B6}
+.dot.stale{background:#F29B38}
+.dot.closed{border:1px solid #839B8D}
+.band{grid-row:2;grid-column:2 / 4;display:flex;align-items:center;background:#07130C;border-bottom:1px solid #1D3528;font-size:12px;overflow:hidden;position:relative;z-index:2}
+.q{display:flex;align-items:center;gap:7px;padding:0 14px;height:32px;border-right:1px solid #14261D;white-space:nowrap}
+.q .s{font-weight:600;color:#ACC4B6}
+.q .p{font-size:13px;color:#E6F1EA}
+.news{margin-left:auto;display:flex;align-items:center;gap:8px;padding:0 14px;min-width:0}
+.news span:last-child{color:#ACC4B6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock{grid-row:3;grid-column:3;background:#07130C;border-left:1px solid #14261D;display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:12px;position:relative;z-index:2}
+.dk{position:relative;width:28px;height:28px;border:0;background:none;color:#ACC4B6;display:flex;align-items:center;justify-content:center}
+.dk .n{position:absolute;top:-6px;right:-5px;font-family:"JetBrains Mono",monospace;font-size:11px;line-height:15px;background:#1B2C23;border-radius:999px;padding:0 4px;color:#E6F1EA}
+.foot{grid-row:4;grid-column:1 / 4;display:flex;align-items:center;background:#0D1B14;border-top:1px solid #1D3528;font-size:12px;overflow:hidden;position:relative;z-index:2}
+.sb{display:flex;align-items:center;gap:8px;padding:0 14px;height:32px;border-right:1px solid #14261D;white-space:nowrap}
+.sb .v{font-size:13px;color:#E6F1EA}
+.sbsub{font-size:11px;color:#839B8D}
+.orb{margin-left:auto;margin-right:12px;width:26px;height:26px;border-radius:50%;position:relative;flex:none;
+  background:radial-gradient(circle at 38% 34%,rgba(220,255,235,.55) 0 8%,rgba(0,232,104,.35) 22%,rgba(4,30,16,.95) 62%,#040B07 100%);
+  box-shadow:inset 0 0 0 1px rgba(0,232,104,.55),0 0 10px rgba(0,232,104,.28)}
+
+/* ── the void: the Eye's light from above, a vignette, a fine grain (no embers here: every moving dot is a datum) ── */
+.main{grid-row:3;grid-column:2;position:relative;overflow:hidden;min-width:0;
+  background:
+    radial-gradient(900px 360px at 46% -110px,rgba(0,232,104,.10),rgba(0,232,104,.025) 50%,rgba(0,232,104,0) 74%),
+    radial-gradient(140% 120% at 50% 28%,rgba(0,0,0,0) 55%,rgba(0,0,0,.42) 100%),
+    #040B07}
+.grain{position:absolute;inset:0;opacity:.07;pointer-events:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55 0 0 0 0 .95 0 0 0 0 .7 0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.page{position:relative;z-index:1;height:100%;padding:12px;display:flex;flex-direction:column;gap:10px}
+.card{position:relative;background:#07130C;border:1px solid #1D3528;border-radius:6px;min-width:0}
+.chip{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:2px;font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;line-height:1;flex:none}
+.chip.long{color:#24B582;border:1px solid rgba(36,181,130,.6)}
+.chip.short{color:#FF6B6E;border:1px solid rgba(255,107,110,.6)}
+.chip.w-real{background:#CC3A40;color:#FFF}
+.chip.w-demo{border:1px solid #D6BC5E;color:#D6BC5E}
+.chip.w-paper{border:1px solid #839B8D;color:#ACC4B6}
+.chip.w-none{border:1px dashed #839B8D;color:#ACC4B6}
+
+/* ── the sky: the market's weather ── */
+.sky{flex:none;height:60px;display:grid;grid-template-columns:minmax(0,1fr) 456px 216px;align-items:center;gap:16px;padding:0 14px}
+.wx{min-width:0;display:flex;flex-direction:column;gap:5px}
+.wx1{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.over{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#839B8D}
+.lvl{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:2px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border:1px solid #2C4739;color:#E6F1EA;transition:border-color .5s,color .5s}
+.lvl.stressed{border-color:#F29B38;color:#F29B38}
+.lvl.crisis{border-color:#FF6B6E;color:#FF6B6E}
+.sc{font-size:12px;color:#E6F1EA}
+.agew{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#839B8D}
+.wx2{font-size:12px;line-height:16px;max-height:32px;color:#ACC4B6;overflow:hidden}
+.hz{min-width:0;display:flex;flex-direction:column;gap:5px}
+.hzt{display:flex;align-items:baseline;gap:8px;font-size:12px;color:#ACC4B6;white-space:nowrap;overflow:hidden}
+.hzt .lbl.on{color:#F29B38}
+.hzr{display:flex;align-items:center;gap:10px;height:24px}
+.hztrack{position:relative;flex:1;height:22px}
+.hzbase{position:absolute;left:0;right:0;top:11px;height:1px;background:#2C4739}
+.hztick{position:absolute;top:8px;width:1px;height:7px;background:#2C4739}
+.hznow{position:absolute;left:0;top:2px;width:2px;height:18px;background:#E6F1EA}
+.hzlab{position:absolute;top:12px;white-space:nowrap;font-family:"JetBrains Mono",monospace;font-size:11px;line-height:11px;color:#839B8D;transform:translateX(-50%);background:#07130C;padding:0 3px}
+.fr{position:absolute;top:2px;height:9px;border-left:1px solid rgba(242,155,56,.9);border-right:1px solid rgba(242,155,56,.45);
+  background:repeating-linear-gradient(115deg,rgba(242,155,56,.5) 0 1px,rgba(242,155,56,.08) 1px 5px);transition:left .7s cubic-bezier(.2,0,0,1),width .7s cubic-bezier(.2,0,0,1)}
+.fr.far{border-color:rgba(242,155,56,.45);background:repeating-linear-gradient(115deg,rgba(242,155,56,.3) 0 1px,rgba(242,155,56,.04) 1px 5px)}
+.hztouch{flex:none;width:178px;display:flex;flex-direction:column;font-size:11px;line-height:12px;color:#839B8D;white-space:nowrap}
+.sw{display:flex;flex-direction:column;gap:5px;align-items:stretch}
+.seg{display:flex;height:24px;border:1px solid #1D3528;border-radius:4px;overflow:hidden;background:#040B07}
+.seg button{flex:1;border:0;background:transparent;color:#ACC4B6;font-size:11px;font-weight:600;letter-spacing:.02em;cursor:pointer;padding:0 4px;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:#14231B;color:#E6F1EA;box-shadow:inset 0 -2px 0 #00E868}
+.seg button:focus-visible{outline:2px solid #00E868;outline-offset:-2px}
+
+/* ── the stage: the river, the baskets, the money lane, the banks ── */
+.stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+#bed,#flow{position:absolute;left:0;top:0;pointer-events:none;z-index:3}
+.air{flex:none;height:26px;position:relative}
+.onvoid{position:absolute;top:3px;font-family:Orbitron,Inter,sans-serif;font-weight:600;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#839B8D;
+  text-shadow:0 0 3px #040B07,0 0 8px #040B07,0 0 14px #040B07}
+.onvoid.a{left:2px}.onvoid.b{right:2px}
+/* the front over the book: the ribbon's own datum, drawn in the air above every basket it touches */
+.frontb{position:absolute;height:5px;z-index:2;pointer-events:none;border-left:1px solid rgba(242,155,56,.9);border-right:1px solid rgba(242,155,56,.9);
+  background:repeating-linear-gradient(115deg,rgba(242,155,56,.62) 0 1px,rgba(242,155,56,.1) 1px 5px)}
+.baskets{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:flex-start;gap:10px}
+/* a basket: the solid card is REAL's alone; DEMO, PAPER and rows with no venue sit apart, in a dashed annex */
+.basket{flex:none;display:flex;align-items:flex-start;gap:6px}
+.basket.stack{flex-direction:column}
+.bk{flex:none;display:flex;flex-direction:column;transition:border-color .6s}
+.annex{flex:none;display:flex;flex-direction:column;background:#07130C;border:1px dashed #2C4739;border-radius:6px;min-width:0;transition:border-color .6s}
+.bk.apart,.bk.slotc{border-style:dashed;border-color:#2C4739}
+.bhead,.ahead{height:58px;flex:none;padding:8px 10px 0;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+.bt{font-size:12px;letter-spacing:.14em;color:#ACC4B6;white-space:nowrap;line-height:16px;display:flex;align-items:center;gap:6px}
+.bt .pl{font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:none;color:#ACC4B6}
+.ahead .bt{color:#839B8D}
+.bs,.bv{display:flex;align-items:center;gap:6px;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap}
+.bv{color:#839B8D}
+.slotc .bt{display:block;white-space:normal;font-size:11px;letter-spacing:.08em;line-height:14px}
+/* the river's band: three still current lines are drawn in it; their height is the weather */
+.water{height:28px;flex:none;background:#040B07;border-top:1px solid #14261D;border-bottom:1px solid #14261D;transition:background .6s,border-color .6s}
+.bbody{padding:8px 9px;transition:background .6s}
+.cols{display:flex;gap:10px;align-items:flex-start}
+.col{display:flex;flex-direction:column;gap:8px;flex:none}
+.wband{flex:none;display:flex;flex-direction:column;font-size:11px;color:#839B8D}
+.wbandh{display:flex;align-items:center;gap:6px;height:16px;white-space:nowrap}
+.wbandh .sum{margin-left:auto;font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;font-size:11px;color:#E6F1EA}
+.wbandh .sum.nil{font-family:Inter,sans-serif;color:#839B8D}
+.wbar{position:relative;height:3px;background:linear-gradient(#1D3528,#1D3528) left bottom/100% 1px no-repeat}
+.wbar i{position:absolute;left:0;top:0;bottom:0;min-width:2px}
+.wbar.w-real i{background:#CC3A40}
+.wbar.w-demo i{box-shadow:inset 0 0 0 1px #D6BC5E}
+.wbar.w-paper i{box-shadow:inset 0 0 0 1px #839B8D}
+.wbar.w-none i{border-top:1px dashed #839B8D;border-bottom:1px dashed #839B8D}
+.wband .apn{height:13px;line-height:13px;white-space:nowrap}
+.more{flex:none;height:22px;display:flex;align-items:center;padding:0 8px;border:1px dashed #2C4739;border-radius:4px;font-size:11px;color:#ACC4B6;white-space:nowrap;overflow:hidden}
+.bfoot{border-top:1px solid #14261D;padding:6px 10px 7px;display:flex;flex-direction:column;gap:1px;font-size:11px;color:#839B8D}
+.bfoot .fw{display:flex;align-items:center;gap:6px;line-height:16px;white-space:nowrap;color:#ACC4B6}
+.bfoot .fw .m{color:#E6F1EA}
+.bfoot .un{line-height:16px;color:#ACC4B6;white-space:nowrap}
+.sg{line-height:15px}
+.sg .m{color:#ACC4B6}
+/* the weather's level tones every basket's outline: ink when calm, amber when stressed, coral in a crisis */
+.lv-stressed .bk,.lv-stressed .annex{border-color:rgba(242,155,56,.5)}
+.lv-crisis .bk,.lv-crisis .annex{border-color:rgba(255,107,110,.58)}
+.lv-stressed .water{border-color:rgba(242,155,56,.28)}
+.lv-crisis .water{border-color:rgba(255,107,110,.32)}
+/* a shut market: frost over its outline, its head, its water and its body; nothing moves in it */
+.stage .basket.shut .bk,.stage .basket.shut .annex{border-color:rgba(172,196,182,.55)}
+.basket.shut .bhead,.basket.shut .ahead{background:repeating-linear-gradient(115deg,rgba(172,196,182,.07) 0 1px,rgba(172,196,182,0) 1px 6px)}
+.stage .basket.shut .water{background:repeating-linear-gradient(115deg,rgba(172,196,182,.2) 0 1px,rgba(172,196,182,0) 1px 5px),#040B07;border-color:rgba(172,196,182,.3)}
+.basket.shut .bbody{background:repeating-linear-gradient(115deg,rgba(172,196,182,.05) 0 1px,rgba(172,196,182,0) 1px 6px)}
+.basket.shut .bt{color:#839B8D}
+.basket.grow{animation:growb .4s cubic-bezier(.2,0,0,1) both}
+@keyframes growb{from{clip-path:inset(0 34% 0 0)}to{clip-path:inset(0 0 0 0)}}
+
+/* a block: its height is its size on the page's one scale (real money sets it); under 48 px the bar at its foot says the size */
+.blk{position:relative;flex:none;background:#0D1B14;border:1px solid #1D3528;border-radius:4px;padding:4px 6px 4px 6px;display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;outline:0}
+.blk:focus-visible{outline:2px solid #00E868;outline-offset:1px}
+.blk.real{border-left:3px solid #CC3A40;padding-left:4px}
+.blk .chip{padding:0 4px}
+.blk.demo{border-color:rgba(214,188,94,.66)}
+.blk.paper{border-color:rgba(131,155,141,.7)}
+.blk.none{border:1px dashed rgba(131,155,141,.8)}
+.blk .pe,.blk .be{position:absolute;left:0;right:0;height:2px;opacity:0;pointer-events:none}
+.blk .pe{top:0;background:linear-gradient(270deg,rgba(0,232,104,.95),rgba(0,232,104,.25) 60%,rgba(0,232,104,0))}
+.blk.real .pe{left:12px}
+.blk .be{bottom:0;background:linear-gradient(90deg,rgba(230,241,234,.9),rgba(230,241,234,.2) 60%,rgba(230,241,234,0))}
+.pb{position:absolute;left:0;bottom:0;height:3px;background:#55665D;pointer-events:none}
+.blk.capd .pb{background:repeating-linear-gradient(90deg,#55665D 0 5px,rgba(85,102,93,0) 5px 7px)}
+/* the one-line row: what a floor-size block of the annex becomes when its column is full */
+.blk.mic{flex-direction:row;align-items:center;gap:5px;padding-top:0;padding-bottom:0}
+.blk.mic .l1,.blk.mic .l2{height:20px}
+.blk.mic .l2{margin-left:auto}
+.blk.mic .l1 .chip,.blk.mic .lt,.blk.mic .ov,.blk.mic .ca{display:none}
+.l1{display:flex;align-items:center;gap:5px;height:18px;flex:none}
+.sym{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:13px;color:#E6F1EA}
+.ov{font-family:"JetBrains Mono",monospace;font-size:13px;line-height:1;color:#ACC4B6}
+.lt{margin-left:auto;font-size:12px;line-height:1;flex:none}
+.lt.watch{color:#F29B38}.lt.alarm{color:#FF6B6E}.lt.unheld{color:#839B8D}
+.l2{display:flex;align-items:center;gap:4px;height:18px;flex:none}
+.rr{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:12px;color:#E6F1EA;white-space:nowrap}
+.ca{margin-left:auto;display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#ACC4B6;white-space:nowrap}
+.ca.stale{color:#F29B38}
+.t2 .ca{display:none}
+.t2 .rr{font-size:15px}
+.t3 .rr{font-size:20px}.t3 .l2{height:26px}
+.l3,.x4{font-family:"JetBrains Mono",monospace;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap;overflow:hidden;flex:none}
+.l3 b,.x4 b,.em b{font-family:Inter,sans-serif;font-weight:400;color:#839B8D}
+.pnl{font-family:"JetBrains Mono",monospace;font-size:12px;line-height:15px;color:#E6F1EA;white-space:nowrap;overflow:hidden;flex:none}
+.pnl span{display:block;font-family:Inter,sans-serif;font-size:11px;line-height:14px;color:#839B8D}
+.em{font-family:"JetBrains Mono",monospace;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap;overflow:hidden;flex:none}
+.l4{align-items:center;gap:6px;font-size:11px;line-height:14px;height:14px;color:#ACC4B6;white-space:nowrap;overflow:hidden;flex:none}
+.l4.stale{color:#F29B38}
+.trk{position:relative;height:7px;margin-top:auto;background:#040B07;border:1px solid #1D3528;border-radius:1px;flex:none}
+.trk.nil{border-style:dashed}
+.trk i{position:absolute;display:block}
+.trk .fill{top:0;bottom:0}
+.trk .fill.u{background:rgba(31,163,116,.8)}
+.trk .fill.d{background:repeating-linear-gradient(115deg,rgba(255,107,110,.95) 0 1px,rgba(255,107,110,0) 1px 3px);box-shadow:inset 0 0 0 1px rgba(255,107,110,.9)}
+.trk .en{top:-2px;bottom:-2px;width:1px;background:#839B8D}
+.trk .mk{top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#E6F1EA}
+.lv{justify-content:space-between;gap:2px;font-family:"JetBrains Mono",monospace;font-size:11px;line-height:14px;color:#ACC4B6;white-space:nowrap;flex:none}
+.lv b{font-family:Inter,sans-serif;font-weight:600;font-size:11px;color:#839B8D;margin-right:2px}
+.org{font-size:11px;line-height:14px;color:#839B8D;flex:none;min-width:0}
+.org span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.org .ru{color:#ACC4B6}
+.blk .l3,.blk .x4,.blk .pnl,.blk .em,.blk .l4,.blk .trk,.blk .lv,.blk .org{display:none}
+.blk.t1 .l3,.blk.t1 .org,.blk.t3 .em,.blk.t3 .pnl,.blk.t4 .x4,.blk.t2 .trk{display:block}
+.blk.t2 .l4,.blk.t2 .lv{display:flex}
+.blk.t1 .org{margin-top:auto}
+.blk.t2 .org{margin-top:0}
+.bar,.barl{display:none}
+/* a block forms: its frame opens, then its lines stand at full strength (no figure ever fades in or out) */
+.blk.forming{animation:formf .6s cubic-bezier(.2,0,0,1) both}
+@keyframes formf{from{clip-path:inset(46% 46% 46% 46% round 4px)}to{clip-path:inset(0 0 0 0 round 4px)}}
+.blk.forming>*{animation:formc .6s steps(1,end) both}
+@keyframes formc{0%{visibility:hidden}60%,100%{visibility:visible}}
+/* a close: the bet has left; its place is held, as an outline, until its money has left the basket */
+.blk.leaving{pointer-events:none;border-style:dashed;border-color:#2C4739;border-left:1px dashed #2C4739;background:transparent}
+.blk.leaving>*{visibility:hidden}
+.blk.leaving::after{content:"closed";position:absolute;left:7px;top:6px;font-size:11px;line-height:14px;color:#839B8D}
+
+.lane{flex:none;height:26px}
+.bottom{flex:none;height:130px;display:grid;grid-template-columns:1.3fr 1.25fr .75fr;gap:14px}
+.chead{display:flex;align-items:center;justify-content:space-between;gap:10px;height:28px;padding:0 12px;border-bottom:1px solid #14261D}
+.ctitle{font-family:Orbitron,"JetBrains Mono",Inter,sans-serif;font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#ACC4B6;white-space:nowrap}
+.cmeta{font-size:11px;color:#839B8D;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pools{display:grid;grid-template-columns:1.9fr 1fr 1.05fr;height:100px}
+.pool{padding:7px 12px 0;border-right:1px solid #14261D;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pool:last-child{border-right:0}
+.pool .ph{display:flex;align-items:center;gap:6px;height:18px}
+.pool .pv{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:15px;line-height:20px;color:#E6F1EA;white-space:nowrap}
+.pool .ps{font-size:11px;line-height:15px;color:#ACC4B6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pool .ps.d{color:#839B8D}
+.cbody{padding:6px 12px 0;display:flex;flex-direction:column;gap:2px}
+.ln{font-size:12px;line-height:18px;color:#ACC4B6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ln .m{color:#E6F1EA}
+.ln.s{font-size:11px;line-height:16px;color:#839B8D}
+.ln.s .m{color:#ACC4B6}
+.ln .chip{vertical-align:1px;margin-right:6px}
+.ln .chip+.chip,.ln.s .chip{margin:0 2px}
+.signals .cbody{gap:0;padding-top:5px}.signals .ln.s{line-height:15px}
+/* a result's colour sits on its figure, and only for real money booked at eToro's price */
+.ln .m.up,.fl .m.up,.tblp .m.up{color:#24B582}.ln .m.down,.fl .m.down,.tblp .m.down{color:#FF6B6E}
+.events{display:none}
+.legend{flex:none;height:20px;display:flex;align-items:center;gap:16px;font-size:11px;color:#839B8D;white-space:nowrap;
+  text-shadow:0 0 3px #040B07,0 0 8px #040B07}
+.legend .k{display:inline-flex;align-items:center;gap:6px}
+.legend .gm{width:7px;height:7px;border-radius:50%;background:#9CFFC8;box-shadow:0 0 5px rgba(0,232,104,.8)}
+.legend .gt{width:7px;height:7px;border:1.5px solid #E6F1EA;transform:rotate(45deg)}
+.legend .gs{width:15px;height:3px;background:repeating-linear-gradient(90deg,#E6F1EA 0 3px,rgba(230,241,234,0) 3px 6px)}
+.legend .sp{margin-left:auto}
+.tbtn{height:20px;padding:0 9px;border:1px solid #1D3528;border-radius:4px;background:#07130C;color:#ACC4B6;font-size:11px;font-weight:600;cursor:pointer;text-shadow:none}
+.tbtn:focus-visible{outline:2px solid #00E868;outline-offset:1px}
+.mocknote{border:1px dashed #2C4739;border-radius:999px;background:#040B07;padding:2px 10px;font-size:11px;color:#839B8D;text-shadow:none}
+.pillb{height:20px;display:inline-flex;align-items:center;gap:5px;padding:0 9px;border:1px solid #1D3528;border-radius:999px;background:#07130C;color:#ACC4B6;font-size:11px;text-shadow:none;white-space:nowrap}
+button.pillb{cursor:pointer}button.pillb:focus-visible{outline:2px solid #00E868;outline-offset:1px}
+.pillb .m{color:#E6F1EA}
+
+/* labels that ride with a flow: opaque, so no figure ever sits on the void or on a mote */
+.fl{position:absolute;left:0;top:0;z-index:5;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 9px;border-radius:999px;background:#0D1B14;border:1px solid #2C4739;
+  font-size:11px;color:#ACC4B6;white-space:nowrap;pointer-events:none;opacity:0;will-change:transform}
+.fl.on{opacity:1}
+.fl .m{color:#E6F1EA}
+.fl .chip{height:14px}
+.fl.evl{max-width:calc(100% - 240px);overflow:hidden}
+.pop{position:absolute;z-index:6;width:292px;background:#0D1B14;border:1px solid #2C4739;border-radius:6px;box-shadow:0 12px 32px rgba(0,0,0,.5);padding:10px 12px;display:none;font-size:12px;color:#ACC4B6}
+.pop.on{display:block}
+.pop h4{margin:0 0 6px;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:#E6F1EA}
+.pop dl{margin:0;display:grid;grid-template-columns:104px 1fr;gap:3px 8px}
+.pop dt{color:#839B8D;font-size:11px;line-height:16px}
+.pop dd{margin:0;color:#E6F1EA;font-size:12px;line-height:16px}
+.pop .pf{margin-top:8px;padding-top:7px;border-top:1px solid #1D3528;font-size:11px;color:#839B8D}
+.tblp{position:absolute;inset:0;z-index:7;background:#07130C;border:1px solid #1D3528;border-radius:6px;padding:12px 14px;overflow:auto;display:none}
+.tblp.on{display:block}
+.tblp h3{margin:0 0 8px;font-family:Orbitron,Inter,sans-serif;font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#ACC4B6}
+.tblp table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px}
+.tblp th{text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#839B8D;padding:5px 8px;border-bottom:1px solid #1D3528;white-space:nowrap}
+.tblp td{padding:5px 8px;border-bottom:1px solid #14261D;color:#E6F1EA;white-space:normal}
+.tblp td.m{white-space:nowrap}
+.tblp td .chip{vertical-align:1px}
+.tblp td.w{color:#ACC4B6}
+.tblp td.w.m{white-space:normal}
+
+@media (min-width:1680px){
+  body{font-size:14px}
+  .sym{font-size:14px}.rr{font-size:13px}.t2 .rr{font-size:16px}.t3 .rr{font-size:22px}
+  .l3,.x4,.l4,.lv,.em,.org,.lv b,.ca{font-size:12px}.l3,.x4,.em,.lv,.org,.l4{line-height:15px}.l4{height:15px}
+  .pnl{font-size:13px}.pnl span{font-size:12px}
+  .bs,.bv,.bfoot,.wband,.wbandh .sum,.more{font-size:12px}.bt{font-size:13px}.slotc .bt{font-size:11px}
+  .ln{font-size:13px}.ln.s{font-size:12px}.pool .pv{font-size:16px}.pool .ps{font-size:12px}
+  .sky{grid-template-columns:minmax(0,1fr) 560px 240px}
+  .bottom{height:138px}
+  .pools{height:108px}
+  .signals .ln.s{line-height:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  .halo,.adot,.dot.live.hb{animation:none}
+  .blk.forming,.blk.forming>*,.basket.grow{animation:none}
+  .fr{transition:none}
+  .legend .k.mv{display:none}
+}
+
+/* ── the phone: no particles, the same content as a list ── */
+@media (max-width:768px){
+  html,body{height:auto}
+  body{overflow:auto}
+  .app{display:block;width:auto;height:auto;overflow:visible}
+  .side,.band,.dock,.foot,.psub,.tr .ck,.tr .ses,.tr .ib,.who,.air,.lane,#bed,#flow,.fl,.pop,.legend .k,.legend .tbtn,.ahead,.annex .water,.pb,.ca,.frontb{display:none!important}
+  .top{position:sticky;top:0;height:48px;padding:0 12px;z-index:9}
+  .main{overflow:visible}
+  .page{height:auto;padding:12px;gap:12px}
+  .sky{display:flex;flex-direction:column;align-items:stretch;height:auto;padding:12px;gap:12px}
+  .wx1{flex-wrap:wrap}
+  .wx2,.hzt{white-space:normal;overflow:visible}
+  .hzt{flex-wrap:wrap;gap:2px 8px}
+  .seg{height:46px}
+  .seg button{font-size:12px}
+  .stage{display:flex;flex-direction:column;gap:12px}
+  .bottom{display:contents}
+  .reserve{order:1}.baskets{order:2}.events{order:3;display:block}.signals{order:4}.closed{order:5}
+  .events .ln{white-space:normal;line-height:18px;padding:2px 0}
+  .bottom>.card{height:auto;padding-bottom:10px}
+  .chead{height:auto;min-height:28px;padding:6px 12px;flex-wrap:wrap}
+  .pools{display:block;height:auto}
+  .pool{border-right:0;border-bottom:1px solid #14261D;padding:8px 12px}
+  .pool:last-child{border-bottom:0}
+  .pool .ps,.ln,.cmeta{white-space:normal}
+  .baskets{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+  .basket,.basket.stack{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .bk,.annex,.wband,.more{width:auto!important}
+  .bhead{height:auto;padding-bottom:8px}
+  .water{height:6px}
+  .bbody{display:block;padding:10px 12px 2px}
+  .cols,.col{display:block}
+  .wband{margin:2px 0 8px}
+  .more{margin-bottom:8px}
+  .blk{width:auto!important;height:auto!important;margin-bottom:8px;padding:10px 12px;gap:5px}
+  .blk.real{padding-left:10px}
+  .blk .l3,.blk .x4,.blk .pnl,.blk .em,.blk .trk,.blk .org{display:block}
+  .blk .l4,.blk .lv{display:flex}
+  .blk .rr{font-size:17px}
+  .blk .trk{margin-top:4px}
+  .blk .org{margin-top:0}
+  .org span{white-space:normal}
+  .sg,.bfoot .fw,.bfoot .un{white-space:normal}
+  .bar{display:block;height:5px;background:#040B07;border:1px solid #1D3528;border-radius:1px;margin-top:3px}
+  .bar i{display:block;height:100%;background:#55665D}
+  .barl{display:block;font-size:11px;color:#839B8D}
+  .legend{height:auto;white-space:normal;flex-wrap:wrap;gap:8px}
+  .legend .sp{margin-left:0}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+<aside class="side" aria-label="Sauron">
+<div class="brand">
+<span class="mark" aria-hidden="true"><span class="halo"></span>
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00E868" stroke-linecap="square" stroke-linejoin="miter" role="img" aria-label="Sauron Vision">
+<polygon points="12,1.4 21.2,6.7 21.2,17.3 12,22.6 2.8,17.3 2.8,6.7" stroke-width="1"/>
+<path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z" fill="#00E868" fill-opacity="0.14" stroke="none"/>
+<circle cx="12" cy="12" r="3.1" fill="#00E868" stroke="none"/>
+<circle cx="12" cy="12" r="1.25" fill="#07130C" stroke="none"/>
+<path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z" stroke-width="1.5"/>
+<path d="M12 1.4V3.2M12 22.6V20.8" stroke-width="0.9"/>
+</svg></span>
+<span class="word">SAURON</span>
+</div>
+<nav class="navwrap" aria-label="Main">
+<div class="sec">Amon Hen</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 21V9l3-6 3 6v12M7 21h10M10.5 13h3"/></svg><span>Barad-dûr</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg><span>Oculus</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg><span>Operations center</span></a>
+<a class="nav on" href="#" aria-current="page"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7c3-2.4 5 2.4 8 0s5-2.4 8 0M3 12c3-2.4 5 2.4 8 0s5-2.4 8 0M3 17c3-2.4 5 2.4 8 0s5-2.4 8 0"/></svg><span>Anduin</span></a>
+<div class="sec">The book</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg><span>Portfolio</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></svg><span>Positions</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 10l9-6 9 6M5 10v9h14v-9"/></svg><span>Treasury</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 12h4"/></svg><span>Brokers</span></a>
+<div class="sec">What can act</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></svg><span>Signals</span><span class="count" id="navsig">13</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="7" width="14" height="11" rx="2"/><path d="M12 3v4M9 12h.01M15 12h.01"/></svg><span>Asset bots</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z"/></svg><span>Risk limits</span></a>
+<div class="sec">Watch</div>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Orcs</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg><span>Morgul</span></a>
+<a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Ops</span></a>
+</nav>
+</aside>
+
+<header class="top">
+<span class="ptitle">Anduin</span>
+<span class="psub" title="CLOSE and TAKE TRADE stay on Positions and on the ticket.">the Great River: what flows through the book · no order leaves this page</span>
+<div class="tr">
+<span class="m ck" style="font-size:12px;color:#ACC4B6" id="clock">20:46:10 UTC</span>
+<span class="ses" style="font-size:12px;color:#839B8D">sessions <span class="m" style="color:#ACC4B6" id="sess">9/14</span></span>
+<span class="pill"><span class="dot live hb"></span>eToro · live</span>
+<span class="armed"><span class="adot"></span>Real armed</span>
+<button type="button" class="ib" aria-label="Notifications"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"/><path d="M10 20a2 2 0 004 0"/></svg></button>
+<button type="button" class="ib" aria-label="Lock"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></button>
+<span class="who">OPERATOR <span aria-hidden="true" style="font-size:11px">▾</span></span>
+</div>
+</header>
+
+<div class="band">
+<div class="q"><span class="s">EURUSD</span><span class="p m">1.08745</span><span class="m up">+0.12%</span><span class="dot live"></span></div>
+<div class="q"><span class="s">XAUUSD</span><span class="p m">2,648.12</span><span class="m down">-0.39%</span><span class="dot recent"></span></div>
+<div class="q"><span class="s">BTCUSD</span><span class="p m">91,230.5</span><span class="m down">-1.28%</span><span class="dot live"></span></div>
+<div class="q"><span class="s">NAS100</span><span class="p m">20,872.0</span><span class="m up">+0.30%</span><span class="dot recent"></span></div>
+<div class="q"><span class="s">AAPL</span><span class="p m">227.06</span><span class="m down">-0.45%</span><span class="dot live" id="bandaapl"></span></div>
+<div class="news"><span class="lbl">News</span><span>Fed Chair speaks at 22:00 UTC · eurozone PMI beats</span></div>
+</div>
+
+<main class="main">
+<div class="grain" aria-hidden="true"></div>
+<div class="page">
+
+<section class="sky card" aria-label="The market's weather">
+<div class="wx">
+<div class="wx1"><span class="over">Weather</span><span class="lvl" id="lvl">Calm</span><span class="m sc" id="score">score 18<span class="i3">/100</span></span><span class="agew" id="wxage"><i class="dot live"></i><span>read <span class="m">6</span> min ago</span></span></div>
+<div class="wx2" id="wxwords">Business as usual.</div>
+</div>
+<div class="hz">
+<div class="hzt" id="hzt"></div>
+<div class="hzr"><div class="hztrack" id="hztrack"><div class="hzbase"></div><div class="fr far" id="fr2"></div><div class="fr" id="fr1"></div><div class="hznow"></div></div><span class="hztouch" id="hztouch"></span></div>
+</div>
+<div class="sw">
+<div class="seg" role="group" aria-label="Group the baskets by" id="segG">
+<button type="button" data-g="family" aria-pressed="true">Family</button><button type="button" data-g="world" aria-pressed="false">World</button><button type="button" data-g="lane" aria-pressed="false">Lane</button><button type="button" data-g="theme" aria-pressed="false">Theme</button>
+</div>
+<div class="seg" role="group" aria-label="Size the blocks by" id="segS">
+<button type="button" data-s="exposure" aria-pressed="true">By exposure</button><button type="button" data-s="risk" aria-pressed="false">By risk</button>
+</div>
+</div>
+</section>
+
+<div class="stage" id="stage">
+<div class="air" id="air"><span class="onvoid a" aria-hidden="true">Upstream</span><span class="onvoid b" aria-hidden="true">Downstream</span></div>
+<div class="baskets" id="baskets" aria-label="The baskets"></div>
+<div class="lane" aria-hidden="true"></div>
+<div class="bottom">
+<section class="card reserve" aria-label="The reserve">
+<div class="chead"><span class="ctitle">Reserve</span><span class="cmeta" title="Available and used are eToro's own cells for the world the account is routed to. They change only when a new reading arrives, never by counting.">eToro's own cells, read <span id="rAge"><span class="m">40</span> s</span> ago · never added</span></div>
+<div class="pools">
+<div class="pool" data-w="real"><div class="ph"><span class="chip w-real">Real</span><span class="lbl">available</span></div><div class="pv" id="rAvail">$6,051.51</div><div class="ps">used <span class="m" id="rUsed">$4,402.10</span> · <span class="m" id="rPct">42.1%</span></div><div class="ps" title="The capital at work of the real rows drawn on this page: the baskets' own “at work” figures, summed.">on Sauron <span class="m" id="rOn">$1,540.53</span></div><div class="ps"><a href="#" title="Used at eToro by positions that have no row on Sauron: no block is drawn for them. The Operations Center lists them.">outside <span class="m" id="rOut">$2,861.57</span> · <span class="m" id="rOutN">2</span> positions ›</a></div></div>
+<div class="pool" data-w="demo"><div class="ph"><span class="chip w-demo">Demo</span></div><div class="pv" title="Not read: the sync reads the eToro account in its current world.">—</div><div class="ps">not read</div><div class="ps d" title="The sync reads the eToro account in its current world: one world at a time.">one at a time</div></div>
+<div class="pool" data-w="paper"><div class="ph"><span class="chip w-paper">Paper</span></div><div class="pv">$20,000.00</div><div class="ps" title="The capital of the two paper configs.">simulated pools</div><div class="ps d">no money moves</div></div>
+</div>
+</section>
+<section class="card signals" aria-label="Upstream, the last 24 hours">
+<div class="chead"><span class="ctitle">Upstream · <span class="m">24</span> h</span><span class="cmeta" title="Signal rows, trade rows, the last recorded reason per symbol and bot, and the rail are four separate readers.">four readers · they do not add up</span></div>
+<div class="cbody">
+<div class="ln" id="sgline"></div>
+<div class="ln s" id="sgrail"></div>
+<div class="ln s" id="sgwhy"></div>
+<div class="ln s" id="sglast"></div>
+<div class="ln s" id="sgdet" style="padding-left:2px"></div>
+<div class="ln s">feeds <i class="dot live"></i> eToro <span class="m">12</span> s · <i class="dot live"></i> OANDA <span class="m">1</span> s · <i class="dot recent"></i> Yahoo <span class="m">3</span> min</div>
+</div>
+</section>
+<section class="card closed" aria-label="Downstream, closed in the last 24 hours">
+<div class="chead"><span class="ctitle">Downstream · <span class="m">24</span> h</span><span class="cmeta">in R</span></div>
+<div class="cbody" id="clbody"></div>
+</section>
+<section class="card events" aria-label="Last events">
+<div class="chead"><span class="ctitle">Last events</span><span class="cmeta">the five newest · what the river would show</span></div>
+<div class="cbody" id="evbody" aria-live="polite"></div>
+</section>
+</div>
+<canvas id="bed" aria-hidden="true"></canvas>
+<canvas id="flow" aria-hidden="true"></canvas>
+<div class="fl" id="fl1"></div><div class="fl" id="fl2"></div><div class="fl" id="fl3"></div><div class="fl evl" id="evl"></div>
+<div class="pop" id="pop" role="tooltip"></div>
+<div class="tblp" id="tblp" tabindex="-1"></div>
+</div>
+
+<div class="legend">
+<span class="k mv"><i class="gm"></i>a price update</span>
+<span class="k mv"><i class="gt"></i>a signal, or a close</span>
+<span class="k mv"><i class="gs"></i>an order's money</span>
+<span class="sp"></span>
+<button type="button" class="pillb" id="scl"></button>
+<span class="pillb" title="One payload, one age: the blocks, the bands' sums and the baskets' counts are read together. A reading with its own older age prints it: the reserve, each price, the weather, the calendar, the volatility's last bar.">book read <span id="bkage"><span class="m">7</span> s</span> ago</span>
+<button type="button" class="tbtn" id="tbtn" aria-expanded="false" aria-controls="tblp">Read as a table</button>
+<span class="mocknote" id="mocknote">mock · invented data</span>
+</div>
+
+</div>
+</main>
+
+<div class="dock" aria-label="Dock">
+<button type="button" class="dk" aria-label="Signals"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></svg><span class="n" id="docksig">13</span></button>
+<button type="button" class="dk" aria-label="Council"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19c1-3 3-4 5-4s4 1 5 4m-2 0c1-3 3-4 5-4s4 1 5 4"/></svg></button>
+<button type="button" class="dk" aria-label="Activity"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></button>
+</div>
+
+<footer class="foot">
+<div class="sb"><span class="lbl">Portfolio</span><span class="v m" id="fport">$10,453.61</span><span class="sbsub">eToro's own</span></div>
+<div class="sb"><span class="lbl">Real · open</span><span class="v m" id="fopen">≈ +$76.26 ▲</span></div>
+<div class="sb"><span class="lbl">Positions</span><span class="v m" id="fpos">8</span><span class="sbsub" id="fposs">3 real · 2 demo · 2 paper · 1 no venue</span></div>
+<div class="sb"><span class="lbl">Signals</span><span class="v m" id="fsig">13</span></div>
+<div class="sb"><span class="lbl">Bots</span><span style="display:inline-flex;align-items:center;gap:6px"><span class="dot live"></span>on</span></div>
+<div class="sb"><span class="lbl">Alerts</span><span class="v m">0</span></div>
+<div class="sb"><span class="lbl">Horde</span><span class="sbsub" id="fhorde">⨯ 0 alarms · ⚠ 0 watch</span></div>
+<span class="orb" role="img" aria-label="Ask Sauron"></span>
+</footer>
+</div>
+
+<script>
+(function () {
+'use strict';
+const Q = new URLSearchParams(location.search);
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches || Q.get('motion') === '0';
+const PHONE = matchMedia('(max-width: 768px)').matches;
+const DEMO = Q.get('demo') !== '0' && !REDUCED && !PHONE;
+const LOOP = Q.get('loop') !== '0';
+const FREEZE = Q.has('freeze') ? +Q.get('freeze') : null;   // run the script to this instant, draw once, stop
+const STOP = Q.has('stop') ? +Q.get('stop') : null;         // play live, pause everything at this instant
+const HOLD = Q.get('hold') === '1';                         // wait for __anduin.go()
+const REALCAD = Q.get('cadence') === 'real';                // prices at the pace the code has today (30 s quotes, 240 s tick stamps, a 10 s poll)
+const QUIET = Q.get('quiet') === '1';                       // every feed quiet: the idle page
+const NROWS = +(Q.get('n') || 0);                           // the stress book: this many invented rows in all
+const NOBOOK = Q.get('book') === '0';                       // nothing open
+const WX0 = ({ calm: 1, stressed: 1, crisis: 1, recovery: 1, off: 1 })[Q.get('wx')] ? Q.get('wx') : 'calm';
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+const fmt = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+let seed = 7;
+const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+
+/* ── the invented book (the Operations Center's and Barad-dur's) ── */
+const EVT_WHY = 'A high-impact print is near: Fed Chair speaks at 22:00 UTC.';
+function book() { return [
+  { id: 'eurusd', sym: 'EURUSD', fam: 'forex', world: 'real', side: 'LONG', qty: '20,000', entry: '1.08420', mark: '1.08745', sl: '1.08160', tp: '1.09200', e: .25, k: .5625, exp: 21749.00, risk: 52.00, work: '$433.68 margin', wk: 433.68, r: '+1.25R', pnl: '≈ +$65.00 ▲', feed: 'eToro quote', age: 1, cad: 2.7, rcad: 30, rfirst: 2300, lane: 'forex3', org: ['trend_break_4h', 'Forex #3'], from: 'bot Forex #3 · rule trend_break_4h', theme: 'usds', held: '41 min', evt: 1 },
+  { id: 'usdjpy', sym: 'USDJPY', fam: 'forex', world: 'demo', side: 'LONG', qty: '2,000', entry: '151.900', mark: '152.310', sl: '151.400', tp: '152.900', e: .333, k: .607, exp: 2000.00, risk: 6.57, work: '$100.00 margin', wk: 100.00, r: '+0.82R', pnl: '≈ +$5.40 ▲', feed: 'eToro tick', age: 180, cad: 0, rcad: 0, first: 7000, lane: 'hand', org: ['Your ticket', 'its instrument page'], from: 'your ticket, from its instrument page', theme: 'usdl', held: '2 d', evt: 1 },
+  { id: 'gbpusd', sym: 'GBPUSD', fam: 'forex', world: 'paper', side: 'SHORT', qty: '10,000', entry: '1.29110', mark: '1.29044', sl: '1.29480', tp: '1.28370', e: .333, k: .393, exp: 12904.40, risk: 37.00, work: 'simulated', wk: null, r: '+0.18R', pnl: '≈ +$6.60 ▲', feed: 'Yahoo', age: 185, cad: 0, rcad: 0, first: 11300, lane: 'fxp7', org: ['fx_pivot_rejection', 'Forex paper #7'], from: 'bot Forex paper #7 · rule fx_pivot_rejection', theme: 'usdl', held: '1 h', evt: 1 },
+  { id: 'eurjpy', sym: 'EURJPY', fam: 'forex', world: 'paper', side: 'SHORT', qty: '10,000', entry: '162.450', mark: '162.326', sl: '162.950', tp: '161.450', e: .333, k: .417, exp: null, risk: null, nousd: 1, work: 'simulated', wk: null, r: '+0.25R', pnl: '≈ +1,240.00 JPY', feed: 'OANDA', age: 0, cad: 3.4, rcad: 10, rfirst: 5200, lane: 'fxp7', org: ['fx_pivot_rejection', 'Forex paper #7'], from: 'bot Forex paper #7 · rule fx_pivot_rejection', theme: 'none', held: '3 h' },
+  { id: 'xauusd', sym: 'XAUUSD', fam: 'commodity', world: 'real', side: 'SHORT', qty: '1.5', entry: '2,658.40', mark: '2,648.12', sl: '2,682.00', tp: '2,611.20', e: .333, k: .48, exp: 3972.18, risk: 35.40, work: '$198.61 margin', wk: 198.61, r: '+0.44R', pnl: '≈ +$15.42 ▲', feed: 'eToro tick', age: 180, cad: 0, rcad: 0, stopped: 1, lane: 'comm4', org: ['trend_break_4h', 'Commodities #4'], from: 'bot Commodities #4 · rule trend_break_4h', theme: 'none', held: '2 h', evt: 1 },
+  { id: 'aapl', sym: 'AAPL', fam: 'stock', world: 'real', side: 'LONG', qty: '4', entry: '228.10', mark: '227.06', sl: '223.20', tp: '237.90', e: .333, k: .263, exp: 908.24, risk: 19.60, work: '$908.24 cost', wk: 908.24, r: '-0.21R', pnl: '≈ -$4.16 ▼', feed: 'eToro quote', age: 2, cad: 3.1, rcad: 30, rfirst: 4100, lane: 'stock2', org: ['rsi_reversal_1d', 'Stocks #2'], from: 'bot Stocks #2 · rule rsi_reversal_1d', theme: 'eql', held: '26 h', evt: 1 },
+  { id: 'msft', sym: 'MSFT', fam: 'stock', world: 'none', side: 'LONG', qty: '3', entry: '410.00', mark: '415.38', sl: null, tp: null, exp: 1246.14, risk: null, work: 'not known', wk: null, r: '—', pnl: '≈ +$16.14 ▲', feed: 'Yahoo', age: 300, cad: 0, rcad: 0, lane: 'byhand', org: ['Recorded by hand', 'no venue'], from: 'recorded by hand: it states no venue', theme: 'eql', held: '3 d', evt: 1, light: { tone: 'unheld', why: 'Nothing on the platform manages, trails or closes this position: it is a row of your hand-kept book.' } },
+  { id: 'nas100', sym: 'NAS100', fam: 'index', world: 'demo', side: 'LONG', qty: '1', entry: '20,810.5', mark: '20,872.0', sl: '20,700.0', tp: '21,031.5', e: .333, k: .52, exp: 20872.00, risk: 110.50, work: '$1,043.60 margin', wk: 1043.60, r: '+0.56R', pnl: '≈ +$61.50 ▲', feed: 'eToro tick', age: 175, cad: 0, rcad: 0, first: 1500, lane: 'hand', org: ['Your ticket', 'signal #3988'], from: 'your ticket, from signal #3988', theme: 'eql', held: '3 d', evt: 1 }
+]; }
+const BTC = { id: 'btcusd', sym: 'BTCUSD', fam: 'crypto', world: 'real', side: 'LONG', qty: '0.02', entry: '91,230.5', mark: '91,230.5', sl: '88,400.0', tp: '96,891.5', e: .333, k: .333, exp: 1824.61, risk: 56.61, work: '$1,824.61 cost', wk: 1824.61, r: '0.00R', pnl: '≈ $0.00', feed: 'eToro fill', age: 0, cad: 2.9, rcad: 30, lane: 'crypto5', org: ['trend_break_4h', 'Crypto #5'], from: 'bot Crypto #5 · rule trend_break_4h', theme: 'none', held: '0 min', evt: 1 };
+/* the stress book (?n=40): invented rows, most of them paper, as a book with many paper bots has */
+function extra(n) {
+  /* archive copy: the forty-row test book's extra names are neutral tickers here (the sent mock used ordinary market symbols) */
+  const names = { forex: ['FX01', 'FX02', 'FX03', 'FX04', 'FX05', 'FX06', 'FX07', 'FX08', 'FX09', 'FX10'], crypto: ['CR01', 'CR02', 'CR03', 'CR04', 'CR05'],
+    commodity: ['CM01', 'CM02', 'CM03', 'CM04'], stock: ['ST01', 'ST02', 'ST03', 'ST04', 'ST05', 'ST06', 'ST07', 'ST08'], index: ['IX01', 'IX02', 'IX03', 'IX04', 'IX05'] };
+  const worlds = ['paper', 'paper', 'demo', 'paper', 'real', 'paper', 'paper', 'none', 'paper', 'demo', 'paper', 'paper', 'real', 'paper', 'paper', 'demo'], fams = Object.keys(names), out = [];
+  for (let i = 0; out.length < n && i < 400; i++) {
+    const fam = fams[i % 5], list = names[fam], j = Math.floor(i / 5); if (j >= list.length) continue;
+    const w = worlds[out.length % worlds.length], exp = Math.round((300 + rnd() * 8700) * 100) / 100, risk = Math.round((5 + rnd() * 50) * 100) / 100, rr = rnd() * 2.5 - .9, long = out.length % 3 !== 1;
+    const feed = w === 'real' ? 'eToro quote' : w === 'demo' ? 'eToro tick' : fam === 'forex' ? 'OANDA' : 'Yahoo', bot = w === 'none' ? 'no venue' : (w === 'paper' ? 'Paper #' : 'Bot #') + (8 + out.length % 9);
+    out.push({ id: list[j].toLowerCase(), sym: list[j], fam, world: w, side: long ? 'LONG' : 'SHORT', qty: '1', entry: '100.00', mark: (100 + rr).toFixed(2), sl: w === 'none' ? null : '98.00', tp: w === 'none' ? null : '104.00', e: .333, k: Math.max(.05, Math.min(.95, .333 + rr * .25)),
+      exp, risk: w === 'none' ? null : risk, work: w === 'paper' ? 'simulated' : w === 'none' ? 'not known' : fmt(exp / 5) + ' margin', wk: w === 'real' || w === 'demo' ? Math.round(exp * 20) / 100 : null, r: w === 'none' ? '—' : (rr >= 0 ? '+' : '-') + Math.abs(rr).toFixed(2) + 'R',
+      pnl: '≈ ' + (rr >= 0 ? '+' : '-') + fmt(Math.abs(rr * risk)) + (rr >= 0 ? ' ▲' : ' ▼'), feed, age: 5 + Math.floor(rnd() * 400), cad: 0, rcad: 0, lane: 'x' + (out.length % 9), org: [w === 'none' ? 'Recorded by hand' : 'mean_revert_1h', bot], from: w === 'none' ? 'recorded by hand: it states no venue' : 'bot ' + bot + ' · rule mean_revert_1h', theme: 'none', held: (1 + out.length % 30) + ' h', evt: fam === 'forex' && list[j].indexOf('USD') < 0 ? 0 : 1 });
+  }
+  return out;
+}
+const WORLD_L = { real: 'Real', demo: 'Demo', paper: 'Paper', none: 'No venue' };
+const WORLD_ORDER = ['real', 'demo', 'paper', 'none'];
+const GROUPS = {
+  family: { order: ['forex', 'crypto', 'commodity', 'stock', 'index'], keep: 1, key: p => p.fam,
+    label: { forex: 'Forex', crypto: 'Crypto', commodity: 'Commodities', stock: 'Stocks & ETFs', index: 'Indices' } },
+  world: { order: WORLD_ORDER, key: p => p.world, plain: { real: 'money at eToro', demo: "eToro's demo", paper: 'the simulator', none: 'by hand' } },
+  lane: { order: ['forex3', 'crypto5', 'comm4', 'stock2', 'fxp7', 'hand', 'byhand', 'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8'], key: p => p.lane,
+    label: { forex3: 'Forex #3', crypto5: 'Crypto #5', comm4: 'Commodities #4', stock2: 'Stocks #2', fxp7: 'Forex paper #7', hand: 'Your tickets', byhand: 'By hand', x0: 'Bot A', x1: 'Bot B', x2: 'Bot C', x3: 'Bot D', x4: 'Bot E', x5: 'Bot F', x6: 'Bot G', x7: 'Bot H', x8: 'Bot I' } },
+  theme: { order: ['usds', 'usdl', 'eql', 'none'], key: p => p.theme, label: { usds: 'USD short', usdl: 'USD long', eql: 'Equity long', none: 'No theme' } }
+};
+/* what each level of the weather does to the river: the height of its current lines, their length, the current's speed */
+const WXP = { calm: { a: 1, lam: 34, sp: 1, score: 18 }, recovery: { a: 1.8, lam: 30, sp: 1.2, score: 38 }, stressed: { a: 3, lam: 26, sp: 1.5, score: 34 }, crisis: { a: 4.5, lam: 20, sp: 2.1, score: 61 }, off: { a: 0, lam: 34, sp: 1, score: null } };
+const WORDS = { calm: 'Business as usual.', stressed: 'Risk-on longs smaller, leverage halved, stops tighter.', crisis: 'No new real-money risk-on long; shorts and safe havens keep trading; leverage capped; open risk-on longs tightened.', recovery: 'Risk-on longs come back in steps, small first.', off: '— not measured: crisis mode is off' };
+const chipW = w => '<span class="chip w-' + w + '">' + WORLD_L[w] + '</span>';
+const chipS = s => '<span class="chip ' + (s === 'LONG' ? 'long' : 'short') + '">' + s + '</span>';
+function fresh() { const w = WXP[WX0]; return {
+  T: 0, group: 'family', size: 'exposure', level: WX0, score: w.score,
+  wxA: w.a, wxAT: w.a, lam: w.lam, lamT: w.lam, speed: w.sp, speedT: w.sp,
+  clock0: 20 * 3600 + 46 * 60 + 10, clockT0: 0, readAt: 20 * 3600 + 40 * 60 + 10, resAt: 20 * 3600 + 45 * 60 + 30, railAt: 20 * 3600 + 45 * 60 + 50, bookAt: 20 * 3600 + 46 * 60 + 3, calAt: 18 * 3600 + 40 * 60, evtAt: 22 * 3600, evtOn: false,
+  pos: NOBOOK ? [] : book().concat(NROWS > 8 ? extra(NROWS - 8) : []), q: [], demo: false, scale: null, relayUntil: 0,
+  /* four readers that do not add up: signal rows, trade rows, the last skip per symbol and config, the rail */
+  cnt: { active: 13, arrived: 21, taken: { real: 3, demo: 0, paper: 5 }, refSym: 5, refReal: 3, waiting: 9, rail: 6 },
+  why: [['cost_filter', 2], ['bad_timing', 1], ['gate_blocked', 1], ['leverage_refused', 1]],
+  last: { sym: 'AAPL', side: 'LONG', bot: 'Stocks #2', world: 'real', code: 'bad_timing', at: '20:31 UTC', detail: 'the stock market shuts at 21:00 UTC: no new entry in its last minutes' },
+  fam: { forex: { sess: 'open', sw: 'open · shuts Fri 21:00 UTC', vol: 41, n: 3, sig: [9, 5, 2] }, crypto: { sess: 'open', sw: 'open · never shuts', vol: 78, n: 1, sig: [3, 1, 1] },
+    commodity: { sess: 'open', sw: 'open · break 22:00 UTC', vol: 55, n: 1, sig: [3, 1, 1] }, stock: { sess: 'open', sw: 'open · shuts 21:00 UTC', vol: 36, n: 2, sig: [4, 1, 1] },
+    index: { sess: 'open', sw: 'cash · shuts 21:00 UTC', vol: 62, n: 1, sig: [2, 0, 0] } },
+  unseat: { forex: 1, commodity: 1 },
+  res: null, portfolio: 10453.61,
+  closed: { real: { n: 2, r: 1.69, usd: 12.40 }, paper: { n: 5, r: -0.80 } },
+  sess: '9/14',
+  ev: [['20:31 UTC', '<span class="m">AAPL</span> ' + chipS('LONG') + ' refused by Stocks #2 ' + chipW('real') + ' · <span class="m">bad_timing</span> · the stock market shuts at <span class="m">21:00 UTC</span>: no new entry in its last minutes'],
+    ['20:05 UTC', '<span class="m">EURUSD</span> ' + chipS('LONG') + ' taken by Forex #3 ' + chipW('real') + ' · fill <span class="m">1.08420</span>'],
+    ['19:46 UTC', '<span class="m">GBPUSD</span> ' + chipS('SHORT') + ' taken by Forex paper #7 ' + chipW('paper') + ' · fill <span class="m">1.29110</span>'],
+    ['19:12 UTC', '<span class="m">USDCAD</span> ' + chipS('SHORT') + ' refused by Forex #3 ' + chipW('real') + ' · <span class="m">cost_filter</span> · planned move <span class="m">0.24%</span> is only <span class="m">1.1x</span> the <span class="m">0.22%</span> round-trip cost (need <span class="m">2.0x</span>)'],
+    ['18:40 UTC', '<span class="m">NZDUSD</span> closed ' + chipW('real') + ' · <span class="m up">+$4.10 ▲</span> · <span class="m up">+0.31R</span> · at eToro\'s price']]
+}; }
+/* the reserve's cells reconcile with the page: used = the real rows' capital at work on Sauron + what eToro holds outside Sauron */
+function reserve0(st) { const onS = Math.round(st.pos.filter(p => p.world === 'real' && p.wk != null).reduce((a, p) => a + p.wk, 0) * 100) / 100, outside = 2861.57, used = onS + outside; st.res = { avail: st.portfolio - used, used, pct: (100 * used / st.portfolio).toFixed(1) + '%', onS, outside, outN: 2 }; return st; }
+let S = reserve0(fresh());
+const G = { w: 0, h: 0, riverY: 0, laneY: 0, airY: 13, airB: 26, bas: {}, blk: {}, pool: {}, pp: {}, mp: {} };
+let actors = [];
+const stage = $('#stage'), bed = $('#bed'), flow = $('#flow');
+const bedC = bed.getContext('2d'), flowC = flow.getContext('2d');
+let bedDirty = true;
+const perf = { frames: 0, draws: 0, skipped: 0, ticks: 0, stepMs: 0, drawMs: 0, maxActors: 0 };
+
+/* ── words and small renders ── */
+const clockNow = () => S.clock0 + (S.T - S.clockT0) / 1000;
+const hms = s => { s = Math.floor(s) % 86400; const p = n => String(n).padStart(2, '0'); return p(Math.floor(s / 3600)) + ':' + p(Math.floor(s % 3600 / 60)) + ':' + p(s % 60); };
+const hm = s => hms(s).slice(0, 5) + ' UTC';
+const ageW = a => a < 60 ? Math.floor(a) + ' s' : a < 3600 ? Math.floor(a / 60) + ' min' : Math.floor(a / 3600) + ' h';
+const ageH = a => ageW(a).replace(/^(\d+)/, '<span class="m">$1</span>');
+const inW = m => { const M = '<span class="m i1">', E = '</span>'; m = Math.round(m); return m >= 60 ? M + Math.floor(m / 60) + E + ' h ' + M + String(m % 60).padStart(2, '0') + E + ' min' : M + m + E + ' min'; };
+const pl = (n, w) => '<span class="m">' + n + '</span> ' + w + (n === 1 ? '' : 's');
+const monoH = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\d[\d.,:]*(?:%|x| UTC)?/g, m => '<span class="m">' + m + '</span>');
+const sgR = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2) + 'R';
+const sgU = v => (v >= 0 ? '+' : '−') + fmt(Math.abs(v)) + (v > 0 ? ' ▲' : v < 0 ? ' ▼' : '');
+const sizeVal = p => S.size === 'risk' ? p.risk : p.exp;
+const stateOf = p => p.shut ? 'closed' : p.age >= 900 ? 'stale' : p.age < 60 ? 'live' : 'recent';
+function badge(p) {
+  const st = stateOf(p);
+  if (st === 'closed') return ['closed', '<i class="dot closed"></i><span>closed · last <span class="m">21:00 UTC</span></span>'];
+  if (st === 'stale') return ['stale', '<i class="dot stale"></i><span>stale · ' + ageH(p.age) + '</span>'];
+  return [st, '<i class="dot ' + st + '"></i><span>' + p.feed + ' · ' + ageH(p.age) + '</span>'];
+}
+/* the compact block's price mark: the dot and the age; a stale price also wears the Horde's ⚠ */
+function badgeS(p) {
+  const st = stateOf(p);
+  if (st === 'closed') return ['closed', '<i class="dot closed"></i><span>closed</span>', 'Market closed · last price 21:00 UTC'];
+  return [st, '<i class="dot ' + st + '"></i><span>' + ageH(p.age) + '</span>', (st === 'stale' ? 'Stale: ' : '') + p.feed + ', ' + ageW(p.age) + ' old'];
+}
+function lightOf(p) {
+  if (p.light) return p.light;
+  if (stateOf(p) === 'stale') return { tone: 'watch', why: "Priced at the venue's last rate, " + ageW(p.age) + ' old.' };
+  if (S.evtOn && p.evt) return { tone: 'watch', why: EVT_WHY };
+  return null;
+}
+const ltHTML = lt => lt ? '<span class="lt ' + lt.tone + '" title="' + lt.why + '">' + (lt.tone === 'unheld' ? '○' : lt.tone === 'alarm' ? '⨯' : '⚠') + '</span>' : '';
+const tierOf = h => { const t = S.tiers; return h >= t[3] ? 4 : h >= t[2] ? 3 : h >= t[1] ? 2 : h >= t[0] ? 1 : 0; };
+const isOver = p => { const v = sizeVal(p); return v != null && S.scale && v > S.scale * 1.0005; };
+function blkHTML(p, h, bw) {
+  const t = tierOf(h), lt = lightOf(p), b = badge(p), bs = badgeS(p), v = sizeVal(p), ov = isOver(p);
+  const cls = ['blk', p.world]; for (let i = 1; i <= t; i++) cls.push('t' + i); if (ov) cls.push('capd'); if (h === MIC) cls.push('mic');
+  const riskT = p.risk != null ? '<b>risk</b> ' + fmt(p.risk) + ' <b>·</b> ' + p.qty : p.nousd ? '<b>risk</b> — <b>· no USD stamp</b>' : '<b>risk</b> — <b>· no stop</b>';
+  const trk = p.sl ? '<div class="trk"><i class="fill ' + (p.k >= p.e ? 'u' : 'd') + '" style="left:' + (Math.min(p.e, p.k) * 100).toFixed(1) + '%;width:' + (Math.abs(p.k - p.e) * 100).toFixed(1) + '%"></i><i class="en" style="left:' + (p.e * 100).toFixed(1) + '%"></i><i class="mk" style="left:' + (p.k * 100).toFixed(1) + '%"></i></div>' : '<div class="trk nil"></div>';
+  const pct = v == null || !S.scale ? 0 : Math.max(2, Math.min(100, 100 * v / S.scale)), what = S.size === 'risk' ? 'risk at the stop' : 'exposure at the mark';
+  return '<article class="' + cls.join(' ') + '" data-id="' + p.id + '" tabindex="0" style="width:' + bw + 'px;height:' + h + 'px" aria-label="' + p.sym + ' ' + p.side.toLowerCase() + ', ' + WORLD_L[p.world] + '">' +
+    '<i class="pe"></i><i class="be"></i>' +
+    '<div class="l1"><span class="sym">' + p.sym + '</span>' + chipW(p.world) + (ov ? '<span class="ov" title="Above the scale: real money sets it. Drawn at the cap, never larger.">›</span>' : '') + ltHTML(lt) + '</div>' +
+    '<div class="l2">' + chipS(p.side) + '<span class="rr" title="' + (p.sl ? 'R now, from the estimate' : 'No stop recorded: no R, not a zero.') + '">' + p.r + '</span><span class="ca ' + bs[0] + '" data-c title="' + bs[2] + '">' + bs[1] + '</span></div>' +
+    '<div class="l3">' + riskT + '</div>' +
+    '<div class="em" title="Entry, then the mark">' + p.entry + ' <b>→</b> ' + p.mark + '</div>' +
+    '<div class="pnl">' + p.pnl + '<span>estimate: ' + p.feed + '</span></div>' +
+    '<div class="x4"><b>exposure</b> ' + (p.exp != null ? fmt(p.exp) : '— <b>no USD stamp</b>') + '</div><div class="x4" title="Capital at work: margin when levered, cost otherwise"><b>at work</b> ' + (/^\$/.test(p.work) ? p.work.split(' ')[0] : '<b>' + p.work + '</b>') + '</div><div class="x4"><b>held</b> ' + p.held + '</div>' +
+    '<div class="l4 ' + b[0] + '" data-b>' + b[1] + '</div>' +
+    trk +
+    '<div class="lv"><span><b>SL</b>' + (p.sl || '—') + '</span><span><b>TP</b>' + (p.tp || '—') + '</span></div>' +
+    '<div class="org" title="' + p.from + '"><span class="ru">' + p.org[0] + '</span><span class="la">' + p.org[1] + '</span></div>' +
+    '<i class="pb" style="width:' + pct.toFixed(1) + '%" title="' + what + ': ' + (v == null ? 'no USD figure' : fmt(v)) + (S.scale ? ' of ' + fmt(S.scale) : '') + '"></i>' +
+    '<span class="barl">' + what + ' ' + (v == null ? '— not in USD' : fmt(v)) + '</span><div class="bar"><i style="width:' + Math.round(pct) + '%"></i></div>' +
+    '</article>';
+}
+/* a world's band inside a basket: its chip, its own sum, its bar on the page's one scale; never a sum across worlds */
+const bandVals = rows => rows.map(sizeVal).filter(v => v != null);
+const bandH = rows => { const n = bandVals(rows).length; return n && n < rows.length ? BH + 13 : BH; };
+function bandHTML(w, rows, bw) {
+  const vals = bandVals(rows), sum = vals.reduce((a, v) => a + v, 0), apart = rows.length - vals.length;
+  const over = S.bscale && sum > S.bscale * 1.0005, pct = !S.bscale || !vals.length ? 0 : Math.max(2, Math.min(100, 100 * sum / S.bscale));
+  const what = S.size === 'risk' ? 'Risk at the stops' : 'Exposure at the mark';
+  return '<div class="wband" data-w="' + w + '" style="width:' + bw + 'px" title="' + what + ' of this basket\'s ' + WORLD_L[w] + ' rows. One sum per world, never added. The bar is this sum on the page\'s one scale' + (over ? '; it is above the scale and capped' : '') + '.">' +
+    '<div class="wbandh">' + chipW(w) + (!rows.length ? '<span class="sum nil">— nothing open</span>' : vals.length ? '<span class="sum">' + fmt(sum) + (over ? ' ›' : '') + '</span>' : '<span class="sum nil">— no figure</span>') + '</div>' +
+    '<div class="wbar w-' + w + '"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
+    (apart && vals.length ? '<div class="apn" title="A row with no USD figure for this measure is drawn at the floor and left out of the sum.">+<span class="m">' + apart + '</span> apart: no USD figure</div>' : '') + '</div>';
+}
+function workSum(w, rows) {
+  if (w === 'paper') return '<span class="i3">simulated</span>';
+  if (!rows.length) return '<span class="m">' + fmt(0) + '</span>';
+  const v = rows.filter(p => p.wk != null); if (!v.length) return '<span class="i3">— not known</span>';
+  return '<span class="m">' + fmt(v.reduce((a, p) => a + p.wk, 0)) + '</span>';
+}
+function sigHTML(k) {
+  const f = S.fam[k].sig;
+  return '<div class="sg" title="Three readers, and they do not add up: signal rows of this family, trade rows opened, and symbols whose last recorded reason is a refusal. All in the last 24 hours.">' +
+    '<span class="m">24</span> h · ' + pl(f[0], 'signal') + ' · <span class="m">' + f[1] + '</span> taken · <span class="m">' + f[2] + '</span> refused</div>';
+}
+function footHTML(b) {
+  const k = b.k; let h = '';
+  if (!b.hasPrim) h += '<div class="fw">' + chipW('real') + '<span class="i3">— nothing open</span></div>';
+  else h += '<div class="fw" title="Capital at work: margin when levered, cost otherwise. It is what left the reserve for these rows.">at work ' + workSum(b.prim[0][0], S.pos.filter(p => GROUPS[S.group].key(p) === k && p.world === b.prim[0][0])) + '</div>';
+  if (S.group === 'family' && S.unseat[k]) h += '<a class="un" href="#" title="Held at eToro and not on Sauron: no row, no mark, so no block. They are part of the reserve\'s “outside Sauron”. The Operations Center lists them.">+<span class="m">' + S.unseat[k] + '</span> at eToro, not on Sauron ›</a>';
+  if (b.annex === 'line') h += '<div class="un" title="No room to draw them at this size.">+<span class="m">' + b.ann.reduce((a, x) => a + x[1].length, 0) + '</span> apart · in the table</div>';
+  if (S.group === 'family') h += sigHTML(k);
+  return h;
+}
+function headHTML(k) {
+  const g = GROUPS[S.group], ps = S.pos.filter(p => g.key(p) === k);
+  if (S.group === 'family') {
+    const f = S.fam[k];
+    return '<div class="bt disp">' + g.label[k] + '</div>' +
+      '<div class="bs"><i class="dot ' + (f.sess === 'open' ? 'live' : 'closed') + '"></i><span>' + f.sw.replace(/(\d\d:\d\d UTC)/, '<span class="m">$1</span>') + '</span></div>' +
+      '<div class="bv" title="20-day realized volatility as a percentile of the last 120 values, for this family\'s held instruments (else the starred ones): the median of ' + f.n + '. Daily bars to 11 Nov.">vol <span class="m i2">p' + f.vol + '</span> · <span class="m i2">' + f.n + '</span> inst · <span class="m i2">11</span> Nov</div>';
+  }
+  const shut = ps.filter(p => p.shut).length, open = ps.length - shut;
+  const title = S.group === 'world' ? '<div class="bt">' + chipW(k) + '<span class="pl">' + g.plain[k] + '</span></div>' : '<div class="bt disp">' + g.label[k] + '</div>';
+  return title + '<div class="bs"><span class="m">' + ps.length + '</span> open · ' + pl(open, 'market') + ' open' + (shut ? ' · <span class="m">' + shut + '</span> shut' : '') + '</div><div class="bv">&nbsp;</div>';
+}
+function slotHTML(k) {
+  const f = S.fam[k], open = f.sess === 'open';
+  return '<section class="basket slot' + (open ? '' : ' shut') + '" data-k="' + k + '" data-vol="' + f.vol + '"><div class="card bk slotc" data-box="card" style="width:' + SLOTW + 'px">' +
+    '<div class="bhead" title="' + f.sw + '"><div class="bt disp">' + GROUPS.family.label[k] + '</div><div class="bs"><i class="dot ' + (open ? 'live' : 'closed') + '"></i><span>' + (open ? 'open' : 'shut') + '</span></div></div><div class="water"></div>' +
+    '<div class="bfoot"><div class="fw"><span class="i3">Nothing open</span></div>' + sigHTML(k) + '</div></div></section>';
+}
+
+/* ── the layout: one scale that real money sets; a block's height is its value on it; columns, bands and the fold ── */
+const GAP = 8, BH = 19, MORE = 22, HEADH = 58, WATER = 28, PADV = 16, SLOTW = 124, CG = 10, BOXPAD = 20, FLOOR = 48, MIC = 22;
+function pack(items, hmax) {
+  const cols = [[]]; let h = 0;
+  items.forEach((it, i) => {
+    let need = it.h; if (it.t === 'band' && items[i + 1]) need += GAP + items[i + 1].h;   // a band's head is never left alone at a column's foot
+    const cur = cols[cols.length - 1];
+    if (cur.length && h + GAP + need > hmax) { cols.push([it]); h = it.h; } else { h += (cur.length ? GAP : 0) + it.h; cur.push(it); }
+  });
+  return cols;
+}
+const colH = c => c.reduce((a, it) => a + it.h, 0) + GAP * Math.max(0, c.length - 1);
+/* bands into at most ncols columns. Outside the real card, blocks give up height before any of them is hidden: the smallest first.
+   A block taller than the floor drops to the floor, a floor-size block becomes a one-line row (symbol, side, R), and the bar at its
+   foot keeps saying its size. Only when every block is a row does the smallest fold, whatever its band, under one "+N more" line;
+   a band with nothing left to show loses its head. Real money sits in the card: it is never cut down, and it folds last. */
+function fit(bands, hmax, ncols, hOf, rowsOK) {
+  const keep = bands.map(b => b[1].slice()), folded = [], cut = new Map(), hNow = p => cut.has(p) ? cut.get(p) : hOf(p);
+  for (let guard = 0; guard < 900; guard++) {
+    const items = [];
+    bands.forEach((b, i) => { if (!keep[i].length && bands.length > 1) return; items.push({ t: 'band', w: b[0], rows: b[1], h: bandH(b[1]) }); keep[i].forEach(p => items.push({ t: 'blk', p, h: hNow(p) })); });
+    if (folded.length) items.push({ t: 'more', rows: folded.slice(), h: MORE });
+    const cols = pack(items, hmax), left = keep.reduce((a, k) => a + k.length, 0);
+    if ((cols.length <= ncols && cols.every(c => colH(c) <= hmax + 1)) || !left) return { cols: cols.slice(0, ncols), folded: folded.length };
+    let bi = -1, bj = -1, bv = Infinity, m = null;
+    if (rowsOK) keep.forEach(k => k.forEach(p => { const v = sizeVal(p) || 0; if (hNow(p) > MIC && v < bv) { bv = v; m = p; } }));
+    if (m) { cut.set(m, hNow(m) > FLOOR ? FLOOR : MIC); continue; }
+    keep.forEach((k, i) => k.forEach((p, j) => { const v = sizeVal(p) || 0; if (v < bv) { bv = v; bi = i; bj = j; } }));
+    folded.push(keep[bi].splice(bj, 1)[0]);
+  }
+  return { cols: [], folded: 0 };
+}
+function build(keepScale) {
+  const g = GROUPS[S.group], region = $('#baskets'), fam = S.group === 'family';
+  const W = region.clientWidth, H = region.clientHeight, big = W >= 1400, BWMIN = big ? 170 : 152;
+  S.tiers = [98, 144, 204, 248].map(v => Math.round(v * (big ? 1.07 : 1)));
+  const keys = g.order.filter(k => g.keep || S.pos.some(p => g.key(p) === k));
+  const prim = (k, ps) => S.group === 'world' ? [[k, ps]] : [['real', ps.filter(p => p.world === 'real')]];
+  if (!keepScale || S.scale == null) {
+    const reals = S.pos.filter(p => p.world === 'real').map(sizeVal).filter(v => v != null), all = S.pos.map(sizeVal).filter(v => v != null);
+    S.scaleReal = reals.length > 0; S.scale = reals.length ? Math.max.apply(null, reals) : all.length ? Math.max.apply(null, all) : null; S.scaleAt = clockNow();
+    const sums = w => keys.map(k => bandVals(S.pos.filter(p => g.key(p) === k && p.world === w)).reduce((a, v) => a + v, 0));
+    const rs = sums('real'), any = WORLD_ORDER.reduce((a, w) => a.concat(sums(w)), []);
+    S.bscale = Math.max.apply(null, (rs.some(v => v > 0) ? rs : any).concat([0])) || null;
+  }
+  /* the foot's room: the family view prints the 24 h counts and the "at eToro" line; one more line when a basket's annex is reduced to a count */
+  function mkPlan(xf) {
+    const anyUn = fam && keys.some(k => S.unseat[k] && S.pos.some(p => g.key(p) === k && p.world === 'real'));
+    const footOf = b => 14 + 17 + xf + (b.hasPrim && fam && S.unseat[b.k] ? 17 : 0) + (fam ? (b.cardCols > 1 ? 16 : 31) : 0);
+    const HCof = b => H - HEADH - WATER - PADV - 2 - footOf(b), HS = H - HEADH - WATER - PADV - 2;
+    /* the cap: the tallest real block alone in its card, and the tallest other block under an empty card with room left for a fold line */
+    const HC0 = H - HEADH - WATER - PADV - 2 - (14 + 17 + xf + (anyUn ? 17 : 0) + (fam ? 31 : 0)), lidU = H - (HEADH + WATER + 2 + 14 + 17 + xf + (fam ? 31 : 0)) - 6 - 2 - PADV;
+    const C = Math.max(FLOOR, Math.min(380, HC0 - BH - GAP, lidU - BH - GAP - MORE - GAP));
+    const hOf = p => { const v = sizeVal(p); return v == null || !S.scale ? FLOOR : Math.max(FLOOR, Math.min(C, Math.round(C * v / S.scale))); };
+    const itemsOf = bands => bands.reduce((a, b) => a.concat([{ t: 'band', h: bandH(b[1]) }], b[1].map(p => ({ t: 'blk', h: hOf(p) }))), []);
+    const plan = keys.map(k => {
+      const ps = S.pos.filter(p => g.key(p) === k), b = { k, ps, prim: prim(k, ps), slot: !ps.length };
+      b.ann = S.group === 'world' ? [] : ['demo', 'paper', 'none'].map(w => [w, ps.filter(p => p.world === w)]).filter(x => x[1].length);
+      b.hasPrim = b.prim[0][1].length > 0; b.cardCols = 1; b.cardCols = b.hasPrim && !PHONE ? pack(itemsOf(b.prim), HCof(b)).length : 1; b.annex = ''; b.annCols = 0;
+      return b;
+    });
+    const cardH = b => { if (!b.hasPrim) return HEADH + WATER + 2 + footOf(b); const c = pack(itemsOf(b.prim), HCof(b)).slice(0, b.cardCols); return HEADH + WATER + 2 + PADV + Math.max.apply(null, c.map(colH)) + footOf(b); };
+    const under = b => H - cardH(b) - 6 - 2 - PADV;
+    plan.forEach(b => {
+      if (!b.ann.length) return;
+      const av = under(b), u = av >= BH + GAP + FLOOR ? pack(itemsOf(b.ann), av) : null;
+      if (PHONE || (u && u.length <= b.cardCols && u.every(c => colH(c) <= av + 1))) b.annex = 'under'; else { b.annex = 'side'; b.annCols = pack(itemsOf(b.ann), HS).length; }
+    });
+    const width = bw => plan.reduce((a, b) => a + (b.slot ? SLOTW : b.cardCols * bw + (b.cardCols - 1) * CG + BOXPAD + (b.annex === 'side' ? 6 + b.annCols * bw + (b.annCols - 1) * CG + BOXPAD : 0)), 0) + 10 * Math.max(0, plan.length - 1);
+    /* too wide: a column is taken where it costs least. An annex of several columns loses one; then the annex with the most room under its card goes under it (folding what does not fit); a card's own extra column goes last */
+    for (let guard = 0; guard < 80 && !PHONE && width(BWMIN) > W; guard++) {
+      const side = plan.filter(b => b.annex === 'side');
+      let t = side.filter(b => b.annCols > 1).sort((a, b) => b.annCols - a.annCols)[0];
+      if (t) { t.annCols--; continue; }
+      t = side.sort((a, b) => under(b) - under(a))[0];
+      if (t) { t.annCols = 0; t.annex = under(t) >= BH + GAP + MORE ? 'under' : 'line'; continue; }
+      t = plan.filter(b => b.cardCols > 1).sort((a, b) => (a.prim[0][0] === 'real') - (b.prim[0][0] === 'real') || b.cardCols - a.cardCols)[0];
+      if (t) { t.cardCols--; if (t.annex === 'under' && under(t) < BH + GAP + MORE) t.annex = 'line'; continue; }
+      break;
+    }
+    return { plan, HCof, HS, C, hOf, under, width };
+  }
+  let L = mkPlan(0); if (L.plan.some(b => b.annex === 'line')) L = mkPlan(17);
+  const plan = L.plan, hOf = L.hOf;
+  const nslot = fam ? plan.filter(b => b.slot).length : 0, ncol = plan.reduce((a, b) => a + (b.slot ? 0 : b.cardCols + (b.annex === 'side' ? b.annCols : 0)), 0);
+  /* the block width is found as if every empty family already held one column, so a first fill never changes it */
+  let bw = Math.floor((W - L.width(0) - nslot * (BOXPAD - SLOTW)) / Math.max(1, ncol + nslot));
+  bw = PHONE ? 300 : Math.max(BWMIN, Math.min(big ? 236 : 206, bw));
+  const moreHTML = it => { const n = w => it.rows.filter(p => p.world === w).length, parts = WORLD_ORDER.filter(n).map(w => n(w) + ' ' + WORLD_L[w].toLowerCase()).join(', '); return '<div class="more" style="width:' + bw + 'px" title="Folded, no room at this size: ' + parts + '. The smallest fold first, real money last. The table lists every row.">+<span class="m">' + it.rows.length + '</span>&nbsp;more · in the table</div>'; };
+  const colsHTML = cols => '<div class="cols">' + cols.map(c => '<div class="col">' + c.map(it => it.t === 'band' ? bandHTML(it.w, it.rows, bw) : it.t === 'more' ? moreHTML(it) : blkHTML(it.p, it.h, bw)).join('') + '</div>').join('') + '</div>';
+  const apartT = 'DEMO, PAPER and rows that state no venue are drawn apart: they never set the scale and are never added to real money.';
+  let html = '', folded = 0; S.plan = {};
+  plan.forEach(b => {
+    S.plan[b.k] = b;
+    if (b.slot && fam) { html += slotHTML(b.k); return; }
+    const card = b.hasPrim ? fit(b.prim, PHONE ? 1e6 : L.HCof(b), b.cardCols, hOf, b.prim[0][0] !== 'real') : null, cw = b.cardCols * bw + (b.cardCols - 1) * CG + BOXPAD;
+    let ax = '';
+    if (b.annex === 'side') { const a = fit(b.ann, L.HS, b.annCols, hOf, true); folded += a.folded; ax = '<div class="annex side" data-box="annex"><div class="ahead" title="' + apartT + '"><div class="bt disp">Apart</div><div class="bs">demo · paper · no venue</div><div class="bv">never added to real</div></div><div class="water"></div><div class="bbody">' + colsHTML(a.cols) + '</div></div>'; }
+    else if (b.annex === 'under') { const a = fit(b.ann, PHONE ? 1e6 : L.under(b), b.cardCols, hOf, true); folded += a.folded; ax = '<div class="annex under" data-box="annex" style="width:' + cw + 'px" title="' + apartT + '"><div class="bbody">' + colsHTML(a.cols) + '</div></div>'; }
+    else if (b.annex === 'line') folded += b.ann.reduce((a, x) => a + x[1].length, 0);
+    if (card) folded += card.folded;
+    const allShut = fam ? S.fam[b.k].sess === 'shut' : (b.ps.length > 0 && b.ps.every(p => p.shut));
+    html += '<section class="basket' + (b.annex === 'under' ? ' stack' : '') + (allShut ? ' shut' : '') + '" data-k="' + b.k + '" data-vol="' + (fam ? S.fam[b.k].vol : 0) + '">' +
+      '<div class="card bk' + (S.group === 'world' && b.k !== 'real' ? ' apart' : '') + '" data-box="card" style="width:' + cw + 'px"><div class="bhead">' + headHTML(b.k) + '</div><div class="water"></div>' +
+      (card ? '<div class="bbody">' + colsHTML(card.cols) + '</div>' : '') + '<div class="bfoot">' + footHTML(b) + '</div></div>' + ax + '</section>';
+  });
+  region.innerHTML = html;
+  S.metrics = { F: FLOOR, C: L.C, bw, scale: S.scale, bscale: S.bscale, shown: $$('.blk', region).length, folded, cols: ncol, H, W };
+  S.pos.forEach(p => { p._b = p._c = p._l = null; });
+  renderScale(); measure(); drawFronts();
+}
+function renderScale() {
+  const el = $('#scl'), what = S.size === 'risk' ? ' at risk' : '';
+  el.innerHTML = S.scale == null ? 'scale · — nothing open' : 'full height = <span class="m">' + fmt(S.scale) + '</span>' + what + ' · ' + (S.scaleReal ? 'set by real money' : 'no real row: the largest shown') + ' at <span class="m">' + hm(S.scaleAt || clockNow()) + '</span> ↻';
+  el.title = 'One scale for the page: the largest real position when the page was laid out. It never shrinks by itself, and a larger real position enlarges it at once. A DEMO or PAPER block above it is capped and marked ›. Click to refit.';
+}
+function renderSky() {
+  const lv = $('#lvl'); lv.className = 'lvl ' + S.level;
+  lv.textContent = S.level === 'off' ? '— not measured' : (S.level === 'stressed' ? '⚠ ' : S.level === 'crisis' ? '⨯ ' : '') + S.level + (S.level === 'recovery' ? ' · day 3 of 10' : '');
+  if (S.level === 'recovery') lv.innerHTML = 'recovery · day <span class="m">3</span> of <span class="m">10</span>';
+  $('#score').innerHTML = S.score == null ? '' : 'score <span>' + S.score + '</span><span class="i3">/100</span>';
+  $('#wxwords').textContent = WORDS[S.level];
+  stage.className = 'stage lv-' + S.level;
+  tickSky(true);
+}
+let skyKey = '';
+function tickSky(force) {
+  const now = clockNow(), m = (S.evtAt - now) / 60, rm = Math.max(0, Math.floor((now - S.readAt) / 60)), ch = Math.max(0, Math.floor((now - S.calAt) / 3600));
+  const key = Math.round(m) + '|' + rm + '|' + S.evtOn + '|' + S.pos.length + '|' + S.level;
+  if (!force && key === skyKey) return; skyKey = key;
+  $('#wxage').innerHTML = S.level === 'off' ? '' : '<i class="dot live"></i><span>read <span class="m">' + rm + '</span> min ago</span>';
+  const n = S.pos.filter(p => p.evt).length, lit = S.pos.filter(p => S.evtOn && p.evt && !p.light).length;
+  $('#hzt').innerHTML = (S.evtOn ? '<span class="lbl on">⚠ Front over the book</span>' : '<span class="lbl">Next print</span>') + '<span>Fed Chair speaks · <span class="m i1">22:00 UTC</span> · in ' + inW(m) + '</span>';
+  $('#hztouch').innerHTML = '<span title="By the care\'s own rule: forex by either leg\'s currency, the rest by the home currency. The ⚠ is the care\'s record on the rows it manages, written at its next pass.">touches <span class="m i2">' + n + '</span> open' + (S.evtOn ? ' · <span class="m i2">' + lit + '</span> lit by the care' : '') + '</span><span>calendar read <span class="m">' + ch + '</span> h ago</span>';
+  const tr = $('#hztrack'), tw = tr.clientWidth, ppm = tw / 360;
+  const put = (el, mm, name) => { const a = Math.max(0, mm - 60), b = Math.min(360, mm + 15); el.style.left = (a * ppm) + 'px'; el.style.width = Math.max(0, (b - a) * ppm) + 'px'; el.title = name + ': the care\'s window, 60 minutes before to 15 after'; };
+  put($('#fr1'), m, 'Fed Chair speaks · 22:00 UTC'); put($('#fr2'), m + 90, 'BoJ Governor speaks · 23:30 UTC');
+  if (!tr.dataset.t) { tr.dataset.t = 1; let h = ''; for (let i = 1; i <= 6; i++) h += '<div class="hztick" style="left:' + (i * 60 * ppm - (i === 6 ? 1 : 0)) + 'px"></div>'; h += '<span class="hzlab" style="left:' + (180 * ppm) + 'px">+3 h</span><span class="hzlab" style="left:' + (360 * ppm - 16) + 'px">+6 h</span><span class="hzlab" style="left:14px">now</span>'; tr.insertAdjacentHTML('beforeend', h); }
+}
+function renderBottom() {
+  const c = S.cnt, t = c.taken, tn = t.real + t.demo + t.paper;
+  $('#sgline').innerHTML = pl(c.arrived, 'signal') + ' arrived · <span class="m">' + tn + '</span> taken: <span class="m">' + t.real + '</span> real · ' + (t.demo ? '<span class="m">' + t.demo + '</span> demo · ' : '') + '<span class="m">' + t.paper + '</span> paper';
+  $('#sgrail').innerHTML = '<span class="m">' + c.rail + '</span> on the rail, read ' + ageH(Math.max(0, clockNow() - S.railAt)) + ' ago · <span title="Not refusals: the vote said no (hold), the bot already holds the symbol (already_open), or it traded it too recently (cooldown).">waiting <span class="m">' + c.waiting + '</span></span>';
+  $('#sgwhy').innerHTML = 'refused: ' + pl(c.refSym, 'symbol') + ' by their last reason · <span class="m">' + c.refReal + '</span> by real bots';
+  $('#sgwhy').title = 'The last reason recorded for each symbol, bot by bot, when it is a refusal and under 24 hours old: ' + S.why.map(w => w[0] + ' ' + w[1]).join(', ') + '. Not a count of refusals: only the last one per symbol is kept.';
+  const l = S.last;
+  $('#sglast').innerHTML = 'last: <span class="m">' + l.sym + '</span> · ' + l.bot + ' ' + chipW(l.world) + ' · <span class="m">' + l.code + '</span> · <span class="m">' + l.at + '</span>';
+  $('#sglast').title = 'The last refusal: ' + l.sym + ' ' + l.side.toLowerCase() + ', by ' + l.bot + ' (' + WORLD_L[l.world] + ').';
+  $('#sgdet').innerHTML = monoH(l.detail); $('#sgdet').title = 'The detail the bot stored with this refusal, word for word (the same line why_no_trade prints).';
+  const r = S.closed.real, p = S.closed.paper;
+  $('#clbody').innerHTML =
+    '<div class="ln">' + chipW('real') + pl(r.n, 'close') + ' · <span class="m ' + (r.r >= 0 ? 'up' : 'down') + '">' + sgR(r.r) + '</span> · <span class="m ' + (r.usd >= 0 ? 'up' : 'down') + '">' + sgU(r.usd) + '</span></div>' +
+    '<div class="ln s" style="padding-left:2px">at eToro\'s price · fees not counted</div>' +
+    '<div class="ln">' + chipW('demo') + '<span class="i3" title="Nothing closed in this world in 24 h.">— nothing closed</span></div>' +
+    '<div class="ln">' + chipW('paper') + '<span class="m">' + p.n + '</span> simulated · <span class="m">' + sgR(p.r) + '</span></div>';
+  $('#rAvail').textContent = fmt(S.res.avail); $('#rUsed').textContent = fmt(S.res.used); $('#rPct').textContent = S.res.pct; $('#rOn').textContent = fmt(S.res.onS); $('#rOut').textContent = fmt(S.res.outside); $('#rOutN').textContent = S.res.outN;
+}
+function renderShell() {
+  const n = w => S.pos.filter(p => p.world === w).length;
+  $('#fpos').textContent = S.pos.length;
+  $('#fposs').textContent = n('real') + ' real · ' + n('demo') + ' demo · ' + n('paper') + ' paper · ' + n('none') + ' no venue';
+  $('#fsig').textContent = $('#navsig').textContent = $('#docksig').textContent = S.cnt.active;
+  $('#sess').textContent = S.sess; $('#fport').textContent = fmt(S.portfolio);
+  const real = S.pos.filter(p => p.world === 'real').reduce((a, p) => a + parseFloat(p.pnl.replace(/[^0-9.\-]/g, '')), 0);
+  $('#fopen').textContent = '≈ ' + (real >= 0 ? '+' : '-') + fmt(Math.abs(real)) + (real > 0 ? ' ▲' : real < 0 ? ' ▼' : '');
+  const w = S.pos.filter(p => { const l = lightOf(p); return l && l.tone === 'watch'; }).length;
+  $('#fhorde').textContent = '⨯ 0 alarms · ⚠ ' + w + ' watch';
+  $('#bandaapl').className = 'dot ' + (S.fam.stock.sess === 'open' ? 'live' : 'closed');
+}
+function renderEvents() {
+  $('#evbody').innerHTML = S.ev.map(e => '<div class="ln s"><span class="m">' + e[0] + '</span> · ' + e[1] + '</div>').join('');
+  const l = $('#evl');
+  if (REDUCED && !PHONE) { l.innerHTML = '<span class="lbl">Last event</span><span class="m">' + S.ev[0][0] + '</span><span>' + S.ev[0][1] + '</span>'; l.classList.add('on'); l.style.transform = 'translate(108px,' + G.airY + 'px)'; }
+}
+function pushEvent(html) { S.ev.unshift([hm(clockNow()), html]); S.ev.length = Math.min(5, S.ev.length); renderEvents(); }
+function renderAll() { renderSky(); build(false); renderBottom(); renderShell(); renderEvents(); tickClock(true); }
+let lastSec = -1;
+function tickClock(force) {
+  const s = Math.floor(clockNow());
+  if (!force && s === lastSec) return; lastSec = s;
+  $('#clock').textContent = hms(s) + ' UTC';
+  $('#rAge').innerHTML = ageH(Math.max(0, clockNow() - S.resAt));
+  $('#bkage').innerHTML = ageH(Math.max(0, (clockNow() - S.bookAt) % 10));
+  tickSky(false);
+}
+function refreshBlock(p) {
+  const el = $('.blk[data-id="' + p.id + '"]'); if (!el || el.classList.contains('leaving')) return;
+  const b = badge(p), l4 = $('[data-b]', el), bs = badgeS(p), ca = $('[data-c]', el);
+  if (p._b !== b[1]) { p._b = b[1]; l4.className = 'l4 ' + b[0]; l4.innerHTML = b[1]; }
+  if (p._c !== bs[1]) { p._c = bs[1]; ca.className = 'ca ' + bs[0]; ca.innerHTML = bs[1]; ca.title = bs[2]; }
+  const lt = lightOf(p), key = lt ? lt.tone + lt.why : '';
+  if (p._l !== key) { p._l = key; const old = $('.lt', el); if (old) old.remove(); if (lt) $('.l1', el).insertAdjacentHTML('beforeend', ltHTML(lt)); bedDirty = true; }
+}
+function refoot(k) { const sec = $('.basket[data-k="' + k + '"]'), f = sec && $('.bk .bfoot', sec); if (!f) return; f.innerHTML = sec.classList.contains('slot') ? '<div class="fw"><span class="i3">Nothing open</span></div>' + sigHTML(k) : footHTML(S.plan[k]); }
+function reband(k) { const g = GROUPS[S.group], sec = $('.basket[data-k="' + k + '"]'); if (!sec) return; $$('.wband', sec).forEach(e => { const w = e.dataset.w; e.outerHTML = bandHTML(w, S.pos.filter(p => g.key(p) === k && p.world === w), parseFloat(e.style.width)); }); }
+
+/* ── geometry: everything the canvas draws is measured on the page ── */
+function measure() {
+  if (PHONE) return;
+  const sr = stage.getBoundingClientRect();
+  const rel = el => { const r = el.getBoundingClientRect(); return { l: r.left - sr.left, r: r.right - sr.left, t: r.top - sr.top, b: r.bottom - sr.top, w: r.width, h: r.height }; };
+  if (G.w !== sr.width || G.h !== sr.height) {
+    G.w = sr.width; G.h = sr.height;
+    [bed, flow].forEach(c => { c.width = Math.round(G.w * DPR); c.height = Math.round(G.h * DPR); c.style.width = G.w + 'px'; c.style.height = G.h + 'px'; c.getContext('2d').setTransform(DPR, 0, 0, DPR, 0, 0); });
+  }
+  G.bas = {}; G.blk = {}; G.mp = {}; G.gates = [];
+  const air = rel($('#air')); G.airY = air.t + 3; G.airB = air.b;
+  $$('.basket').forEach(bk => {
+    const k = bk.dataset.k, card = $('.bk', bk), R = rel(card), w = rel($('.water', card)), full = rel(bk);
+    R.wy = Math.round((w.t + w.b) / 2) + .5; R.fl = full.l; R.fr = full.r; R.ft = full.t; R.shut = bk.classList.contains('shut'); R.vol = +bk.dataset.vol || 0;
+    G.bas[k] = R; G.riverY = R.wy;
+    $$('[data-box]', bk).forEach(box => {
+      const X = rel(box), foot = $('.bfoot', box); X.yb = (foot ? rel(foot).t : X.b) - 4.5; X.gl = Math.round(X.l + 5) + .5;
+      X.gate = box.classList.contains('under') ? R.l : X.l; if (!box.classList.contains('under')) G.gates.push(X.l);
+      $$('.blk', box).forEach(e => { if (e.classList.contains('leaving')) return; const B = rel(e); B.xf = Math.round(B.r + 4) + .5; B.gx = Math.round(B.l - 5) + .5; B.bk = k; B.box = X; G.blk[e.dataset.id] = B; });
+    });
+  });
+  const ln = rel($('.lane')); G.laneY = Math.round((ln.t + ln.b) / 2) + .5;
+  $$('.pool').forEach(e => { const R = rel(e); G.pool[e.dataset.w] = { x: Math.round(R.l + 30) + .5, y: rel(e.closest('.card')).t }; });
+  G.pp = {}; for (const id in G.blk) G.pp[id] = pricePath(G.blk[id]);
+  bedDirty = true;
+}
+function mk(pts) { const seg = []; let L = 0; for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); L += l; } return { pts, seg, L }; }
+function at(path, s) {
+  s = Math.max(0, Math.min(path.L, s));
+  for (let i = 0; i < path.seg.length; i++) {
+    if (s <= path.seg[i] || i === path.seg.length - 1) { const t = path.seg[i] ? Math.min(1, s / path.seg[i]) : 0, a = path.pts[i], b = path.pts[i + 1]; return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+    s -= path.seg[i];
+  }
+  return path.pts[0];
+}
+const inl = b => Math.min(46, b.w * .3);
+/* a price enters the river at its own basket's gate, rides to the gutter at its block's right, drops, and is taken in along the top edge */
+const pricePath = b => mk([[b.box.gate, G.riverY], [b.xf, G.riverY], [b.xf, b.t + 1], [b.r - inl(b), b.t + 1]]);
+/* money climbs the left gutter of its box, runs under the blocks, and enters its block along the bottom edge */
+function moneyPath(w, b) { const p = G.pool[w], X = b.box; return mk([[p.x, p.y], [p.x, G.laneY], [X.gl, G.laneY], [X.gl, X.yb], [b.gx, X.yb], [b.gx, b.b - 1], [b.l + inl(b), b.b - 1]]); }
+const moneyOf = (id, w) => G.mp[id] || (G.blk[id] ? (G.mp[id] = moneyPath(w, G.blk[id])) : null);
+/* the river's surface: three still current lines. Their height is the weather's level plus each family's volatility; ice is flat; "not measured" is flat */
+function ampAt(x) {
+  if (S.level === 'off') return 0;
+  let a = S.wxA;
+  for (const k in G.bas) { const b = G.bas[k]; if (x > b.fl && x < b.fr) { if (b.shut) return 0; a += Math.min(1, (x - b.fl) / 18, (b.fr - x) / 18) * 1.5 * b.vol / 100; break; } }
+  return Math.min(6, a);
+}
+const wave = (x, ph) => Math.sin(x * 6.2832 / S.lam + 1.3 + ph);
+const rip = x => ampAt(x) * wave(x, 0);
+const rip2 = (x, up) => (up ? -9 : 9) + .5 * ampAt(x) * wave(x, up ? 1.1 : -1.1);
+
+/* ── sprites, drawn once ── */
+function sprite(r, stops) { const c = document.createElement('canvas'); c.width = c.height = Math.ceil(r * 2 * DPR); const x = c.getContext('2d'); x.scale(DPR, DPR); const g = x.createRadialGradient(r, r, 0, r, r, r); stops.forEach(s => g.addColorStop(s[0], s[1])); x.fillStyle = g; x.fillRect(0, 0, r * 2, r * 2); c.r = r; return c; }
+const SPR = {
+  price: sprite(4.5, [[0, 'rgba(214,255,230,1)'], [.3, 'rgba(0,232,104,.85)'], [.6, 'rgba(0,232,104,.22)'], [1, 'rgba(0,232,104,0)']]),
+  glow: sprite(8, [[0, 'rgba(0,232,104,.55)'], [.5, 'rgba(0,232,104,.16)'], [1, 'rgba(0,232,104,0)']])
+};
+function drawToken(c, x, y, al, sc, bare) { if (!bare) { c.globalAlpha = al * .9; c.drawImage(SPR.glow, x - 8, y - 8, 16, 16); } c.globalAlpha = al; c.save(); c.translate(x, y); c.rotate(Math.PI / 4); c.strokeStyle = '#E6F1EA'; c.lineWidth = 1.5; c.fillStyle = '#040B07'; const s = 4.2 * sc; c.fillRect(-s, -s, 2 * s, 2 * s); c.strokeRect(-s, -s, 2 * s, 2 * s); c.restore(); }
+
+/* ── the bed: the river's three lines, the gates, the feeders, the money lane (redrawn only when something changed) ── */
+function drawBed() {
+  const c = bedC; c.clearRect(0, 0, G.w, G.h); c.lineWidth = 1;
+  if (G.pool.real) {
+    c.setLineDash([2, 5]); c.strokeStyle = 'rgba(172,196,182,.26)'; c.beginPath();
+    c.moveTo(G.pool.real.x, G.laneY); c.lineTo(G.w - 2, G.laneY);
+    for (const w in G.pool) { c.moveTo(G.pool[w].x, G.pool[w].y); c.lineTo(G.pool[w].x, G.laneY); }
+    c.stroke(); c.setLineDash([]);
+  }
+  const line = f => { c.beginPath(); for (let x = 0; x <= G.w - 7; x += 1.5) { const y = G.riverY + f(x); if (x) c.lineTo(x, y); else c.moveTo(x, y); } };
+  c.lineJoin = 'round';
+  line(rip); c.strokeStyle = 'rgba(0,232,104,.10)'; c.lineWidth = 9; c.stroke(); c.strokeStyle = 'rgba(172,196,182,.6)'; c.lineWidth = 1; c.stroke();
+  c.strokeStyle = 'rgba(172,196,182,.3)'; line(x => rip2(x, true)); c.stroke(); line(x => rip2(x, false)); c.stroke();
+  c.fillStyle = 'rgba(172,196,182,.8)'; c.beginPath(); c.moveTo(G.w - 1, G.riverY); c.lineTo(G.w - 8, G.riverY - 4); c.lineTo(G.w - 8, G.riverY + 4); c.closePath(); c.fill();
+  c.beginPath(); c.arc(3.5, G.riverY, 2.5, 0, 6.2832); c.fill();
+  for (const k in G.bas) {
+    const b = G.bas[k];
+    if (b.shut) { c.clearRect(b.fl + 1, G.riverY - 13, b.fr - b.fl - 2, 26); c.setLineDash([1, 4]); c.strokeStyle = 'rgba(172,196,182,.7)'; c.beginPath(); [-9, 0, 9].forEach(d => { c.moveTo(b.fl + 1, G.riverY + d); c.lineTo(b.fr - 1, G.riverY + d); }); c.stroke(); c.setLineDash([]); }
+  }
+  c.strokeStyle = 'rgba(172,196,182,.6)'; c.beginPath(); (G.gates || []).forEach(x => { c.moveTo(x + .5, G.riverY - 6); c.lineTo(x + .5, G.riverY + 6); }); c.stroke();
+  S.pos.forEach(p => {
+    const b = G.blk[p.id]; if (!b) return; const st = stateOf(p);
+    c.beginPath(); c.moveTo(b.xf, G.riverY + 1); c.lineTo(b.xf, b.t + 1); c.lineTo(b.r - inl(b), b.t + 1);
+    if (st === 'live') { c.strokeStyle = 'rgba(0,232,104,.34)'; c.setLineDash([]); }
+    else if (st === 'recent') { c.strokeStyle = 'rgba(172,196,182,.34)'; c.setLineDash([]); }
+    else if (st === 'stale') { c.strokeStyle = 'rgba(242,155,56,.9)'; c.setLineDash([3, 3]); }
+    else { c.strokeStyle = 'rgba(172,196,182,.6)'; c.setLineDash([1, 3]); }
+    c.stroke(); c.setLineDash([]);
+  });
+  bedDirty = false;
+}
+/* the front: inside the care's window, a hatched amber band in the air above every basket that holds a touched row */
+function drawFronts() {
+  $$('.frontb', stage).forEach(e => e.remove());
+  if (PHONE || !S.evtOn) return;
+  const g = GROUPS[S.group]; let h = '';
+  for (const k in G.bas) { if (!S.pos.some(p => p.evt && g.key(p) === k)) continue; const b = G.bas[k]; h += '<div class="frontb" style="left:' + b.fl.toFixed(1) + 'px;width:' + (b.fr - b.fl).toFixed(1) + 'px;top:' + (b.ft - 7).toFixed(1) + 'px" title="' + EVT_WHY + '"></div>'; }
+  stage.insertAdjacentHTML('beforeend', h);
+}
+
+/* ── the actors: every one of them is a datum or an event ── */
+function mote(o) { actors.push(Object.assign({ s: 0, a: 1 }, o)); }
+/* a price update: the printed age comes from its stamp at once and never from the animation; the mote only carries the light to the block */
+function priceMote(p) {
+  p.age = 0; refreshBlock(p); bedDirty = true;
+  mote({ kind: 'price', id: p.id, spr: SPR.price, weather: 1, path: () => G.pp[p.id] || null,
+    end() { const q = S.pos.find(x => x.id === p.id); if (!q || q.shut) return; const e = $('.blk[data-id="' + p.id + '"] .pe'); if (e && e.animate) e.animate([{ opacity: .95 }, { opacity: 0 }], { duration: 560, easing: 'ease-out' }); } });
+}
+function label(el, html) { el.innerHTML = html; el.classList.add('on'); el._w = el.offsetWidth; return el; }
+function place(el, x) { const lx = Math.max(108, Math.min(G.w - el._w - 132, x - el._w / 2)); el.style.transform = 'translate(' + lx.toFixed(1) + 'px,' + G.airY + 'px)'; }
+function later(ms, fn) { S.q.push({ t: S.T + ms, fn }); S.q.sort((a, b) => a.t - b.t); }
+
+/* a change of the book re-lays its baskets on the same scale and the same block width; what moved eases to its place in 0.4 s */
+function relay(growK) {
+  if (PHONE || REDUCED) { build(true); return; }
+  const old = {}, oldB = {};
+  $$('.basket').forEach(b => { old[b.dataset.k] = b.getBoundingClientRect().left; });
+  $$('.blk').forEach(e => { const r = e.getBoundingClientRect(), br = e.closest('.basket').getBoundingClientRect(); oldB[e.dataset.id] = [r.left - br.left, r.top - br.top]; });
+  build(true);
+  const ease = { duration: 400, easing: 'cubic-bezier(.2,0,0,1)' };
+  $$('.basket').forEach(b => { const o = old[b.dataset.k], dx = o == null ? 0 : o - b.getBoundingClientRect().left; if (dx && b.animate) b.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], ease); if (b.dataset.k === growK) b.classList.add('grow'); });
+  $$('.blk').forEach(e => { const o = oldB[e.dataset.id]; if (!o) return; const r = e.getBoundingClientRect(), br = e.closest('.basket').getBoundingClientRect(), dx = o[0] - (r.left - br.left), dy = o[1] - (r.top - br.top); if ((dx || dy) && e.animate) e.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }], ease); });
+  S.relayUntil = S.T + 470;
+}
+function signal(o) {
+  if (!G.bas[o.fam]) return;
+  const lab = label($(o.take ? '#fl2' : '#fl1'), '<span class="m">' + o.sym + '</span>' + chipS(o.side) + '<span>' + o.rule + '</span>');
+  S.cnt.arrived++; S.cnt.active++; S.cnt.rail++; S.railAt = clockNow(); S.fam[o.fam].sig[0]++; renderBottom(); renderShell(); refoot(o.fam);
+  mote({ kind: 'tok', v: 330, lab, path: () => mk([[0, G.riverY], [G.bas[o.fam].l, G.riverY]]),
+    end() {
+      const b = G.bas[o.fam];
+      if (!o.take) {
+        S.cnt.refSym++; if (o.world === 'real') S.cnt.refReal++; S.fam[o.fam].sig[2]++;
+        const w = S.why.find(x => x[0] === o.code); if (w) w[1]++; else S.why.push([o.code, 1]);
+        S.last = { sym: o.sym, side: o.side, bot: o.bot, world: o.world, code: o.code, at: hm(clockNow()), detail: o.detail };
+        label(lab, '<span class="m">' + o.sym + '</span><span>refused by ' + o.bot + '</span>' + chipW(o.world) + '<span>·</span><span class="m">' + o.code + '</span>'); place(lab, b.l + lab._w / 2 - 8);
+        actors.push({ kind: 'puff', x: Math.max(6, b.l - 6), y: G.riverY, t: 0, d: 900 });
+        pushEvent('<span class="m">' + o.sym + '</span> ' + chipS(o.side) + ' refused by ' + o.bot + ' ' + chipW(o.world) + ' · <span class="m">' + o.code + '</span> · ' + o.detailH);
+        later(3300, () => lab.classList.remove('on'));
+      } else {
+        S.cnt.taken[o.world]++; S.cnt.rail--; S.fam[o.fam].sig[1]++;
+        const p = Object.assign({}, o.pos); S.pos.push(p);
+        relay(o.fam);
+        const el = $('.blk[data-id="' + p.id + '"]'); if (el) el.classList.add('forming');
+        label(lab, '<span class="m">' + o.sym + '</span><span>taken by ' + o.bot + '</span>' + chipW(o.world) + '<span>· fill <span class="m">' + p.entry + '</span></span>'); place(lab, G.bas[o.fam].l + 120 - lab._w / 2);
+        const lit = (sel, d) => () => { const e = $('.blk[data-id="' + p.id + '"] ' + sel); if (e && e.animate) e.animate([{ opacity: 1 }, { opacity: 0 }], { duration: d, easing: 'ease-out' }); };
+        mote({ kind: 'tok', v: 300, noLab: 1, path: () => G.pp[p.id] || null, end: lit('.pe', 700) });
+        actors.push({ kind: 'guide', path: () => moneyOf(p.id, p.world), t: 0, d: 2600 });
+        for (let i = 0; i < 12; i++) later(480 + i * 62, () => mote({ kind: 'money', v: 430, path: () => moneyOf(p.id, p.world), end: i === 11 ? lit('.be', 800) : null }));
+        later(2700, () => { S.res = Object.assign({}, S.res, { avail: 4226.90, used: 6226.71, pct: '59.6%', onS: 3365.14 }); S.resAt = clockNow(); renderBottom(); tickClock(true); });
+        later(3400, () => lab.classList.remove('on'));
+        pushEvent('<span class="m">' + o.sym + '</span> ' + chipS(o.side) + ' taken by ' + o.bot + ' ' + chipW(o.world) + ' · fill <span class="m">' + p.entry + '</span>');
+        p.next = S.T + (REALCAD ? 30000 : 2600);
+      }
+      renderBottom(); renderShell(); refoot(o.fam);
+    } });
+}
+function jump(h, m, s) { const to = h * 3600 + m * 60 + s, d = to - clockNow(); S.clock0 = to; S.clockT0 = S.T; S.resAt = to - 8 - Math.floor(rnd() * 40); S.railAt = to - 4 - Math.floor(rnd() * 20);
+  S.pos.forEach(p => { if (p.stopped) p.age += d; else if (!p.cad || p.cad > 9e5) p.age = 20 + Math.floor(rnd() * 200); refreshBlock(p); });
+  S.readAt = to - (to % 900) + 5; renderBottom(); tickClock(true); bedDirty = true; return d; }
+function stale(id) { const p = S.pos.find(x => x.id === id); if (!p) return; refreshBlock(p); renderShell(); bedDirty = true; pushEvent('<span class="m">' + p.sym + '</span> ' + chipW(p.world) + ' · its price is stale: <span class="m">' + Math.floor(p.age / 60) + '</span> min old'); }
+function shut(fam) {
+  const f = S.fam[fam]; f.sess = 'shut'; f.sw = 'shut · reopens 14:30 UTC'; S.fam.index.sw = 'cash shut · CFD trades'; S.sess = '8/14';
+  S.pos.forEach(p => { if (p.fam === fam) { p.shut = 1; refreshBlock(p); } });
+  actors = actors.filter(a => !(a.kind === 'price' && S.pos.some(p => p.id === a.id && p.shut)));
+  $$('.basket').forEach(b => { const k = b.dataset.k; if (S.group === 'family' && !b.classList.contains('slot')) { $('.bhead', b).innerHTML = headHTML(k); if (k === fam) b.classList.add('shut'); } });
+  renderShell(); measure(); pushEvent(GROUPS.family.label[fam] + ' · the market shut · reopens <span class="m">14:30 UTC</span>');
+}
+function front() { S.evtOn = true; renderSky(); S.pos.forEach(refreshBlock); renderShell(); drawFronts(); pushEvent('⚠ the front is over the book · Fed Chair speaks · <span class="m">22:00 UTC</span>'); }
+function setLevel(lv, score) { const w = WXP[lv]; S.level = lv; S.score = score; S.wxAT = w.a; S.lamT = w.lam; S.speedT = w.sp; renderSky(); pushEvent('the weather turned <span class="m">' + lv + '</span> · score <span class="m">' + score + '</span>/<span class="m">100</span>'); }
+function closePos(id, booked) {
+  const p = S.pos.find(x => x.id === id), B = G.blk[id]; if (!p || !B) return;
+  const el = $('.blk[data-id="' + id + '"]'), k = B.bk, lab = $('#fl3'), col = p.world === 'real' ? (booked.usd >= 0 ? ' up' : ' down') : '';
+  const words = '<span class="m">' + p.sym + '</span><span>closed</span>' + chipW(p.world) + '<span>·</span><span class="m' + col + '">' + sgU(booked.usd) + '</span><span>·</span><span class="m' + col + '">' + sgR(booked.r) + '</span><span>· at eToro\'s price</span>';
+  label(lab, words);
+  actors = actors.filter(a => a.id !== id);
+  const out = mk([[B.r - inl(B), B.t + 1], [B.xf, B.t + 1], [B.xf, G.riverY], [G.w, G.riverY]]);
+  mote({ kind: 'tok', v: 520, lab, path: () => out, end() { later(900, () => lab.classList.remove('on')); S.closed.real = { n: S.closed.real.n + 1, r: S.closed.real.r + booked.r, usd: S.closed.real.usd + booked.usd }; renderBottom(); } });
+  const back = moneyPath(p.world, B); back.pts.reverse(); back.seg.reverse();
+  actors.push({ kind: 'guide', path: () => back, t: 0, d: 1500 });
+  for (let i = 0; i < 12; i++) later(80 + i * 62, () => mote({ kind: 'money', v: 430, path: () => back }));
+  later(2300, () => { const av = S.res.avail + p.wk + booked.usd, us = S.res.used - p.wk; S.res = Object.assign({}, S.res, { avail: av, used: us, pct: (100 * us / (av + us)).toFixed(1) + '%', onS: S.res.onS - p.wk }); S.portfolio = av + us; S.resAt = clockNow(); renderBottom(); renderShell(); tickClock(true); });
+  el.classList.add('leaving');
+  S.pos = S.pos.filter(x => x.id !== id); delete G.blk[id]; delete G.pp[id]; reband(k); refoot(k); renderShell(); tickSky(true); bedDirty = true;
+  pushEvent(words.replace(/<\/span><span/g, '</span> <span'));
+  later(1500, () => relay());
+}
+function script() {
+  later(900, () => signal({ sym: 'XAGUSD', side: 'SHORT', rule: 'trend_break_4h', fam: 'commodity', take: false, bot: 'Commodities #4', world: 'real', code: 'cost_filter',
+    detail: 'planned move 0.31% is only 1.4x the 0.22% round-trip cost (need 2.0x)', detailH: 'planned move <span class="m">0.31%</span> is only <span class="m">1.4x</span> the <span class="m">0.22%</span> round-trip cost (need <span class="m">2.0x</span>)' }));
+  later(2900, () => signal({ sym: 'BTCUSD', side: 'LONG', rule: 'trend_break_4h', fam: 'crypto', take: true, bot: 'Crypto #5', world: 'real', pos: BTC }));
+  later(6400, () => { jump(20, 58, 40); stale('xauusd'); });
+  later(7500, () => { jump(21, 0, 40); shut('stock'); front(); });
+  later(8700, () => { jump(21, 15, 10); setLevel('stressed', 34); });
+  later(10100, () => closePos('eurusd', { usd: 63.80, r: 1.23 }));
+  later(12700, () => { S.done = true; });
+  later(14600, () => { if (LOOP && S.demo && FREEZE == null && STOP == null) restart(true); });
+}
+
+/* ── one step of the world, one draw: 30 a second at most, and none at all when nothing moves ── */
+function step(dt) {
+  S.T += dt; const mdt = Math.min(dt, 50);
+  while (S.q.length && S.q[0].t <= S.T) S.q.shift().fn();
+  const ez = (a, b) => a + (b - a) * Math.min(1, mdt / 500);
+  if (Math.abs(S.wxA - S.wxAT) > .02 || Math.abs(S.lam - S.lamT) > .1) { S.wxA = ez(S.wxA, S.wxAT); S.lam = ez(S.lam, S.lamT); S.easing = true; bedDirty = true; }
+  else if (S.easing) { S.wxA = S.wxAT; S.lam = S.lamT; S.easing = false; bedDirty = true; }
+  S.speed = ez(S.speed, S.speedT);
+  if (S.relayUntil) { if (S.relayUntil <= S.T) S.relayUntil = 0; measure(); }
+  for (let i = actors.length - 1; i >= 0; i--) {
+    const a = actors[i];
+    if (a.kind === 'puff' || a.kind === 'guide') { a.t += mdt; if (a.t >= a.d) actors.splice(i, 1); continue; }
+    const path = a.path(); if (!path) { actors.splice(i, 1); continue; }
+    /* a price mote goes at the current's speed, and never takes more than 1.2 s (calm) to reach its block */
+    const v = a.kind === 'price' ? Math.max(96, path.L / 1.2) * S.speed : a.v;
+    a.s += v * mdt / 1000; a._p = path;
+    if (a.s >= path.L) { actors.splice(i, 1); if (a.end) a.end(); }
+  }
+  S.pos.forEach(p => {
+    p.age += dt / 1000;
+    if (p.shut || p.stopped || !p.cad) return;
+    if (p.next == null) p.next = S.T + (p.first0 != null ? p.first0 : p.cad * 1000 * rnd());
+    if (S.T >= p.next) { priceMote(p); p.next = S.T + p.cad * 1000 * (REALCAD ? 1 : .8 + .4 * rnd()); }
+  });
+  if (actors.length > perf.maxActors) perf.maxActors = actors.length;
+  if (Math.floor(S.T / 1000) !== S._s) { S._s = Math.floor(S.T / 1000); tickClock(false); S.pos.forEach(refreshBlock); }
+}
+let flowEmpty = true;
+function draw() {
+  if (bedDirty) drawBed();
+  if (!actors.length && flowEmpty) { perf.skipped++; return; }
+  flowEmpty = !actors.length;
+  const c = flowC; c.clearRect(0, 0, G.w, G.h);
+  for (let i = 0; i < actors.length; i++) {
+    const a = actors[i];
+    if (a.kind === 'guide') { const path = a.path(); if (!path) continue; const u = a.t / a.d, al = Math.min(1, u * 8, (1 - u) * 5) * .3; c.globalAlpha = al; c.strokeStyle = '#E6F1EA'; c.lineWidth = 1; c.beginPath(); path.pts.forEach((p, j) => j ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.stroke(); continue; }
+    if (a.kind === 'puff') { const u = a.t / a.d; drawToken(c, a.x, a.y - 34 * u, (1 - u) * (1 - u), 1 + .7 * u, true); continue; }
+    const path = a._p || a.path(); if (!path) continue;
+    const pt = at(path, a.s); let x = pt[0], y = pt[1];
+    if (Math.abs(y - G.riverY) < .01) y += rip(x);
+    let al = Math.min(1, a.s / 14, (path.L - a.s) / 10); if (al < 0) al = 0;
+    if (a.kind === 'tok') { drawToken(c, x, y, al, 1); if (a.lab && !a.noLab) place(a.lab, x); continue; }
+    c.globalAlpha = al;
+    /* money is never a light: an ink square, whatever the result; the result's colour is on its figure */
+    if (a.kind === 'money') { c.fillStyle = '#E6F1EA'; c.fillRect(Math.round(x) - 1.5, Math.round(y) - 1.5, 3, 3); continue; }
+    const r = a.spr.r; c.drawImage(a.spr, x - r, y - r, r * 2, r * 2);
+  }
+  c.globalAlpha = 1; perf.draws++;
+}
+let raf = 0, timer = 0, lastT = 0, lastSlot = -1, paused = true;
+const busy = () => actors.length > 0 || !!S.easing || S.relayUntil > 0 || bedDirty || !flowEmpty;
+function nextDue() {
+  let t = S.q.length ? S.q[0].t : Infinity;
+  S.pos.forEach(p => { if (!p.shut && !p.stopped && p.cad && p.next != null && p.next < t) t = p.next; });
+  if (STOP != null && STOP < t) t = STOP;
+  return Math.max(0, Math.min(t, (Math.floor(S.T / 1000) + 1) * 1000) - S.T);
+}
+function tick(now, viaRaf) {
+  if (paused) return;
+  const dt = lastT ? Math.min(viaRaf ? 100 : 1100, Math.max(0, now - lastT)) : 33; lastT = now; perf.ticks++;
+  const t0 = performance.now(); step(dt); const t1 = performance.now(); draw(); perf.stepMs += t1 - t0; perf.drawMs += performance.now() - t1;
+  if (STOP != null && S.T >= STOP) { pause(true); return; }
+  schedule();
+}
+function frame(now) { raf = 0; perf.frames++; const slot = Math.floor(now / 33.334); if (slot === lastSlot) { raf = requestAnimationFrame(frame); return; } lastSlot = slot; tick(now, true); }
+/* no frame is asked for when nothing moves: the page sleeps until the next event, price or second */
+function schedule() { if (paused || raf || timer) return; if (busy()) raf = requestAnimationFrame(frame); else timer = setTimeout(() => { timer = 0; tick(performance.now(), false); }, Math.max(4, nextDue())); }
+function pause(hard) { if (paused) return; paused = true; cancelAnimationFrame(raf); raf = 0; clearTimeout(timer); timer = 0; if (hard && document.getAnimations) document.getAnimations().forEach(a => a.pause()); }
+function resume() { if (!paused || REDUCED || PHONE) return; paused = false; lastT = 0; schedule(); }
+function restart(demo) {
+  actors = []; $$('.fl').forEach(e => e.classList.remove('on')); seed = 7; S = reserve0(fresh()); S.demo = !!demo; flowEmpty = false;
+  $$('#segG button').forEach(b => b.setAttribute('aria-pressed', b.dataset.g === S.group)); $$('#segS button').forEach(b => b.setAttribute('aria-pressed', b.dataset.s === S.size));
+  S.pos.forEach(p => { if (QUIET) { p.cad = 0; p.first = null; } else if (REALCAD) { p.cad = p.rcad || 0; p.first0 = p.rfirst; } else if (p.first) { p.first0 = p.first; p.cad = p.cad || 9e6; } if (p.cad && p.cad < 9e5) p.age = Math.floor(rnd() * p.cad * (REALCAD ? .4 : 1)); });
+  renderAll();
+  if (PHONE) return;
+  if (REDUCED) { drawBed(); renderEvents(); return; }
+  if (demo) script(); bedDirty = true;
+}
+function go() {
+  if (FREEZE != null) { for (let t = 0; t < FREEZE; t += 33.333) step(33.333); draw(); return; }
+  paused = true; resume();
+}
+
+/* ── the switches, the detail, the table ── */
+function regroup() { actors = actors.filter(a => a.kind === 'price'); S.q = []; S.demo = false; $$('.fl').forEach(e => { if (e.id !== 'evl') e.classList.remove('on'); }); $('#mocknote').textContent = 'mock · story stopped · R replays it'; build(false); if (REDUCED && !PHONE) drawBed(); else if (!paused) { bedDirty = true; if (timer) { clearTimeout(timer); timer = 0; } schedule(); } }
+$('#segG').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.group = b.dataset.g; $$('#segG button').forEach(x => x.setAttribute('aria-pressed', x === b)); regroup(); });
+$('#segS').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.size = b.dataset.s; $$('#segS button').forEach(x => x.setAttribute('aria-pressed', x === b)); regroup(); });
+$('#scl').addEventListener('click', () => regroup());
+const pop = $('#pop');
+function showPop(el) {
+  const p = S.pos.find(x => x.id === el.dataset.id); if (!p || PHONE) return; const lt = lightOf(p);
+  pop.innerHTML = '<h4><span class="m">' + p.sym + '</span>' + chipS(p.side) + chipW(p.world) + '</h4><dl>' +
+    '<dt>Entry</dt><dd><span class="m">' + p.qty + ' @ ' + p.entry + '</span> · ' + p.held + ' ago</dd>' +
+    '<dt>Mark</dt><dd><span class="m">' + p.mark + '</span> · ' + (p.shut ? 'market closed' : p.feed + ', ' + ageW(p.age)) + '</dd>' +
+    '<dt>Open P&amp;L</dt><dd><span class="m">' + p.pnl + '</span> estimate</dd>' +
+    '<dt>Exposure</dt><dd class="m">' + (p.exp != null ? fmt(p.exp) + (S.size === 'exposure' && isOver(p) ? ' › above the scale' : '') + '</dd>' : '— no USD stamp</dd>') +
+    '<dt>Capital at work</dt><dd class="m">' + p.work + '</dd>' +
+    '<dt>Risk at the stop</dt><dd class="m">' + (p.risk != null ? fmt(p.risk) + (S.size === 'risk' && isOver(p) ? ' › above the scale' : '') : p.nousd ? '— no USD stamp' : '— no stop recorded') + '</dd>' +
+    '<dt>Stop · target</dt><dd class="m">' + (p.sl || '—') + ' · ' + (p.tp || '—') + '</dd>' +
+    '<dt>Comes from</dt><dd>' + p.from + '</dd>' +
+    '<dt>The Horde</dt><dd>' + (lt ? lt.why : 'calm: no light on this seat') + '</dd></dl>' +
+    '<div class="pf">Its page is Positions ›, where CLOSE lives. Nothing here sends an order.</div>';
+  pop.classList.add('on');
+  const sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect(); let x = r.right - sr.left + 8; if (x + 292 > sr.width) x = r.left - sr.left - 300;
+  pop.style.left = Math.max(0, x) + 'px'; pop.style.top = Math.max(0, Math.min(sr.height - pop.offsetHeight - 4, r.top - sr.top)) + 'px';
+}
+$('#baskets').addEventListener('mouseover', e => { const b = e.target.closest('.blk'); if (b) showPop(b); });
+$('#baskets').addEventListener('mouseleave', () => pop.classList.remove('on'));
+$('#baskets').addEventListener('focusin', e => { const b = e.target.closest('.blk'); if (b) showPop(b); });
+$('#baskets').addEventListener('focusout', () => pop.classList.remove('on'));
+function tableHTML() {
+  const g = GROUPS[S.group], cap = t => '<table><caption class="lbl" style="text-align:left;padding-bottom:4px">' + t + '</caption>';
+  const n = S.pos.filter(p => p.evt).length, c = S.cnt, t = c.taken;
+  let h = '<h3>Anduin, as a table · the same content</h3>' + cap('The weather') + '<tr><th>Level</th><th>Score</th><th>Read</th><th>Words</th></tr><tr><td>' + $('#lvl').textContent + '</td><td class="m">' + (S.score == null ? '—' : S.score + '/100') + '</td><td class="m">' + ($('#wxage').textContent || '—') + '</td><td class="w">' + WORDS[S.level] + '</td></tr></table>';
+  h += cap('The prints of the next six hours · calendar read ' + Math.floor((clockNow() - S.calAt) / 3600) + ' h ago') + '<tr><th>Print</th><th>At</th><th>The care\'s window</th><th>Touches</th><th>Lit by the care</th></tr>' +
+    '<tr><td>Fed Chair speaks</td><td class="m">22:00 UTC</td><td class="m">21:00 – 22:15 UTC</td><td class="m">' + n + ' open</td><td class="m">' + (S.evtOn ? S.pos.filter(p => p.evt && !p.light).length : 0) + '</td></tr>' +
+    '<tr><td>BoJ Governor speaks</td><td class="m">23:30 UTC</td><td class="m">22:30 – 23:45 UTC</td><td class="m">' + S.pos.filter(p => /JPY/.test(p.sym)).length + ' open</td><td class="m">0</td></tr></table>';
+  h += cap('Positions · scale: ' + (S.scale == null ? '—' : fmt(S.scale)) + (S.scaleReal ? ', the largest real position' : '')) + '<tr><th>Basket</th><th>Symbol</th><th>World</th><th>Side</th><th>Exposure</th><th>At work</th><th>Risk at stop</th><th>R now</th><th>Stop</th><th>Target</th><th>Price</th><th>Comes from</th><th>The Horde</th></tr>';
+  S.pos.slice().sort((a, b) => WORLD_ORDER.indexOf(a.world) - WORLD_ORDER.indexOf(b.world)).forEach(p => { const lt = lightOf(p); h += '<tr><td>' + ((g.label || WORLD_L)[g.key(p)] || WORLD_L[p.world]) + '</td><td class="m">' + p.sym + '</td><td>' + WORLD_L[p.world] + '</td><td>' + p.side + '</td><td class="m">' + (p.exp != null ? fmt(p.exp) : '— no USD stamp') + '</td><td class="m">' + p.work + '</td><td class="m">' + (p.risk != null ? fmt(p.risk) : p.nousd ? '— no USD stamp' : '— no stop') + '</td><td class="m">' + p.r + '</td><td class="m">' + (p.sl || '—') + '</td><td class="m">' + (p.tp || '—') + '</td><td class="w">' + (p.shut ? 'market closed' : stateOf(p) + ' · ' + p.feed + ' · ' + ageW(p.age)) + '</td><td class="w">' + p.from + '</td><td class="w">' + (lt ? lt.why : 'calm') + '</td></tr>'; });
+  h += '</table>' + cap('Families · counts of the last 24 h, three readers that do not add up') + '<tr><th>Family</th><th>Market</th><th>Volatility</th><th>Signals</th><th>Taken</th><th>Refused (symbols, last reason)</th><th>At eToro, not on Sauron</th></tr>';
+  GROUPS.family.order.forEach(k => { const f = S.fam[k]; h += '<tr><td>' + GROUPS.family.label[k] + '</td><td>' + f.sw + '</td><td class="m">p' + f.vol + ' (median of ' + f.n + ', daily bars to 11 Nov)</td><td class="m">' + f.sig[0] + '</td><td class="m">' + f.sig[1] + '</td><td class="m">' + f.sig[2] + '</td><td class="m">' + (S.unseat[k] || 0) + '</td></tr>'; });
+  h += '</table>' + cap('Upstream · 24 h') + '<tr><th>Arrived</th><th>Taken</th><th>On the rail</th><th>Refused</th><th>Reasons</th><th>Waiting</th></tr><tr><td class="m">' + c.arrived + '</td><td class="m">' + (t.real + t.demo + t.paper) + ' (' + t.real + ' real, ' + t.demo + ' demo, ' + t.paper + ' paper)</td><td class="m">' + c.rail + '</td><td class="m">' + c.refSym + ' symbols, ' + c.refReal + ' by real bots</td><td class="w m">' + S.why.map(w => w[0] + ' ' + w[1]).join(' · ') + '</td><td class="m">' + c.waiting + '</td></tr></table>';
+  h += cap('Last events') + '<tr><th>At</th><th>What</th></tr>' + S.ev.map(e => '<tr><td class="m">' + e[0] + '</td><td class="w">' + e[1] + '</td></tr>').join('') + '</table>';
+  return h + '<p style="font-size:11px;color:#839B8D;margin:0">The reserve and Downstream are text on the page already. Esc or the button closes this table.</p>';
+}
+const tblp = $('#tblp'), tbtn = $('#tbtn');
+function toggleTable(on) { const open = on == null ? !tblp.classList.contains('on') : on; if (open === tblp.classList.contains('on')) return; tblp.classList.toggle('on', open); tbtn.setAttribute('aria-expanded', open); tbtn.textContent = open ? 'Back to the river' : 'Read as a table'; if (open) { tblp.innerHTML = tableHTML(); tblp.focus(); pause(); } else resume(); }
+tbtn.addEventListener('click', () => toggleTable());
+document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleTable(false); if (e.key === 'r' || e.key === 'R') { toggleTable(false); $('#mocknote').textContent = 'mock · invented data'; pause(); restart(true); go(); } });
+
+/* ── the pauses: a hidden tab, the lock (the shell's three loops stop with it), a resize ── */
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); else resume(); });
+document.addEventListener('sv:pin-locked', () => { document.body.classList.add('sv-locked'); pause(); });
+document.addEventListener('sv:pin-unlocked', () => { document.body.classList.remove('sv-locked'); resume(); });
+let rz = 0; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { build(false); skyKey = ''; $('#hztrack').dataset.t = ''; $$('.hztick,.hzlab').forEach(e => e.remove()); tickSky(true); if (REDUCED && !PHONE) { drawBed(); renderEvents(); } }, 150); });
+
+/* the still bed as SVG paths, for the preview board (which runs no script) */
+function bedSVG() {
+  const f = v => (Math.round(v * 10) / 10).toString(), d = pts => pts.map((p, i) => (i ? 'L' : 'M') + f(p[0]) + ' ' + f(p[1])).join('');
+  const line = fn => { const pts = []; for (let x = 0; x <= G.w - 7; x += 2) pts.push([x, G.riverY + fn(x)]); return d(pts); };
+  let lane = 'M' + f(G.pool.real.x) + ' ' + f(G.laneY) + 'L' + f(G.w - 2) + ' ' + f(G.laneY); for (const w in G.pool) lane += 'M' + f(G.pool[w].x) + ' ' + f(G.pool[w].y) + 'L' + f(G.pool[w].x) + ' ' + f(G.laneY);
+  const feeders = [], motes = [];
+  S.pos.forEach(p => { const b = G.blk[p.id]; if (!b) return; feeders.push({ id: p.id, st: stateOf(p), d: 'M' + f(b.xf) + ' ' + f(G.riverY + 1) + 'V' + f(b.t + 1) + 'H' + f(b.r - inl(b)) }); const pp = G.pp[p.id], pts = []; for (let s = 0; s < pp.seg[0]; s += 3) pts.push([pp.pts[0][0] + s, G.riverY + rip(pp.pts[0][0] + s)]); motes.push({ id: p.id, live: stateOf(p) === 'live', quiet: !!p.stopped, L: pp.L, d: d(pts.concat(pp.pts.slice(1))) }); });
+  return { w: G.w, h: G.h, riverY: G.riverY, airY: G.airY, lines: [line(rip), line(x => rip2(x, true)), line(x => rip2(x, false))], gates: (G.gates || []).map(x => 'M' + f(x + .5) + ' ' + f(G.riverY - 6) + 'V' + f(G.riverY + 6)).join(''), lane, feeders, motes, gate: k => G.bas[k].l };
+}
+function boot() {
+  restart(DEMO);
+  if (PHONE || REDUCED) return;
+  if (!HOLD) go();
+}
+window.__anduin = { T: () => S.T, go, pause, resume, restart, perf: () => Object.assign({ actors: actors.length, paused, sleeping: !!timer && !raf }, perf), geom: () => G, state: () => S, table: toggleTable, rip: x => rip(x), stateOf: id => stateOf(S.pos.find(p => p.id === id)), bedSVG };
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(boot); else boot();
+})();
+</script>
+</body>
+</html>

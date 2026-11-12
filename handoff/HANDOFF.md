@@ -1,6 +1,6 @@
 # Sauron Vision — handoff for the next Claude session
 
-Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-07 ~07:25 UTC, by the session working since 2026-10-31. A weekly usage limit stopped this session from 2026-11-02 05:39 to 2026-11-04 20:00 UTC; the unfinished work was saved on `claude/wip-*` branches (§3).
+Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-12 ~13:50 UTC, by the session working since 2026-10-31. A weekly usage limit stopped this session from 2026-11-02 05:39 to 2026-11-04 20:00 UTC; the unfinished work was saved on `claude/wip-*` branches (§3).
 
 Nothing private lives here. The repository is PUBLIC: it was private only from 2026-11-05 to 2026-11-06, and everything pushed to any branch, this one included, is public. The operator's account figures, positions (which instruments he holds or traded, their sizes, prices and P&L), personal or family matters, and any partner or investor document never enter git: not in code, tests, commit messages, PR bodies or this file. Describe a case generically ("a live forex ticket", "one of his eToro rows"). Before opening a PR, scan the branch's commit messages and added lines for such data. Those live in the operator's own claude.ai documents and in files he keeps.
 
@@ -48,6 +48,16 @@ Nothing private lives here. The repository is PUBLIC: it was private only from 2
 
 ## 3. Open lines of work
 
+**Status at 2026-11-12 ~13:50 UTC (this block wins over the table below where they differ)**
+- `main` is `4c1ebcc`. Merged on 2026-11-12: #98 (feed F1), #99 (signals keep arriving the moment they fire; a shut market is said in words; an optional wait for the open behind `signal_market_hold`, OFF), #100 (the MARKET SHUT badge and the SHUT chip) and #101 (the watchdog says "live by decision" once, then alarms for faults only). Not deployed yet. The operator turned `pipeline_campaign_watch` and `actuator_mode_live` OFF by hand on 2026-11-12; he must turn the watchdog back ON after the deploy.
+- **Deploy note for #98-#101:** being written and verified (run `wf_7f977bed-483`; outputs `scratchpad/deploynote/deploy_fr.md` and `verify_log.md`). Send it when the verdict is "ready to send".
+- **The bots' venue floor** (branch `claude/botfloor`, run `wf_aed95951-4e1`): build in flight, then three review lenses, the fix, `scratchpad/botfloor/pr_botfloor.md` and `botfloor_fr.md`. Then merge `origin/main`, open the PR, CI, merge when green, send the sheet. Its PIN switch arrives OFF; only the operator turns it on. His per-trade ceiling for a floor entry is 2%.
+- **Whole pot, big hand tickets, steppers** (run `wf_cfb6f950-551`): `scratchpad/fleet/pot_fr.md` is in verification (send it); `steppers_spec.md` holds the plus and minus controls for size, SL and TP (build later, in the S1a look).
+- **Anduin, the flow page:** mock sent on 2026-11-12 and approved the same day ("6 okay", see section 4). Spec, note, mock, board and tools are in `handoff/plans/anduin/`; the board is board 7 of the canvas artifact. Build stage A1 (a read-only page on real data; money direction: none) after S1a and the magic layer.
+- **The magic layer** (branch `claude/uis1a`, run `wf_46796a68-761`, relaunched 13:43 UTC): commit 0 is `684bfa2`; then C1-C7 and C9; then C8 (Ambience, migration `portfolio/0020`); C10 on `claude/fillworking` (`280e7e6`, local: verify and push); the merge of `main` (the MARKET SHUT badge and chip must take the S1a look); three review lenses (money and truth; performance and regressions; the operator's brief judged on renders); the fix; targeted runs (CI is the suite); PR bodies in `scratchpad/s1amagic/`. Then the PRs for `claude/uis1a` and `claude/fillworking`, and a deploy note that says "migrate before restart".
+- **Next, one at a time:** the OC0 review and PR (`claude/opscenter0` `63866ce`), F5 small guards (R1, R8, R11), F3, F4, the steppers, the Lore note (run `wf_45f4b7c2-2a9`), Worlds v3 final (run `wf_7ebefdda-ef0`), O2c commits 2-5 (run `wf_695daa15-278`), the intro labels (run `wf_cfb4b816-e44`), then O1, OC1, E1 and Anduin A1.
+- **Usage:** the weekly limit resets on 2026-11-18 at 20:00 UTC. A stop kills every workflow: resume each with its script path and run id. Run few workflows at once and deliver each finished piece before starting the next.
+
 | Branch | Base | Commits | State | Next |
 |---|---|---|---|---|
 | Unblock trading | — | — | Done on Sauron's side, 2026-11-05 | Switches ON; bots 1-5 and 14-30 ON (no MAX BOT LEVERAGE typed yet; their configs carry fixed 20x forex, 10x commodity, 5x stock, 2x crypto); manual lanes 7-10 back to the whole account (`shares rollback 165 155 154 153 --yes`); `share_allocator_auto_derisk` OFF; shock plan #174 left PROPOSED (do not apply). The last lock is eToro's free cash at 0: his own open positions (one opened from Sauron's ticket, one he opened himself in the eToro app, which Morgul reports as Drift; expected). |
@@ -83,6 +93,11 @@ STACKING. Every branch touches `core/wall_facts.py` TESTS_GREEN, so merging one 
 - The Saxo hold for closes in doubt (`plans/saxo_hold.md`). No Saxo row is live.
 
 ## 4. The operator's decisions (log)
+
+**2026-11-12 (afternoon)**
+- Anduin, the flow page: "6 okay". The name Anduin; baskets by family by default (world, lane and theme one click away); blocks sized by exposure ("by risk" one click away); its own page, opened from the sidebar, then from Barad-dûr; the weather as in the mock; real money sets the scale and owns the solid basket, DEMO and PAPER sit apart.
+- His brief for the magic layer and the new pages, in his words: "magique dans l'esprit de Sauron, high end et financier". Read it as: Sauron's own magic (the Eye, its light, embers), restrained and precise, and a trading desk first (every figure crisp and still; the magic lives around the numbers, never on them).
+- "magnifique travail", then "6 okay, continue".
 
 **2026-10-31**
 - Shorts fully possible.
@@ -175,5 +190,11 @@ STACKING. Every branch touches `core/wall_facts.py` TESTS_GREEN, so merging one 
 | #89 | 8be4725 (2026-11-07) | open eToro rows print eToro's own P&L, else eToro's quote side, else a labelled estimate; display only |
 | #94 | e5ef5c8 (2026-11-07) | the ticket says an order may have gone when its answer is lost, and looks it up (read-only endpoint) |
 | #95 | ede54d0 (2026-11-07) | the eToro request budget, cheaper reads, eToro's own quotes every 30 s, the eToro sync every 60 s; no migration |
+| #96 | 227e03b (2026-11-07) | tests that went red on weekends or by chance |
+| #97 | 15dd487 (2026-11-07) | Oculus O0: truth and cost in today's look |
+| #98 | 30271ff (2026-11-12) | feed F1: the truth core for eToro prices; migration `bot_program/0051_feed_harm_event`; read-only command `feed_harms` |
+| #99 | fcd44e3 (2026-11-12) | signals keep arriving live; a shut market is said in words; an optional wait for the open (`signal_market_hold`, OFF); migration `signals/0020_signalhold` |
+| #100 | 8a3ab2e (2026-11-12) | the MARKET SHUT badge on the rail card, the headband and /signals/; a SHUT filter chip; an optional rail section (OFF) |
+| #101 | 4c1ebcc (2026-11-12) | the watchdog tells the truth for a live operator: "live by decision" once, alarms for faults only |
 
 The sheets for #81, #82 and #83 were sent. Small follow-ups from the #83 sheet review: the alarm group's G6-at-100% line should say it stops nothing; the ticket says 'never read' / 'not stored' when the last read carried no available cash; the chart's remembered frame is one click behind (pre-existing).
