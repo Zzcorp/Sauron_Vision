@@ -815,26 +815,38 @@ class WindowsAndAgesTests(TestCase):
 
 # ── 6. Dashes ────────────────────────────────────────────────────────────
 
+def _check_dashes(case, html, where):
+    """Every dash in `html` has a title, and the legend lists it; a dash
+    never sits untitled inside a sentence either. Returns how many."""
+    walker = _walk(html)
+    legend = set()
+    for tag, attrs, texts in walker.elements:
+        if "data-oc-why" in attrs:
+            legend.add(" ".join("".join(texts).split()))
+    dashes = 0
+    for text, attrs, tag in walker.texts:
+        if text.strip() != DASH:
+            # A dash that stands for a figure, inside a longer text node:
+            # "— configs · — enabled" (a separator dash has a word on
+            # both sides).
+            case.assertNotRegex(
+                " ".join(text.split()), r"(?:^|· |: )— (?!$)|(?<=[a-z] )—$",
+                f"{where}: an untitled dash inside {text.strip()!r}")
+            continue
+        dashes += 1
+        title = (attrs.get("title") or "").strip()
+        case.assertTrue(title, f"{where}: a dash in <{tag}> has no title")
+        case.assertIn(" ".join(title.split()), legend,
+                      f"{where}: {title!r} is not in the legend")
+    return dashes
+
+
 class DashesTests(TestCase):
     """A dash means no figure here, and its line says why; 0 is a
     measured zero (spec §5.7)."""
 
     def _check(self, html, where):
-        walker = _walk(html)
-        legend = set()
-        for tag, attrs, texts in walker.elements:
-            if "data-oc-why" in attrs:
-                legend.add(" ".join("".join(texts).split()))
-        dashes = 0
-        for text, attrs, tag in walker.texts:
-            if text.strip() != DASH:
-                continue
-            dashes += 1
-            title = (attrs.get("title") or "").strip()
-            self.assertTrue(title, f"{where}: a dash in <{tag}> has no title")
-            self.assertIn(" ".join(title.split()), legend,
-                          f"{where}: {title!r} is not in the legend")
-        return dashes
+        return _check_dashes(self, html, where)
 
     def test_every_dash_has_a_title_and_the_footer_lists_it(self):
         for name, build in (("empty", lambda u: None),
@@ -931,6 +943,89 @@ class DashesTests(TestCase):
             for value, text in zip(values, printed):
                 if value == DASH:
                     self.assertEqual(text, DASH, rel)
+
+
+class WhenAReadFailsTests(TestCase):
+    """A read that fails is "not measured", never "none". Each block of
+    the LIVE tab is fenced and prints dashes when its read raises; the
+    dashes then said what an empty day says ("the gate was not asked in
+    24 h", "closed with no R", "No graded loser: a clean session", a
+    brain with "0" concerns), or stood untitled inside a sentence. A
+    failed read now says so, in the spec's words for it (§5.7), and
+    every failure is logged."""
+
+    NOT_MEASURED = "not measured: a source could not be read"
+
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_fail")
+        self.client.force_login(self.user)
+        _three_worlds(self.user)
+
+    def _live(self, patcher):
+        with patcher:
+            with self.assertLogs("dashboard.views_command", level="WARNING"):
+                body = self.client.get("/command/tab/live/").content.decode()
+        _check_dashes(self, body, "a failed read")
+        return body, " ".join(t for t, _a, _g in _texts(body))
+
+    def _cell(self, body, label):
+        """The strip cell whose label is `label`: (its html, its text)."""
+        for cell in re.findall(r'<div class="oc-strip-cell".*?</div>', body,
+                               re.S):
+            if f'<span class="oc-strip-label">{label}</span>' in cell:
+                return cell, " ".join(
+                    "".join(t for t, _a, _g in _texts(cell)).split())
+        self.fail(f"no strip cell {label!r}")
+
+    def test_the_closes_of_24h(self):
+        body, text = self._live(mock.patch(
+            "dashboard.views_command._fill_card",
+            side_effect=RuntimeError("closes unreadable")))
+        for false_none in ("No graded loser: a clean session",
+                           "No graded winner yet", "No fills in the last 24h",
+                           "No graded closes in last 24h",
+                           "closed with no R", "nothing closed in 24 h"):
+            self.assertNotIn(false_none, text)
+        for label in ("24H R", "W / L 24H"):
+            cell, _text = self._cell(body, label)
+            self.assertIn(f'title="{self.NOT_MEASURED}"', cell, label)
+        self.assertGreaterEqual(text.count("the closes could not be read"), 4)
+        # The configs are the Eye's own read: they do not die with the
+        # closes.
+        _cell, opens = self._cell(body, "OPEN POS")
+        self.assertIn("3 configs · 3 enabled", opens)
+
+    def test_the_gate(self):
+        from bot_program.orchestrator_models import OrchestratorEvent
+        body, text = self._live(mock.patch.object(
+            OrchestratorEvent.objects, "filter",
+            side_effect=RuntimeError("gate unreadable")))
+        cell, cell_text = self._cell(body, "GATE 24H")
+        self.assertIn(f'title="{self.NOT_MEASURED}"', cell)
+        self.assertNotIn("the gate was not asked", body)
+        self.assertNotIn("allow logged", cell_text)
+
+    def test_the_rules(self):
+        from signals.models_control import RuleControl
+        body, _text = self._live(mock.patch.object(
+            RuleControl, "running_q",
+            side_effect=RuntimeError("rules unreadable")))
+        cell, cell_text = self._cell(body, "RULES")
+        self.assertIn(f'title="{self.NOT_MEASURED}"', cell)
+        self.assertNotIn("paused ·", cell_text)
+
+    def test_the_brain(self):
+        body, text = self._live(mock.patch(
+            "dashboard.views_command._brain_reading",
+            side_effect=RuntimeError("brain unreadable")))
+        for label in ("REGIME", "CONCERNS"):
+            cell, _text = self._cell(body, label)
+            self.assertIn(f'title="{self.NOT_MEASURED}"', cell, label)
+        self.assertNotIn("the brain has written no report", body)
+        self.assertNotIn("No active concerns from the brain", text)
+        _cell, concerns = self._cell(body, "CONCERNS")
+        self.assertNotRegex(concerns, r"CONCERNS 0\b")
 
 
 # ── 7. The bots tab ──────────────────────────────────────────────────────

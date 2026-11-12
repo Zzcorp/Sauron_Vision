@@ -1074,6 +1074,22 @@ def command_tab_live(request):
                                   if p.get("kind") == "asset")
     context["eye_legacy_rows"] = sum(1 for p in eye_rows
                                      if p.get("kind") == "legacy")
+    # Configs from the Eye's own read (2026-11-07): "Active bots 8" counted
+    # every config beside "5 enabled". Counted here, outside the closes'
+    # fence below (2026-11-12): they are not the closes', and a failed read
+    # of the closes printed "— configs · — enabled".
+    asset_bots = [b for b in (context.get("bot_health") or [])
+                  if b.get("kind") == "asset"]
+    context["live_bots_enabled"] = sum(1 for b in asset_bots if b["enabled"])
+    context["live_bots_total"] = len(asset_bots)
+
+    # A READ THAT FAILS IS "NOT MEASURED", NEVER "NONE" (2026-11-12, spec
+    # §5.7). Each block below is fenced and prints dashes when its read
+    # raises; the template asks these flags which dash it is, so a failed
+    # read never borrows an empty day's words ("the gate was not asked",
+    # "a clean session", a brain with 0 concerns).
+    context.update(gate_unread=False, pulse_unread=False, rules_unread=False,
+                   brain_unread=False)
 
     # THE LIVE WORLD AS eToro STATES IT (2026-10-31). eToro's own used,
     # available and total, from the sync's cells with their age, stand
@@ -1115,6 +1131,7 @@ def command_tab_live(request):
         context["gate_n_allow"] = DASH
         context["gate_n_reject"] = DASH
         context["gate_asked"] = False
+        context["gate_unread"] = True
 
     # Recent fills (last 5 closed bot trades in the last 24h) + 24h session
     # metrics. R only, all worlds: each close carries its world chip.
@@ -1141,13 +1158,6 @@ def command_tab_live(request):
         best_24h = max(graded, key=lambda t: float(t.realized_r), default=None)
         worst_24h = min(graded, key=lambda t: float(t.realized_r), default=None)
 
-        # Configs from the Eye's own read (2026-11-07): "Active bots 8"
-        # counted every config beside "5 enabled".
-        asset_bots = [b for b in context["bot_health"]
-                      if b.get("kind") == "asset"]
-        n_bots_enabled = sum(1 for b in asset_bots if b["enabled"])
-        n_bots_total = len(asset_bots)
-
         # Last 12 closes, oldest → newest, matching the axis captions under
         # the bars. The slice used to run over the tail of a newest-first
         # list, so the card labelled "last 12 closes" plotted the twelve
@@ -1155,8 +1165,6 @@ def command_tab_live(request):
         last_12 = list(reversed(graded))[-12:]
         last_12_r = [float(t.realized_r) for t in last_12]
 
-        context["live_bots_enabled"] = n_bots_enabled
-        context["live_bots_total"] = n_bots_total
         context["live_24h_n"] = n_closed_24h
         context["live_24h_wins"] = n_wins
         context["live_24h_losses"] = n_losses
@@ -1190,9 +1198,8 @@ def command_tab_live(request):
     except Exception as e:
         logger.warning("Op Center LIVE session pulse unavailable: %s", e,
                        exc_info=True)
+        context["pulse_unread"] = True
         context["live_recent_fills"] = []
-        context["live_bots_enabled"] = DASH
-        context["live_bots_total"] = DASH
         context["live_24h_n"] = DASH
         context["live_24h_wins"] = DASH
         context["live_24h_losses"] = DASH
@@ -1228,6 +1235,7 @@ def command_tab_live(request):
     except Exception as e:
         logger.warning("Op Center rule counters unavailable: %s", e,
                        exc_info=True)
+        context["rules_unread"] = True
         context["live_rules_active"] = DASH
         context["live_rules_paused"] = DASH
         context["live_rules_research"] = DASH
@@ -1242,7 +1250,12 @@ def command_tab_live(request):
         context["brain_top_concerns"] = brain["concerns"]
         context["brain_trust"] = brain["trust_score"]
         context["brain_trust_band"] = brain["trust_band"]
-    except Exception:
+    except Exception as e:
+        # Logged like every other block here (2026-11-12): it fell back in
+        # silence, and the tab then said "no report" and "0 concerns".
+        logger.warning("Op Center LIVE brain reading unavailable: %s", e,
+                       exc_info=True)
+        context["brain_unread"] = True
         context["brain"] = None
         context["brain_regime"] = "unknown"
         context["brain_regime_conf"] = DASH

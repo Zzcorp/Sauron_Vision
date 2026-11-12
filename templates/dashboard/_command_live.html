@@ -9,15 +9,23 @@ Rendered without the request (dashboard.views_command._fragment): no
 context processor runs here. Every dash carries its reason, and the foot
 lists them (core/templatetags/oc_dash.py). REAL, DEMO and PAPER money is
 never added; R is a ratio and is said to be "all worlds · R only".
+A READ THAT FAILS IS "NOT MEASURED", NEVER "NONE" (2026-11-12): the view
+flags each fenced block whose read raised (gate_unread, pulse_unread,
+rules_unread, brain_unread), and its cells then print the dash with that
+reason, never an empty day's words ("the gate was not asked", "a clean
+session", a brain with 0 concerns) and never a dash inside a sentence.
 {% endcomment %}
 
 {# ── 1. Top strip — regime · gate · exposure · session pulse #}
 <div class="oc-strip">
-    <div class="oc-strip-cell" title="{{ brain.regime_title|default:why.no_report }}">
+    <div class="oc-strip-cell" title="{% if brain_unread %}{{ why.not_measured }}{% else %}{{ brain.regime_title|default:why.no_report }}{% endif %}">
         <span class="oc-strip-label">REGIME</span>
         {% if brain.report %}
         <span class="oc-strip-value oc-regime-{{ brain_regime }}">{{ brain_regime|upper }}</span>
         <span class="oc-strip-sub">conf {{ brain_regime_conf }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · report {{ brain_age_str }}</span>
+        {% elif brain_unread %}
+        <span class="oc-strip-value">{% dash why.not_measured %}</span>
+        <span class="oc-strip-sub">the brain's report could not be read</span>
         {% else %}
         <span class="oc-strip-value">{% dash why.no_report %}</span>
         <span class="oc-strip-sub">trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span></span>
@@ -27,8 +35,8 @@ never added; R is a ratio and is said to be "all worlds · R only".
         {# No accept rate: the gate logs every reject and only a 10% sample of #}
         {# its allows, so a ratio of the two is not a rate anybody measured. #}
         <span class="oc-strip-label">GATE 24H</span>
-        <span class="oc-strip-value">{% if gate_asked %}{{ gate_n_reject }}{% else %}{% dash why.gate_not_asked %}{% endif %}</span>
-        <span class="oc-strip-sub">refused · {{ gate_n_allow }} allow logged (sampled) · 24 h</span>
+        <span class="oc-strip-value">{% if gate_unread %}{% dash why.not_measured %}{% elif gate_asked %}{{ gate_n_reject }}{% else %}{% dash why.gate_not_asked %}{% endif %}</span>
+        <span class="oc-strip-sub">{% if gate_unread %}the gate's decisions could not be read · 24 h{% else %}refused · {{ gate_n_allow }} allow logged (sampled) · 24 h{% endif %}</span>
     </div>
     {# DEPLOYED, per world, in USD (2026-11-07): the notional at the marks, REAL first, never added; its share of the typed cash is gone (a mixed-currency ratio of mixed worlds). #}
     <div class="oc-strip-cell" title="The notional of the open rows at their marks, in USD (price x quantity x the row's USD per unit), each world apart and never added. The platform's own arithmetic, not eToro's.">
@@ -58,22 +66,22 @@ never added; R is a ratio and is said to be "all worlds · R only".
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">24H R</span>
-        <span class="oc-strip-value {% if live_24h_sum_r > 0 %}up{% elif live_24h_sum_r < 0 %}down{% endif %}">{% if live_24h_sum_r == "—" %}{% if live_24h_n %}{% dash why.ungraded %}{% else %}{% dash why.nothing_24h %}{% endif %}{% else %}{% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R{% endif %}</span>
-        <span class="oc-strip-sub">{{ live_24h_n }} closed · {% if live_24h_win_rate == "—" %}win rate <span title="{% if live_24h_n %}{{ why.ungraded }}{% else %}{{ why.nothing_24h }}{% endif %}">—</span>{% if live_24h_n %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_24h %}{% endif %}{% else %}{{ live_24h_win_rate }}% win{% endif %} · all worlds · R only</span>
+        <span class="oc-strip-value {% if live_24h_sum_r > 0 %}up{% elif live_24h_sum_r < 0 %}down{% endif %}">{% if pulse_unread %}{% dash why.not_measured %}{% elif live_24h_sum_r == "—" %}{% if live_24h_n %}{% dash why.ungraded %}{% else %}{% dash why.nothing_24h %}{% endif %}{% else %}{% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R{% endif %}</span>
+        <span class="oc-strip-sub">{% if pulse_unread %}the closes could not be read{% else %}{{ live_24h_n }} closed · {% if live_24h_win_rate == "—" %}win rate <span title="{% if live_24h_n %}{{ why.ungraded }}{% else %}{{ why.nothing_24h }}{% endif %}">—</span>{% if live_24h_n %}{% dash_note "—" why.ungraded %}{% else %}{% dash_note "—" why.nothing_24h %}{% endif %}{% else %}{{ live_24h_win_rate }}% win{% endif %}{% endif %} · all worlds · R only</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">W / L 24H</span>
-        <span class="oc-strip-value"><span class="up">{{ live_24h_wins }}</span> / <span class="down">{{ live_24h_losses }}</span></span>
+        <span class="oc-strip-value">{% if pulse_unread %}{% dash why.not_measured %}{% else %}<span class="up">{{ live_24h_wins }}</span> / <span class="down">{{ live_24h_losses }}</span>{% endif %}</span>
         <span class="oc-strip-sub">trade tally · 24 h · all worlds</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">RULES</span>
         <span class="oc-strip-value"{% if live_rules_active == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_rules_active }}</span>{% dash_note live_rules_active why.not_measured %}
-        <span class="oc-strip-sub">{{ live_rules_paused }} paused · {{ live_rules_research }} research · platform-wide</span>
+        <span class="oc-strip-sub">{% if rules_unread %}the rule controls could not be read{% else %}{{ live_rules_paused }} paused · {{ live_rules_research }} research{% endif %} · platform-wide</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CONCERNS</span>
-        <span class="oc-strip-value {% if brain_top_concerns %}down{% endif %}">{{ brain_top_concerns|length }}</span>
+        <span class="oc-strip-value {% if brain_top_concerns %}down{% endif %}">{% if brain_unread %}{% dash why.not_measured %}{% else %}{{ brain_top_concerns|length }}{% endif %}</span>
         <span class="oc-strip-sub">flagged by the brain{% if brain.report %} · report {{ brain_age_str }}{% endif %}</span>
     </div>
 </div>
@@ -83,7 +91,7 @@ never added; R is a ratio and is said to be "all worlds · R only".
 <div class="grid grid-3" style="gap:14px;margin:14px 0 18px 0;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Session pulse · last {{ live_24h_spark|length }} closes · 24 h</span>
+            <span class="card-title">Session pulse · {% if pulse_unread %}not measured{% else %}last {{ live_24h_spark|length }} closes{% endif %} · 24 h</span>
             {% if live_24h_spark %}
                 <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
                     Σ {% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R · all worlds · R only
@@ -94,7 +102,11 @@ never added; R is a ratio and is said to be "all worlds · R only".
         {# loss and a +3R win drew the same length in opposite directions — #}
         {# two different rulers on one axis. One peak now scales both sides. #}
         {# Each bar names its world (2026-11-07): R from any world, said so. #}
+        {% if pulse_unread %}
+        <p class="oc-empty">Not measured: the closes could not be read.</p>
+        {% else %}
         {% include "_partials/chart_bars.html" with bars=live_24h_bars max=live_24h_spark_peak signed=1 short=1 ends=1 axis_start="oldest" axis_mid=live_24h_n axis_end="newest" unit="realized R per close, all worlds" when="last 24 hours" empty="No graded closes in last 24h." %}
+        {% endif %}
     </div>
 
     <div class="card" style="border-left:2px solid var(--accent);">
@@ -108,6 +120,8 @@ never added; R is a ratio and is said to be "all worlds · R only".
                 {% if live_24h_best.config.rule_name %}{{ live_24h_best.config.rule_name|truncatechars:32 }}{% else %}{% dash why.no_rule %}{% endif %}<br>
                 {% if live_24h_best.outcome %}{{ live_24h_best.outcome }}{% else %}{% dash why.no_outcome %}{% endif %} · {{ live_24h_best.closed_at|date:"Y-m-d H:i" }} UTC
             </div>
+        {% elif pulse_unread %}
+            <p class="oc-empty">Not measured: the closes could not be read.</p>
         {% else %}
             <p class="oc-empty">No graded winner yet.</p>
         {% endif %}
@@ -124,6 +138,8 @@ never added; R is a ratio and is said to be "all worlds · R only".
                 {% if live_24h_worst.config.rule_name %}{{ live_24h_worst.config.rule_name|truncatechars:32 }}{% else %}{% dash why.no_rule %}{% endif %}<br>
                 {% if live_24h_worst.outcome %}{{ live_24h_worst.outcome }}{% else %}{% dash why.no_outcome %}{% endif %} · {{ live_24h_worst.closed_at|date:"Y-m-d H:i" }} UTC
             </div>
+        {% elif pulse_unread %}
+            <p class="oc-empty">Not measured: the closes could not be read.</p>
         {% else %}
             <p class="oc-empty">No graded loser: a clean session.</p>
         {% endif %}
@@ -146,6 +162,8 @@ never added; R is a ratio and is said to be "all worlds · R only".
                     <span class="oc-mini-pnl {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{% if t.realized_r is not None %}{{ t.realized_r|floatformat:2 }}R{% else %}{% dash why.ungraded %}{% endif %}</span>
                 </div>
             {% endfor %}
+        {% elif pulse_unread %}
+            <p class="oc-empty">Not measured: the closes could not be read.</p>
         {% else %}
             <p class="oc-empty">No fills in the last 24h.</p>
         {% endif %}
@@ -166,6 +184,8 @@ never added; R is a ratio and is said to be "all worlds · R only".
                     </li>
                 {% endfor %}
             </ul>
+        {% elif brain_unread %}
+            <p class="oc-empty">Not measured: the brain's report could not be read.</p>
         {% else %}
             <p class="oc-empty">No active concerns from the brain.</p>
         {% endif %}
