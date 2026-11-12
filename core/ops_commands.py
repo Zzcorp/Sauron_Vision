@@ -503,7 +503,7 @@ COMMANDS = [
     {
         "name": "paper_readiness",
         "title": "Paper readiness",
-        "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
+        "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises. With a bot armed for real money it names a live operation as one: the chain faults apart, the live-action switches listed as a decision and not as blockers.",
         "usage": [
             "python manage.py paper_readiness",
             "python manage.py paper_readiness --window-days 90",

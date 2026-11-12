@@ -13,6 +13,9 @@ Pinned here, requests.post patched (no real HTTP):
   * the manual lane, the orchestrator's refusal and the evidence chain in
     words: no snake_case outside a code key, the account's currency, one
     summary sentence, a button;
+  * the watchdog's words for a live operator (2026-11-12): the "live by
+    decision" notice and the "no longer paper-only" alarm, exactly; each
+    live-action switch in its own words, its key only folded as code;
   * the fills' bell titles and bodies, and the e-mail and Discord copies,
     from the message; the bell's title dedupes (the drawdown, a refused
     close) still working;
@@ -45,6 +48,7 @@ BLOCKED = chr(0x26D4)
 LANE_LIVE = chr(0x1F534)
 LANE_PAPER = chr(0x1F4C4)
 COLD = chr(0x2744) + chr(0xFE0F)
+NOTICE = chr(0x2139) + chr(0xFE0F)
 HAND = chr(0x270B)
 
 BTC_MOVED = ("Stop moved by eToro: it holds 75745.80, not the 79934.97 "
@@ -280,6 +284,242 @@ class TheEvidenceChainTests(_Base):
         self.assertIn("First problem: no enabled config lists a symbol — "
                       "nothing will be measured", lines)
         self.assertEqual(jargon(p["text"]), [])
+
+
+# ── 2026-11-12: a decision is said once, a fault is alarmed ──────────────
+
+ACTUATOR_BLOCKER = (
+    "actuator_mode_live is ON — the rule actuator's live mode (a superuser "
+    "may apply a pause or a size cut to a rule; nothing applies by itself), "
+    "which is not a paper campaign")
+STILL_WATCHED = ("Still watched every day: the master switch, the "
+                 "indicators, the signals, the bots, the promotion ladder, "
+                 "the bar feeds and the graded outcomes")
+NOT_A_FAULT = ("So this is not a paper campaign: that is your decision, not "
+               "a fault.")
+
+
+def _finding(key, text):
+    from bot_program.campaign_readiness import Finding
+    return Finding(key, text)
+
+
+class TheLiveByDecisionTests(_Base):
+    """The operator, 2026-11-11, quoted "The evidence chain is broken"
+    with every link ON: he trades real money by decision. A decision is
+    said once, as a notice, in words that are true of it."""
+
+    def _notice(self, **kw):
+        from bot_program.notifications import notify_live_by_decision
+        fields = {"armed": ["actuator_mode_live"], "live_configs": 2,
+                  "hand_lanes": 1, "paper_configs": 0,
+                  "fingerprint": "f00dfeed0001"}
+        fields.update(kw)
+        return self._send(lambda: notify_live_by_decision(
+            self.user, **fields), domain=HOST)
+
+    def test_the_notice_exactly(self):
+        p = self._notice()
+        self.assertEqual(p["text"], "\n".join([
+            f"<b>{NOTICE} Live by decision: the paper-campaign checks "
+            f"stand down</b>",
+            "2 bots are armed for real money; 1 hand lane is in live mode. "
+            + NOT_A_FAULT,
+            "",
+            "Armed: the rule actuator&#x27;s live mode (a superuser may "
+            "apply a pause or a size cut to a rule; nothing applies by "
+            "itself)",
+            "No paper bot is on: nothing trades on the simulator except "
+            "entries a live bot&#x27;s rule sends there",
+            STILL_WATCHED,
+            "<blockquote expandable>Keys: <code>actuator_mode_live</code>",
+            "Full check: <code>manage.py paper_readiness</code>"
+            "</blockquote>"]))
+        self.assertEqual(p["reply_markup"],
+                         _button("/ops/", "Open ops page"))
+        self.assertEqual(jargon(p["text"]), [])
+        n = _bell(self.user).get()
+        self.assertEqual(n.title, "● Live by decision: the paper-campaign "
+                                  "checks stand down")
+        self.assertEqual(n.body, "2 bots are armed for real money; 1 hand "
+                                 "lane is in live mode. " + NOT_A_FAULT)
+        self.assertEqual(n.url, "/ops/")
+        self.assertEqual(n.notification_type, "bot")
+        self.assertEqual(n.data["fingerprint"], "f00dfeed0001")
+        self.assertEqual(n.data["mark"], NOTICE)
+        self.assertEqual(jargon(n.title + "\n" + n.body + "\n"
+                                + "\n".join(n.data["items"])), [])
+
+    def test_every_armed_switch_in_its_own_words(self):
+        from bot_program.campaign_readiness import MUST_BE_OFF
+        p = self._notice(armed=list(MUST_BE_OFF), live_configs=1,
+                         hand_lanes=0, paper_configs=1)
+        lines = p["text"].split("\n")
+        self.assertEqual(lines[1],
+                         "1 bot is armed for real money. " + NOT_A_FAULT)
+        self.assertEqual([ln for ln in lines if ln.startswith("Armed: ")], [
+            "Armed: the rule actuator&#x27;s live mode (a superuser may "
+            "apply a pause or a size cut to a rule; nothing applies by "
+            "itself)",
+            "Armed: the meta-allocator&#x27;s live mode (a superuser may "
+            "apply rule weights, 0.1x to 3x, to future entries)",
+            "Armed: the share allocator&#x27;s live mode (a share plan may "
+            "be applied with the PIN, which re-sizes the pools)",
+            "Armed: the capital desk&#x27;s live mode (the bots obey the "
+            "desk&#x27;s plan: displaced entries are skipped and sizes cut)",
+            "Armed: the share allocator&#x27;s automatic de-risk (a shock "
+            "plan that only lowers shares applies itself)"])
+        # a paper bot is on: nothing is said about the simulator
+        self.assertFalse([ln for ln in lines if "No paper bot" in ln], lines)
+        self.assertIn(STILL_WATCHED, lines)
+        self.assertIn(
+            "<blockquote expandable>Keys: <code>actuator_mode_live, "
+            "meta_allocator_mode_live, share_allocator_mode_live, "
+            "capital_desk_mode_live, share_allocator_auto_derisk</code>",
+            lines)
+        self.assertEqual(jargon(p["text"]), [])
+
+    def test_no_armed_switch_folds_no_key(self):
+        p = self._notice(armed=[], live_configs=3, hand_lanes=0)
+        lines = p["text"].split("\n")
+        self.assertEqual(lines[1],
+                         "3 bots are armed for real money. " + NOT_A_FAULT)
+        self.assertEqual(lines[3:], [
+            "No paper bot is on: nothing trades on the simulator except "
+            "entries a live bot&#x27;s rule sends there",
+            STILL_WATCHED,
+            "<blockquote expandable>Full check: <code>manage.py "
+            "paper_readiness</code></blockquote>"])
+
+    def test_the_demo_world_is_never_called_real_money(self):
+        p = self._notice(live_configs=0, demo_configs=1, hand_lanes=0)
+        self.assertEqual(p["text"].split("\n")[1],
+                         "1 bot is in live mode on the demo world. "
+                         + NOT_A_FAULT)
+        self.assertNotIn("real money", p["text"])
+        p = self._notice(live_configs=1, demo_configs=2, hand_lanes=3)
+        self.assertEqual(
+            p["text"].split("\n")[1],
+            "1 bot is armed for real money; 2 bots are in live mode on the "
+            "demo world; 3 hand lanes are in live mode. " + NOT_A_FAULT)
+
+    def test_a_paper_hand_lane_is_named_where_it_trades(self):
+        p = self._notice(paper_lanes=1)
+        self.assertIn(
+            "No paper bot is on: nothing trades on the simulator except "
+            "entries a live bot&#x27;s rule sends there and trades taken by "
+            "hand on a paper lane", p["text"].split("\n"))
+
+    def test_the_no_longer_paper_only_alarm_exactly(self):
+        from bot_program.notifications import notify_evidence_chain_cold
+        blocker = _finding(("armed", "actuator_mode_live"), ACTUATOR_BLOCKER)
+        p = self._send(lambda: notify_evidence_chain_cold(
+            self.user, cold=[], blockers=[blocker]), domain=HOST)
+        self.assertEqual(p["text"], "\n".join([
+            f"<b>{COLD} The paper campaign is no longer paper-only</b>",
+            "A switch that lets real money move is on while every enabled "
+            "bot trades on paper.",
+            "",
+            "First problem: the rule actuator&#x27;s live mode is on (a "
+            "superuser may apply a pause or a size cut to a rule; nothing "
+            "applies by itself)",
+            "<blockquote expandable>Blocker: <code>actuator_mode_live is ON "
+            "— the rule actuator&#x27;s live mode (a superuser may apply a "
+            "pause or a size cut to a rule; nothing applies by itself), "
+            "which is not a paper campaign</code>",
+            "Full check: <code>manage.py paper_readiness</code>"
+            "</blockquote>"]))
+        self.assertEqual(p["reply_markup"],
+                         _button("/ops/", "Open ops page"))
+        self.assertEqual(jargon(p["text"]), [])
+        n = _bell(self.user).get()
+        self.assertEqual(n.title,
+                         "▲ The paper campaign is no longer paper-only")
+        self.assertEqual(jargon(n.title + "\n" + n.body + "\n"
+                                + "\n".join(n.data["items"])), [])
+
+    def test_the_other_findings_are_counted_never_dropped(self):
+        from bot_program.notifications import notify_evidence_chain_cold
+        blockers = [
+            _finding(("armed", "actuator_mode_live"), ACTUATOR_BLOCKER),
+            _finding(("armed", "share_allocator_mode_live"),
+                     "share_allocator_mode_live is ON"),
+            _finding(("no_result",), "3 signals closed")]
+        p = self._send(lambda: notify_evidence_chain_cold(
+            self.user, cold=[], blockers=blockers))
+        lines = p["text"].split("\n")
+        self.assertEqual(lines[4], "And 2 more findings: run the full check")
+        p = self._send(lambda: notify_evidence_chain_cold(
+            self.user, cold=[], blockers=blockers[:2]))
+        self.assertEqual(p["text"].split("\n")[4],
+                         "And 1 more finding: run the full check")
+
+    def test_a_fault_with_no_link_named(self):
+        """No link is off: the title keeps to what is known, the summary
+        no longer says the ladder has NOTHING to grade, and the line about
+        links that are off is not said."""
+        from bot_program.notifications import notify_evidence_chain_cold
+        blocker = _finding(
+            ("no_bars", ("EURUSD",)),
+            "1 symbol(s) have no 4h bars at all — no rule can form a "
+            "decision on them, so they contribute nothing to the 90 days: "
+            "EURUSD")
+        p = self._send(lambda: notify_evidence_chain_cold(
+            self.user, cold=[], blockers=[blocker]))
+        self.assertEqual(p["text"].split("\n")[:4], [
+            f"<b>{COLD} The evidence chain is broken</b>",
+            "Evidence is not being produced, so the days passing now give "
+            "the promotion ladder less to grade.",
+            "",
+            "First problem: 1 symbol(s) have no 4h bars at all — no rule "
+            "can form a decision on them, so they contribute nothing to the "
+            "90 days: EURUSD"])
+        self.assertNotIn("A link that is off", p["text"])
+        self.assertNotIn("paper campaign is not complete", p["text"])
+        self.assertEqual(jargon(p["text"]), [])
+
+    def test_the_rule_with_no_paper_bot_is_named_in_words(self):
+        from bot_program.notifications import notify_evidence_chain_cold
+        blocker = _finding(
+            ("stuck", ("po3_london_sweep_short",)),
+            "po3_london_sweep_short is at the paper stage with no paper bot "
+            "to trade on — it can earn no paper fill, and the ladder asks "
+            "for paper fills before real money. It needs a paper bot that "
+            "lists a market it fires on")
+        p = self._send(lambda: notify_evidence_chain_cold(
+            self.user, cold=[], blockers=[blocker]), domain=HOST)
+        self.assertEqual(p["text"], "\n".join([
+            f"<b>{COLD} No paper bot for the rules at the paper stage</b>",
+            "A rule born at research trades only on a paper bot until it is "
+            "promoted, and no paper bot that is on lists a market it fires "
+            "on.",
+            "",
+            "First problem: po3 london sweep short is at the paper stage "
+            "with no paper bot to trade on — it can earn no paper fill, and "
+            "the ladder asks for paper fills before real money. It needs a "
+            "paper bot that lists a market it fires on",
+            "<blockquote expandable>Blocker: <code>po3_london_sweep_short "
+            "is at the paper stage with no paper bot to trade on — it can "
+            "earn no paper fill, and the ladder asks for paper fills before "
+            "real money. It needs a paper bot that lists a market it fires "
+            "on</code>",
+            "Full check: <code>manage.py paper_readiness</code>"
+            "</blockquote>"]))
+        self.assertEqual(jargon(p["text"]), [])
+        self.assertEqual(_bell(self.user).get().title,
+                         "▲ No paper bot for the rules at the paper stage")
+
+    def test_a_named_link_wins_over_every_other_title(self):
+        from bot_program.notifications import notify_evidence_chain_cold
+        p = self._send(lambda: notify_evidence_chain_cold(
+            self.user, cold=["pipeline_signals"],
+            blockers=[_finding(("armed", "actuator_mode_live"),
+                               ACTUATOR_BLOCKER)]))
+        self.assertEqual(p["text"].split("\n")[0],
+                         f"<b>{COLD} The evidence chain is broken at the "
+                         f"signal pipeline</b>")
+        self.assertIn("A link that is off is a decision; a link with no "
+                      "row was never set up", p["text"].split("\n"))
 
 
 # ── P5 P6: the bell rows, the copies, the currency ───────────────────────

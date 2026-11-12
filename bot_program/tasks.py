@@ -1,4 +1,5 @@
 import logging
+from datetime import date, timedelta
 
 from celery import shared_task
 from core.dead_man_switch import heartbeat
@@ -1635,11 +1636,109 @@ def grade_capital_desk() -> dict:
 
 # ─── 2026-09-15: the watchdog for a paper campaign ──────────────────────────
 
-#: One notification per cold spell, not one per day. A chain that stays cold
-#: for a week is one problem, and seven identical alerts is how an operator
-#: learns to ignore the eighth. Cleared the moment the chain is complete, so
-#: a NEW cold spell speaks immediately.
-CHAIN_COLD_ALERT_COOLDOWN = 24 * 3600
+#: IT SPEAKS WHEN SOMETHING CHANGES, NOT BECAUSE A DAY PASSED (2026-11-12).
+#: The cooldown used to be a cache key that lived 24 hours, on a schedule of
+#: 24 hours. The next morning's check landed a moment before the key expired
+#: or a moment after, so a fault that stood came back every one to two days,
+#: for ever, under a comment that promised "one notification per cold spell".
+#:
+#: The memory is now WHAT was said and the day it was said, with no expiry.
+#: The same set of faults stays quiet; a different set speaks at once; a
+#: fault that still stands is recalled once after this long. The set is read
+#: off the findings' KEYS, never off their sentences
+#: (campaign_readiness.Finding): three sentences carry a number that moves
+#: every morning, and a memory of sentences would call a stale bar a new
+#: fault each day it grew a day older. Cleared the moment the chain is
+#: complete, so a NEW cold spell speaks immediately.
+#:
+#: Counted in calendar days (UTC), not in seconds: the run of the seventh
+#: morning starts a few seconds before or after the 168th hour, by however
+#: long the sends took, which is exactly how the old key missed.
+CHAIN_REMIND_AFTER = timedelta(days=7)
+
+#: Where the alarm's memory lives: {"fp": fingerprint, "day": ISO date}.
+CHAIN_SAID_KEY = "campaign_watch:said"
+
+#: The 24-hour key of before 2026-11-12. Redis keeps its keys across a
+#: deploy, so every run deletes it: nothing reads it any more.
+CHAIN_OLD_KEY = "campaign_watch:alerted"
+
+
+def _chain_fingerprint(findings) -> str:
+    """The SET of faults as one word: a hash of the findings' keys, sorted.
+
+    Never of their sentences. A finding with no key (the tests refuse one)
+    counts as one fixed key: it can then hide a change, and it cannot bring
+    back a daily alarm.
+    """
+    import hashlib
+    keys = sorted(repr(tuple(getattr(f, "key", None) or ("unkeyed",)))
+                  for f in findings)
+    return hashlib.sha1("|".join(keys).encode("utf-8")).hexdigest()[:12]
+
+
+def _chain_already_said(said, fingerprint: str, today) -> bool:
+    """True while this same set of faults was said less than
+    CHAIN_REMIND_AFTER ago. A memory that cannot be read (another shape, a
+    day in the future) was not said."""
+    if not isinstance(said, dict) or said.get("fp") != fingerprint:
+        return False
+    try:
+        day = date.fromisoformat(str(said.get("day") or ""))
+    except ValueError:
+        return False
+    return timedelta(0) <= (today - day) < CHAIN_REMIND_AFTER
+
+
+def _live_notice_fingerprint(armed) -> str:
+    """The "live by decision" notice is said once per SET of armed
+    live-action switches: this names the set."""
+    import hashlib
+    word = "live_by_decision|" + ",".join(sorted(str(k) for k in armed))
+    return hashlib.sha1(word.encode("utf-8")).hexdigest()[:12]
+
+
+def _say_live_by_decision(report, recipients) -> int:
+    """Tell each staff account, once, that the paper checks stand down
+    because a bot is armed for real money. Returns how many were told now.
+
+    For a live operation only, and only when there is something to say: a
+    live-action switch is ON, or no paper bot is on. Said once per set of
+    armed switches. THE BELL TABLE IS THE MEMORY, as notify_staff's is: a
+    row that carries the fingerprint means that account was told, so an
+    emptied cache cannot repeat it, and a staff account that arrives later
+    is told once. A muted bot feed gets no row and no message, as for the
+    alarm.
+    """
+    if report.get("campaign") != "live":
+        return 0
+    fleet = report.get("fleet") or {}
+    armed = list(report.get("armed") or [])
+    if not armed and fleet.get("paper_bots"):
+        return 0
+    fingerprint = _live_notice_fingerprint(armed)
+    from alerts.models import Notification
+
+    from .notifications import notify_live_by_decision
+    told = 0
+    for user in recipients:
+        try:
+            if Notification.objects.filter(
+                    user=user, data__fingerprint=fingerprint).exists():
+                continue
+            if notify_live_by_decision(
+                    user, armed=armed,
+                    live_configs=int(fleet.get("live_bots") or 0),
+                    demo_configs=int(fleet.get("demo_bots") or 0),
+                    hand_lanes=int(fleet.get("hand_lanes") or 0),
+                    paper_configs=int(fleet.get("paper_bots") or 0),
+                    paper_lanes=int(fleet.get("paper_lanes") or 0),
+                    fingerprint=fingerprint):
+                told += 1
+        except Exception as e:  # noqa: BLE001 — a notice never stops the watch
+            logger.warning("[campaign watch] live-by-decision notice failed "
+                           "for %s: %s", user.id, e)
+    return told
 
 
 @shared_task
@@ -1658,32 +1757,55 @@ def watch_evidence_chain():
     — the funding feed that wrote nothing, the broker sync that missed eight
     times in silence, the backtester that priced an absent bar at zero.
 
+    A DECISION IS SAID ONCE, A FAULT IS ALARMED (2026-11-12). The operator
+    trades real money by decision, and this alarmed on it every one to two
+    days: "The evidence chain is broken", with every link ON. It now alarms
+    on `blockers` as readiness() defines them: for a live operation the
+    chain's own faults (a link OFF or with NO ROW, an unticked beat entry,
+    closed signals with no result, bars missing or stale, no symbol) and a
+    rule stuck at the paper stage with no paper bot. That a live-action
+    switch is ON, or that no paper bot is on, is said once as a notice
+    (_say_live_by_decision). A paper campaign keeps every check.
+
     READ-ONLY. It measures and it notifies; it turns nothing on. A watchdog
     that repaired the chain would be a watchdog nobody could trust to report
     it honestly, and switching a pipeline back on is an operator's decision.
     """
     from django.contrib.auth.models import User
     from django.core.cache import cache
+    from django.utils import timezone
 
     from .campaign_readiness import readiness
 
+    today = timezone.now().date()
     report = readiness()
     cold = report["cold_links"]
     blockers = report["blockers"]
     out = {"status": "ok", "cold_links": cold,
-           "blockers": len(blockers), "notified": 0}
+           "blockers": len(blockers), "notified": 0,
+           "campaign": report["campaign"], "noticed": 0}
+    cache.delete(CHAIN_OLD_KEY)
+
+    recipients = list(User.objects.filter(is_staff=True, is_active=True))
+    try:
+        out["noticed"] = _say_live_by_decision(report, recipients)
+    except Exception as e:  # noqa: BLE001 — a notice never stops the alarm
+        logger.warning("[campaign watch] live-by-decision notice failed: %s",
+                       e)
 
     if not blockers:
-        # A complete chain clears the gate, so the next cold spell is heard
-        # at once rather than swallowed by a cooldown from the last one.
-        cache.delete("campaign_watch:alerted")
+        # A complete chain clears the memory, so the next cold spell is
+        # heard at once rather than taken for the last one.
+        cache.delete(CHAIN_SAID_KEY)
         return out
 
-    if cache.get("campaign_watch:alerted"):
+    fingerprint = _chain_fingerprint(blockers)
+    if _chain_already_said(cache.get(CHAIN_SAID_KEY), fingerprint, today):
+        # "cooldown" is the word the result has always carried for a run
+        # that found a fault and kept quiet about it.
         out["status"] = "cooldown"
         return out
 
-    recipients = list(User.objects.filter(is_staff=True, is_active=True))
     if not recipients:
         # Not an error and not a success: the check ran, the chain is cold,
         # and there is nobody configured to tell. Said plainly rather than
@@ -1694,17 +1816,27 @@ def watch_evidence_chain():
         out["status"] = "nobody_to_tell"
         return out
 
+    # The chain's own faults first, whatever order the checks ran in: the
+    # message shows the first finding and counts the rest, and its title is
+    # the first finding's. A dead feed must not sit behind a switch.
+    chain = {id(f) for f in report["chain_faults"]}
+    ordered = ([f for f in blockers if id(f) in chain]
+               + [f for f in blockers if id(f) not in chain])
+
     from .notifications import notify_evidence_chain_cold
     for user in recipients:
         try:
-            if notify_evidence_chain_cold(user, cold=cold, blockers=blockers):
+            if notify_evidence_chain_cold(user, cold=cold, blockers=ordered):
                 out["notified"] += 1
         except Exception as e:  # noqa: BLE001 — one failure must not eat the rest
             logger.warning("[campaign watch] notify failed for %s: %s",
                            user.id, e)
 
     if out["notified"]:
-        cache.set("campaign_watch:alerted", 1, CHAIN_COLD_ALERT_COOLDOWN)
+        # Remembered only once somebody was told: an alarm nobody received
+        # is tried again at the next run, not held for a week.
+        cache.set(CHAIN_SAID_KEY,
+                  {"fp": fingerprint, "day": today.isoformat()}, None)
     logger.warning(
         "[campaign watch] evidence chain is cold: %s — %d blocker(s), "
         "%d operator(s) told", ", ".join(cold) or "see blockers",

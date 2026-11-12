@@ -552,8 +552,11 @@ DEFAULT_COMPONENTS = [
     # green and goes cold on day twelve spends seventy-eight days producing
     # nothing, and the only thing that would notice is somebody choosing to
     # run the command again. Nothing on this platform chose to.
+    # 2026-11-12: it said "one notification when a link goes cold" while a
+    # standing blocker came back every one to two days, and it alarmed on a
+    # live operator's own decision. The words below are what it does now.
     {"key": "pipeline_campaign_watch", "name": "Evidence Chain Watchdog",
-     "description": "Daily read-only check that the paper-campaign evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is still complete, and one notification when a link goes cold. Writes nothing and makes no broker call.",
+     "description": "Daily read-only check that the evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is complete. Speaks once when a link is off, missing or starved, again only when that changes, weekly while it lasts. Live trading by decision is said once, never alarmed. Writes nothing.",
      "category": "pipeline"},
 
     # ── eToro leverage (2026-09-23; the words 2026-09-26) ──────

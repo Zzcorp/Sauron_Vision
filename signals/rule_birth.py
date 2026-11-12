@@ -41,6 +41,10 @@ Who reads this module:
   signals/meta_allocator               no allocation (it would move every
                                        trading rule's 1/N share and the
                                        sample tier)
+  bot_program/campaign_readiness       a born name at the paper stage with
+                                       no paper bot to trade on is the
+                                       watchdog's one paper check for a
+                                       live operator (at_paper_stage)
 
 A fork of a born name (`death_cross_evolved_v2`) is born with it: the
 evolution layer already creates forks at research, and the exclusions
@@ -166,6 +170,29 @@ def voteless(*, live: bool) -> set:
         if stage == "research" or (live and stage not in LIVE_STAGES):
             out.add(name)
     return out
+
+
+def at_paper_stage() -> list:
+    """The born names (and forks) whose row is at the paper stage, sorted:
+    past research and at no live stage, so they vote on a paper config and
+    on no live one (voteless). With no paper bot on they earn no paper
+    fill, which is what the evidence-chain watchdog names (2026-11-12,
+    bot_program/campaign_readiness).
+
+    ONE read of the rows, on purpose. The same set is the difference
+    voteless(live=True) - voteless(live=False), two reads, and voteless
+    fails closed by returning every born name: one failed read of the two
+    would name rules that sit at a live stage. A read that raises returns
+    nothing here and is logged. Failing closed is right for a vote and
+    wrong for an alarm, which must not name a rule it could not read."""
+    try:
+        rows = _born_rows()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[birth] born rows unread (%s): no rule is named at "
+                       "the paper stage", e)
+        return []
+    return sorted(name for name, stage in rows.items()
+                  if stage != "research" and stage not in LIVE_STAGES)
 
 
 def still_at_research() -> set:
