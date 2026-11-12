@@ -146,6 +146,13 @@ button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-
     color: var(--text-muted);
     white-space: nowrap;
 }
+/* /signals/: what the optional market hold did with its announcement. */
+.sig-hold {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
 .sr-pop-facts {
     display: flex;
     flex-direction: column;
@@ -261,6 +268,34 @@ button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-
     color: var(--text-muted);
 }
 .signals-rail:not(.open) .sr-gone { display: none; }
+
+/* ── MARKET SHUT (the optional market hold): the signals whose market
+   cannot trade now, hidden unless the rail section says so. Rendered only
+   while the switch signal_market_hold is on. Its rows are LEFT THE RAIL's
+   in shape. ─────────────────────────────────────────────────────────── */
+[data-sv-fhost="signals"]:not([data-f-shut="1"]) [data-sv-shut] { display: none; }
+.sr-shut-sec {
+    border-bottom: 1px solid var(--border-glow);
+    background: rgba(0, 0, 0, 0.18);
+}
+.sr-wait-row {
+    padding: 7px 12px;
+    border-top: 1px dashed rgba(19, 48, 32, 0.6);
+    opacity: .82;
+}
+.sr-wait-row:hover { opacity: 1; background: var(--bg-card-hover); }
+.sr-gone-tag-market_shut, .sr-gone-tag-market_settling { color: var(--accent-gold-ink, #e8a33d); border-color: rgba(232, 163, 61, 0.45); }
+.sr-wait-rule {
+    margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.signals-rail:not(.open) .sr-shut-sec { display: none; }
 
 /* ── the headband SIGNALS popup: the rail's own rows ─────────────────── */
 .sv-sig-rows { display: flex; flex-direction: column; }

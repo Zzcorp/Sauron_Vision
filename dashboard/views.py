@@ -530,6 +530,9 @@ def _signal_rows(signals, configs=None, user=None):
     badges = signal_surface.badges_for(names)
     records = signal_surface.rule_records(names)
     acted = signal_surface.acted_index(signals, user=user)
+    # The announcements the optional market hold kept for the open
+    # (2026-11-12): one query for the page; empty unless a signal was held.
+    holds = signal_surface.hold_blocks(signals)
 
     rows = []
     for s in signals:
@@ -549,6 +552,7 @@ def _signal_rows(signals, configs=None, user=None):
             # and the hour the market opens, from the market clock (no
             # query); nothing for a closed signal or an open market.
             "market": signal_surface.market_block(s),
+            "hold": holds.get(s.pk),
             "trades": acted.get(s.pk) or [],
             "graded": graded,
             # A closed signal with no realized_r is not a zero-R signal: it is

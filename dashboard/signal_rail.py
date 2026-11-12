@@ -81,6 +81,21 @@ instrument and never from the database). One chip, SHUT, shows or hides
 those cards (shown by default, the `shut_off` choice of the operator's
 prefs) and counts them. An open market's card carries nothing new.
 
+THE OPTIONAL HOLD (the switch signal_market_hold, OFF on arrival; with it
+off none of this runs). For an operator who would rather see what can be
+traded now, the lifecycle stays as it is and a candidate it would show as
+a card waits under MARKET SHUT instead while its market cannot trade
+(shut, or in its first quarter hour): off the cards, the rail's count and
+the headband list, with the hour the market opens, whether its 24 hours
+end before that, and its ticket (a paper ticket is refused until the
+market opens; a live one warns and is the operator's to send). It is a
+card again by itself once the market has opened and settled. While a
+market cannot trade, the price rules (5 to 7) judge nothing: a quote
+re-stamped before the open used to record a sticky STOP departure. The
+title counts the waiting signals, and the counts still add up: on the
+rail + waiting + left and still active + left earlier + not evaluated =
+active in the engine.
+
 DISPLAY ONLY. It never writes Signal (any field), RuleControl,
 PromotionEvent, AssetBotConfig, AssetBotTrade, Instrument, alerts or
 notification preferences, and it never pushes or announces. A retired
@@ -142,6 +157,8 @@ TAGS = {
     "rule_paused": "PAUSED", "rule_demoted": "DEMOTED",
     "rule_losing": "LOSING", "rule_losing_live": "LOSING LIVE",
     "passed": "PASSED", "taken": "TAKEN",
+    # the MARKET SHUT section's rows (the optional hold)
+    "market_shut": "SHUT", "market_settling": "SETTLING",
     "closed_target": "TARGET", "closed_stop": "STOP",
     "closed_expired": "CLOSED", "closed_manual": "CLOSED", "closed": "CLOSED",
 }
@@ -205,6 +222,9 @@ class RailFacts:
     #: know the hour, and while the market is open.
     opens: str = ""
     opens_at: object = None
+    #: Its hours on the rail end before its market opens: it will have
+    #: left the rail before anything can trade it.
+    misses_open: bool = False
     o_score: int = 0
     o_cls: int = 0
     o_cscore: int = 0
@@ -658,6 +678,13 @@ def _lifecycle(s, ctx):
         return Verdict("aged", _aged_words(s, aff, now, ctx["last_flag"]),
                        aff + timedelta(hours=RAIL_FRESH_HOURS))
     mark, fresh = _fresh_mark(s.instrument, now)
+    # THE OPTIONAL HOLD: while a market is shut or settling a quote is not
+    # a market price (a stream re-stamps the last one), so it judges
+    # nothing and records no departure. Off, the rules read every fresh
+    # quote, as they always did.
+    if fresh and ctx.get("hold") and not _market(s.instrument, ctx,
+                                                 now)["tradeable"]:
+        fresh = False
     if fresh:
         hit = _price_verdict(s, mark, side, now)
         if hit is not None:
@@ -770,7 +797,9 @@ def _facts(s, ctx, now) -> RailFacts:
                                (rf.get("live") or {}).get(pool)),
         market="" if market["tradeable"] else market["state"],
         market_words=market["words"], opens=market["opens"],
-        opens_at=market["reopens"])
+        opens_at=market["reopens"],
+        misses_open=bool(market["reopens"] is not None and (
+            aff + timedelta(hours=RAIL_FRESH_HOURS)) < market["reopens"]))
 
 
 def _market(inst, ctx, now) -> dict:
@@ -840,6 +869,7 @@ def _empty(error="") -> dict:
             "votes": 0, "live": 0, "held": 0, "shut": 0, "ceiling": False,
             "title": "The rail could not be read." if error else "No signal on the rail."}
     return {"cards": [], "rows": [], "gone": [], "gone_n": 0, "gone_more": 0,
+            "waiting": [], "waiting_n": 0, "hold": False,
             "gone_tags": [], "gone_tags_words": "", "n": 0, "long_n": 0,
             "short_n": 0, "active_n": 0, "older_n": 0, "new24": 0,
             "classes": classes, "rules": [], "groups": [], "votes_n": 0, "live_n": 0,
@@ -967,12 +997,12 @@ def _build(request) -> dict:
 
     ctx = {"now": now, "mine": mine, "life": life, "newest": newest,
            "last_flag": last_flag, "rules": rule_facts,
-           "demotions": demotions, "held": held}
+           "demotions": demotions, "held": held, "hold": _hold_on()}
 
     # 4. The verdicts. The rail's own lifecycle judges every candidate, the
     #    ones this operator passed included (the lifecycle is the rail's, a
     #    pass is one operator's); your own pass or take is the first match.
-    cards, gone, to_store = [], [], []
+    cards, gone, to_store, waiting = [], [], [], []
     for s in candidates:
         v = _lifecycle(s, ctx)
         if v is not None and v.store:
@@ -984,7 +1014,12 @@ def _build(request) -> dict:
         if own is None:
             if v is None:
                 s.rail = _facts(s, ctx, now)
-                cards.append(s)
+                if ctx["hold"] and s.rail.market:
+                    # THE OPTIONAL HOLD: its market cannot trade now, so it
+                    # waits under MARKET SHUT, off the cards.
+                    waiting.append(_waiting_row(s, ctx, now))
+                else:
+                    cards.append(s)
             elif v.at >= gone_start:
                 gone.append(_gone_row(s, v.reason, v.words, v.at, False, ctx,
                                       now, active=True))
@@ -1091,9 +1126,10 @@ def _build(request) -> dict:
     new24 = Signal.objects.filter(created_at__gte=gone_start).count()
     gone_active = sum(1 for g in gone if g.engine_active)
     n = len(cards)
+    waiting_n = len(waiting)
     long_n = sum(1 for s in cards if s.rail.side == "long")
     short_n = sum(1 for s in cards if s.rail.side == "short")
-    older_n = max(0, active_n - n - gone_active - unevaluated)
+    older_n = max(0, active_n - n - waiting_n - gone_active - unevaluated)
     per_class = {}
     for s in cards:
         per_class[s.rail.asset_class] = per_class.get(s.rail.asset_class, 0) + 1
@@ -1114,6 +1150,10 @@ def _build(request) -> dict:
     shut_n = sum(1 for s in cards if s.rail.market == "shut")
     title = (f"{n} on the rail · {active_n} active in the engine · "
              f"{gone_n} left in the last 24h · {older_n} left earlier")
+    if ctx["hold"]:
+        title = (f"{n} on the rail · {waiting_n} waiting for their market "
+                 f"· {active_n} active in the engine · {gone_n} left in the "
+                 f"last 24h · {older_n} left earlier")
     if closed_unread:
         title += (f" ({closed_unread} more engine closes not read: the "
                   f"newest {GONE_CLOSED_FETCH} were)")
@@ -1152,6 +1192,8 @@ def _build(request) -> dict:
             "rules": [[name, key, cnt] for name, key, cnt in rule_list],
             "votes": votes_n, "live": live_n, "held": held_n,
             "shut": shut_n, "ceiling": ceiling_hit, "title": title}
+    if ctx["hold"]:
+        meta["waiting"] = waiting_n
 
     tags_words = " · ".join(f"{t.lower()} {c}" for t, c in gone_tags)
     if closed_unread:
@@ -1159,6 +1201,7 @@ def _build(request) -> dict:
             tags_words, f"{closed_unread} engine closes not read"]))
     return {
         "cards": cards, "rows": rows_out, "gone": shown,
+        "waiting": waiting, "waiting_n": waiting_n, "hold": ctx["hold"],
         "gone_n": gone_n, "gone_more": max(0, len(gone) - len(shown)),
         "gone_tags": gone_tags,
         "gone_tags_words": tags_words,
@@ -1173,6 +1216,31 @@ def _build(request) -> dict:
         "ceiling": RAIL_SAFETY_CEILING, "error": "", "meta": meta,
         "title": title,
     }
+
+
+def _hold_on() -> bool:
+    """The optional hold's switch, read once per render; never asked while
+    the market gate is off (the test suite), so no query is spent there."""
+    try:
+        from signals import market_hold
+        return bool(market_hold.GATE and market_hold.enabled())
+    except Exception:  # noqa: BLE001 — an unread switch is off
+        return False
+
+
+def _waiting_row(s, ctx, now) -> Gone:
+    """One MARKET SHUT row: a candidate the rail would show as a card,
+    whose market cannot trade now. The words say when it opens, and when
+    the signal's hours on the rail end before that."""
+    facts = s.rail
+    words = (facts.market_words[:1].upper() + facts.market_words[1:] + "."
+             if facts.market_words else "Its market cannot trade now.")
+    if facts.misses_open:
+        from core.exchange_status import utc_words
+        words += (f" Its {RAIL_FRESH_HOURS} hours end "
+                  f"{utc_words(facts.leaves_at)}, before the market opens.")
+    return _gone_row(s, "market_" + facts.market, words,
+                     facts.opens_at or now, False, ctx, now, active=True)
 
 
 def _gone_row(s, reason, words, at, yours, ctx, now, *, active) -> Gone:

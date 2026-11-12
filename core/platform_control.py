@@ -612,13 +612,16 @@ DEFAULT_COMPONENTS = [
     # before. ON: hold_at_birth keeps the announcement of a signal whose
     # market cannot trade, and the lifecycle task's release pass sends it
     # once, 15 minutes after the open, or drops it (closed, aged, or its
-    # first price past its plan). It gates no task of its own (the pass
-    # writes its counts on this row when something is held), reads no
-    # order path and writes no Signal field, so it is not a live-money
-    # switch and not a PIN switch; "all on" may turn it on. Description
-    # measured at 299 chars (< 300).
+    # first price past its plan). ON also moves such a signal's card off
+    # the rail, under MARKET SHUT (dashboard/signal_rail.py), until its
+    # market has opened and settled: the description says so, because a
+    # card that leaves the rail unannounced reads as a lost signal. It
+    # gates no task of its own (the pass writes its counts on this row
+    # when something is held), reads no order path and writes no Signal
+    # field, so it is not a live-money switch and not a PIN switch; "all
+    # on" may turn it on. Description measured at 297 chars (< 300).
     {"key": "signal_market_hold", "name": "Signal Market Hold",
-     "description": "Off (default): every signal is announced the moment it fires; one whose market is shut says so. On: such a signal's banner, bell and Telegram wait for the open, then go out once if it is under 24h old and the first price leaves its plan valid; else it is dropped, the reason kept. It moves no money.",
+     "description": "Off (default): every signal is announced as it fires; one whose market is shut says so. On: its banner, bell and Telegram wait for the open, then go out once if it is under 24h old and its plan holds at the first price, else it is dropped; its rail card waits under MARKET SHUT. It moves no money.",
      "category": "pipeline"},
 
     # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────

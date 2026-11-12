@@ -64,7 +64,32 @@ first render passes rail_initial and renders those rows itself.
     drawn up to a bound, and these lines say how many more there were.{% endcomment %}
     {% if rail.gone_more %}<div class="sr-rail-note">and {{ rail.gone_more }} more engine closes in the last 24h, drawn no further: the engine closed them, so no ticket is lost. /signals/ lists every signal.</div>{% endif %}
     {% if rail.closed_unread %}<div class="sr-rail-note">{{ rail.closed_unread }} more engine closes of the last 24h were not read (the newest {{ rail.closed_fetch }} were). /signals/ lists every signal.</div>{% endif %}
-</section>
+</section>{% if rail.hold %}{# MARKET SHUT (2026-11-12, the optional hold, the switch signal_market_hold): the signals the rail would show as cards whose market cannot trade now, each with the hour it opens and its ticket. Hidden until its chip or its filter row is pressed. Not rendered at all with the switch off, and written on the line of the tag above so that render keeps its bytes. #}
+<section class="sr-shut-sec" data-sv-shut aria-label="Signals whose market cannot trade now">
+    <div class="sr-gone-head">
+        <span class="sr-gone-title">MARKET SHUT</span>
+        <span class="sr-gone-count" data-sv-rail-n="waiting">{{ rail.waiting_n|default:"0" }}</span>
+    </div>
+    {% for g in rail.waiting %}
+    <div class="sr-wait-row" data-sv-row data-waiting data-reason="{{ g.reason }}" data-signal-id="{{ g.signal_id }}" data-asset-class="{{ g.facts.asset_class }}" data-side="{{ g.facts.side }}" data-score-b="{{ g.facts.score_band }}" data-stage="{{ g.facts.stage }}" data-votes="{{ g.facts.votes|yesno:'1,0' }}" data-live="{{ g.facts.live|yesno:'1,0' }}" data-held="{{ g.facts.held|yesno:'1,0' }}" data-rule-key="{{ g.facts.rule_key }}" data-created="{{ g.created_at|date:'c' }}">
+        <div class="sr-gone-l1">
+            <span class="sr-sym">{{ g.symbol }}</span>
+            <span class="sr-badge sr-badge-{{ g.direction }}">{{ g.direction|upper|slice:":4" }}</span>
+            <span class="sr-gone-tag sr-gone-tag-{{ g.reason }}">{{ g.tag }}</span>
+            {% if g.rule %}<span class="sr-wait-rule" title="{{ g.rule }}">{{ g.rule|truncatechars:24 }}</span>{% endif %}
+        </div>
+        <div class="sr-gone-words">{{ g.words }}</div>
+        {% if g.position_words %}<div class="sr-gone-pos">{{ g.position_words }}</div>{% endif %}
+        {% if g.takeable %}
+        <div class="sr-gone-acts">
+            <button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="{% if g.reason == 'market_settling' %}The market has just opened: a paper ticket is refused in its first quarter hour; a live ticket is yours to send{% else %}The market is shut: a paper ticket is refused until it opens; a live ticket warns and is yours to send{% endif %}" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>
+        </div>
+        {% endif %}
+    </div>
+    {% empty %}
+    <div class="sr-gone-empty">No signal is waiting for its market.</div>
+    {% endfor %}
+</section>{% endif %}
 {% if rail.ceiling_hit %}<div class="sr-rail-note sr-rail-ceiling">Showing the newest {{ rail.ceiling }} of {{ rail.total }} signals from the last 48h. /signals/ lists every one.</div>{% endif %}
 {% url 'signals_list' as signals_url %}
 <div class="sr-list" data-sv-list="signals">

@@ -545,6 +545,43 @@ def market_block(signal, now=None) -> dict:
             "title": f"{words[:1].upper()}{words[1:]}. {MARKET_TICKET_WORDS}"}
 
 
+def hold_blocks(signals) -> dict:
+    """{signal_id: {"text", "title"}} for the signals whose announcement
+    the optional market hold kept for their market's open (2026-11-12,
+    signals.models.SignalHold; the switch signal_market_hold). One query
+    for the page, never one a row; a signal announced at its birth has no
+    row and no entry, so with the switch never turned on this is empty
+    and the page draws nothing. Never raises."""
+    from core.exchange_status import utc_words
+    ids = [s.pk for s in signals if getattr(s, "pk", None)]
+    if not ids:
+        return {}
+    try:
+        from signals.models import SignalHold
+        holds = list(SignalHold.objects.filter(signal_id__in=ids))
+    except Exception as e:  # noqa: BLE001 — the list renders regardless
+        logger.warning("[signals] market holds unreadable: %s", e)
+        return {}
+    out = {}
+    for h in holds:
+        born = ("born while its market was shut" if h.reopens_at is not None
+                else "born while its market could not trade")
+        words = str(h.words or "")
+        if h.state == SignalHold.HELD:
+            text = f"announcement held: {born}" + (
+                f" · it opens {utc_words(h.reopens_at)}"
+                if h.reopens_at is not None else "")
+        elif h.state == SignalHold.RELEASED:
+            text = f"{born} · announced at the open" + (
+                f", {utc_words(h.decided_at)}" if h.decided_at else "")
+        else:
+            text = f"{born} · {words[:1].lower()}{words[1:]}" if words \
+                else f"{born} · never announced"
+        out[h.signal_id] = {"text": text,
+                            "title": f"{words[:1].upper()}{words[1:]}"}
+    return out
+
+
 STATES = ("active", "closed", "graded", "ungraded")
 ACTED = ("yes", "no")
 STAGES = ("research", "paper", "live_small", "live_full", "unregistered")
