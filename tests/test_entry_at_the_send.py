@@ -9,13 +9,19 @@ tests/bot_venue_floor_harness.py (EURUSD, USDJPY, BTCUSD at invented
 prices, round invented pools; no broker, no model, no HTTP):
 
   * one position per config and symbol: two candidates of one config and
-    one symbol in one pass send one order, not two.
+    one symbol in one pass send one order, not two;
+  * MAX DAILY LOSS read again at the send for every entry: a candidate
+    proposed before the day crossed the limit, never judged elite, is not
+    sent.
 
 Run with:  python manage.py test tests.test_entry_at_the_send
 """
+import contextlib
+from decimal import Decimal
 from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 
 from tests import bot_venue_floor_harness as H
 
@@ -120,3 +126,99 @@ class OnePositionPerConfigAndSymbolTests(TestCase):
             skip)
         self.assertTrue(skip["detail"].endswith(
             ": sent after this entry was proposed — nothing sent"), skip)
+
+
+class TheDailyLossAtTheSendTests(TestCase):
+    """C. MAX DAILY LOSS read again at the send, for every entry. Past the
+    limit (and above the absolute stop) only an entry judged elite opens,
+    at half its size, and the proposal is what judges it. A candidate
+    proposed while the day was inside the limit was never judged: the desk
+    sends minutes after it proposes, and a stop-out booked in between
+    crosses the limit. The venue floor's fix read the day again at the
+    send for a raised entry only."""
+
+    def _world(self, tag):
+        H.switch(H.SWITCH, None)
+        H.switch(H.LEVERAGE, True)
+        H.limit(max_daily_loss_pct=3.0)
+        return H.arm("crypto_clear", tag)
+
+    def _book_a_loss(self, world, pnl):
+        """Another live config of the account closes at a loss."""
+        from bot_program.models import AssetBotTrade
+        other = H._live_cfg(world["user"], "crypto", name="F loser")
+        AssetBotTrade.objects.create(
+            config=other, asset_class="crypto", symbol="ETHUSD", side="BUY",
+            qty=Decimal("1"), entry_price=Decimal("2000"),
+            exit_price=Decimal(str(2000 + pnl)), stop_loss=Decimal("1900"),
+            take_profit=Decimal("2300"), status="CLOSED", paper=False,
+            pnl=Decimal(str(pnl)), closed_at=timezone.now())
+
+    def _phases(self, world, *, between=None, elite=None):
+        """The runner's two phases for the world's config: propose, then
+        (after `between`) send. `elite` stands in for the elite verdict
+        the proposal reads (AssetBot._elite_verdict)."""
+        from bot_program.asset_engine import runner
+        from bot_program.asset_engine.base import AssetBot
+        H._clear_eligibility()
+        v = H.venue(world["price"], world["table"])
+        cands = []
+        verdict = (mock.patch.object(AssetBot, "_elite_verdict",
+                                     return_value=dict(elite))
+                   if elite is not None else contextlib.nullcontext())
+        with mock.patch(H.ROUTER, return_value=v), \
+                mock.patch("time.sleep"), verdict, \
+                mock.patch("bot_program.notifications.notify_bot_fill_open"):
+            bot = runner._propose_phase(
+                world["cfg"], signal_stats={}, candidates=cands,
+                not_desked={"paper": [], "live": []}, summaries=[])
+            if between is not None:
+                between()
+            res = [runner._execute_one(bot, c, mult=1.0, plan=None,
+                                       decision=None, opened=[], halted={})
+                   for c in cands]
+        world["cfg"].refresh_from_db()
+        return bot, cands, res, v
+
+    def test_a_candidate_not_judged_elite_is_not_sent_once_the_day_crossed(
+            self):
+        """Pool 1,000: MAX DAILY LOSS 3% is 30, the absolute stop 45.
+        BTCUSD is proposed while the day is flat, at the bot's own 0.001;
+        another config's stop-out of 35 is booked before the send. The send
+        finds the day past the limit, and the candidate was never judged
+        elite: nothing sent. A candidate proposed past the limit and judged
+        elite still goes, at half its size, stamped elite."""
+        from bot_program.models import AssetBotTrade
+        world = self._world("crossed")
+        bot, cands, res, v = self._phases(
+            world, between=lambda: self._book_a_loss(world, -35))
+        self.assertEqual([(c.symbol, c.qty_default) for c in cands],
+                         [("BTCUSD", 0.001)])
+        self.assertFalse((getattr(cands[0], "elite", None) or {}).get(
+            "elite"))
+        self.assertTrue(bot._elite_only)
+        self.assertEqual(res, [None])
+        v.market_order.assert_not_called()
+        self.assertEqual(
+            AssetBotTrade.objects.filter(config=world["cfg"]).count(), 0)
+        skip = world["cfg"].extras["skips"]["BTCUSD"]
+        self.assertEqual(skip["code"], "gate_blocked")
+        self.assertEqual(
+            skip["detail"],
+            "the day went past the daily loss limit after this entry was "
+            "proposed: past it only an entry judged elite opens, and this "
+            "one was not — nothing sent")
+        # the elite path, unchanged: proposed past the limit, judged
+        # elite, sent at half its size and stamped
+        world = self._world("elite")
+        self._book_a_loss(world, -35)
+        bot, cands, res, v = self._phases(
+            world, elite={"elite": True, "why": "synthetic: a measured edge",
+                          "net_rr": 2.5, "n": 30})
+        self.assertEqual([(c.symbol, c.qty_default) for c in cands],
+                         [("BTCUSD", 0.0005)])
+        self.assertIsNotNone(res[0], world["cfg"].extras.get("skips"))
+        self.assertEqual([c.args[:3] for c in v.market_order.call_args_list],
+                         [("BTCUSD", "BUY", 0.0005)])
+        (row,) = AssetBotTrade.objects.filter(config=world["cfg"])
+        self.assertIs(row.metadata.get("elite_past_daily_stop"), True)

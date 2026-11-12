@@ -6731,6 +6731,30 @@ class AssetBot(ABC):
                 _cut_note + "the day went past the daily loss limit after "
                 "this entry was raised to the venue's smallest size — "
                 "nothing sent")
+        # THE DAILY LOSS RULE, READ AGAIN AT THE SEND FOR EVERY ENTRY
+        # (2026-11-12; main's own, recorded by the venue floor's money
+        # review). Past MAX DAILY LOSS, and above the absolute stop where
+        # can_open_new closes the gate, only an entry the PROPOSAL judged
+        # elite opens, at ELITE_SIZE_SCALE (propose_entry, _elite_verdict).
+        # The desk's pass proposes for every config, then sends: a
+        # stop-out booked by a later config's manage step crosses the limit
+        # after this candidate was proposed as an ordinary entry, and the
+        # runner ran can_open_new just before this call
+        # (runner._execute_one), which set _elite_only. Such a candidate
+        # was never judged elite: it is not sent, whatever its size (a
+        # raised one meets the floor's own words just above).
+        _elite_c = getattr(cand, "elite", None)
+        if getattr(self, "_elite_only", "") and not (
+                isinstance(_elite_c, dict) and _elite_c.get("elite")):
+            logger.warning("[%s_bot] %s: proposed inside the daily loss "
+                           "limit, and the day is past it now (%s) — not "
+                           "judged elite, nothing sent", self.asset_class,
+                           symbol, self._elite_only)
+            return self._skip(
+                symbol, skips.GATE_BLOCKED,
+                "the day went past the daily loss limit after this entry "
+                "was proposed: past it only an entry judged elite opens, "
+                "and this one was not — nothing sent")
         # ONE POSITION PER CONFIG AND SYMBOL, READ AGAIN AT THE SEND
         # (2026-11-12; the venue floor's money review, finding 8). The
         # proposal refuses a symbol this config already holds (ALREADY_OPEN)
