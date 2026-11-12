@@ -1117,6 +1117,13 @@ class MoneyDirectionTests(_Base):
         "portfolio/migrations/0019_traderprofile_rail_prefs.py",
     }
     RAIL_WORDS = ("RailDeparture", "signal_rail", "rail_prefs")
+    #: A migration names the one before it in its dependencies: a file's
+    #: name, not a read of the rail. Updated deliberately (2026-11-12):
+    #: portfolio 0020, the Ambience field (display only), follows
+    #: 0019_traderprofile_rail_prefs and must say so. That one line of a
+    #: migration is let through, whole; anything else it says of the rail
+    #: is still a hit.
+    RAIL_DEPENDENCY = re.compile(r'\s*\("portfolio", "0019_traderprofile_rail_prefs"\),?\s*')
 
     def test_no_engine_module_reads_the_rail(self):
         """A guard, not a regression test: it passed before the rail existed,
@@ -1142,9 +1149,29 @@ class MoneyDirectionTests(_Base):
                         or re.match(r"\s*rail_prefs = models\.JSONField\(", ln)
                         for ln in lines):
                     continue
+                if "/migrations/" in rel and all(
+                        self.RAIL_DEPENDENCY.fullmatch(ln) for ln in lines):
+                    continue
                 hits.append(f"{rel}: {word}")
         self.assertEqual(hits, [])
         self.assertGreater(read, 500, "the guard read almost nothing")
+
+    def test_a_migration_s_dependency_is_a_file_name_and_nothing_else_is(self):
+        """The one line the guard lets through in a migration is the
+        dependency on the rail's own migration; a migration that reads or
+        writes the field is still caught, on the same line or another."""
+        ambience = (Path(settings.BASE_DIR) / "portfolio/migrations"
+                    / "0020_traderprofile_ambience.py").read_text(encoding="utf-8")
+        named = [ln for ln in ambience.splitlines()
+                 if any(word in ln for word in self.RAIL_WORDS)]
+        self.assertEqual(len(named), 1)
+        self.assertTrue(self.RAIL_DEPENDENCY.fullmatch(named[0]), named[0])
+        for line in ('    rail_prefs = models.JSONField(default=dict)',
+                     '        profile.rail_prefs = {}',
+                     '        ("portfolio", "0019_traderprofile_rail_prefs"), profile.rail_prefs',
+                     '    from dashboard.signal_rail import rail_snapshot'):
+            with self.subTest(line=line):
+                self.assertIsNone(self.RAIL_DEPENDENCY.fullmatch(line))
 
     def test_the_take_trade_path_reads_nothing_of_the_rail(self):
         """The ticket's views live in dashboard/views.py beside the rail's
