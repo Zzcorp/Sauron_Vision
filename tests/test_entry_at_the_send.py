@@ -12,7 +12,9 @@ prices, round invented pools; no broker, no model, no HTTP):
     one symbol in one pass send one order, not two;
   * MAX DAILY LOSS read again at the send for every entry: a candidate
     proposed before the day crossed the limit, never judged elite, is not
-    sent.
+    sent;
+  * the 12-hour note after a refused levered order: written exactly when
+    eToro refused an order that reached it, whoever reads the refusal.
 
 Run with:  python manage.py test tests.test_entry_at_the_send
 """
@@ -222,3 +224,104 @@ class TheDailyLossAtTheSendTests(TestCase):
                          [("BTCUSD", "BUY", 0.0005)])
         (row,) = AssetBotTrade.objects.filter(config=world["cfg"])
         self.assertIs(row.metadata.get("elite_past_daily_stop"), True)
+
+
+class TheTwelveHourNoteTests(TestCase):
+    """D. The 12-hour note after a refused order (LEVERAGE_QUIET_HOURS):
+    one levered or raised order per quiet, not one per pass. Written
+    exactly when eToro refused an order that reached it, whoever reads the
+    refusal: the order's own answer, the order's exception, or the
+    working-entry poll a pass later. An order that never reached eToro is
+    no refusal."""
+
+    def _world(self, tag):
+        """EURUSD typed at 10x on a 10,000 pool: the bot's own 1,500 units
+        clear eToro's minimum, so main sends them (nothing is raised)."""
+        H.switch(H.SWITCH, None)
+        H.switch(H.LEVERAGE, True)
+        return H.arm("forex_typed_leverage", tag, pool="10000")
+
+    def test_a_levered_refusal_read_by_the_working_poll_is_noted(self):
+        """eToro accepts the order and the lookup is not read in time: the
+        row is WORKING. The next pass's poll reads eToro's refusal: noted
+        like a refusal at the order, and the same order does not go out
+        again on the pass after. An unlevered row's refusal keeps main's
+        memory (no note at 1x), as at the order."""
+        world = self._world("poll")
+        v = H.venue(world["price"], world["table"], fill={
+            "orderId": "o-9", "status": "NEW", "working": True,
+            "executedQty": "0"})
+        with mock.patch("bot_program.notifications.notify_staff"):
+            out = H.run(world, the_venue=v)
+        (row,) = H.trade_rows(out)
+        self.assertTrue(row.metadata.get("entry_working"), row.metadata)
+        self.assertEqual(row.metadata.get("leverage"), 10)
+        self.assertNotIn("venue_floor", row.metadata)
+        self.assertNotIn("leverage_refusals", out.cfg.extras)
+        v.order_status = lambda oid: {
+            "state": "dead", "status": "Rejected", "filled": 0,
+            "refusal": "errorCode 999"}
+        out.bot._poll_working_entry(row, v)
+        out.cfg.refresh_from_db()
+        notes = out.cfg.extras.get("leverage_refusals") or {}
+        self.assertIn("EURUSD", notes, out.cfg.extras)
+        self.assertEqual(notes["EURUSD"]["leverage"], 10)
+        self.assertEqual(notes["EURUSD"]["why"],
+                         "broker reported Rejected: errorCode 999")
+        again = H.run(world)
+        self.assertEqual(H.orders(again), [])
+        skip = H.skip_of(again)
+        self.assertEqual(skip["code"], "leverage_refused")
+        self.assertTrue(skip["detail"].startswith(
+            "at 10x: eToro refused EURUSD 0.0h ago (broker reported "
+            "Rejected: errorCode 999); quiet for 12h"), skip)
+        # an unlevered row refused at the poll: no note, as at the order
+        world = self._world("poll1x")
+        world["cfg"].extras = {"session_filter_disabled": True}
+        world["cfg"].save(update_fields=["extras"])
+        H.limit(max_single_position_pct=100, max_pledged_pct=100)
+        v = H.venue(world["price"], world["table"], fill={
+            "orderId": "o-8", "status": "NEW", "working": True,
+            "executedQty": "0"})
+        out = H.run(world, the_venue=v)
+        (row,) = H.trade_rows(out)
+        self.assertNotIn("leverage", row.metadata)
+        v.order_status = lambda oid: {
+            "state": "dead", "status": "Rejected", "filled": 0}
+        out.bot._poll_working_entry(row, v)
+        out.cfg.refresh_from_db()
+        self.assertNotIn("leverage_refusals", out.cfg.extras)
+
+    def test_an_order_that_never_reached_etoro_writes_no_note(self):
+        """The connection was never made, the adapter refused the order
+        before its POST, or it could not name the instrument: eToro refused
+        nothing. No 12-hour note, and the next pass may send it (after a
+        failed POST the venue's health holds new entries for its own
+        quiet). An order eToro answered with a refusal is noted, as
+        before."""
+        never = (
+            ("unsent", RuntimeError(
+                "eToro unreachable (ConnectionError): the order for EURUSD "
+                "was not sent — refused")),
+            ("prepost", ValueError(
+                "eToro NOT SENT: leverage 10 is past this adapter's 5 "
+                "ceiling (EURUSD BUY). The cap is on what leaves the box")),
+            ("unnamed", LookupError(
+                "eToro knows no instrument spelled 'EURUSD'")))
+        for tag, err in never:
+            with self.subTest(tag):
+                world = self._world(tag)
+                out = H.run(world, the_venue=H.venue(
+                    world["price"], world["table"], raises=err))
+                self.assertEqual(len(H.orders(out)), 1)
+                self.assertEqual(H.skip_of(out)["code"], "order_error")
+                self.assertNotIn("leverage_refusals", out.cfg.extras)
+                again = H.run(world)
+                self.assertEqual(len(H.orders(again)), 1)
+        # it reached eToro, and eToro refused it: noted
+        world = self._world("reached")
+        out = H.run(world, the_venue=H.venue(
+            world["price"], world["table"],
+            raises=RuntimeError('eToro refused (400): {"errorCode": 720}')))
+        self.assertEqual(
+            out.cfg.extras["leverage_refusals"]["EURUSD"]["leverage"], 10)

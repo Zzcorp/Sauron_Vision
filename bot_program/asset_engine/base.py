@@ -2420,19 +2420,25 @@ class AssetBot(ABC):
             return
         if state == "dead":
             _vf_row = meta.get("venue_floor")
-            if isinstance(_vf_row, dict) and _vf_row.get("floored"):
-                # A RAISED ORDER THE VENUE REFUSED, READ HERE (the review
-                # of 2026-11-12): eToro accepted the order, the lookup was
-                # not read in time and the row was booked WORKING, so the
+            _raised = isinstance(_vf_row, dict) and bool(
+                _vf_row.get("floored"))
+            try:
+                _lev = int(meta.get("leverage")
+                           or (_vf_row.get("leverage") if _raised else 0)
+                           or 1)
+            except (TypeError, ValueError):
+                _lev = 1
+            if _raised or _lev > 1:
+                # A REFUSAL READ HERE IS A REFUSAL AT THE ORDER (the review
+                # of 2026-11-12, and main's own levered order since the
+                # same day): eToro accepted the order, the lookup was not
+                # read in time and the row was booked WORKING, so the
                 # refusal is met by this poll and not at the order. Noted
-                # like a refusal at the order (execute_entry): one order
-                # per LEVERAGE_QUIET_HOURS, not one per pass. A row that
-                # was not raised keeps main's memory: none.
-                try:
-                    _lev = int(meta.get("leverage")
-                               or _vf_row.get("leverage") or 1)
-                except (TypeError, ValueError):
-                    _lev = 1
+                # exactly as execute_entry notes a refusal it reads: a
+                # levered order, or a raised one at any multiplier — one
+                # order per LEVERAGE_QUIET_HOURS, not one per pass. An
+                # unlevered order that was not raised keeps main's memory
+                # there and here: none.
                 self._remember_leverage_refusal(
                     trade.symbol, _lev,
                     f"broker reported {st.get('status') or 'cancelled'}"
@@ -8070,12 +8076,14 @@ class AssetBot(ABC):
                              self.asset_class, symbol, e)
                 # The other bare `return None`: an order the broker threw
                 # on used to leave the same trace as no order at all.
-                # A RAISED ORDER THAT NEVER LEFT is not a refusal (the
-                # review of 2026-11-12): the connection was never made
-                # (etoro_client: "was not sent"), eToro refused nothing,
-                # and the venue's health already holds new entries. False
-                # for every order that was not raised: main's memory.
-                _unsent = bool(_floored and "was not sent" in str(e))
+                # AN ORDER THAT NEVER LEFT is not a refusal (the review of
+                # 2026-11-12, a raised order; every order since the same
+                # day): the connection was never made, the adapter refused
+                # the order before its POST, or it could not name the
+                # instrument (_order_never_left). eToro refused nothing,
+                # and after a failed POST the venue's health already holds
+                # new entries: no 12-hour note.
+                _unsent = self._order_never_left(e)
                 if _unsent:
                     pass
                 elif leverage is not None and leverage > 1:
@@ -10570,6 +10578,23 @@ class AssetBot(ABC):
         except Exception as e:  # noqa: BLE001 — an alert must not cost a tick
             logger.warning("[%s_bot] fraction-refused notification failed: "
                            "%s", self.asset_class, e)
+
+    @staticmethod
+    def _order_never_left(exc) -> bool:
+        """True when the adapter's own words say the order never reached
+        the venue (2026-11-12), so no 12-hour note is written for it:
+        the connection was never made (etoro_client.market_order raises
+        "... the order for X was not sent ..."), the adapter refused the
+        order before its POST ("eToro NOT SENT: ...", a level or a
+        multiplier it cannot send), or it could not name the instrument (a
+        plain LookupError from instrument_id, before the POST). Anything
+        else reached eToro, or may have: an answer eToro gave ("eToro
+        refused (400): ...") is a refusal, and an order in doubt has its
+        own note."""
+        words = str(exc)
+        return ("was not sent" in words
+                or words.startswith("eToro NOT SENT")
+                or type(exc) is LookupError)
 
     @staticmethod
     def _floor_minimum_refusal(words) -> bool:
