@@ -90,12 +90,22 @@ def signal_extras(signal) -> dict:
     return out
 
 
+def _market_line(signal) -> str:
+    """"Market shut · opens Sun 22:00 UTC" while the signal's market is
+    shut, else "" (signals/market_hold.shut_label, capitalised as a line
+    of its own). Never raises."""
+    from signals.market_hold import shut_label
+    said = shut_label(getattr(signal, "instrument", None))
+    return said[:1].upper() + said[1:]
+
+
 def signal_telegram(signal) -> tuple:
     """(title, lines, mark): one signal as the house message.
 
         📈 Signal · MSFT · BUY
         Sauron flags MSFT as a buy at 421.37.      (signal_extras)
 
+        Market shut · opens Mon 14:30 UTC          (only while it is shut)
         Score: 0.82
         Rule: Starter stock momentum
         Entry 421.37 · stop 410.00 · target 440.00
@@ -112,6 +122,13 @@ def signal_telegram(signal) -> tuple:
     so no ticket line is added then). "Prepare ticket" (2026-10-24)
     opens the TAKE TRADE ticket filled from this signal; nothing is sent
     from Telegram.
+
+    A signal announced while its market is shut says so on the first line
+    under the summary (2026-11-12, signals/market_hold.shut_label), with
+    the hour the market opens when the clock knows it; a message cut to
+    fit loses its last lines first, so this one stays. An open market's
+    message keeps its bytes, and the buttons are the same either way: the
+    ticket says the market is shut itself.
     """
     import math
 
@@ -125,7 +142,11 @@ def signal_telegram(signal) -> tuple:
     direction = str(signal.direction or "").lower()
     side = SIGNAL_SIDES.get(direction) or (direction.upper() or "SIGNAL")
     mark = MARKS.get(f"signal_{direction}") or MARKS["signal"]
-    lines = [f"Score: {float(signal.score or 0):.2f}"]
+    lines = []
+    market = _market_line(signal)
+    if market:
+        lines.append(market)
+    lines.append(f"Score: {float(signal.score or 0):.2f}")
     rule = rule_words(signal.rule_name) if signal.rule_name else ""
     if rule:
         lines.append(f"Rule: {rule}")
@@ -337,6 +358,12 @@ def _match_users(signal, chats: list, later: list) -> None:
 
     from alerts.channels.email_alert import send_email_to_user
     from alerts.channels.whatsapp_alert import send_whatsapp_to_user
+    from signals.market_hold import shut_label
+
+    # A SHUT MARKET IS SAID (2026-11-12): the email and WhatsApp copies
+    # carry the words the Telegram message carries; "" on an open market,
+    # whose copies keep their bytes.
+    market = shut_label(signal.instrument)
 
     for user in User.objects.filter(is_active=True):
         # Check user's alert rules
@@ -353,6 +380,8 @@ def _match_users(signal, chats: list, later: list) -> None:
                     f"{signal.title}\n"
                     f"Urgency: {signal.urgency}"
                 )
+                if market:
+                    message += f"\n{market[:1].upper()}{market[1:]}"
 
                 if rule.notify_telegram:
                     _add_chat(chats, user)
@@ -374,6 +403,8 @@ def _match_users(signal, chats: list, later: list) -> None:
                 if prefs.receive_signals:
                     title = f"Signal: {signal.instrument.symbol} {signal.direction.upper()}"
                     message = f"Score: {signal.score:.2f} | {signal.title}"
+                    if market:
+                        message += f" | {market}"
                     if prefs.telegram_chat_id:
                         _add_chat(chats, user)
                     if prefs.email_notifications and user.email:

@@ -6,14 +6,23 @@ logger = logging.getLogger(__name__)
 
 
 def notify_new_signal(signal):
-    """Create in-app notification for a new signal."""
+    """Create in-app notification for a new signal.
+
+    A signal announced while its market is shut says so at the end of
+    its body (2026-11-12, signals/market_hold.shut_label): "... · market
+    shut · opens Sun 22:00 UTC". An open market's row keeps its bytes."""
     try:
         from alerts.links import instrument_url
+        from signals.market_hold import shut_label
         symbol = signal.instrument.symbol
+        body = f"{signal.title} — Score: {signal.score:.2f}"
+        market = shut_label(signal.instrument)
+        if market:
+            body = f"{body} · {market}"
         Notification.create_for_all(
             notification_type="signal",
             title=f"{signal.direction.upper()} {symbol}",
-            body=f"{signal.title} — Score: {signal.score:.2f}",
+            body=body,
             # A signal has no page of its own; its instrument's page has the
             # chart, the technicals and this signal in its list. /signals/
             # asked the reader to find the row the title already named.

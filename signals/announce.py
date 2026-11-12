@@ -20,6 +20,15 @@ announce_new_signal does what the rule engine always did, in its order:
 Each step is wrapped, and logged at the level the rule engine used: a
 broken notifier never aborts a creator whose row is already written.
 
+A SHUT MARKET IS SAID, NEVER HELD BACK (2026-11-12). The operator asked
+to keep receiving every signal the moment it fires ("faites que l'on
+reçoive quand même les signaux live"), so a signal born while its
+instrument's market is shut is announced at once like any other, and each
+step says so in plain words with the hour the market opens: the banner's
+line, the bell's body, one line of the Telegram message and one clause of
+the email and WhatsApp copies (signals/market_hold.shut_label, no switch).
+An open market's announcement keeps its bytes.
+
 WHO CALLS IT
   signals/tasks.py          _create_signals_and_notify, after each create
   signals/opportunity_scanner.py
@@ -46,8 +55,13 @@ logger = logging.getLogger(__name__)
 
 
 def banner_payload(signal) -> dict:
-    """The "new_signal" event the live banner draws."""
-    return {
+    """The "new_signal" event the live banner draws.
+
+    A signal announced while its market is shut says so (2026-11-12,
+    signals/market_hold): one more key, "market", with the words the
+    banner adds to its line ("market shut · opens Sun 22:00 UTC"). An
+    open market's payload has no such key and keeps its bytes."""
+    payload = {
         "signal_id": signal.pk,
         "symbol": signal.instrument.symbol,
         "title": signal.title,
@@ -60,6 +74,11 @@ def banner_payload(signal) -> dict:
         "rr": signal.risk_reward_ratio,
         "url": "/signals/",
     }
+    from signals.market_hold import shut_label
+    market = shut_label(signal.instrument)
+    if market:
+        payload["market"] = market
+    return payload
 
 
 def announce_new_signal(signal) -> dict:

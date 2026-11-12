@@ -8550,8 +8550,13 @@ never nags. He never acts.{% endcomment %}
                 cls: "signal", kind: "New signal", sym: d.symbol,
                 val: (d.score !== undefined && d.score !== null) ? String(d.score) : "",
                 valCls: "",
+                /* A signal announced while its market is shut says so
+                   (2026-11-12, signals/market_hold): the engine sends
+                   d.market ("market shut · opens Sun 22:00 UTC") and the
+                   one line that matters carries it. No key, no words. */
                 line: (d.direction ? String(d.direction).toUpperCase() + " · " : "") +
-                      (d.title || d.rule_name || ""),
+                      (d.title || d.rule_name || "") +
+                      (d.market ? " · " + d.market : ""),
                 more: row("Rule", d.rule_name) + row("Entry", d.entry) +
                       row("Stop", d.stop) + row("Target", d.target) +
                       row("Reward : risk", d.rr ? d.rr + " : 1" : ""),
