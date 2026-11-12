@@ -3823,6 +3823,11 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         push_eye_event(user, "fill_open", {
             "trade_id": trade.id, "asset_class": cfg.asset_class,
             "symbol": inst.symbol, "side": side,
+            # WHETHER IT FILLED (2026-11-07): an order the broker holds is
+            # booked WORKING and announced here too, so a page can tell it
+            # from a fill; its fill is announced when the tick books it
+            # (AssetBot._finish_working_entry, "working": false).
+            "working": bool((trade.metadata or {}).get("entry_working")),
         })
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] WS push (open) failed: %s", e)
