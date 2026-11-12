@@ -968,7 +968,13 @@ class TheOpsPageAsksOnlyWhereItMustTests(_Fixture):
         resp = self.client.get("/ops/")
         lines = [ln for ln in resp.content.decode().splitlines()
                  if "all on leaves" in ln]
-        self.assertEqual(len(lines), 2, lines)
+        # System, Agents and, since 2026-11-12, Pipeline: "all on" leaves
+        # the optional market hold OFF too, and that one takes no PIN
+        # (core.platform_control.OPERATOR_CHOICE_SWITCHES).
+        self.assertEqual(len(lines), 3, lines)
+        pipeline_line = next(ln for ln in lines
+                             if "signal_market_hold" in ln)
+        self.assertNotIn("trading PIN", pipeline_line)
         system_line = next(ln for ln in lines if "morgul_brake" in ln)
         self.assertIn("trading PIN", system_line)
         for key in _pin_keys():

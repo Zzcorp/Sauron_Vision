@@ -32,6 +32,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-ci.txt
 
+      # The eToro feed's store runs a Lua compare-and-set in Redis; its tests
+      # (tests/feed/test_venue_store_rules.py) start their own redis-server
+      # on a private unix socket and FAIL here without the binary, so the
+      # script can never drift from its in-memory twin unseen. The package
+      # starts a server on port 6379: it is stopped at once, because
+      # settings.py would otherwise find it and move the whole suite off
+      # the locmem cache it is written for.
+      - name: Install redis-server (binary only, service stopped)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq redis-server
+          sudo systemctl stop redis-server || true
+          sudo systemctl disable redis-server || true
+          if (exec 3<>/dev/tcp/127.0.0.1/6379) 2>/dev/null; then
+            echo "a Redis still listens on 6379" >&2; exit 1
+          fi
+          redis-server --version
+
       # WhiteNoise serves from STATIC_ROOT; a test asserts every template
       # asset was actually collected, so CI must collect like a deploy does.
       - name: Collect static assets

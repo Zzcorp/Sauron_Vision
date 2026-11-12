@@ -404,6 +404,24 @@ COMMANDS = [
         "runnable_reason": "terminal only: the Run lane's set is pinned",
     },
     {
+        "name": "feed_harms",
+        "title": "eToro feed harms",
+        "purpose": "How often today's price handling did each harm the eToro feed's later phases remove, by kind over the last N days, zeros included: a real row left unmanaged by mark sanity, a CLOSE refused for no usable price mark, the kill switch's price read before each close (median and longest, in seconds), a poller's previous close or out-of-session price, a zero or crossed side stored, and each real exit booked at Sauron's mark, at an outside quote, at a level the venue held, with no price or left pending. The baseline to read before a feed switch goes ON. Read-only, asks no broker; never a price, an account figure or an id.",
+        "usage": [
+            "python manage.py feed_harms              # the last 7 days",
+            "python manage.py feed_harms --days 30    # the last 30 days",
+        ],
+        "mirrors": "",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # Read-only and asks no broker, but the Run lane's set is pinned as
+        # a security decision (tests/test_ops_cockpit.py): a terminal
+        # command until that set is widened on purpose (2026-11-07).
+        "runnable": False,
+        "runnable_reason": "terminal only: the Run lane's set is pinned",
+    },
+    {
         "name": "legacy_positions",
         "title": "Legacy positions",
         "purpose": "Every open legacy portfolio position (the /setup/ eToro sync button, the /setup/ 'add position' form, the chat trader) by symbol, with its book, writer, age and the admin page that closes it by hand (no bot or reconcile closes one) — each one counts as a real-money holder in the duplicate rule.",
@@ -503,7 +521,7 @@ COMMANDS = [
     {
         "name": "paper_readiness",
         "title": "Paper readiness",
-        "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
+        "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises. With a bot armed for real money it names a live operation as one: the chain faults apart, the live-action switches listed as a decision and not as blockers.",
         "usage": [
             "python manage.py paper_readiness",
             "python manage.py paper_readiness --window-days 90",

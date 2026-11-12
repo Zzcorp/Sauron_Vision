@@ -4,6 +4,8 @@ from celery import shared_task
 from core.task_gate import guarded_task
 import logging
 
+from bot_program import feed_fence
+
 logger = logging.getLogger(__name__)
 
 # ── daily API budgets ───────────────────────────────────────────────────
@@ -56,12 +58,16 @@ def _yf_market_quote(ysym: str) -> dict | None:
 
     try:
         info = yf.Ticker(ysym).info or {}
-        price = (_finite(info.get("regularMarketPrice"))
-                 or _finite(info.get("previousClose")))
+        market = _finite(info.get("regularMarketPrice"))
+        price = market or _finite(info.get("previousClose"))
         if price:
+            # "previous_close": the price is Yahoo's previous close standing
+            # in for a market price (the eToro feed spec's harm 10, counted
+            # by _count_previous_close; read by nothing else)
             return {"last": price,
                     "change_pct": _finite(info.get("regularMarketChangePercent")),
-                    "volume": info.get("volume")}
+                    "volume": info.get("volume"),
+                    "previous_close": not market}
     except Exception as e:
         logger.debug("[yf quote] info(%s) failed: %s", ysym, e)
     try:
@@ -73,6 +79,15 @@ def _yf_market_quote(ysym: str) -> dict | None:
     except Exception as e:
         logger.warning("[yf quote] history(%s) failed: %s", ysym, e)
     return None
+
+
+def _count_previous_close(inst, quote, source="yfinance") -> None:
+    """THE HARM COUNTER (the eToro feed spec, F1, bot_program.feed_harms):
+    a quote just written from Yahoo's previous close (_yf_market_quote's
+    fallback), counted after the write commits. Through the fence: the
+    poll and its write are exactly as before."""
+    if isinstance(quote, dict) and quote.get("previous_close"):
+        feed_fence.count("poller", "on_previous_close", inst, source)
 
 
 def _held_symbols(instruments, source: str) -> set[str]:
@@ -287,6 +302,7 @@ def fetch_forex_quotes():
                                      change_pct=quote.get("change_pct"),
                                      instrument=inst):
                 fetched += 1
+                _count_previous_close(inst, quote)
         except Exception as e:
             logger.warning("[forex quotes] %s via yfinance failed: %s",
                            inst.symbol, e)
@@ -358,6 +374,7 @@ def fetch_commodity_quotes():
                            change_pct=quote.get("change_pct"),
                            volume=quote.get("volume"), instrument=inst):
                 fetched += 1
+                _count_previous_close(inst, quote)
         except Exception as e:
             logger.warning(f"Commodity fetch failed for {inst.symbol}: {e}")
 
@@ -417,6 +434,7 @@ def fetch_index_quotes():
                            change_pct=quote.get("change_pct"),
                            volume=quote.get("volume"), instrument=inst):
                 fetched += 1
+                _count_previous_close(inst, quote)
         except Exception as e:
             logger.warning(f"Index fetch failed for {inst.symbol}: {e}")
 

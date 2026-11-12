@@ -216,7 +216,7 @@
             {# (a) CAN ANYTHING ACT ON IT. Derived from rule_actuator.stage_policy #}
             {# and is_rule_active — the same two functions the ENTRY path calls, #}
             {# never a second implementation. The reason is in the title. #}
-            <td data-label="Can anything act?"><span class="badge badge-{{ r.badge.tone|default:'medium' }}" title="{{ r.badge.reason }}">{{ r.badge.label|default:"—" }}</span></td>
+            <td data-label="Can anything act?"><span class="badge badge-{{ r.badge.tone|default:'medium' }}" title="{{ r.badge.reason }}">{{ r.badge.label|default:"—" }}</span>{% if r.market.shut %}{# Its market is shut now (2026-11-12): said here, with the hour it opens. #} <span class="badge badge-high sig-shut" title="{{ r.market.title }}">MARKET SHUT</span>{% if r.market.opens %} <span class="sig-shut-opens">{{ r.market.opens }}</span>{% endif %}{% endif %}{% if r.hold %}{# Its announcement was held for its market's open (the optional market hold): what happened to it. #}<div class="sig-hold" title="{{ r.hold.title }}">{{ r.hold.text }}</div>{% endif %}</td>
             <td data-label="Symbol" style="font-family: var(--font-display); font-size: 12px;">
                 {# The ticker AND the asset it names. A row of tickers asks #}
                 {# the reader to already know that HGUSD is copper and MES #}
