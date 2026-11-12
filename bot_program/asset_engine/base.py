@@ -2652,11 +2652,22 @@ class AssetBot(ABC):
             except Exception as e:  # noqa: BLE001 — never stops a fill
                 logger.warning("[%s_bot] %s: the short read-back failed: %s",
                                self.asset_class, trade.symbol, e)
+        # THE ORCS (bot_program/orcs, O1): the position is born an Orc once
+        # the fill is booked. The Orc tables and the row's stamp only.
+        try:
+            from bot_program.orcs.birth import ensure_on_commit
+            ensure_on_commit(trade, getattr(self, "_tick_broker_cache", None))
+        except Exception as e:  # noqa: BLE001 — never stops a fill
+            logger.warning("[%s_bot] %s: the Orc's birth was not "
+                           "registered: %s", self.asset_class, trade.symbol,
+                           e)
         # THE FILL, ANNOUNCED (2026-11-07): the entry pushed fill_open
         # "working": true when it booked this held order; the fill is said
         # once, here, on the user's Eye WebSocket, as execute_entry and
-        # TAKE TRADE say theirs. Display only, after the booking: a push
-        # that fails is logged and changes nothing.
+        # TAKE TRADE say theirs. Display only, after the booking and last
+        # (review 2026-11-12): the push waits on the channel layer, so
+        # nothing the fill needs (the Orc's registration above) waits on
+        # it. A push that fails is logged and changes nothing.
         try:
             from dashboard.consumers import push_eye_event
             push_eye_event(self.user, "fill_open", {
@@ -2667,15 +2678,6 @@ class AssetBot(ABC):
         except Exception as e:  # noqa: BLE001 — never stops a fill
             logger.warning("[%s_bot] WS push (fill) failed: %s",
                            self.asset_class, e)
-        # THE ORCS (bot_program/orcs, O1): the position is born an Orc once
-        # the fill is booked. The Orc tables and the row's stamp only.
-        try:
-            from bot_program.orcs.birth import ensure_on_commit
-            ensure_on_commit(trade, getattr(self, "_tick_broker_cache", None))
-        except Exception as e:  # noqa: BLE001 — never stops a fill
-            logger.warning("[%s_bot] %s: the Orc's birth was not "
-                           "registered: %s", self.asset_class, trade.symbol,
-                           e)
 
     def _broker_snapshot(self, client, what: str, *, priority=None,
                          why: str = ""):

@@ -435,9 +435,27 @@ class AHeldOrdersFillIsAnnouncedTests(_BookedTwice, TestCase):
                 "trade_id": run["tid"], "asset_class": "stock",
                 "symbol": "NVDA", "side": "BUY", "working": False}])
 
+    def test_the_orc_is_registered_before_the_fill_is_told(self):
+        """Review 2026-11-12: the push waits on the channel layer; the
+        Orc's birth, registered to run on the booking's commit, does not
+        wait on it: the Orc is registered first, then the fill is told."""
+        from bot_program.asset_engine.base import make_bot
+        order = []
+        trade = _working_trade(self.cfg)
+        client = _client(dict(FILLED_10))
+        with patch("bot_program.orcs.birth.ensure_on_commit",
+                   side_effect=lambda *a, **k: order.append("orc")), \
+                patch(PUSH, side_effect=lambda user, kind, data=None:
+                      order.append(kind)):
+            make_bot(self.cfg)._finish_working_entry(
+                trade, client, qty=10.0, price=99.75, source="broker",
+                venue=dict(FILLED_10))
+        self.assertEqual([k for k in order if k in ("orc", "fill_open")],
+                         ["orc", "fill_open"])
+
     def test_a_push_that_raises_never_escapes_the_fill(self):
-        """Called as the poll calls it: the fill is booked, the hooks after
-        the push still run, and nothing is raised to the tick."""
+        """Called as the poll calls it: the fill is booked, the Orc's birth
+        is registered, and nothing is raised to the tick."""
         from bot_program.asset_engine.base import make_bot
         from bot_program.tax_lot_models import TaxLot
         trade = _working_trade(self.cfg)
@@ -453,7 +471,7 @@ class AHeldOrdersFillIsAnnouncedTests(_BookedTwice, TestCase):
         self.assertNotIn("entry_working", trade.metadata)
         self.assertEqual(trade.entry_price, Decimal("99.75"))
         self.assertTrue(TaxLot.objects.filter(source_trade=trade).exists())
-        self.assertTrue(hooks, "the Orc's birth is registered after it")
+        self.assertTrue(hooks, "the Orc's birth is registered")
 
 
 # ── end to end: a held ticket, then its fill ────────────────────────────────
