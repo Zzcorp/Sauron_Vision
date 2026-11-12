@@ -276,7 +276,8 @@ def arm(name, tag, **changes):
             currency=spec.get("account_currency", "USD"))
     own_book(user, pool)
     signal(spec["symbol"], spec["icls"], rule=spec.get("rule", RULE),
-           stage=spec.get("stage", "live_full"))
+           stage=spec.get("stage", "live_full"),
+           direction=spec.get("direction", "bullish"))
     cfg = _live_cfg(user, spec["cls"], mode=spec.get("mode", "live"),
                     name=f"F {name}"[:80])
     cfg.symbols = [spec["symbol"]]

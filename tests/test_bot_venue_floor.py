@@ -196,23 +196,27 @@ class TheFloorOpensTests(_On):
         self.assertEqual(out.venue.wire.calls, [])
 
     def test_a_commodity_under_the_minimum_opens_at_the_smallest_size(self):
-        """XAUUSD at 2,000, a 1,000 pool: 0.0833 units sized, 0.5 is the
-        minimum; 15.00 at the stop, 1.5% of the pool."""
+        """XAUUSD at 2,000, a 1,000 pool: 0.0833 units sized, 0.5 is
+        eToro's minimum and 0.505 the size with its 1% headroom; 15.15 at
+        the stop, 1.515% of the pool."""
         out = H.run(_on("commodity_under_min"))
-        row = self.assertOpened(out, qty=0.5, leverage=10)
+        row = self.assertOpened(out, qty=0.505, leverage=10)
         floor = _floor_of(row)
         self.assertEqual(floor["replaced_qty"], 0.0833)
-        self.assertEqual(floor["risk_pct"], 1.5)
-        self.assertEqual(floor["notional_x_pool"], 1.0)
+        self.assertEqual(floor["venue_min_units"], 0.5)
+        self.assertEqual(floor["headroom_pct"], 1.0)
+        self.assertEqual(floor["risk_pct"], 1.515)
+        self.assertEqual(floor["notional_x_pool"], 1.01)
 
     def test_an_index_under_the_minimum_opens_at_the_smallest_size(self):
         """NAS100 at 20,000 in a stock config, eToro's fractions on:
-        0.0083 units sized, 0.05 is the minimum; 15.00 at the stop."""
+        0.0083 units sized, 0.05 is the minimum, 0.0505 with the
+        headroom; 15.15 at the stop."""
         out = H.run(_on("index_under_min"))
-        row = self.assertOpened(out, qty=0.05, leverage=20)
+        row = self.assertOpened(out, qty=0.0505, leverage=20)
         floor = _floor_of(row)
         self.assertEqual(floor["replaced_qty"], 0.0083)
-        self.assertEqual(floor["risk_pct"], 1.5)
+        self.assertEqual(floor["risk_pct"], 1.515)
         self.assertIs(row.metadata["fractional_units"], True)
 
     def test_a_stock_whose_budget_buys_under_one_share_opens_at_one(self):
@@ -232,13 +236,14 @@ class TheFloorOpensTests(_On):
 
     def test_crypto_under_the_minimum_opens_at_the_smallest_size(self):
         """BTCUSD at 50,000 with a 0.02% risk setting: 0.00008 sized, 10
-        USD is 0.0002; the chooser finds no multiplier whose margin eToro
-        takes and settles on the unlevered order."""
+        USD is 0.0002, 0.000202 with the headroom; the chooser finds no
+        multiplier whose margin eToro takes and settles on the unlevered
+        order."""
         out = H.run(_on("crypto_under_min"))
-        row = self.assertOpened(out, qty=0.0002, leverage=1)
+        row = self.assertOpened(out, qty=0.000202, leverage=1)
         floor = _floor_of(row)
         self.assertEqual(floor["replaced_qty"], 8e-05)
-        self.assertEqual(floor["risk_pct"], 0.05)
+        self.assertEqual(floor["risk_pct"], 0.0505)
         self.assertEqual(floor["normal_risk_pct"], 0.02)
         self.assertEqual(floor["leverage"], 1)
 
@@ -256,9 +261,13 @@ class TheFloorOpensTests(_On):
 
     def test_the_smallest_size_is_the_hand_tickets(self):
         """ONE floor function for both lanes: on the same client, price
-        and step, the hand ticket's minimum (manual_trade._venue_min_qty
-        over AssetBot._venue_size_floor) is the size the bot opens at."""
-        from bot_program.manual_trade import _venue_min_qty
+        and step, the venue's minimum the bot reads is the hand ticket's
+        (manual_trade._venue_min_qty over AssetBot._venue_size_floor), and
+        the bot opens at that minimum with its headroom (the bot's order
+        leaves minutes after it is sized, the hand ticket's at once),
+        rounded up to the step by the hand ticket's own rule."""
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.manual_trade import _ceil_to_step, _venue_min_qty
         for name, step in (("forex_under_min", 100.0),
                            ("commodity_under_min", 1e-4),
                            ("index_under_min", 1e-4),
@@ -266,13 +275,20 @@ class TheFloorOpensTests(_On):
                            ("crypto_under_min", 1e-8)):
             world = _on(name, tag="hand")
             out = H.run(world)
+            raw = {}
             hand, why = _venue_min_qty(
                 H.venue(world["price"], world["table"]), world["symbol"],
                 float(world["price"]),
-                out.bot._value_per_unit(world["symbol"]), step)
+                out.bot._value_per_unit(world["symbol"]), step, raw=raw)
             self.assertEqual(why, "", name)
-            self.assertAlmostEqual(out.cand.qty_default, hand, places=9,
-                                   msg=name)
+            record = out.cand.venue_floor["record"]
+            self.assertAlmostEqual(record["venue_min_units"], raw["floor"],
+                                   places=6, msg=name)
+            self.assertGreaterEqual(out.cand.qty_default, hand, name)
+            self.assertAlmostEqual(
+                out.cand.qty_default,
+                _ceil_to_step(raw["floor"] * (1 + AssetBot.FLOOR_HEADROOM),
+                              step), places=9, msg=name)
 
     def test_the_step_is_the_bots_own_rounding(self):
         """The smallest size sits on the step the bot's _round_qty keeps
@@ -311,26 +327,30 @@ class TheCeilingTests(_On):
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "venue_min_size")
-        self.assertTrue(skip["detail"].startswith(
-            "the venue's smallest size would risk 0.81% of the pool, above "
-            "your 0.5% ceiling (MAX BOT FLOOR RISK): sized 300 units from "
-            "the stop distance; this venue's minimum is 925.926."), skip)
+        # 1,000 units are this bot's step above eToro's 925.9: the words
+        # say whose size it is, and the detail fits the record whole
+        self.assertEqual(
+            skip["detail"],
+            "this bot's smallest size would risk 0.81% of the pool, above "
+            "your 0.5% ceiling (MAX BOT FLOOR RISK; eToro's minimum is "
+            "925.9 units, Fractional Units off): sized 300 units")
         # the reason sits inside what why_no_trade prints of a detail
         self.assertIn("above your 0.5% ceiling", skip["detail"][:88])
 
     def test_over_the_ceiling_keeps_sized_to_zero_and_says_why(self):
         """NAS100 in a stock config without fractions: the smallest size
         this bot sends is one whole unit, 20,000 USD: 300.00 at the stop,
-        30% of the pool."""
+        30% of the pool. The words name it this bot's, with eToro's own
+        minimum (0.05 unit, 1.5% of the pool) and the switch beside it."""
         out = H.run(_on("index_whole_units"))
         self.assertIsNone(out.cand)
         self.assertNothingSent(out)
         self.assertEqual(H.skip_of(out), {
             "code": "sized_to_zero",
-            "detail": ("the venue's smallest size would risk 30.00% of the "
-                       "pool, above your 2% ceiling (MAX BOT FLOOR RISK): "
-                       "risk budget 0.25% of 1000 is below one tradeable "
-                       "unit")})
+            "detail": ("this bot's smallest size would risk 30.00% of the "
+                       "pool, above your 2% ceiling (MAX BOT FLOOR RISK; "
+                       "eToro's minimum is 0.05 units, Fractional Units "
+                       "off): sized under one unit")})
 
     def test_a_risk_at_the_ceiling_opens(self):
         world = _on("forex_under_min")
@@ -338,15 +358,16 @@ class TheCeilingTests(_On):
         self.assertOpened(H.run(world), qty=1000.0, leverage=20)
 
     def test_the_default_is_two_percent(self):
-        """The same commodity on a 700 pool: 15.00 at the stop is 2.14%."""
+        """The same commodity on a 700 pool: 15.15 at the stop is 2.16%."""
         world = _on("commodity_under_min", pool="700")
         out = H.run(world)
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "venue_min_size")
         self.assertTrue(skip["detail"].startswith(
-            "the venue's smallest size would risk 2.14% of the pool, above "
-            "your 2% ceiling (MAX BOT FLOOR RISK): "), skip)
+            "the venue's smallest size would risk 2.16% of the pool, above "
+            "your 2% ceiling (MAX BOT FLOOR RISK): sized 0.0583 units; this "
+            "venue's minimum is 0.5"), skip)
 
     def test_the_class_notional_cap_binds_the_floor(self):
         """A 400 USD share on a 1,000 pool: one share risks 20.00, 2% of
@@ -356,8 +377,9 @@ class TheCeilingTests(_On):
         self.assertNothingSent(out)
         self.assertEqual(H.skip_of(out), {
             "code": "sized_to_zero",
-            "detail": ("the venue's smallest size is 0.4 times the pool, "
-                       "above the 0.2 times this class may carry: risk "
+            "detail": ("this bot's smallest size is 0.4 times the pool, "
+                       "above the 0.2 times this class may carry (eToro's "
+                       "minimum is 0.025 units, Fractional Units off): risk "
                        "budget 0.25% of 1000 is below one tradeable unit")})
 
     def test_a_setting_that_cannot_be_read_raises_nothing(self):
@@ -475,6 +497,8 @@ class EveryOtherGateTests(_On):
         self.assertEqual(self._main_code("forex_under_min", "m",
                                          extras=typed), "venue_min_size")
         out = H.run(_on("forex_under_min", extras=typed))
+        # refused at the proposal: its own judgement is on the raised size
+        self.assertIsNone(out.cand)
         self.assertNothingSent(out)
         self.assertEqual(H.skip_of(out), {
             "code": "gate_blocked",
@@ -487,6 +511,7 @@ class EveryOtherGateTests(_On):
         self.assertEqual(self._main_code("forex_under_min", "m"),
                          "venue_min_size")
         out = H.run(_on("forex_under_min"))
+        self.assertIsNone(out.cand)
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "gate_blocked")
@@ -500,6 +525,7 @@ class EveryOtherGateTests(_On):
         self.assertEqual(self._main_code("forex_under_min", "m"),
                          "venue_min_size")
         out = H.run(_on("forex_under_min"))
+        self.assertIsNone(out.cand)
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "gate_blocked")
@@ -524,9 +550,11 @@ class EveryOtherGateTests(_On):
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "venue_min_size")
-        self.assertTrue(skip["detail"].startswith(
+        self.assertEqual(
+            skip["detail"],
             "past the daily loss limit no entry is raised to the venue's "
-            "smallest size: sized 200 units from the stop distance"), skip)
+            "smallest size: sized 200 units; this venue's minimum is "
+            "925.926")
         out = H.run(_on("forex_under_min", tag="not_elite"),
                     prepare=past(False))
         self.assertIsNone(out.cand)
@@ -688,7 +716,9 @@ class TheLeverageRuleTests(_On):
         H.limit(max_single_position_pct=100, max_pledged_pct=100)
         out = H.run(_on("forex_under_min", leverage=False))
         row = self.assertOpened(out, qty=1000.0, leverage=1)
-        self.assertEqual(row.metadata["leverage"], 1)
+        # no key on the config, no stamp on the row: absent is a state,
+        # never a typed 1; the floor's record keeps the chooser's 1
+        self.assertNotIn("leverage", row.metadata)
         floor = _floor_of(row)
         self.assertEqual(floor["leverage"], 1)
         self.assertIn("etoro_leverage_live is OFF", floor["leverage_why"])
@@ -831,9 +861,11 @@ class TheQuietsTests(_On):
         self.assertEqual(H.orders(again), [])
         skip = H.skip_of(again)
         self.assertEqual(skip["code"], "venue_min_size")
-        self.assertTrue(skip["detail"].startswith(
-            "eToro refused EURUSD 0.0h ago, so nothing is raised to the "
-            "venue's smallest size for 12h: "), skip)
+        self.assertEqual(
+            skip["detail"],
+            "eToro refused EURUSD 0.0h ago: nothing is raised to the "
+            "venue's smallest size until 12h after it: sized 300 units; "
+            "this venue's minimum is 925.926")
 
     def test_an_unlevered_floored_order_refused_is_noted_too(self):
         """At 1x main keeps no note of a refused order; a floored one is
@@ -874,9 +906,11 @@ class TheSendChecksTests(_On):
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "venue_min_size")
-        self.assertTrue(skip["detail"].startswith(
-            "raised to the venue's smallest size at the proposal and under "
-            "it at the order: sized 500 units"), skip)
+        self.assertEqual(
+            skip["detail"],
+            "raised to the venue's smallest size at the proposal and cut "
+            "under it by the capital desk: sized 500 units; this venue's "
+            "minimum is 925.926")
 
     def test_the_switch_turned_off_before_the_order_sends_nothing(self):
         out = H.run(_on("forex_under_min"),
@@ -895,9 +929,11 @@ class TheSendChecksTests(_On):
         self.assertNothingSent(out)
         skip = H.skip_of(out)
         self.assertEqual(skip["code"], "venue_min_size")
-        self.assertTrue(skip["detail"].startswith(
-            "the venue's smallest size would risk 0.81% of the pool, above "
-            "your 0.5% ceiling (MAX BOT FLOOR RISK)"), skip)
+        self.assertEqual(
+            skip["detail"],
+            "this bot's smallest size would risk 0.81% of the pool, above "
+            "your 0.5% ceiling (MAX BOT FLOOR RISK; eToro's minimum is "
+            "925.9 units, Fractional Units off) — nothing sent")
 
     def test_a_minimum_unread_at_the_order_sends_nothing(self):
         world = _on("stock_under_one_share")
@@ -971,10 +1007,12 @@ class TheRecordAndWordsTests(_On):
                                places=5)
         self.assertEqual(floor, {
             "floored": True, "replaced_qty": 300.0, "qty": 1000.0,
+            "headroom_pct": 1.0, "step": 100.0,
             "risk_pct": 0.81, "normal_risk_pct": 0.25,
             "replaced_risk_pct": 0.243, "ceiling_pct": 2.0,
             "notional_x_pool": 0.54, "stage_factor": 1.0, "proof_cut": 1.0,
-            "leverage": 20, "leverage_by": "chooser"})
+            "allocator_mult": 1.0, "corr_scale": 1.0,
+            "leverage": 20, "leverage_by": "chooser", "settlement": "cfd"})
         # the sizer's own numbers stay the bot's normal budget
         self.assertEqual(row.metadata["risk_fraction"], 0.0025)
         self.assertEqual(row.metadata["risk_dollars"], 5.0)
@@ -993,10 +1031,12 @@ class TheRecordAndWordsTests(_On):
         from bot_program.notifications import fill_open_message
         out = H.run(_on("forex_under_min"))
         row = self.assertOpened(out, qty=1000.0, leverage=20)
-        line = ("Smallest size: raised to 1,000 units, the least eToro "
-                "takes, from the 300 units the risk budget sized · 0.81% "
-                "of the pool at risk, against this bot's usual 0.25% · 20x "
-                "chosen automatically")
+        line = ("Smallest size: raised to 1,000 units, the least this bot "
+                "sends that eToro takes (eToro's own minimum is 925.9 "
+                "units; steps of 100 while Fractional Units is off), from "
+                "the 300 units the risk budget sized · 0.81% of the pool at "
+                "risk, against this bot's usual 0.25% · 20x chosen "
+                "automatically")
         self.assertEqual(out.note.call_args.kwargs["floor"], line)
         message = fill_open_message(
             asset_class="forex", symbol="EURUSD", side="BUY", qty=row.qty,
@@ -1015,9 +1055,13 @@ class TheRecordAndWordsTests(_On):
         self.assertOpened(out, qty=1.0, leverage=5)
         self.assertEqual(
             out.note.call_args.kwargs["floor"],
-            "Smallest size: raised to 1 share, the least eToro takes; the "
-            "risk budget sized less than one · 0.50% of the pool at risk, "
-            "against this bot's usual 0.25% · 5x chosen automatically")
+            "Smallest size: raised to 1 share, the least this bot sends "
+            "that eToro takes (eToro's own minimum is 0.1 shares; whole "
+            "shares while Fractional Units is off); the risk budget sized "
+            "less than this bot's smallest step · 0.50% of the pool at "
+            "risk, against this bot's usual 0.25% · 5x chosen "
+            "automatically, as a CFD: eToro charges a fee each night it "
+            "is held")
 
     def test_a_typed_multiplier_is_not_called_chosen(self):
         typed = {"session_filter_disabled": True, "leverage": 10}
@@ -1025,9 +1069,11 @@ class TheRecordAndWordsTests(_On):
         self.assertOpened(out, qty=1000.0, leverage=10)
         self.assertEqual(
             out.note.call_args.kwargs["floor"],
-            "Smallest size: raised to 1,000 units, the least eToro takes, "
-            "from the 300 units the risk budget sized · 0.81% of the pool "
-            "at risk, against this bot's usual 0.25%")
+            "Smallest size: raised to 1,000 units, the least this bot "
+            "sends that eToro takes (eToro's own minimum is 925.9 units; "
+            "steps of 100 while Fractional Units is off), from the 300 "
+            "units the risk budget sized · 0.81% of the pool at risk, "
+            "against this bot's usual 0.25%")
 
     def test_an_entry_that_was_not_floored_says_nothing(self):
         out = H.run(_on("stock_clear"))
@@ -1043,13 +1089,14 @@ class TheRecordAndWordsTests(_On):
         message, the line among its lines, for Telegram and the bell."""
         from bot_program import notifications
         out = H.run(_on("commodity_under_min"))
-        row = self.assertOpened(out, qty=0.5, leverage=10)
+        row = self.assertOpened(out, qty=0.505, leverage=10)
         words = out.bot._fill_words(row)
-        self.assertTrue(words["floor"].startswith(
-            "Smallest size: raised to 0.5 units, the least eToro takes, "
-            "from the 0.0833 units the risk budget sized · 1.5% of the "
+        self.assertEqual(
+            words["floor"],
+            "Smallest size: raised to 0.505 units, eToro's minimum plus "
+            "1%, from the 0.0833 units the risk budget sized · 1.5% of the "
             "pool at risk, against this bot's usual 0.25% · 10x chosen "
-            "automatically"), words)
+            "automatically")
         with mock.patch.object(notifications, "dispatch_notification",
                                return_value=True) as send:
             notifications.notify_bot_fill_open(

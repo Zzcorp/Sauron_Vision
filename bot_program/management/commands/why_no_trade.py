@@ -191,9 +191,22 @@ class Command(BaseCommand):
             # apply. Never a blocker: a switch that is off is a decision.
             # When the floor is ON and an order was still refused for its
             # size, the refusal's own words below lead with the reason.
+            # The floor is eToro's alone (the review of 2026-11-12): a
+            # live bot whose class another venue carries, or none, is told
+            # so instead of "ON". The route is preflight_live's own reader
+            # (the router's precedence, flags only, no broker asked);
+            # unreadable says nothing of the route.
             try:
                 from bot_program.asset_engine.base import venue_floor_words
-                w(f"        {venue_floor_words(c)}")
+                _route = None
+                if getattr(c, "mode", "paper") == "live":
+                    try:
+                        from bot_program.management.commands.preflight_live \
+                            import _venue_for
+                        _route = _venue_for(c.user, c.asset_class)[1]
+                    except Exception:           # noqa: BLE001
+                        _route = None
+                w(f"        {venue_floor_words(c, venue=_route)}")
             except Exception as exc:            # noqa: BLE001
                 w(f"        venue floor: could not be read ({exc})")
             for code, n in sorted(counts.items(), key=lambda kv: -int(kv[1])):

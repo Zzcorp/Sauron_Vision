@@ -444,6 +444,63 @@ def _attack_lines(w, cfg, kind, venue, now, blockers, warnings) -> None:
             f"is charged by NOTHING here — the cost filter is spread only")
 
 
+def _floor_lines(w, cfg, kind, warnings) -> None:
+    """Section 4's leverage line for a config with NO extras['leverage'].
+
+    As it always read ("the adapter sends 1") unless THE VENUE FLOOR FOR
+    BOTS is ON for it (2026-11-12, the review: the line said 1 for a bot
+    whose raised entries then left at 20x). ON, on a live bot eToro
+    carries: an entry raised to the venue's smallest size lets the
+    engine's chooser pick its multiplier (AssetBot._order_leverage,
+    floor_auto). Said here per instrument class with the most it may pick
+    — the class ceiling under MAX BOT LEVERAGE, 1 while etoro_leverage_live
+    is OFF — judged by the engine's own rule (judge_order_leverage with
+    the pick), and the financing warning the attack mode's lines carry.
+    Never a blocker: a refusal of the pick refuses raised entries only,
+    and the bot's own size goes as before. Nothing here asks a broker."""
+    from bot_program.asset_engine.base import (
+        LEVERAGE_SWITCH_KEY, MAX_ORDER_LEVERAGE, ORDER_LEVERAGE_CEILING,
+        bot_cap_words, bot_leverage_cap, judge_order_leverage,
+        venue_floor_on)
+    from bot_program.manual_trade import MANUAL_CONFIG_NAME
+    from core.platform_control import is_component_enabled
+    if (cfg.name == MANUAL_CONFIG_NAME or kind != "etoro"
+            or not venue_floor_on()):
+        w("        leverage —  (no extras['leverage']; the "
+          "adapter sends 1)")
+        return
+    w("        leverage —  (no extras['leverage']; the adapter sends 1, "
+      "except an entry raised to the venue's smallest size: the chooser "
+      "picks its multiplier, up to MAX BOT LEVERAGE and the class ceiling)")
+    on = is_component_enabled(LEVERAGE_SWITCH_KEY)
+    cap = bot_leverage_cap(cfg)
+    for icls in _instrument_classes(cfg):
+        ceiling = min(int(MAX_ORDER_LEVERAGE),
+                      int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        capped = on and cap is not None and cap < ceiling
+        most = (min(ceiling, cap) if capped else ceiling) if on else 1
+        w(f"          {icls}: a raised entry goes at up to {most}x"
+          + (f" ({bot_cap_words(cap)})" if capped else "")
+          + ", on eToro's LIVE list and inside the stop band"
+          + ("" if on else f" ({LEVERAGE_SWITCH_KEY} is OFF: every order "
+                           f"goes at 1x)"))
+        if most <= 1:
+            continue
+        _lev, why = judge_order_leverage(cfg, icls, kind, floor_pick=most)
+        if why:
+            w(f"            ← {why}")
+            warnings.append(
+                f"config {cfg.id} ({cfg.name}), an entry raised to the "
+                f"venue's smallest size, {icls} at {most}x: {why}")
+            continue
+        warnings.append(
+            f"config {cfg.id} ({cfg.name}): an entry raised to the venue's "
+            f"smallest size goes at up to {most}x on {icls}: financing "
+            f"(overnight/weekend fees on a levered CFD) is charged by "
+            f"NOTHING here — the cost filter is spread only — and a stock "
+            f"or crypto buy above 1x is a CFD, not the asset")
+
+
 def _primary_classes(row) -> str:
     out = []
     for c in _VENUE_CLASSES:
@@ -968,8 +1025,7 @@ class Command(BaseCommand):
                 _extras = cfg.extras or {}
                 from bot_program.asset_engine.base import leverage_is_auto
                 if "leverage" not in _extras:
-                    w("        leverage —  (no extras['leverage']; the "
-                      "adapter sends 1)")
+                    _floor_lines(w, cfg, kind, warnings)
                 elif leverage_is_auto(_extras):
                     _attack_lines(w, cfg, kind, venue, now, blockers,
                                   warnings)
@@ -1101,7 +1157,7 @@ class Command(BaseCommand):
                 # readers (base.venue_floor_words). A line, never a
                 # blocker: OFF is the default and a decision.
                 from bot_program.asset_engine.base import venue_floor_words
-                _vfw = venue_floor_words(cfg)
+                _vfw = venue_floor_words(cfg, venue=kind)
                 w("        VENUE FLOOR" + _vfw[len("venue floor"):])
                 if cfg.enabled and not list(cfg.symbols or []):
                     if cfg.name != MANUAL_CONFIG_NAME:
