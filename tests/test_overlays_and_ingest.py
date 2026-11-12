@@ -239,8 +239,18 @@ class BackgroundArtTests(TestCase):
         """The circuit layer is registered to eye coordinates — pads on the die
         edge, traces leaving the lid apexes. The mouse parallax moved the eye
         by up to 60px and left the board behind, so the registration came
-        apart on the first pointer move."""
-        self.assertIn("circuits.style.transform = eyeShift", self.body)
+        apart on the first pointer move.
+
+        (2026-11-12, the magic kept) A look, updated. The parallax script
+        is gone: both layers have been hidden on every platform page since
+        S1a, so it moved, on each pointer move, two drawings nobody saw.
+        What the test guards is unchanged: a script that moves the eye
+        moves the board with it. Today no script moves either.
+        """
+        moves_eye = "globe.style.transform" in self.body
+        moves_board = "circuits.style.transform = eyeShift" in self.body
+        self.assertEqual(moves_eye, moves_board)
+        self.assertFalse(moves_eye)
 
     def test_the_board_is_populated(self):
         """Bond wires, vias, footprints and silkscreen are what separate a

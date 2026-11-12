@@ -29,20 +29,37 @@ dark, desktop first. S1a lays its foundation under every page at once:
     (#CC3A40, white on it 4.94:1; today's #E83030 gave 4.29), and nothing
     else paints a solid fill in it.
 
+THE MAGIC KEPT (2026-11-12). The operator approved this look and asked to
+keep Sauron's own theme, "the magic, the prestige". What that changed here,
+each a look, updated deliberately, with its reason at the test:
+  * the twelve neutrals of the palette take the Eye's hue at the very
+    lightness they had (S1A_LADDER keeps the values they replace);
+  * the shell loads three faces' links: Orbitron comes back for the frame's
+    titles, without digits, and Rajdhani for the nav rows;
+  * the embers come back on the pages that opt in, calm, from
+    static/js/sv-embers.js, which the node class below runs as it ships;
+    the caustics and the fake log lines are gone for good;
+  * one more loop may run, under Ambience Magic: the Eye's breath; under
+    reduced motion none runs at all.
+What a look may never do stays as it was: 4.5:1, REAL the only solid red,
+nothing under 11 px, light mode frozen. tests/test_magic_layer.py holds
+the layer's own rules.
+
 Display only. Nothing here reaches an order, a stop, a size, a gate, a
 switch or a broker; no network, no model.
 
 The measured classes render pages through the test client from synthetic
 rows and lay them out in a headless Chromium with every network URL
 blocked (tests/test_close_advice.py's _Chrome); they skip, not fail, where
-the machine has none. The node class runs the ambient scripts of base.html
-under node with a stubbed page; it skips where node is missing.
+the machine has none. The node class runs the ember script and base.html's
+clock under node with a stubbed page; it skips where node is missing.
 
 Run with:  python manage.py test tests.test_design_tokens
 """
 import json
 import pathlib
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -51,31 +68,44 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase
 
-from tests.test_close_advice import CHROME, HOST, NODE, _quote
-from tests.test_ui_s0_fixes import _get, _measure
+from tests.test_close_advice import CHROME, HOST, NODE, _Chrome, _quote
+from tests.test_ui_s0_fixes import _get, _measure, _offline
 
 ROOT = pathlib.Path(settings.BASE_DIR)
 TOKENS = "static/css/sv-tokens.css"
 KIT = "static/css/sv-kit.css"
 SAURON = "static/css/sauron.css"
 BASE = "templates/base.html"
+EMBERS = "static/js/sv-embers.js"
 
-#: §4.1, checked live: the words and numbers faces, and the wordmark's
-#: subset. Nothing else is fetched for type.
+#: §4.1, checked live: the words and numbers faces; Orbitron for the frame's
+#: titles, as a subset of the capitals, the Latin-1 capitals and the title
+#: punctuation, with no digit in it; Rajdhani 600 for the nav rows. A look,
+#: updated (the magic kept, 2026-11-12): S1a's second link carried the
+#: wordmark's own letters at 700 and nothing else. text= applies to a whole
+#: request, so Orbitron and Rajdhani each have their link. Nothing else is
+#: fetched for type.
 FONT_LINKS = (
     "https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700"
     "&family=JetBrains+Mono:wght@400..700&display=swap",
-    "https://fonts.googleapis.com/css2?family=Orbitron:wght@700"
-    "&text=SAURON%20VISION&display=swap",
+    "https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900"
+    "&text=ABCDEFGHIJKLMNOPQRSTUVWXYZ%C3%80%C3%81%C3%82%C3%84%C3%87%C3%88%C3%89%C3%8A%C3%8B%C3%8E%C3%8F"
+    "%C3%94%C3%96%C3%99%C3%9B%C3%9C%20%C2%B7%E2%80%94%E2%80%93-%26%27%E2%80%99()%2F%3A.%2C!%3F%23%2B%25"
+    "&display=swap",
+    "https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap",
 )
 
-#: §3: the approved palette (the preview of 2026-11-06).
+#: §3: the approved palette (the preview of 2026-11-06), its twelve neutrals
+#: Eye-lit (the magic kept, 2026-11-12). A look, updated: each neutral keeps
+#: the OKLab lightness S1a gave it and takes the Eye's hue family, so every
+#: contrast below is computed on the new values and none moved by more than
+#: 0.1 (the minimum is ink-3 on bg-4, 4.92:1; it was 4.93).
 PALETTE = {
-    "--sv-bg-0": "#070A09", "--sv-bg-1": "#0C1110", "--sv-bg-2": "#121918",
-    "--sv-bg-3": "#182120", "--sv-bg-4": "#1F2A28",
-    "--sv-line-1": "#1B2422", "--sv-line-2": "#26322F", "--sv-line-3": "#36443F",
-    "--sv-ink-1": "#E9EFED", "--sv-ink-2": "#B4C0BC", "--sv-ink-3": "#8A9894",
-    "--sv-ink-4": "#59655F",
+    "--sv-bg-0": "#040B07", "--sv-bg-1": "#07130C", "--sv-bg-2": "#0D1B14",
+    "--sv-bg-3": "#14231B", "--sv-bg-4": "#1B2C23",
+    "--sv-line-1": "#14261D", "--sv-line-2": "#1D3528", "--sv-line-3": "#2C4739",
+    "--sv-ink-1": "#E6F1EA", "--sv-ink-2": "#ACC4B6", "--sv-ink-3": "#839B8D",
+    "--sv-ink-4": "#55665D",
     "--sv-eye": "#00E868",
     "--sv-up": "#24B582", "--sv-down": "#FF6B6E",
     "--sv-up-fill": "#1FA374", "--sv-down-fill": "#E5484D",
@@ -83,6 +113,15 @@ PALETTE = {
     "--sv-warn": "#F29B38", "--sv-ai": "#A48BFF",
     "--sv-cat-1": "#3987E5", "--sv-cat-2": "#D95926", "--sv-cat-3": "#9085E9",
     "--sv-cat-4": "#C98500", "--sv-cat-5": "#D55181",
+}
+#: S1a's neutrals, which the Eye-lit ones replace at the same lightness
+#: (tests/test_magic_layer.py measures each against its own).
+S1A_LADDER = {
+    "--sv-bg-0": "#070A09", "--sv-bg-1": "#0C1110", "--sv-bg-2": "#121918",
+    "--sv-bg-3": "#182120", "--sv-bg-4": "#1F2A28",
+    "--sv-line-1": "#1B2422", "--sv-line-2": "#26322F", "--sv-line-3": "#36443F",
+    "--sv-ink-1": "#E9EFED", "--sv-ink-2": "#B4C0BC", "--sv-ink-3": "#8A9894",
+    "--sv-ink-4": "#59655F",
 }
 SURFACES = ("--sv-bg-0", "--sv-bg-1", "--sv-bg-2", "--sv-bg-3", "--sv-bg-4")
 #: Everything that prints words or numbers on a surface (§3.2-§3.6). ink-4
@@ -158,10 +197,13 @@ LIGHT_OVERLAY_TODAY = {"--pop-bg": "#0a1a14", "--pop-bg-2": "#0e2218", "--pop-bo
 #: so light mode must derive them again from its own.
 DERIVED = ("--sv-up-wash", "--sv-down-wash", "--sv-paper", "--sv-danger", "--sv-grid")
 
-#: The ambient layers of base.html, none displayed on a work page.
-AMBIENT = (".grid-bg", ".eye-glow-shadow", ".globe-eye-bg",
-           ".globe-circuits-bg", "#particles-canvas", "#caustics-canvas",
-           ".se-cs-paragraph")
+#: The ambient layers of base.html. The first four are displayed on no work
+#: page. The ember canvas is displayed on the pages that opt in, under
+#: Ambience Magic, in the dark theme, and nowhere else (the magic kept,
+#: 2026-11-12); the caustics canvas and the two code-stream paragraphs of
+#: fake log lines are no longer in the page at all.
+STILL_LAYERS = (".grid-bg", ".eye-glow-shadow", ".globe-eye-bg", ".globe-circuits-bg")
+AMBIENT = STILL_LAYERS + ("#particles-canvas",)
 
 #: The world-marker family (§3.5): the only selectors that may paint a
 #: solid fill in --sv-real, the only solid red on the platform. The LIVE /
@@ -362,13 +404,35 @@ class FaceTests(SimpleTestCase):
         base = read(BASE)
         links = re.findall(r'href="(https://fonts\.googleapis\.com/[^"]+)"', base)
         self.assertEqual([l.replace("&amp;", "&") for l in links], list(FONT_LINKS))
-        for gone in ("Rajdhani", "Share+Tech+Mono",
-                     "Orbitron:wght@400;500;600;700;800;900"):
+        # Updated deliberately (the magic kept, 2026-11-12): Rajdhani is
+        # back in the shell, as the 600 link alone (the nav rows' face).
+        # Share Tech Mono and the full Orbitron, digits included, stay out.
+        self.assertEqual(base.count("Rajdhani"), 1)
+        self.assertIn("family=Rajdhani:wght@600&amp;display=swap", base)
+        for gone in ("Share+Tech+Mono", "Orbitron:wght@400;500;600;700;800;900",
+                     "Orbitron:wght@700&amp;text=SAURON"):
             self.assertNotIn(gone, base)
+
+    def test_orbitron_is_loaded_without_digits(self):
+        """A digit must never be drawn in Orbitron: its 5, 6, 8 and 9 are
+        the least distinct of the four faces. The link asks for a subset by
+        its text= and that text holds no digit, so the browser draws a
+        title's digits in the next face of the stack, JetBrains Mono."""
+        import urllib.parse
+        link = [l for l in FONT_LINKS if "Orbitron" in l]
+        self.assertEqual(len(link), 1)
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(link[0]).query)
+        self.assertEqual(query["family"], ["Orbitron:wght@400..900"])
+        text = query["text"][0]
+        self.assertEqual(re.findall(r"\d", text), [])
+        for ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ ·—#":
+            self.assertIn(ch, text)
+        root = block(read(TOKENS), ":root")
+        self.assertEqual(root["--sv-font-display"].split(",")[1].strip(), '"JetBrains Mono"')
 
     def test_no_other_font_host_in_the_shell(self):
         """base.html and every sheet it links: type comes from Google Fonts
-        only, through the two links above (no @import, no @font-face with a
+        only, through the three links above (no @import, no @font-face with a
         remote source, no other host)."""
         base = read(BASE)
         sheets = re.findall(r"""\{% static 'css/([\w.-]+\.css)' %\}""", base)
@@ -382,29 +446,28 @@ class FaceTests(SimpleTestCase):
                              "fonts.gstatic.com", "fontawesome", "rsms.me"):
                     self.assertNotIn(host, text)
 
-    def test_a_page_that_names_a_retired_face_loads_it_itself(self):
-        """The shell stopped loading Rajdhani, Share Tech Mono and the full
-        Orbitron (§4.1). A page under base.html that names one in its own
-        styles (not as a var() fallback) loads it itself, from Google Fonts:
-        /passation/'s letter fell back to the system faces, and "TO
-        GANDALF" mixed the wordmark subset's eight Orbitron letters with
-        fallback ones (review, 2026-11-07)."""
-        retired = {"Rajdhani": "Rajdhani", "Share Tech Mono": "Share+Tech+Mono",
-                   "Orbitron": "Orbitron"}
-        offenders, named = [], 0
+    def test_no_page_under_the_shell_names_a_face_or_loads_one_of_its_own(self):
+        """Updated deliberately (the magic kept, 2026-11-12). S1a's shell
+        loaded neither Rajdhani nor the full Orbitron, so a page that named
+        one loaded it itself (/passation/). The shell loads both again:
+        named literally, the letter's sentences would now be drawn in the
+        nav rows' Rajdhani, and a page's own full Orbitron would draw
+        digits in it on that page. So no page under base.html names
+        Orbitron, Rajdhani or Share Tech Mono in its own styles (a var()
+        fallback aside) or links a face of its own: the tokens carry them
+        (tests/test_magic_layer.py reads which selectors may)."""
+        offenders, read_pages = [], 0
         for path in sorted((ROOT / "templates").rglob("*.html")):
             text = path.read_text(encoding="utf-8")
-            if '{% extends "base.html" %}' not in text:
+            if not re.search(r'\{% extends (base_template\|default:)?"base\.html" %\}', text):
                 continue
-            links = re.findall(r'href="https://fonts\.googleapis\.com/css2\?([^"]+)"', text)
-            for face, family in retired.items():
-                if not re.search(r"""font-family:\s*['"]%s['"]""" % face, text):
-                    continue
-                named += 1
-                if not any(re.search(r"(^|&|amp;)family=%s(:|&|$)" % re.escape(family), l)
-                           for l in links):
+            read_pages += 1
+            if "fonts.googleapis.com" in text:
+                offenders.append("%s links a face of its own" % path.relative_to(ROOT))
+            for face in ("Orbitron", "Rajdhani", "Share Tech Mono"):
+                if re.search(r"""font-family:\s*['"]%s['"]""" % face, text):
                     offenders.append("%s names %s" % (path.relative_to(ROOT), face))
-        self.assertGreater(named, 0)
+        self.assertGreater(read_pages, 80)
         self.assertEqual(offenders, [])
 
     def test_the_faces_are_tokens_with_their_fallbacks(self):
@@ -413,7 +476,10 @@ class FaceTests(SimpleTestCase):
                          '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif')
         self.assertEqual(root["--sv-font-mono"],
                          '"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace')
-        self.assertTrue(root["--sv-font-brand"].startswith('"Orbitron"'))
+        # The wordmark's face is the display face now (2026-11-12): one
+        # Orbitron for the frame, its digits falling to JetBrains Mono.
+        self.assertEqual(root["--sv-font-brand"], "var(--sv-font-display)")
+        self.assertTrue(root["--sv-font-display"].startswith('"Orbitron", "JetBrains Mono"'))
 
     def test_the_old_names_read_the_new_tokens(self):
         root = block(read(SAURON), ":root")
@@ -422,8 +488,9 @@ class FaceTests(SimpleTestCase):
                 self.assertEqual(root.get(old), "var(%s, %s)" % (new, was))
 
     def test_the_wordmark_keeps_orbitron(self):
-        """Orbitron stays on the wordmark only: the subset carries SAURON
-        VISION and nothing else, so the brand rule names --sv-font-brand."""
+        """The brand rule names --sv-font-brand, which reads the display
+        face: Orbitron, on the wordmark and the frame's titles (the magic
+        kept, 2026-11-12; S1a's subset carried SAURON VISION alone)."""
         brand = block(read(SAURON), ".sidebar-brand h1")
         self.assertTrue(brand["font-family"].startswith("var(--sv-font-brand"),
                         brand["font-family"])
@@ -761,15 +828,56 @@ class RailFiltersOnTheKitTests(SimpleTestCase):
 class AmbientSourceTests(SimpleTestCase):
 
     def test_the_ambient_layers_are_not_displayed_on_work_pages(self):
-        found = [b for p, b, c in rules(read(SAURON))
-                 if all(a in p for a in AMBIENT)]
-        self.assertTrue(found, "no rule hides the ambient layers")
-        self.assertIn(("display", "none !important"), decls(found[0]))
+        """Updated deliberately (the magic kept, 2026-11-12): the grid, the
+        globe-eye, its glow and the circuits stay hidden everywhere; the
+        ember canvas left that list for a rule of its own, which hides it
+        off the pages that opted in, outside Ambience Magic and in light
+        mode."""
+        css = read(SAURON)
+        still = block(css, ", ".join(STILL_LAYERS))
+        self.assertEqual(still, {"display": "none !important"})
+        for prelude, body, ctx in rules(css):
+            if any(a in prelude for a in STILL_LAYERS) and "display" in dict(decls(body)) \
+                    and dict(decls(body))["display"].startswith("none"):
+                self.assertNotIn("#particles-canvas", prelude)
+        embers = block(css, "body:not([data-sv-embers]) #particles-canvas,\n"
+                            "        body:not([data-sv-ambience=\"magic\"]) #particles-canvas,\n"
+                            "        body.light-mode #particles-canvas")
+        self.assertEqual(embers, {"display": "none !important"})
 
     def test_the_particles_carry_no_tickers_and_no_prices(self):
-        script = _script_with("getElementById('particles-canvas')")
-        for gone in ("TICKERS", "tickerPrice", "fillText", "EUR/USD", "base:67500"):
+        """The embers draw no text, ever: no label, no symbol, no figure
+        (S1a took the fake tickers and prices out of main's script; the
+        calm field never had any). At most 56 embers and 12 flakes of ash."""
+        script = read(EMBERS)
+        for gone in ("TICKERS", "tickerPrice", "fillText", "strokeText", "EUR/USD", "base:67500"):
             self.assertNotIn(gone, script)
+        self.assertNotRegex(script, r"\.font\s*=")
+        caps = re.search(r"NMAX = CFG\.embers \|\| (\d+), NAMAX = CFG\.ash \|\| (\d+)", script)
+        self.assertTrue(caps, "the caps are not where the test reads them")
+        self.assertLessEqual(int(caps.group(1)), 56)
+        self.assertLessEqual(int(caps.group(2)), 12)
+        self.assertRegex(script, r"Math\.min\(NMAX,")
+        self.assertRegex(script, r"Math\.min\(NAMAX,")
+
+    def test_the_caustics_and_the_fake_log_lines_are_gone(self):
+        """Fabricated activity never ships: the two code-stream paragraphs
+        typed invented log lines (fake R values, fake prices), hidden since
+        S1a and still in the page; the caustics layer never showed on a
+        work page and was the heaviest loop. Both are out of base.html and
+        of the sheet, with the pupil and parallax loops of the hidden
+        globe."""
+        base = read(BASE)
+        for gone in ("se-cs-paragraph", "seCsPara", "TEMPLATES", "caustics-canvas",
+                     "Ambient code-stream", "globePupilGroup').style", "pupil.style.transform",
+                     "Embers & Ash", "Mouse parallax"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, base)
+        css = read(SAURON)
+        for gone in ("se-cs-paragraph", "se-cs-line", "seCursorBlink", "#caustics-canvas"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, css)
+        self.assertEqual(base.count('<canvas id="particles-canvas"></canvas>'), 1)
 
 
 def mix(a, b, share):
@@ -844,8 +952,14 @@ class ReviewFixesTests(SimpleTestCase):
         disabled look is restated after them."""
         kit = read(KIT)
         order = [p for p, b, c in rules(kit) if not c]
-        last_variant = max(i for i, p in enumerate(order) if ".btn.btn-buy" in p or ".btn.btn-stop" in p)
-        disabled = [i for i, p in enumerate(order) if "[disabled]" in p and ".btn-buy" in p]
+        # Updated deliberately (the magic kept, 2026-11-12): the side's own
+        # light on hover names a BUY that is :not([disabled]); it is neither
+        # a variant's look nor the disabled look, so neither list takes it.
+        lit = ":is(:hover, :focus-visible)"
+        last_variant = max(i for i, p in enumerate(order)
+                           if (".btn.btn-buy" in p or ".btn.btn-stop" in p) and lit not in p)
+        disabled = [i for i, p in enumerate(order)
+                    if "[disabled]" in p and ".btn-buy" in p and lit not in p]
         self.assertTrue(disabled)
         self.assertGreater(disabled[-1], last_variant)
         rule = dict(decls([b for p, b, c in rules(kit) if not c][disabled[-1]]))
@@ -870,159 +984,285 @@ def _script_with(marker):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# The ambient loops, run under node with a stubbed page
+# The embers and the clock, run under node with a stubbed page
 # ══════════════════════════════════════════════════════════════════════════
 
 NODE_HARNESS = r"""
 const vm = require('vm');
 const fs = require('fs');
-const [particles, caustics] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const out = {};
-for (const [hidden, reduced] of [[false, false], [true, false], [false, true]]) {
-  let raf = 0, intervals = 0, clockText = null;
-  const el = () => ({ style: {}, width: 0, height: 0,
-                      getContext: () => new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => ({ addColorStop() {} })), set: (t, k, v) => { t[k] = v; return true; } }),
-                      getAttribute: () => 'UTC', set textContent(v) { clockText = v; } });
-  const nodes = { 'particles-canvas': el(), 'caustics-canvas': el(), clock: el() };
-  const ctx = {
-    window: null, Math, Intl, Date, JSON, console,
-    performance: { now: () => 1000 },
-    document: {
-      getElementById: id => nodes[id] || null,
-      querySelector: () => el(),
-      addEventListener: () => {},
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const clockSrc = fs.readFileSync(process.argv[3], 'utf8');
+
+function world(o) {
+  o = Object.assign({ ambience: 'magic', embers: true, hidden: false, reduced: false, light: false,
+                      cssHides: false, cover: () => false, hitCost: 0, drawCost: 0, words: [] }, o);
+  let now = 1000, rafQ = [], rafAsked = 0, idleQ = [], timers = [], hits = 0, fontSet = 0;
+  const calls = {}, observers = [], listeners = {}, wlisteners = {};
+  const context = main => new Proxy({}, {
+    get: (t, k) => {
+      if (k in t) return t[k];
+      if (k === 'createRadialGradient') return () => ({ addColorStop() {} });
+      return () => { if (main) { calls[k] = (calls[k] || 0) + 1; if (k === 'clearRect') now += o.drawCost; } };
     },
-    getComputedStyle: () => ({ display: hidden ? 'none' : 'block' }),
-    matchMedia: q => ({ matches: reduced && /reduce/.test(q) }),
-    requestAnimationFrame: () => { raf++; return raf; },
-    setInterval: () => { intervals++; return 1; },
-    setTimeout: () => 1,
-  };
-  ctx.window = ctx;
-  ctx.window.innerWidth = 1440; ctx.window.innerHeight = 900;
-  ctx.window.addEventListener = () => {};
-  vm.createContext(ctx);
-  vm.runInContext(particles, ctx);
-  const afterParticles = raf;
-  vm.runInContext(caustics, ctx);
-  out[(hidden ? 'hidden' : 'shown') + (reduced ? '+reduced' : '')] =
-    { particlesRaf: afterParticles, causticsRaf: raf - afterParticles, intervals, clock: clockText };
+    set: (t, k, v) => { if (main && k === 'font') fontSet++; t[k] = v; return true; } });
+  const mainCtx = context(true);
+  const canvas = { id: 'particles-canvas', width: 0, height: 0, getContext: () => mainCtx };
+  const classes = new Set(o.light ? ['light-mode'] : []);
+  const attrs = { 'data-sv-ambience': o.ambience };
+  if (o.embers) attrs['data-sv-embers'] = '';
+  const mutate = () => observers.forEach(f => f([]));
+  const body = {
+    classList: { contains: c => classes.has(c), add: c => { classes.add(c); mutate(); },
+                 remove: c => { classes.delete(c); mutate(); } },
+    getAttribute: k => (k in attrs ? attrs[k] : null), hasAttribute: k => k in attrs,
+    setAttribute: (k, v) => { attrs[k] = v; mutate(); }, removeAttribute: k => { delete attrs[k]; mutate(); } };
+  const root = { scrollHeight: 912 };
+  const card = { parentElement: body, isCard: true };
+  const doc = {
+    body, documentElement: root, hidden: o.hidden, fonts: null,
+    getElementById: id => (id === 'particles-canvas' ? canvas : null),
+    createElement: () => ({ width: 0, height: 0, getContext: () => context(false) }),
+    querySelectorAll: () => o.words.map(b => ({ getBoundingClientRect: () => (
+      { left: b[0], top: b[1], right: b[2], bottom: b[3], width: b[2] - b[0], height: b[3] - b[1] }) })),
+    elementFromPoint: (x, y) => { hits++; now += o.hitCost; return o.cover(x, y) ? card : body; },
+    addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); } };
+  const win = {
+    document: doc, innerWidth: 1440, innerHeight: 912, scrollY: 0,
+    matchMedia: () => ({ matches: o.reduced, addEventListener() {} }),
+    getComputedStyle: el => (el === canvas ? { display: o.cssHides ? 'none' : 'block' }
+      : { backgroundImage: 'none', backgroundColor: el && el.isCard ? 'rgb(7, 19, 12)' : 'rgba(0, 0, 0, 0)' }),
+    performance: { now: () => now },
+    requestAnimationFrame: f => { rafAsked++; rafQ.push(f); return rafAsked; },
+    cancelAnimationFrame: () => { rafQ = []; },
+    requestIdleCallback: f => { idleQ.push(f); return idleQ.length; },
+    setTimeout: (f, ms) => { timers.push({ at: now + (ms || 0), f }); return timers.length; },
+    clearTimeout: id => { if (timers[id - 1]) timers[id - 1].f = null; },
+    addEventListener: (t, f) => { (wlisteners[t] = wlisteners[t] || []).push(f); },
+    MutationObserver: function (f) { this.observe = () => observers.push(f); },
+    Math, Float32Array, Map, console };
+  win.window = win;
+  vm.runInContext(src, vm.createContext(win));
+  return {
+    o, body, doc, root, calls,
+    stats: () => win.__svEmberStats,
+    idle: () => { let n = 0; while (idleQ.length && n < 2000) { idleQ.shift()({ timeRemaining: () => 4 }); n++; } return n; },
+    tick: dt => { now += dt; const q = rafQ; rafQ = []; q.forEach(f => f(now)); return q.length; },
+    advance: ms => { now += ms; timers.forEach(t => { if (t.f && t.at <= now) { const f = t.f; t.f = null; f(); } }); },
+    fire: t => (listeners[t] || []).forEach(f => f({ type: t })),
+    asked: () => rafAsked, pending: () => rafQ.length, hits: () => hits, fontSet: () => fontSet };
 }
+function settle(w, ticks) { let n = 0; for (let i = 0; i < ticks; i++) n += w.tick(16.7); return n; }
+// the field starts once the page's own entrance is over (900 ms), then maps in idle slices
+function start(w) { w.advance(1000); return w.idle(); }
+
+const out = {};
+// opted in, under Magic, with a void: frames are scheduled, the caps hold
+{ const w = world(); const slices = start(w); const s = w.stats();
+  out.running = { asked: w.asked(), embers: s.embers, ash: s.ash, hits: w.hits(), slices, maps: s.maps };
+  settle(w, 20);
+  out.running.frames = s.frames; out.running.perFrame = (w.calls.drawImage || 0) / s.frames;
+  out.running.text = (w.calls.fillText || 0) + (w.calls.strokeText || 0) + w.fontSet(); }
+// the tab hidden
+{ const w = world({ hidden: true }); start(w); settle(w, 5); out.hidden = w.asked();
+  w.doc.hidden = false; w.fire('visibilitychange'); w.idle(); out.shownAgain = w.asked() > 0;
+  const a = w.asked(); w.doc.hidden = true; w.fire('visibilitychange'); settle(w, 5); out.hiddenAgain = [w.asked() - a, w.pending()]; }
+// the PIN lock, until it lifts
+{ const w = world(); start(w); settle(w, 4); const a = w.asked();
+  w.fire('sv:pin-locked'); settle(w, 5); out.locked = [w.asked() - a, w.pending()];
+  w.fire('sv:pin-unlocked'); out.unlocked = w.asked() - a; }
+// a dialog holds the page (sv-overlay.js: body.sv-scroll-locked), until it closes
+{ const w = world(); start(w); settle(w, 4); const a = w.asked();
+  w.body.classList.add('sv-scroll-locked'); settle(w, 5); out.dialog = [w.asked() - a, w.pending()];
+  w.body.classList.remove('sv-scroll-locked'); out.dialogClosed = w.asked() - a; }
+// Calm and Off: nothing mapped, nothing scheduled; switched to from Magic, the canvas is cleared
+['calm', 'off'].forEach(m => {
+  const w = world({ ambience: m }); start(w); settle(w, 5);
+  const v = world(); start(v); settle(v, 4);
+  const a = v.asked(), c = v.calls.clearRect || 0, d = v.calls.drawImage || 0;
+  v.body.setAttribute('data-sv-ambience', m); settle(v, 5);
+  const off = { asked: v.asked() - a, cleared: (v.calls.clearRect || 0) - c, drawn: (v.calls.drawImage || 0) - d };
+  v.body.setAttribute('data-sv-ambience', 'magic');
+  out[m] = { asked: w.asked(), hits: w.hits(), switched: off, back: v.asked() - a };
+});
+// not opted in; the sheet hides the canvas; light mode
+{ const w = world({ embers: false }); start(w); settle(w, 5); out.notOptedIn = [w.asked(), w.hits()];
+  w.body.setAttribute('data-sv-embers', ''); w.idle(); out.optedInLater = w.asked() > 0; }
+{ const w = world({ cssHides: true }); start(w); settle(w, 5); out.cssHidden = [w.asked(), w.hits()]; }
+{ const w = world({ light: true }); start(w); settle(w, 5); out.lightMode = [w.asked(), w.hits()]; }
+// a page with no void
+{ const w = world({ cover: () => true }); start(w); settle(w, 5);
+  out.noVoid = { asked: w.asked(), embers: w.stats().embers, ash: w.stats().ash, drawn: w.calls.drawImage || 0 }; }
+// reduced motion: one still frame, no frame asked, and none again when the page changes
+{ const w = world({ reduced: true }); start(w); settle(w, 5);
+  out.reduced = { asked: w.asked(), draws: w.calls.clearRect || 0, sprites: w.calls.drawImage || 0,
+                  field: w.stats().embers + w.stats().ash };
+  w.body.classList.add('sv-scroll-locked'); w.body.classList.remove('sv-scroll-locked');
+  out.reduced.drawsAfter = w.calls.clearRect || 0; }
+// the cap: ten ticks 16.7 ms apart give five draws
+{ const w = world(); start(w); const f = w.stats().frames; settle(w, 10); out.cap = w.stats().frames - f; }
+// the void map: a card over the top half; no ember is born there, at the start or when
+// one that left the screen is born again (its x falls back to the left edge)
+{ const w = world({ cover: (x, y) => y < 456 }); start(w);
+  const born = w.stats().field().map(e => e[1]), reborn = [];
+  let prev = w.stats().field();
+  for (let i = 0; i < 4000; i++) {
+    w.tick(100);
+    const cur = w.stats().field();
+    cur.forEach((e, k) => { if (e[0] < prev[k][0]) reborn.push(e[1]); });
+    prev = cur;
+  }
+  out.map = { embers: w.stats().embers, minBorn: Math.min.apply(null, born), reborn: reborn.length,
+              minReborn: Math.min.apply(null, reborn), voidArea: w.stats().voidArea }; }
+// the slices: a hit test costs 0.1 ms on this clock, so a row costs 2.4
+{ const w = world({ hitCost: 0.1 }); const n = start(w);
+  out.slices = { max: w.stats().sliceMax, count: w.stats().mapSlices, ran: n, maps: w.stats().maps }; }
+// a live swap that leaves the page's shape alone costs no map; one that moves it costs one
+{ const w = world(); start(w); const h = w.hits();
+  w.fire('sv:live-swapped'); w.advance(400); w.idle(); const same = w.hits() - h;
+  w.root.scrollHeight = 1400; w.fire('sv:live-swapped'); w.advance(400); w.idle();
+  out.swap = [same, w.hits() - h]; }
+// near words on the void: held to .18 inside their box, the ember's own alpha from 18 px
+{ const w = world({ words: [[400, 300, 700, 314]] }); start(w); const s = w.stats();
+  out.near = { inside: s.alphaAt(500, 305, 0.55), edge: s.alphaAt(500, 300, 0.55), half: s.alphaAt(500, 291, 0.55),
+               at18: s.alphaAt(500, 282, 0.55), far: s.alphaAt(100, 100, 0.55), dim: s.alphaAt(500, 305, 0.1),
+               words: s.words }; }
+// the stats ring: the last 240 draws, so a late read still sees the latest
+{ const w = world(); start(w); const s = w.stats(); let n = 0;
+  while (s.n < 300) { w.o.drawCost = (s.n + 1) / 100; w.tick(40); if (++n > 2000) break; }
+  const r = s.recent();
+  out.ring = { n: s.n, kept: r.length, first: r[0], last: r[r.length - 1] }; }
+// the clock in base.html: its own small script
+{ let intervals = 0, text = null;
+  const el = { getAttribute: () => 'UTC', set textContent(v) { text = v; } };
+  const ctx = { Intl, Date, document: { getElementById: id => (id === 'clock' ? el : null) },
+                setInterval: () => { intervals++; return 1; } };
+  vm.runInContext(clockSrc, vm.createContext(ctx));
+  out.clock = { intervals, text, lines: clockSrc.split('\n').length }; }
 process.stdout.write(JSON.stringify(out));
 """
 
 
 @unittest.skipUnless(NODE, "node is not on this machine")
 class AmbientGuardNodeTests(SimpleTestCase):
-    """The particle, parallax and caustics loops of base.html, run as they
-    ship: they start where their layer is displayed and no reduced motion is
-    asked, and return before scheduling a single frame otherwise. The clock
-    in the same script runs either way."""
+    """static/js/sv-embers.js, run as it ships with a stubbed page (rewritten
+    for it, the magic kept, 2026-11-12; S1a's class ran main's ember,
+    parallax and caustics loops, which are gone). The field runs on a page
+    that opted in, under Ambience Magic, where the page shows a void; it
+    asks for no frame while the tab is hidden, the PIN lock is up or a
+    dialog holds the page, under Calm and Off, on a page that has not
+    opted in, or where the page shows no void; under reduced motion it
+    draws one still frame. The clock is its own small script in base.html
+    and ticks either way."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        scripts = [_script_with("getElementById('particles-canvas')"),
-                   _script_with("getElementById('caustics-canvas')")]
         with tempfile.TemporaryDirectory() as tmp:
-            data = pathlib.Path(tmp) / "scripts.json"
-            data.write_text(json.dumps(scripts), encoding="utf-8")
+            clock = pathlib.Path(tmp) / "clock.js"
+            clock.write_text(_script_with("getElementById('clock')"), encoding="utf-8")
             harness = pathlib.Path(tmp) / "harness.js"
             harness.write_text(NODE_HARNESS, encoding="utf-8")
-            done = subprocess.run([NODE, str(harness), str(data)], capture_output=True,
-                                  text=True, timeout=60)
+            done = subprocess.run([NODE, str(harness), str(ROOT / EMBERS), str(clock)],
+                                  capture_output=True, text=True, timeout=120)
         if done.returncode:
             raise AssertionError(done.stderr)
         cls.got = json.loads(done.stdout)
 
-    def test_the_loops_run_where_the_layer_shows(self):
-        shown = self.got["shown"]
-        self.assertGreater(shown["particlesRaf"], 0, shown)
-        self.assertGreater(shown["causticsRaf"], 0, shown)
+    def test_the_field_runs_where_it_shows(self):
+        """Opted in, Magic, a void: frames are asked for; one ember per
+        6,000 px² of void up to 56, ash up to 12; one drawImage each."""
+        r = self.got["running"]
+        self.assertGreater(r["asked"], 0, r)
+        self.assertEqual((r["embers"], r["ash"]), (56, 12))
+        self.assertEqual(r["hits"], 38 * 24)             # 24 columns, a row every 24 px
+        self.assertEqual(r["maps"], 1)
+        self.assertGreater(r["frames"], 0)
+        self.assertEqual(r["perFrame"], 68)
+        self.assertEqual(r["text"], 0)
 
-    def test_no_frame_is_scheduled_for_a_hidden_layer(self):
-        hidden = self.got["hidden"]
-        self.assertEqual((hidden["particlesRaf"], hidden["causticsRaf"]), (0, 0), hidden)
+    def test_no_frame_is_scheduled_for_a_hidden_tab(self):
+        self.assertEqual(self.got["hidden"], 0)
+        self.assertTrue(self.got["shownAgain"])
+        self.assertEqual(self.got["hiddenAgain"], [0, 0])
+
+    def test_no_frame_is_scheduled_while_the_pin_lock_is_up(self):
+        self.assertEqual(self.got["locked"], [0, 0])
+        self.assertGreater(self.got["unlocked"], 0)
+
+    def test_no_frame_is_scheduled_while_a_dialog_holds_the_page(self):
+        self.assertEqual(self.got["dialog"], [0, 0])
+        self.assertGreater(self.got["dialogClosed"], 0)
+
+    def test_no_frame_is_scheduled_under_calm_or_off(self):
+        for mode in ("calm", "off"):
+            got = self.got[mode]
+            with self.subTest(mode=mode):
+                self.assertEqual((got["asked"], got["hits"]), (0, 0), got)
+                self.assertEqual(got["switched"]["asked"], 0, got)
+                self.assertGreaterEqual(got["switched"]["cleared"], 1, got)     # the canvas cleared
+                self.assertEqual(got["switched"]["drawn"], 0, got)
+                self.assertGreater(got["back"], 0, got)                         # back on Magic, no reload
+
+    def test_no_frame_is_scheduled_on_a_page_that_has_not_opted_in(self):
+        self.assertEqual(self.got["notOptedIn"], [0, 0])
+        self.assertTrue(self.got["optedInLater"])
+        self.assertEqual(self.got["cssHidden"], [0, 0])
+        self.assertEqual(self.got["lightMode"], [0, 0])
+
+    def test_a_page_with_no_void_has_no_embers_and_asks_for_no_frame(self):
+        self.assertEqual(self.got["noVoid"], {"asked": 0, "embers": 0, "ash": 0, "drawn": 0})
 
     def test_no_frame_is_scheduled_under_reduced_motion(self):
-        reduced = self.got["shown+reduced"]
-        self.assertEqual((reduced["particlesRaf"], reduced["causticsRaf"]), (0, 0), reduced)
+        """One still frame, drawn once: the field is simply there."""
+        r = self.got["reduced"]
+        self.assertEqual(r["asked"], 0, r)
+        self.assertEqual((r["draws"], r["drawsAfter"]), (1, 1), r)
+        self.assertEqual(r["sprites"], r["field"])
+        self.assertGreater(r["field"], 0)
+
+    def test_at_most_30_frames_a_second(self):
+        self.assertEqual(self.got["cap"], 5)
+
+    def test_embers_are_born_in_the_void_only(self):
+        m = self.got["map"]
+        self.assertEqual(m["embers"], 56)
+        self.assertEqual(m["voidArea"], 1440 * 456)
+        self.assertGreaterEqual(m["minBorn"], 456)
+        self.assertGreater(m["reborn"], 56)
+        self.assertGreaterEqual(m["minReborn"], 456)
+
+    def test_the_map_never_holds_the_main_thread(self):
+        """Built in slices: none works for more than 4 ms plus one row."""
+        s = self.got["slices"]
+        self.assertLessEqual(s["max"], 4 + 24 * 0.1 + 1e-6, s)
+        self.assertGreater(s["count"], 10, s)
+        self.assertEqual(s["count"], s["ran"])
+        self.assertEqual(s["maps"], 1)
+
+    def test_a_swap_that_leaves_the_page_s_shape_alone_costs_no_map(self):
+        self.assertEqual(self.got["swap"], [0, 38 * 24])
+
+    def test_an_ember_dims_near_words_on_the_void(self):
+        n = self.got["near"]
+        self.assertEqual(n["words"], 1)
+        self.assertAlmostEqual(n["inside"], 0.18, places=6)
+        self.assertAlmostEqual(n["edge"], 0.18, places=6)
+        self.assertAlmostEqual(n["half"], 0.365, places=6)
+        self.assertAlmostEqual(n["at18"], 0.55, places=6)
+        self.assertAlmostEqual(n["far"], 0.55, places=6)
+        self.assertAlmostEqual(n["dim"], 0.1, places=6)       # never raised: a cap, not a floor
+
+    def test_the_stats_ring_keeps_the_last_240_draws(self):
+        r = self.got["ring"]
+        self.assertEqual((r["n"], r["kept"]), (300, 240))
+        self.assertAlmostEqual(r["first"], 0.61, places=4)
+        self.assertAlmostEqual(r["last"], 3.0, places=4)
 
     def test_the_clock_still_ticks(self):
-        for state, got in self.got.items():
-            with self.subTest(state=state):
-                self.assertEqual(got["intervals"], 1)
-                self.assertRegex(got["clock"] or "", r"^\d\d:\d\d:\d\d UTC$")
-
-
-#: The code-stream's block of base.html (Ask Sauron's script), from its
-#: comment to its two loops, run alone with a stubbed page.
-CODE_STREAM_HARNESS = r"""
-const vm = require('vm');
-const fs = require('fs');
-const block = fs.readFileSync(process.argv[2], 'utf8');
-const out = {};
-for (const [hidden, reduced] of [[false, false], [true, false], [false, true]]) {
-  let timers = 0;
-  const para = () => ({ childNodes: [], appendChild(n) { this.childNodes.push(n); return n; },
-                        removeChild() {}, get firstChild() { return this.childNodes[0]; } });
-  const nodes = { seCsParaLeft: para(), seCsParaRight: para() };
-  const ctx = {
-    Math, Date, Promise, console,
-    window: { matchMedia: q => ({ matches: reduced && /reduce/.test(q) }) },
-    document: { getElementById: id => nodes[id] || null,
-                createElement: () => ({ appendChild() {}, set className(v) {}, textContent: '' }) },
-    getComputedStyle: () => ({ display: hidden ? 'none' : 'block' }),
-    setTimeout: () => { timers++; return timers; },
-  };
-  vm.createContext(ctx);
-  vm.runInContext('(function () {' + block + '})();', ctx);
-  out[(hidden ? 'hidden' : 'shown') + (reduced ? '+reduced' : '')] = { timers };
-}
-process.stdout.write(JSON.stringify(out));
-"""
-
-
-@unittest.skipUnless(NODE, "node is not on this machine")
-class CodeStreamGuardNodeTests(SimpleTestCase):
-    """The two code-stream paragraphs type fake log lines (fake R values,
-    fake prices) letter by letter, on timers. S1a hides them on work pages,
-    and they went on typing into the hidden nodes: 167 timer callbacks in
-    6 s on /command/ (review, 2026-11-07). Like the other ambient loops,
-    they start only where their layer is displayed and no reduced motion
-    is asked."""
-
-    START = "// ── Ambient code-stream"
-    END = "loop(streamRight, 1100);\n    }"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        base = read(BASE)
-        i = base.index(cls.START)
-        cls.block = base[i:base.index(cls.END, i) + len(cls.END)]
-        with tempfile.TemporaryDirectory() as tmp:
-            data = pathlib.Path(tmp) / "block.js"
-            data.write_text(cls.block, encoding="utf-8")
-            harness = pathlib.Path(tmp) / "harness.js"
-            harness.write_text(CODE_STREAM_HARNESS, encoding="utf-8")
-            done = subprocess.run([NODE, str(harness), str(data)], capture_output=True,
-                                  text=True, timeout=60)
-        if done.returncode:
-            raise AssertionError(done.stderr)
-        cls.got = json.loads(done.stdout)
-
-    def test_the_stream_types_where_it_shows(self):
-        self.assertEqual(self.got["shown"]["timers"], 2, self.got)
-
-    def test_no_timer_for_a_hidden_stream(self):
-        self.assertEqual(self.got["hidden"]["timers"], 0, self.got)
-
-    def test_no_timer_under_reduced_motion(self):
-        self.assertEqual(self.got["shown+reduced"]["timers"], 0, self.got)
-
-    def test_the_guard_reads_the_layer_s_display(self):
-        self.assertIn("getComputedStyle(streamLeft).display !== 'none'", self.block)
+        got = self.got["clock"]
+        self.assertEqual(got["intervals"], 1)
+        self.assertRegex(got["text"] or "", r"^\d\d:\d\d:\d\d UTC$")
+        self.assertLess(got["lines"], 25)        # the clock alone: no loop rides in its script
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1073,15 +1313,31 @@ SHELL_PROBE = r"""(async function () {
     out.flat = getComputedStyle(probe.querySelector('.sign-flat')).color;
     var real = getComputedStyle(probe.querySelector('.sv-world--live'));
     out.real = { bg: real.backgroundColor, color: real.color, size: real.fontSize };
-    out.ambient = {};
-    %(ambient)s.forEach(function (s) {
-        var e = document.querySelector(s);
-        out.ambient[s] = e ? getComputedStyle(e).display : 'absent';
-    });
-    out.anims = document.getAnimations().filter(function (a) {
-        var t = a.effect && a.effect.getComputedTiming();
-        return a.playState === 'running' && t && t.iterations === Infinity;
-    }).map(function (a) { return a.animationName + '@' + (a.effect.target.className && a.effect.target.className.baseVal !== undefined ? a.effect.target.className.baseVal : a.effect.target.className); });
+    // The ambient layers and the endless animations, per Ambience (the
+    // body's attribute, as the operator's choice sets it).
+    function ambientNow() {
+        var got = {};
+        %(ambient)s.forEach(function (s) {
+            var e = document.querySelector(s);
+            got[s] = e ? getComputedStyle(e).display : 'absent';
+        });
+        return got;
+    }
+    function animsNow() {
+        return document.getAnimations().filter(function (a) {
+            var t = a.effect && a.effect.getComputedTiming();
+            return a.playState === 'running' && t && t.iterations === Infinity;
+        }).map(function (a) { return a.animationName + '@' + (a.effect.target.className && a.effect.target.className.baseVal !== undefined ? a.effect.target.className.baseVal : a.effect.target.className); });
+    }
+    out.embers = b.hasAttribute('data-sv-embers');
+    out.ambient = {}; out.anims = {};
+    var modes = ['calm', 'off', 'magic'];
+    for (var mi = 0; mi < modes.length; mi++) {
+        b.setAttribute('data-sv-ambience', modes[mi]);
+        await frame();
+        out.ambient[modes[mi]] = ambientNow();
+        out.anims[modes[mi]] = animsNow();
+    }
     // The shell's own text: everything outside the page content, visible or
     // not (a dropdown waiting for its hover counts), the ambient layers aside.
     function own(el) {
@@ -1112,7 +1368,7 @@ SHELL_PROBE = r"""(async function () {
         while (layers.length) g = over(layers.pop(), g);
         return g;
     }
-    var AMB = '.grid-bg, .eye-glow-shadow, .globe-eye-bg, .globe-circuits-bg, #particles-canvas, #caustics-canvas, .se-cs-paragraph';
+    var AMB = '.grid-bg, .eye-glow-shadow, .globe-eye-bg, .globe-circuits-bg, #particles-canvas';
     out.shellSmall = []; out.shellLow = []; out.redFills = []; out.shellText = 0;
     Array.prototype.forEach.call(b.querySelectorAll('*'), function (el) {
         if (el === probe || probe.contains(el)) return;
@@ -1143,6 +1399,7 @@ SHELL_PROBE = r"""(async function () {
     });
     b.classList.add('light-mode');
     var lcs = getComputedStyle(b);
+    out.ambient.light = ambientNow();
     out.light = {};
     %(light)s.forEach(function (n) { out.light[n] = lcs.getPropertyValue(n).trim(); });
     out.lightUp = getComputedStyle(probe.querySelector('.up')).color;
@@ -1158,6 +1415,50 @@ SHELL_PROBE = r"""(async function () {
     return JSON.stringify(out);
 })()""" % {"ambient": json.dumps(list(AMBIENT)), "light": json.dumps(sorted(LIGHT_TODAY)),
            "aliases": json.dumps(sorted(set(LIGHT_ALIASES_TODAY) | set(LIGHT_OVERLAY_TODAY)))}
+
+
+#: The endless animations per Ambience, for the pass that asks for reduced
+#: motion.
+REDUCED_PROBE = r"""(async function () {
+    function frame() { return new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); }); }
+    var out = {}, modes = ['magic', 'calm', 'off'];
+    for (var i = 0; i < modes.length; i++) {
+        document.body.setAttribute('data-sv-ambience', modes[i]);
+        await frame();
+        out[modes[i]] = document.getAnimations().filter(function (a) {
+            var t = a.effect && a.effect.getComputedTiming();
+            return a.playState === 'running' && t && t.iterations === Infinity;
+        }).map(function (a) { return a.animationName; });
+    }
+    return JSON.stringify(out);
+})()"""
+
+
+def _measure_reduced(pages, viewports, probe, tmp_prefix):
+    """tests.test_ui_s0_fixes._measure, with the browser asked for reduced
+    motion: {(url, width): the probe's answer}."""
+    tmp = tempfile.mkdtemp(prefix=tmp_prefix)
+    try:
+        files = {}
+        for i, (url, markup) in enumerate(sorted(pages.items())):
+            path = pathlib.Path(tmp) / ("page%d.html" % i)
+            path.write_text(_offline(markup), encoding="utf-8")
+            files[url] = path.as_uri()
+        chrome = _Chrome(CHROME)
+        try:
+            got = {}
+            for width, height in viewports:
+                sid = chrome.page(width, height, False)
+                chrome.call("Emulation.setEmulatedMedia", {"features": [
+                    {"name": "prefers-reduced-motion", "value": "reduce"}]}, session=sid)
+                for url, uri in files.items():
+                    chrome.open(sid, uri)
+                    got[(url, width)] = json.loads(chrome.eval(sid, probe))
+            return got
+        finally:
+            chrome.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def rgb(h):
@@ -1194,6 +1495,7 @@ class ShellMeasuredTests(TestCase):
         client.force_login(user)
         pages = {url: _get(client, url) for url in ("/command/", "/positions/")}
         cls.got = _measure(pages, cls.VIEWPORTS, SHELL_PROBE, "sv-s1a-shell-")
+        cls.reduced = _measure_reduced(pages, cls.VIEWPORTS, REDUCED_PROBE, "sv-s1a-reduced-")
 
     def test_the_body_is_inter_13_on_1_45_at_400(self):
         for (url, width), got in sorted(self.got.items()):
@@ -1233,20 +1535,45 @@ class ShellMeasuredTests(TestCase):
         self.assertGreaterEqual(float(got["size"][:-2]), 11)
 
     def test_no_ambient_layer_is_displayed(self):
+        """Updated deliberately (the magic kept, 2026-11-12). /command/ and
+        /positions/ opted into the embers: under Ambience Magic, in the dark
+        theme, their canvas is displayed, and no other ambient layer is;
+        under Calm and Off, and in light mode, none is. (A page that has
+        not opted in: tests/test_magic_layer.py.)"""
         for (url, width), got in sorted(self.got.items()):
             with self.subTest(url=url, width=width):
-                self.assertEqual(set(got["ambient"].values()) - {"absent"}, {"none"},
-                                 got["ambient"])
-                self.assertNotIn("absent", [got["ambient"][s] for s in AMBIENT[:6]])
+                self.assertTrue(got["embers"])
+                magic = dict(got["ambient"]["magic"])
+                self.assertEqual(magic.pop("#particles-canvas"), "block")
+                self.assertEqual(set(magic.values()), {"none"}, magic)
+                for mode in ("calm", "off", "light"):
+                    self.assertEqual(set(got["ambient"][mode].values()), {"none"},
+                                     (mode, got["ambient"][mode]))
 
     def test_at_most_two_infinite_animations_and_only_the_meaningful_ones(self):
         """Nothing moves on a work page unless a value moved or he acted: the
-        live heartbeat and the armed pill's beat may run, nothing else."""
+        live heartbeat and the armed pill's beat may run, nothing else.
+        Updated deliberately (the magic kept, 2026-11-12): under Ambience
+        Magic one more may, the Eye's breath on the sidebar's mark (opacity
+        and transform on one small layer); Calm and Off keep S1a's two; and
+        under reduced motion nothing loops at all, in any Ambience."""
+        beats = r"^(sv-heartbeat|sv-armed-beat)@"
         for (url, width), got in sorted(self.got.items()):
             with self.subTest(url=url, width=width):
-                self.assertLessEqual(len(got["anims"]), 2, got["anims"])
-                for a in got["anims"]:
-                    self.assertRegex(a, r"^(sv-heartbeat|sv-armed-beat)@", got["anims"])
+                magic = got["anims"]["magic"]
+                self.assertLessEqual(len(magic), 3, magic)
+                breath = [a for a in magic if a.startswith("sv-eye-breath@")]
+                self.assertEqual(len(breath), 1, magic)
+                for a in magic:
+                    if a not in breath:
+                        self.assertRegex(a, beats, magic)
+                for mode in ("calm", "off"):
+                    self.assertLessEqual(len(got["anims"][mode]), 2, got["anims"][mode])
+                    for a in got["anims"][mode]:
+                        self.assertRegex(a, beats, got["anims"][mode])
+        for (url, width), got in sorted(self.reduced.items()):
+            with self.subTest(url=url, width=width, motion="reduced"):
+                self.assertEqual(got, {"magic": [], "calm": [], "off": []})
 
     def test_light_mode_computes_today_s_colours(self):
         got = self.got[("/command/", 1440)]

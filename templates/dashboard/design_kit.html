@@ -5,8 +5,14 @@
 {% comment %}
 /design/kit/ (UI plan §7, S1a, 2026-11-06): every component of the kit on
 synthetic content, for staff. Nothing here is real and nothing here acts:
-every button is type="button" with no handler, no input sits in a form.
-The layout below is this page's own and takes tokens only.
+every button is type="button" with no handler of its own, no input sits in
+a form. The layout below is this page's own and takes tokens only.
+
+The magic kept (2026-11-12): the faces, the light sources, the hero card,
+a page head on the void and the moments. Their play buttons and the
+Ambience preview are wired by the one small script at the foot (extra_js):
+it plays a light by hand and sets this page's own Ambience; it posts
+nothing, saves nothing and announces nothing.
 {% endcomment %}
 {% block extra_css %}
 <style>
@@ -33,6 +39,17 @@ The layout below is this page's own and takes tokens only.
   .dk-static-menu { position: static; opacity: 1; visibility: visible; transform: none; width: 220px; }
   .dk-field { display: flex; flex-direction: column; gap: 6px; }
   .dk-field-row { display: flex; align-items: center; }
+  /* The magic's specimens. */
+  .dk-navbox { display: inline-flex; width: 240px; background: var(--sv-bg-1); border: 1px solid var(--sv-line-1); border-radius: var(--sv-radius-ctl); overflow: hidden; }
+  .dk-navbox .nav-link { flex: 1; }
+  .dk-heroes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sv-sp-5); padding-top: var(--sv-sp-5); }
+  .sv-page-head .sv-overline { display: block; }
+  .dk-stage { position: relative; }
+  .dk-h28 td { height: 28px; }
+  .dk-h44 td { height: 44px; }
+  .dk-dock { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--sv-bg-1); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card); }
+  .dk-icon { font-size: 14px; line-height: 1; color: var(--sv-eye); }
+  .dk-card { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card); }
 </style>
 {% endblock %}
 {% block content %}
@@ -48,6 +65,7 @@ The layout below is this page's own and takes tokens only.
   <section class="sv-panel" aria-labelledby="dkPalette">
     <div class="sv-panel-head"><span class="sv-panel-title" id="dkPalette">Palette</span><span class="sv-panel-meta">opaque surfaces · one colour, one meaning</span></div>
     <div class="sv-panel-body dk-stack">
+      <p class="sv-panel-meta" data-kit="eye-lit">The surfaces, the lines and the ink are Eye-lit: each keeps the lightness of the approved look and takes the Eye's hue, so every contrast stays where it was.</p>
       {% for group, swatches in palette %}
       <div class="dk-stack">
         <span class="sv-label">{{ group }}</span>
@@ -76,7 +94,78 @@ The layout below is this page's own and takes tokens only.
         {% else %}<span style="font-size: var({{ token }});">{{ use }}</span>{% endif %}
       </div>
       {% endfor %}
-      <div class="dk-scale-row"><span class="sv-label">Wordmark</span><span style="font-family: var(--sv-font-brand); font-weight: 700; letter-spacing: .18em; color: var(--sv-eye);">SAURON VISION</span></div>
+      <div class="dk-scale-row"><span class="sv-label">Wordmark</span><span class="sv-panel-title" style="font-size: 16px; font-weight: 700; letter-spacing: var(--sv-track-brand); color: var(--sv-eye);">SAURON VISION</span></div>
+    </div>
+  </section>
+
+  {# ── The magic kept (2026-11-12): the faces ── #}
+  <section class="sv-panel" aria-labelledby="dkFaces" data-kit="faces">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkFaces">Faces</span><span class="sv-panel-meta">Orbitron for the frame's titles, never a digit · Rajdhani for the nav · Inter for words · JetBrains Mono for numbers</span></div>
+    <div class="sv-panel-body dk-scale">
+      <div class="dk-scale-row"><span class="sv-label">Title · display face</span><span class="card-title" data-kit="face-display">SYN100 · 30D WINDOW #12</span></div>
+      <div class="dk-scale-row"><span class="sv-label">Nav row · frame face</span><span class="dk-navbox"><span class="nav-link" data-kit="face-frame">Operations Center</span></span></div>
+      <div class="dk-scale-row"><span class="sv-label" data-kit="face-words">Label · word face</span><span>Whose price this is, and how old.</span></div>
+      <div class="dk-scale-row"><span class="sv-label">Figures · number face</span><span class="sv-num" data-kit="face-numbers">0123456789 · 1,084.50 · +0.42%</span></div>
+      <div class="dk-scale-row"><span class="sv-label">A money word in a title</span><span class="card-title">Orc · XAUUSD <span class="sv-plain">Long</span></span></div>
+    </div>
+  </section>
+
+  {# ── The magic kept: light on what lives ── #}
+  <section class="sv-panel" aria-labelledby="dkLight" data-kit="light-sources">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkLight">Light</span><span class="sv-panel-meta">the Eye's green glows only on what is alive or chosen · never a figure, never REAL, never a control that moves money</span></div>
+    <div class="sv-panel-body dk-stack">
+      <div class="dk-row">
+        <span class="sv-label">Ambience</span>
+        <div class="sv-seg" role="group" aria-label="Ambience" data-kit="ambience"><button type="button" class="sv-seg-btn" data-kit-ambience="magic" aria-pressed="true">Magic</button><button type="button" class="sv-seg-btn" data-kit-ambience="calm" aria-pressed="false">Calm</button><button type="button" class="sv-seg-btn" data-kit-ambience="off" aria-pressed="false">Off</button></div>
+        <span class="sv-panel-meta">Preview on this page only: nothing is saved. Magic is all of it; Calm keeps the still light and nothing moves; Off is the approved look exactly.</span>
+      </div>
+      <div class="dk-grid">
+        <div class="dk-stack"><span class="sv-label">The active nav row</span><span class="dk-navbox"><span class="nav-link active"><span class="icon">&#9673;</span>Operations Center</span></span></div>
+        <div class="dk-stack"><span class="sv-label">Live dots, still</span><div class="dk-row"><span class="sv-fresh sv-fresh--live">eToro · live</span><span class="dk-row"><span class="status-dot online"></span>Engine healthy</span></div></div>
+        <div class="dk-stack"><span class="sv-label">A side, hovered or focused</span><div class="dk-row"><button type="button" class="btn btn-buy">Buy</button><button type="button" class="btn btn-sell">Sell</button><button type="button" class="btn btn-primary">Save</button></div><span class="sv-panel-meta">A side lights in its own colour, inside its own box. The primary button takes no light.</span></div>
+      </div>
+      <span class="sv-label">Hero cards · lit only while the figure is live, never around REAL</span>
+      <div class="dk-heroes">
+        <div class="sv-panel sv-panel--hero" data-kit="hero-live"><div class="sv-panel-body dk-stack"><span class="sv-label">XAUUSD · live</span><span class="sv-kpi-value">2,648.12</span><span class="sv-fresh sv-fresh--live">eToro · live</span></div></div>
+        <div class="sv-panel sv-panel--hero" data-kit="hero-stale"><div class="sv-panel-body dk-stack"><span class="sv-label">XAUUSD · stale</span><span class="sv-kpi-value">2,648.12</span><span class="sv-fresh sv-fresh--stale">eToro · <span class="sv-fresh-age">3 min</span> · <span class="sv-fresh-stale-word">stale</span></span></div></div>
+        <div class="sv-panel sv-panel--hero" data-kit="hero-real"><div class="sv-panel-body dk-stack"><span class="dk-row"><span class="sv-label">Real money</span>{% money_world "live" compact="1" %}</span><span class="sv-kpi-value">2,648.12</span><span class="sv-fresh sv-fresh--live">eToro · live</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  {# ── The magic kept: a page head on the void (stage S2). Its words wear the void's dark halo; its age holds a figure, so it sits on an opaque pill. ── #}
+  <div class="sv-page-head sv-on-void" data-kit="page-head">
+    <div><span class="sv-overline">Positions</span><p class="sv-page-head-lead">What is open now, whose money it is, and what each position is doing.</p></div>
+    <span class="sv-pill sv-pill--solid"><span class="sv-fresh sv-fresh--live">eToro · live</span><span class="sv-fresh-age">3 s</span></span>
+  </div>
+  {# A lone figure under a page's last card (a refresh note): on the void it takes the same solid pill, in the dark theme only. #}
+  <p data-kit="void-pill"><span class="sv-void-pill">Auto-refresh every 10s · 12:00:00</span></p>
+
+  {# ── The magic kept: moments, on synthetic rows at the three row heights ── #}
+  <section class="sv-panel" aria-labelledby="dkMoments" data-kit="moments">
+    <div class="sv-panel-head"><span class="sv-panel-title" id="dkMoments">Moments</span><span class="sv-panel-meta">light only when something real happened · each plays once · synthetic rows</span></div>
+    <div class="sv-panel-body dk-stack">
+      <div class="dk-row">
+        <button type="button" class="btn btn-sm btn-secondary" data-kit-play="fill">Play a fill</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-kit-play="signal">Play a new signal</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-kit-play="stop">Play a stop moved</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-kit-play="close">Play a close</button>
+      </div>
+      <p class="sv-panel-meta">A fill: the Eye flares and a light runs under the new row, up to the action cell and never under Close. A new signal: a light along its card and the rail's icon, once. A stop moved: the approved neutral wash. A close: the Eye, softer.</p>
+      <div class="dk-table-wrap dk-stage">
+        <table class="sv-table" data-kit="moment-rows">
+          <thead><tr><th>Symbol</th><th>Side</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">P&amp;L</th><th></th></tr></thead>
+          <tbody>
+            <tr class="dk-h28" data-kit-row="28"><td class="sv-sym">XAUUSD</td><td><span class="sv-side sv-side--down">Short</span></td><td class="num">2,648.0</td><td class="num">2,672.0</td><td class="num up" data-kit-pnl>+31.20</td><td><button type="button" class="btn btn-sm btn-danger">Close</button></td></tr>
+            <tr data-kit-row="32"><td class="sv-sym">EURUSD</td><td><span class="sv-side sv-side--up">Long</span></td><td class="num">1.0842</td><td class="num" data-kit-stop>1.0810</td><td class="num down" data-kit-pnl>-12.40</td><td><button type="button" class="btn btn-sm btn-danger">Close</button></td></tr>
+            <tr class="dk-h44" data-kit-row="44"><td class="sv-sym">BTCUSD<small>two lines</small></td><td><span class="sv-side sv-side--up">Long</span></td><td class="num">60,600.0</td><td class="num">58,800.0</td><td class="num up" data-kit-pnl>+300.00</td><td><button type="button" class="btn btn-sm btn-danger">Close</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dk-row" data-kit="moment-signal">
+        <span class="dk-dock"><span class="dk-icon" data-kit-icon>&#x25C8;</span><span class="sv-count">3</span></span>
+        <div class="dk-card" data-kit-card><span class="sv-side sv-side--up">Long</span><span class="sv-num">XAUUSD</span><span class="sv-panel-meta">a new signal's card</span></div>
+      </div>
     </div>
   </section>
 
@@ -264,4 +353,35 @@ The layout below is this page's own and takes tokens only.
 
 </div>
 <!-- /dk-page -->
+{% endblock %}
+{% block extra_js %}
+<script>
+/* /design/kit/: the play buttons of the moments and the Ambience preview.
+   This page only: nothing is posted, saved or announced. */
+(function () {
+    function all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+    function pressed() {
+        var now = document.body.getAttribute('data-sv-ambience') || 'magic';
+        all('[data-kit-ambience]').forEach(function (b) {
+            b.setAttribute('aria-pressed', b.getAttribute('data-kit-ambience') === now ? 'true' : 'false');
+        });
+    }
+    pressed();
+    document.addEventListener('click', function (e) {
+        var t = e.target && e.target.closest ? e.target.closest('[data-kit-play], [data-kit-ambience]') : null;
+        if (!t) return;
+        if (t.hasAttribute('data-kit-ambience')) {
+            document.body.setAttribute('data-sv-ambience', t.getAttribute('data-kit-ambience'));
+            pressed();
+            return;
+        }
+        if (!window.SV || !SV.moments) return;
+        var kind = t.getAttribute('data-kit-play');
+        if (kind === 'fill') all('[data-kit-row]').forEach(function (row) { SV.moments.play('fill', row); });
+        else if (kind === 'signal') SV.moments.play('signal', document.querySelector('[data-kit-card]'), document.querySelector('[data-kit-icon]'));
+        else if (kind === 'stop') SV.moments.play('stop', document.querySelector('[data-kit-stop]'));
+        else if (kind === 'close') SV.moments.play('close');
+    });
+})();
+</script>
 {% endblock %}

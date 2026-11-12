@@ -11,8 +11,11 @@ filters (qty, src_name) on made-up values.
     is not signed in, get the 404 an unknown URL gets (no login redirect
     that would say the page exists).
   * EVERY COMPONENT IS ON IT, and nothing on it acts: every button is a
-    plain type="button" with no handler, no field sits in a form, nothing
-    is posted, and the view reads no model.
+    plain type="button" with no handler of its own, no field sits in a
+    form, nothing is posted, and the view reads no model. (Since the magic
+    kept, 2026-11-12: the play buttons of the three moments and the
+    Ambience preview change this page's own look, through one small script
+    outside the kit's markup; it reaches no server and saves nothing.)
   * THE NUMBER RULES: qty trims, groups and keeps eight significant digits;
     src_name prints a source's name, never its tag; unknown is the em-dash.
   * MEASURED, at the four desk widths: nothing on the page under 11 px, no
@@ -101,6 +104,35 @@ COMPONENTS = {
     "the departures' tags": "sr-gone-tag sr-gone-tag-target_reached",
     "TICKET by side": "sr-gone-btn sr-gone-btn-ticket",
     "BRING BACK": "↺ BRING BACK",
+    # The magic kept (2026-11-12): the faces, the light and the moments.
+    "the face specimen": 'data-kit="faces"',
+    "an Orbitron title with a figure in it": 'data-kit="face-display">SYN100 · 30D WINDOW #12<',
+    "a Rajdhani nav row": 'class="nav-link" data-kit="face-frame"',
+    "an Inter label": 'class="sv-label" data-kit="face-words"',
+    "JetBrains Mono figures": 'class="sv-num" data-kit="face-numbers"',
+    "the Eye-lit ladder": 'data-kit="eye-lit"',
+    "the light sources": 'data-kit="light-sources"',
+    "an active nav row": 'class="nav-link active"',
+    "a live component's dot": "status-dot online",
+    "a hero card, live": 'class="sv-panel sv-panel--hero" data-kit="hero-live"',
+    "a hero card, stale": 'class="sv-panel sv-panel--hero" data-kit="hero-stale"',
+    "a hero beside a REAL chip": 'class="sv-panel sv-panel--hero" data-kit="hero-real"',
+    "a page head on the void": 'class="sv-page-head sv-on-void" data-kit="page-head"',
+    "an overline": 'class="sv-overline"',
+    "the page head's solid age pill": 'class="sv-pill sv-pill--solid"',
+    "a lone figure's solid pill on the void": 'data-kit="void-pill"><span class="sv-void-pill">',
+    "the moments": 'data-kit="moments"',
+    "play a fill": 'data-kit-play="fill"',
+    "play a new signal": 'data-kit-play="signal"',
+    "play a stop moved": 'data-kit-play="stop"',
+    "play a close": 'data-kit-play="close"',
+    "a 28 px row": 'data-kit-row="28"',
+    "a 32 px row": 'data-kit-row="32"',
+    "a 44 px row": 'data-kit-row="44"',
+    "the Ambience control": 'data-kit="ambience"',
+    "Ambience Magic": 'data-kit-ambience="magic" aria-pressed="true">Magic<',
+    "Ambience Calm": 'data-kit-ambience="calm" aria-pressed="false">Calm<',
+    "Ambience Off": 'data-kit-ambience="off" aria-pressed="false">Off<',
 }
 
 
@@ -181,6 +213,24 @@ class DesignKitContentTests(TestCase):
             with self.subTest(hook=hook):
                 self.assertNotIn(hook, self.page)
 
+    def test_the_page_s_one_script_only_plays_and_previews(self):
+        """The play buttons and the Ambience preview (the magic kept,
+        2026-11-12) are wired by one script after the kit's markup: it
+        plays a moment by hand (SV.moments.play, never an event the
+        platform would hear) and sets this page's own Ambience attribute.
+        It posts nothing, saves nothing and dispatches nothing."""
+        tail = self.html[self.html.index("<!-- /dk-page -->"):]
+        scripts = [m for m in re.findall(r"<script>(.*?)</script>", tail, flags=re.S) if "data-kit-play" in m]
+        self.assertEqual(len(scripts), 1)
+        script = scripts[0]
+        self.assertIn("SV.moments.play", script)
+        self.assertIn("data-sv-ambience", script)
+        for never in ("fetch(", "XMLHttpRequest", "htmx", "localStorage", "sessionStorage",
+                      "dispatchEvent", "CustomEvent", "submit(", "location", "cookie", "WebSocket"):
+            with self.subTest(never=never):
+                self.assertNotIn(never, script)
+        self.assertIn("Preview on this page only", self.page)
+
     def test_the_view_reads_no_data(self):
         src = (ROOT / "dashboard" / "views_design_kit.py").read_text(encoding="utf-8")
         imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", src, flags=re.M)
@@ -233,7 +283,7 @@ KIT_PROBE = r"""(function () {
     var page = document.querySelector('.dk-page');
     Array.prototype.forEach.call(document.body.querySelectorAll('*'), function (el) {
         if (el.closest('script,style,noscript,template')) return;
-        if (el.closest('.grid-bg,.eye-glow-shadow,.globe-eye-bg,.globe-circuits-bg,#particles-canvas,#caustics-canvas,.se-cs-paragraph')) return;
+        if (el.closest('.grid-bg,.eye-glow-shadow,.globe-eye-bg,.globe-circuits-bg,#particles-canvas')) return;
         var own = false;
         for (var i = 0; i < el.childNodes.length; i++) {
             var n = el.childNodes[i];

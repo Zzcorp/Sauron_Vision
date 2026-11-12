@@ -10,6 +10,10 @@
    test_live_hooks_inventory.py), and no money control changes meaning
    (tests/test_money_controls_look.py). Nothing here is under 11 px.
 
+   The last block (the magic kept, 2026-11-12) brings Sauron's own theme
+   back in the frame: the display face on titles, light on what lives, the
+   void, the Eye's breath, moments for proven events. Never on a figure.
+
    /design/kit/ (staff only) shows every component on synthetic content. */
 
 
@@ -18,7 +22,8 @@
 
    Two loops are allowed, both meaningful: the live heartbeat dot (.sv-live
    -dot, a value's source alive) and the armed pill's beat (real money is
-   armed, sauron.css). Both stop under reduced motion. Every other infinite
+   armed, sauron.css). Both stop under reduced motion. (A third under
+   Ambience Magic only, the Eye's breath: the last block.) Every other infinite
    animation of the shell stops here: the brand eye's float and glow, the
    news and quote marquees (the wheel over them still moves them, and every
    quote is in the watchlist and the rail too), the idle Eye's ripples and
@@ -396,13 +401,13 @@ thead th,
 body:not(.light-mode) .sidebar { background: var(--sv-bg-1); border-right-color: var(--sv-line-1); }
 body:not(.light-mode) .sidebar-brand { border-bottom-color: var(--sv-line-1); }
 body:not(.light-mode) .sidebar-brand h1 { text-shadow: none; }
-.sidebar-brand .subtitle,
-.nav-section {
-    font-family: var(--sv-font-sans);
-    font-weight: 600;
-    letter-spacing: var(--sv-track-label);
-}
-.nav-link { font-size: var(--sv-fs-base); letter-spacing: 0; border-left-width: 2px; }
+/* The nav's faces are the frame's (the magic kept, 2026-11-12): the rows
+   and the brand's subtitle in Rajdhani 600, which at the base size + 2
+   takes Inter's width at the base size within 1.5 px on the longest
+   labels, so nothing reflows; the section heads join the display face
+   (the last block). The 2 px edge stays. */
+.sidebar-brand .subtitle { font-family: var(--sv-font-frame); font-weight: 600; font-size: 12px; letter-spacing: .3em; }
+.nav-link { font-family: var(--sv-font-frame); font-weight: 600; font-size: var(--sv-fs-nav); letter-spacing: .02em; border-left-width: 2px; }
 body:not(.light-mode) .nav-link { color: var(--sv-ink-2); }
 body:not(.light-mode) .nav-link:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-line-3); }
 body:not(.light-mode) .nav-link.active { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-eye); }
@@ -597,7 +602,10 @@ body:not(.light-mode) .hq-acct.hq-acct--live { border-left-color: var(--sv-real)
    Popovers (rail cards, quote cards, the bottom band's dropdowns, menus,
    hover cards, the notifications, the user menu, the live-status list):
    bg-2, a line-2 border, 6 px corners, the popover shadow, no glow. Their
-   placement, pinning and dismissal are their scripts', untouched. */
+   placement, pinning and dismissal are their scripts', untouched. Ask
+   Sauron's panel joined them on 2026-11-12: it was a see-through gradient
+   under a blur with a green glow, and its suggestions hold figures ("Top
+   rules · 30d"); no figure sits on glass. */
 
 body:not(.light-mode) {
     --pop-bg: var(--sv-bg-2);
@@ -625,7 +633,8 @@ body:not(.light-mode) .lsp-dropdown,
 body:not(.light-mode) .exchange-dropdown,
 body:not(.light-mode) .ticker-popup,
 body:not(.light-mode) .nf-pop,
-body:not(.light-mode) .pos-pop {
+body:not(.light-mode) .pos-pop,
+body:not(.light-mode) .se-chat-panel {
     background: var(--sv-bg-2);
     border: 1px solid var(--sv-line-2);
     box-shadow: var(--sv-shadow-pop);
@@ -1170,3 +1179,347 @@ input[type=checkbox], input[type=radio] { accent-color: var(--sv-eye); }
     0%   { background-color: color-mix(in srgb, var(--sv-ink-2) 14%, transparent); }
     100% { background-color: transparent; }
 }
+
+
+/* ══ THE MAGIC KEPT (2026-11-12) ═════════════════════════════════════════
+   The operator approved the look above and asked to keep Sauron's own
+   theme, "the magic, the prestige". It comes back in the frame and never
+   on the data:
+
+     - the display face, Orbitron, on the frame's titles, and Rajdhani on
+       the nav rows (above, in the nav's block);
+     - light on what lives: the wordmark, the Eye, the active row, a live
+       dot, the selected tab, a hero card while its figure is live. Never a
+       figure, a cell, a tile or a chip; never REAL, which is a fill, not a
+       light; never the Eye's green on a control that moves money. A BUY or
+       a SELL lights in its own side's colour, inside its own box, on hover
+       and focus only;
+     - the void behind opaque cards: light from above, a vignette, a still
+       grain, on two fixed composited layers. No figure sits on it;
+     - the Eye's breath and gaze, and moments that play once, for a proven
+       event only (static/js/sv-moments.js).
+
+   His Ambience decides how much: Magic (all of it), Calm (the still light,
+   nothing that moves) or Off, which is the approved look exactly: every
+   rule that lights anything sits under Magic or Calm, in the dark theme.
+   Light mode takes none of it (frozen). tests/test_magic_layer.py reads
+   the rules between this marker and the one that ends the block. */
+
+
+/* ── §4 The display face, on the frame only ──────────────────────────────
+   Orbitron in capitals, for titles: never a sentence, a button, a chip, a
+   table head, a figure or a money word. base.html loads it without digits,
+   so a digit in a title ("SMA 200", "Position #12") is drawn by JetBrains
+   Mono, the next face of the token's stack. */
+.sidebar-brand h1,
+.topbar-title,
+.card-title,
+.sv-panel-title,
+.sc-heading-title,
+.modal-title,
+.kbd-modal-title,
+.gollum-dialog .gl-title,
+.nav-section,
+.il-title,
+.sv-overline {
+    font-family: var(--sv-font-display);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--sv-track-display);
+}
+.topbar-title { font-size: 15px; }
+.card-title { font-size: 12px; }
+body:not(.light-mode) .card-title { color: var(--sv-ink-2); }
+.nav-section { letter-spacing: var(--sv-track-overline); }
+.il-title { font-weight: 900; }
+/* An overline: the small title above a page head (stage S2). */
+.sv-overline { font-size: var(--sv-fs-micro); letter-spacing: .2em; color: var(--sv-ink-3); }
+/* The wordmark: its own span named the old display face (Inter since the
+   approved look), over the brand rule's Orbitron; it takes the brand's. */
+.brand-text { font-family: inherit; font-size: 16px; font-weight: 700; letter-spacing: var(--sv-track-brand); }
+/* A money word inside a title wears the word face: BUY, SELL, REAL, LONG
+   and SHORT are never drawn in Orbitron. The position page's headline
+   ("Long EURCAD") is one, by its own class. */
+.sv-plain,
+.topbar-title .pd-title-long { font-family: var(--sv-font-sans); letter-spacing: var(--sv-track-label); }
+
+
+/* ── Light on the frame (Magic and Calm; Off is the approved look) ─────── */
+
+/* The wordmark: the one text that glows. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar-brand h1 { text-shadow: var(--sv-glow-brand-text); }
+
+/* The active nav row: the Eye's 2 px edge with its glow, a spill of light
+   fading to the right, the icon in the Eye's green. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active { background: var(--sv-spill-active), var(--sv-bg-3); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active::after {
+    content: ""; position: absolute; left: -2px; top: 4px; bottom: 4px; width: 2px;
+    background: var(--sv-eye); box-shadow: var(--sv-glow-edge);
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active .icon {
+    color: var(--sv-eye); filter: drop-shadow(0 0 4px rgba(0,232,104,.55));
+}
+
+/* Live dots: a price LIVE, a feed alive, a component healthy. Still: one
+   dot per page beats (.sv-live-dot, above), as in the approved look. The
+   quote band's dot says up, down or flat, not live, so it takes no light:
+   the Eye's green never marks a gain. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-fresh--live::before,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-live-dot,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .status-dot.online { box-shadow: var(--sv-glow-dot); }
+
+/* The selected tab and segment: the Eye's underline and a short glow that
+   hangs below it, outside the control's own box. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-tab.is-active,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-tab[aria-selected="true"],
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-seg-btn.is-active,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-seg-btn[aria-pressed="true"] {
+    box-shadow: inset 0 -2px 0 var(--sv-eye), 0 4px 10px -6px rgba(0,232,104,.6);
+}
+
+/* The money buttons that open or add to a position: their own side's
+   light, on hover and focus only, inside their own box (inset), so nothing
+   beside them changes; never when disabled. At rest they are as approved
+   (no shadow). The focus ring stays the 2 px outline above: no halo. No
+   light at all on the primary button (it is also the PIN-guarded TURN ON
+   that arms real money), on the protective outline (CLOSE, CLOSE ALL, turn
+   off), on the dialog's confirm or on the REAL family. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-long:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-buy:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-in); }
+/* Coral after jade: a bearish card's TAKE TRADE is a SELL. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-short:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-short:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-sell:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-in); }
+
+/* The hero card: a page's one headline figure (pages adopt it from stage
+   S2; /design/kit/ shows it). A 1 px edge of light on top and a glow above
+   it, outside the card. Lit only while its figure is live: a stale,
+   closed, reference or estimated value puts the light out. And dark around
+   a world marker: a card that holds REAL is never a hero. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero { position: relative; border-color: var(--sv-line-3); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero::before {
+    content: ""; position: absolute; left: 14px; right: 14px; top: -1px; height: 1px;
+    background: var(--sv-edge-hero); pointer-events: none;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero::after {
+    content: ""; position: absolute; top: -14px; height: 13px; left: 12%; right: 12%;
+    background: radial-gradient(60% 100% at 50% 100%, rgba(0,232,104,.30), rgba(0,232,104,0));
+    pointer-events: none;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-fresh--stale, .sv-fresh--closed, .sv-fresh--ref, .sv-est)::before,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-fresh--stale, .sv-fresh--closed, .sv-fresh--ref, .sv-est)::after { content: none; }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-world--live, .sv-venue--live, .tk-venue--live, .sv-armed-pill, .sv-adv-world.is-live, .pos-pop-venue.is-live, .hq-tag--live, .hq-brk--live, .ib-env--live, .bk-env--live)::before,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-world--live, .sv-venue--live, .tk-venue--live, .sv-armed-pill, .sv-adv-world.is-live, .pos-pop-venue.is-live, .hq-tag--live, .hq-brk--live, .ib-env--live, .bk-env--live)::after { content: none; }
+
+
+/* ── The void, and opaque grounds ────────────────────────────────────────
+   The page behind the cards: the Eye's light from above and a vignette on
+   one fixed layer, a still grain on another. Two composited layers, never
+   a background attached to the viewport, which the main thread repaints
+   behind every frame (measured: 2.6 times the cost at rest on a slow
+   CPU). <body> keeps its flat bg-0; the ember canvas (z-index 0) and the
+   layout stack above both. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])::before {
+    content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none; will-change: transform;
+    background: var(--sv-void-light), var(--sv-void-vignette);
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])::after {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; will-change: transform;
+    background-image: var(--sv-void-grain); opacity: var(--sv-grain-opacity);
+}
+
+/* No figure on the void or on glass. The cards were a gradient whose lower
+   40 % was 8 to 12 % see-through (496 elements in 92 templates): opaque
+   bg-1 now, within about 6 levels of what they read as. */
+body:not(.light-mode) :is(.card, .stat-box, .metric, .signal-item) { background: var(--sv-bg-1); }
+/* The instrument page's header (the symbol, the live price, the ticket's
+   two prices) sat on the void: it sits on a panel. The panel grows outward
+   into the page's own padding, so nothing inside the header moves. */
+body:not(.light-mode) .detail-header {
+    background: var(--sv-bg-1); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card);
+    padding: 12px 16px; margin: -13px -17px 11px;
+}
+@media (max-width: 768px) {
+    body:not(.light-mode) .detail-header { padding: 8px 10px; margin: -9px -11px 15px; }
+}
+/* And no figure on a see-through wash: what the shell and the two pages
+   with embers still drew behind a number is opaque now, the same tint
+   mixed onto the surface it sits on. The quote band's change (an 8 % wash
+   on the band's bg-1); the shared table's even rows (35 % of bg-3 on a
+   card's bg-1; :where() keeps both rules at the weight they had, and the
+   hover is restated after them as it was); Ask Sauron's suggestions (a
+   plain chip: the Eye's wash sat behind "30d"); the Operations Center's
+   selected tab, which holds its section's count and P&L (a selected
+   control's ground, bg-3, with no glow behind the figures; its Eye bar
+   stays). */
+body:not(.light-mode) .dh-chg.up { background: color-mix(in srgb, var(--sv-up) 8%, var(--sv-bg-1)); }
+body:not(.light-mode) .dh-chg.down { background: color-mix(in srgb, var(--sv-down) 8%, var(--sv-bg-1)); }
+:where(body:not(.light-mode)) .sv-perf-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--sv-bg-3) 35%, var(--sv-bg-1)); }
+:where(body:not(.light-mode)) .sv-perf-table tbody tr:hover { background: var(--sv-bg-3); }
+/* The positions book pins its last cell and paints the row's stripe in it
+   itself (sv-close-advice.css, --sv-pin-row, a 35 % wash over the card):
+   the pinned cell takes the same opaque stripe as its row, so the two
+   stay one colour. Under the pointer the row's own rule still decides. */
+body:not(.light-mode) .sv-perf-table > tbody > tr:nth-child(even):not(:hover) { --sv-pin-row: color-mix(in srgb, var(--sv-bg-3) 35%, var(--sv-bg-1)); }
+body:not(.light-mode) .se-suggest { background: var(--sv-bg-3); border-color: var(--sv-line-3); }
+body:not(.light-mode) .se-suggest:hover { background: var(--sv-bg-4); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+body:not(.light-mode) .oc-tab.active { background: var(--sv-bg-3); box-shadow: none; }
+/* What a page fills in after it loads sits on the same rule (/command/
+   swaps its tabs in and draws its day scheme by script; an instrument
+   prints its day change once a quote has one). The day scheme keeps its
+   soft centre, mixed onto its own bg-1 instead of laid over it (its
+   counts sit on it); an empty-state note keeps its 25 % tint, mixed onto
+   the card ("No fills in the last 24h" holds a figure); the instrument's
+   day change keeps its 10 % wash, mixed onto its header's panel. */
+body:not(.light-mode) .day-scheme-wrap { background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--sv-eye) 8%, var(--sv-bg-1)), var(--sv-bg-1) 55%); }
+body:not(.light-mode) :is(.oc-empty, .empty-state) { background: color-mix(in srgb, var(--sv-bg-3) 25%, var(--sv-bg-1)); }
+body:not(.light-mode) .dtl-chg.up { background: color-mix(in srgb, var(--sv-eye) 10%, var(--sv-bg-1)); }
+body:not(.light-mode) .dtl-chg.down { background: color-mix(in srgb, var(--sv-down) 10%, var(--sv-bg-1)); }
+
+/* Words that do sit on the void (a page head, stage S2) wear its own dark
+   halo, a shade in bg-0, not a glow; the embers dim near them
+   (sv-embers.js). A page head's age or source line holds a figure, so it
+   sits on an opaque pill and wears no halo. */
+body:not(.light-mode) .sv-on-void { text-shadow: 0 0 3px var(--sv-bg-0), 0 0 8px var(--sv-bg-0), 0 0 14px var(--sv-bg-0); }
+.sv-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sv-sp-5); flex-wrap: wrap; }
+.sv-page-head-lead { margin-top: 6px; max-width: var(--sv-measure); font-size: var(--sv-fs-lead); color: var(--sv-ink-1); }
+.sv-pill {
+    display: inline-flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px;
+    border-radius: var(--sv-radius-chip); font-size: var(--sv-fs-micro); color: var(--sv-ink-2); white-space: nowrap;
+}
+.sv-pill--solid { background: var(--sv-bg-1); border: 1px solid var(--sv-line-2); text-shadow: none; }
+/* A figure that would sit on the void outside a page head (the refresh
+   note under a page's last card) takes the same solid pill, in the dark
+   theme only: the light theme has no void, and stays as it was. */
+body:not(.light-mode) .sv-void-pill {
+    display: inline-flex; align-items: center; height: 24px; padding: 0 10px;
+    border-radius: var(--sv-radius-chip); background: var(--sv-bg-1); border: 1px solid var(--sv-line-2);
+    font-size: var(--sv-fs-micro); color: var(--sv-ink-2); white-space: nowrap;
+}
+
+
+/* ── The Eye mark, alive ─────────────────────────────────────────────────
+   Off keeps the approved mark: no halo, nothing moves (the rules at the
+   top of this sheet). Magic and Calm bring the halo back as a gradient (no
+   blur filter); under Magic, where motion is allowed, it breathes: opacity
+   and transform only, so the compositor runs it. The mark itself never
+   floats. Its iris looks toward the pointer (sv-moments.js). */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap::before {
+    opacity: .7; filter: none;
+    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.12) 36%, rgba(0,232,104,0) 68%);
+}
+@media (prefers-reduced-motion: no-preference) {
+    body:not(.light-mode)[data-sv-ambience="magic"] .brand-eye-wrap::before {
+        opacity: 1;
+        animation: sv-eye-breath var(--sv-dur-breath) ease-in-out infinite;
+    }
+}
+@keyframes sv-eye-breath {
+    0%, 100% { opacity: .5; transform: translate(-50%, -50%) scale(.88); }
+    50% { opacity: .95; transform: translate(-50%, -50%) scale(1.06); }
+}
+.sv-brand-iris { transition: transform 240ms var(--sv-ease); }
+
+/* The flare: a burst and a 1 px ring in one circle, once, when a fill is
+   proven (sv-moments.js sets .sv-flare; never for an order the broker only
+   holds, a quote or a refresh). A close flares at 60 %. Calm: one soft
+   glow in place, no ring. Off and reduced motion: none. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare::after {
+    content: ""; position: absolute; top: 50%; left: 50%; width: 70px; height: 70px;
+    box-sizing: border-box; border-radius: 50%; border: 1px solid rgba(0,232,104,.9);
+    background: radial-gradient(circle, rgba(170,255,205,.75) 0%, rgba(0,232,104,.42) 38%, rgba(0,232,104,0) 84%);
+    pointer-events: none; z-index: 0; opacity: 0;
+    transform: translate(-50%, -50%) scale(.6);
+    animation: sv-eye-flare var(--sv-dur-moment) var(--sv-ease) 1 both;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare--soft::after { animation-name: sv-eye-flare-soft; }
+body:not(.light-mode)[data-sv-ambience="calm"] .brand-eye-wrap.sv-flare::after { border-color: transparent; animation-name: sv-eye-glow; }
+@keyframes sv-eye-flare {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+    12% { opacity: 1; transform: translate(-50%, -50%) scale(.9); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.9); }
+}
+@keyframes sv-eye-flare-soft {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+    12% { opacity: .6; transform: translate(-50%, -50%) scale(.9); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.9); }
+}
+@keyframes sv-eye-glow {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    20% { opacity: .6; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+
+/* ── Moments: light only when something real happened ────────────────────
+   Each is its own small light, placed by sv-moments.js, played once and
+   removed: only the light's opacity and background-position move, never a
+   content element's colour, transform or size, never a button, never a
+   figure. A stop that moved keeps the approved neutral wash (.sv-flash).
+
+   A fill: one light along the new row's bottom hairline, 2 px (the
+   hairline and one faint pixel above it, where no text reaches), from the
+   row's left edge to the action cell's left edge, so CLOSE never takes it.
+   No shadow, nothing spills. */
+.sv-row-light { position: absolute; height: 2px; pointer-events: none; z-index: 2; opacity: 0; }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-row-light {
+    background:
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.95) 45%, rgba(190,255,215,1) 50%, rgba(0,232,104,.95) 55%, rgba(0,232,104,0)) 100% 100% / 300% 1px no-repeat,
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.22) 45%, rgba(0,232,104,.30) 50%, rgba(0,232,104,.22) 55%, rgba(0,232,104,0)) 100% 0 / 300% 1px no-repeat;
+    animation: sv-light-run var(--sv-dur-sweep) var(--sv-ease) 1 both;
+}
+/* A new signal: the same light along its card's top edge (the bright line
+   on the edge itself, the faint one under it). */
+.sv-moment-arrive::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    pointer-events: none; z-index: 2; opacity: 0;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-moment-arrive::after {
+    background:
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.22) 45%, rgba(0,232,104,.30) 50%, rgba(0,232,104,.22) 55%, rgba(0,232,104,0)) 100% 100% / 300% 1px no-repeat,
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.95) 45%, rgba(190,255,215,1) 50%, rgba(0,232,104,.95) 55%, rgba(0,232,104,0)) 100% 0 / 300% 1px no-repeat;
+    animation: sv-light-run var(--sv-dur-sweep) var(--sv-ease) 1 both;
+}
+/* Calm: the lights fade in place; they do not travel. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-row-light.sv-row-light--still,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-moment-arrive.sv-moment--still::after {
+    background-position: 50% 100%, 50% 0;
+    animation-name: sv-light-fade;
+}
+/* The rail's signal icon: a round light behind the glyph, once. The count
+   beside it stays an opaque bubble. */
+.sv-moment-icon { position: relative; isolation: isolate; }
+.sv-moment-icon::before {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    z-index: -1; pointer-events: none; opacity: 0;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-moment-icon::before {
+    background: radial-gradient(circle, rgba(0,232,104,.42) 0%, rgba(0,232,104,.14) 45%, rgba(0,232,104,0) 70%);
+    animation: sv-moment-icon var(--sv-dur-moment) ease-out 1 both;
+}
+@keyframes sv-light-run {
+    0% { opacity: 1; background-position: 100% 100%, 100% 0; }
+    92% { opacity: 1; background-position: 0% 100%, 0% 0; }
+    100% { opacity: 0; background-position: 0% 100%, 0% 0; }
+}
+@keyframes sv-light-fade {
+    0% { opacity: 0; }
+    30% { opacity: 1; }
+    100% { opacity: 0; }
+}
+@keyframes sv-moment-icon {
+    0% { opacity: 0; }
+    12% { opacity: 1; }
+    100% { opacity: 0; }
+}
+/* Reduced motion: no moment, no flare (the script sets none; this holds
+   it). The words and the approved washes still say what happened. */
+@media (prefers-reduced-motion: reduce) {
+    .sv-row-light, .sv-moment-arrive::after, .sv-moment-icon::before, .brand-eye-wrap.sv-flare::after { display: none; }
+}
+
+/* ══ END OF THE MAGIC KEPT ═══════════════════════════════════════════════ */

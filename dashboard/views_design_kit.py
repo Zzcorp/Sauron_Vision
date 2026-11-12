@@ -18,22 +18,22 @@ from core.views_book import is_staff
 #: §3: the palette, by role, as the tokens name it.
 PALETTE = (
     ("Surfaces", (
-        ("--sv-bg-0", "#070A09", "the void: page, chart, input wells"),
-        ("--sv-bg-1", "#0C1110", "cards, panels, sidebar, rail"),
-        ("--sv-bg-2", "#121918", "raised: popovers, dialogs, heads"),
-        ("--sv-bg-3", "#182120", "controls, row hover"),
-        ("--sv-bg-4", "#1F2A28", "selected row, pressed control"),
+        ("--sv-bg-0", "#040B07", "the void: page, chart, input wells"),
+        ("--sv-bg-1", "#07130C", "cards, panels, sidebar, rail"),
+        ("--sv-bg-2", "#0D1B14", "raised: popovers, dialogs, heads"),
+        ("--sv-bg-3", "#14231B", "controls, row hover"),
+        ("--sv-bg-4", "#1B2C23", "selected row, pressed control"),
     )),
     ("Lines", (
-        ("--sv-line-1", "#1B2422", "hairlines between rows"),
-        ("--sv-line-2", "#26322F", "card and input borders"),
-        ("--sv-line-3", "#36443F", "strong and hover borders"),
+        ("--sv-line-1", "#14261D", "hairlines between rows"),
+        ("--sv-line-2", "#1D3528", "card and input borders"),
+        ("--sv-line-3", "#2C4739", "strong and hover borders"),
     )),
     ("Ink", (
-        ("--sv-ink-1", "#E9EFED", "values, primary text"),
-        ("--sv-ink-2", "#B4C0BC", "secondary text, zero"),
-        ("--sv-ink-3", "#8A9894", "labels, captions, axes, unknown"),
-        ("--sv-ink-4", "#59655F", "disabled and placeholder only"),
+        ("--sv-ink-1", "#E6F1EA", "values, primary text"),
+        ("--sv-ink-2", "#ACC4B6", "secondary text, zero"),
+        ("--sv-ink-3", "#839B8D", "labels, captions, axes, unknown"),
+        ("--sv-ink-4", "#55665D", "disabled and placeholder only"),
     )),
     ("Meaning", (
         ("--sv-eye", "#00E868", "the Eye: live, selected, focus"),

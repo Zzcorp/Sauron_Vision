@@ -43,6 +43,13 @@ class renders synthetic pages through the test client and computes the
 colours in a headless Chromium with every network URL blocked (skipped,
 not failed, where the machine has none).
 
+THE MAGIC KEPT (2026-11-12). Sauron's light came back on the frame, and
+this module holds its line on the money controls: at rest every one of them
+is as S1a left it (no shadow at all); the Eye's green never reaches one,
+with hover and focus forced; a BUY or a SELL lights in its own side's
+colour, inside its own box only (inset), so nothing beside it changes;
+TURN ON, CLOSE, CLOSE ALL, the dialog's confirm and PASS take no light.
+
 Run with:  python manage.py test tests.test_money_controls_look
 """
 import json
@@ -55,7 +62,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase
 
 from tests.test_close_advice import CHROME, _legacy, _quote, _trade
-from tests.test_design_tokens import block, decls, read, rules
+from tests.test_design_tokens import PALETTE, block, decls, read, rules
 from tests.test_ui_s0_fixes import _get, _measure
 
 ROOT = pathlib.Path(settings.BASE_DIR)
@@ -285,6 +292,23 @@ class ProtectiveButtonsLookTests(SimpleTestCase):
         for value in rule.values():
             self.assertNotIn("--accent", value)
             self.assertNotIn("rgba(0,232,104", value)
+        # Hovered and focused too (the magic kept, 2026-11-12): the primary
+        # button is also the PIN-guarded TURN ON that arms real money, so no
+        # rule of the shell gives it, in any state, a glow or the Eye's green.
+        states = 0
+        for rel in (SAURON, KIT):
+            for prelude, body, ctx in rules(read(rel)):
+                if ".btn-primary" not in prelude or "light-mode" in prelude:
+                    continue
+                states += ":hover" in prelude or ":focus" in prelude
+                for prop, value in decls(body):
+                    with self.subTest(file=rel, rule=prelude, prop=prop):
+                        self.assertNotIn("--sv-glow", value)
+                        self.assertNotIn("--sv-eye", value)
+                        self.assertNotIn("0,232,104", value.replace(" ", ""))
+                        if prop in ("box-shadow", "text-shadow", "filter"):
+                            self.assertNotRegex(value, r"--accent\b(?!-)")
+        self.assertGreater(states, 0)
 
     def test_the_buttons_keep_their_words_and_hooks(self):
         positions = read("templates/dashboard/positions_list.html")
@@ -582,8 +606,10 @@ class MoneyControlsMeasuredTests(TestCase):
 # Measured: the review of 2026-11-07
 # ══════════════════════════════════════════════════════════════════════════
 
-REAL, INK1 = rgb_of("#CC3A40"), rgb_of("#E9EFED")
-LINE2, LINE3 = rgb_of("#26322F"), rgb_of("#36443F")
+# The neutrals are the Eye-lit ones since 2026-11-12 (a look, updated:
+# tests/test_design_tokens.PALETTE holds them, at S1a's lightness).
+REAL, INK1 = rgb_of("#CC3A40"), rgb_of(PALETTE["--sv-ink-1"])
+LINE2, LINE3 = rgb_of(PALETTE["--sv-line-2"]), rgb_of(PALETTE["--sv-line-3"])
 WARN, GOLD = rgb_of("#F29B38"), rgb_of("#D6BC5E")
 CLEAR = "rgba(0, 0, 0, 0)"
 
@@ -865,3 +891,236 @@ class PhoneTapFloorMeasuredTests(TestCase):
         for b in close:
             with self.subTest(button=b["text"]):
                 self.assertGreaterEqual(b["h"], 48, b)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Measured: the light and the money controls (the magic kept, 2026-11-12)
+# ══════════════════════════════════════════════════════════════════════════
+
+#: The controls that open or add to a position, and the side each wears.
+SIDE_CONTROLS = (
+    (".sr-popup:has(.sr-pop-dir-bullish) .sr-pop-btn-act", "up"),
+    (".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn-act", "down"),
+    (".dh-pop .sr-pop-btn-act, .wl-pop .sr-pop-btn-act", "up"),
+    (".dh-pop .sr-pop-btn-short, .wl-pop .sr-pop-btn-short", "down"),
+    (".tk-long", "up"), (".tk-short", "down"),
+    (".dk-page .btn.btn-buy:not([disabled])", "up"), (".dk-page .btn.btn-sell:not([disabled])", "down"),
+    ('.sr-gone-row[data-side="long"] .sr-gone-btn-ticket', "up"),
+    ('.sr-gone-row[data-side="short"] .sr-gone-btn-ticket', "down"),
+)
+#: The controls that take no light at all: the protective ones, TURN ON,
+#: the dialog's confirm, PASS, and a BUY or a SELL that is disabled.
+DARK_CONTROLS = ("[data-sv-close-trade]", "#svCloseAll", "button.btn-danger", "button.btn-primary",
+                 ".sv-dialog-btn--go", ".sr-pop-btn-pass", ".btn.btn-stop",
+                 "[data-probe-off]")
+LIGHT_RGB = {"up": "36, 181, 130", "down": "255, 107, 110", "eye": "0, 232, 104"}
+
+CONTROLS_PROBE = r"""(function (sides, dark) {
+  function read(sel, side) {
+    return Array.prototype.map.call(document.querySelectorAll(sel), function (el) {
+      var c = getComputedStyle(el);
+      return { sel: sel, side: side, text: (el.textContent || '').trim().slice(0, 24), shadow: c.boxShadow,
+               textShadow: c.textShadow, filter: c.filter, bg: c.backgroundColor, img: c.backgroundImage,
+               outline: c.outlineStyle + ' ' + c.outlineColor };
+    });
+  }
+  var out = [];
+  sides.forEach(function (s) { out = out.concat(read(s[0], s[1])); });
+  dark.forEach(function (s) { out = out.concat(read(s, null)); });
+  return out;
+})"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class MoneyControlsLightMeasuredTests(TestCase):
+    """Every §10 control with :hover and :focus-visible forced (the
+    DevTools' own switch), per Ambience, on /command/, /positions/, /ops/,
+    an instrument page and the kit, at 1440."""
+
+    URLS = ("/command/", "/positions/", "/ops/", "/instruments/BTCUSD/", "/design/kit/")
+    MODES = ("magic", "calm", "off")
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.test_magic_layer import PROBES, _Browser, _book, _file_page, _pages
+        client = _book("magic_money")
+        pages = {u: _file_page(m) for u, m in _pages(client, cls.URLS).items()}
+        everything = ", ".join([s for s, _side in SIDE_CONTROLS] + list(DARK_CONTROLS))
+        probe = CONTROLS_PROBE + "(%s, %s)" % (json.dumps(SIDE_CONTROLS), json.dumps(DARK_CONTROLS))
+        b = _Browser(pages, "sv-magic-money-")
+        try:
+            sid = b.tab()
+            cls.rest, cls.forced, cls.ring = {}, {}, []
+            for url in cls.URLS:
+                b.open(sid, url, PROBES)
+                # A disabled BUY and SELL, in both spellings, as pages print them.
+                b.js(sid, "(function () { var d = document.createElement('div');"
+                          " d.innerHTML = '<button type=\"button\" class=\"btn btn-buy\" disabled data-probe-off>Buy</button>'"
+                          " + '<button type=\"button\" class=\"btn btn-sell disabled\" data-probe-off>Sell</button>';"
+                          " (document.querySelector('.page-content') || document.body).appendChild(d); return 0; })()")
+                for mode in cls.MODES:
+                    b.js(sid, "__sv.mode('%s'); __sv.frame().then(function () { return 0; })" % mode)
+                    cls.rest[(url, mode)] = b.js(sid, probe)
+                b.force(sid, everything, ["hover", "focus-visible", "focus"])
+                for mode in cls.MODES:
+                    b.js(sid, "__sv.mode('%s'); __sv.frame().then(function () { return 0; })" % mode)
+                    cls.forced[(url, mode)] = b.js(sid, probe)
+            # The neighbours: one control at a time, forced, in a picture of
+            # its box and the 24 px around it, under Magic and under Off.
+            for url, selectors in (("/design/kit/", (".dk-page .btn.btn-buy:not([disabled])",
+                                                     ".dk-page .btn.btn-sell:not([disabled])",
+                                                     '.sr-gone-row[data-side="long"] .sr-gone-btn-ticket',
+                                                     '.sr-gone-row[data-side="short"] .sr-gone-btn-ticket')),
+                                   ("/instruments/BTCUSD/", (".tk-long", ".tk-short")),
+                                   ("/command/", (".sr-popup:has(.sr-pop-dir-bullish) .sr-pop-btn-act",
+                                                  ".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn-act"))):
+                b.open(sid, url, PROBES)
+                b.js(sid, "__sv.settle()")      # the page has landed before a box is read
+                for sel in selectors:
+                    # A rail card is opened as a click opens it (a hover card
+                    # is not displayed where the browser reports no hover),
+                    # one at a time, and set where the page's script would
+                    # set it: inside the viewport.
+                    box = b.js(sid, "(function () { var e = document.querySelector(%s); if (!e) return null;"
+                                    " Array.prototype.forEach.call(document.querySelectorAll('.sr-popup'), function (p) {"
+                                    "   p.classList.remove('sv-pinned', 'show'); });"
+                                    " var pop = e.closest('.sr-popup');"
+                                    " if (pop) { pop.classList.add('sv-pinned', 'show'); pop.style.top = '90px'; pop.style.left = '420px';"
+                                    "   pop.style.right = 'auto'; pop.style.bottom = 'auto'; pop.style.transform = 'none'; }"
+                                    " else e.scrollIntoView({ block: 'center' });"
+                                    " var r = e.getBoundingClientRect();"
+                                    " return r.width && r.top >= 24 && r.bottom <= innerHeight - 24 ? [r.left, r.top, r.width, r.height] : null; })()"
+                               % json.dumps(sel))
+                    if not box:
+                        continue
+                    clip = (max(0, int(box[0]) - 24), max(0, int(box[1]) - 24), int(box[2]) + 49, int(box[3]) + 49)
+                    node = b.nodes(sid, sel)[:1]
+                    shots = {}
+                    for state in ("rest", "forced"):
+                        b.chrome.call("CSS.forcePseudoState", {"nodeId": node[0], "forcedPseudoClasses":
+                                      ["hover", "focus-visible", "focus"] if state == "forced" else []}, session=sid)
+                        for mode in ("magic", "off"):
+                            # settled: the page's entrance and the hover's own
+                            # transition are at their end in every picture
+                            b.js(sid, "__sv.mode('%s'); __sv.frame().then(__sv.settle)" % mode)
+                            shots[(state, mode)] = b.shot(sid, clip)
+                    b.chrome.call("CSS.forcePseudoState", {"nodeId": node[0], "forcedPseudoClasses": []}, session=sid)
+                    cls.ring.append((url, sel, (int(box[0]) - clip[0], int(box[1]) - clip[1],
+                                               int(box[0] + box[2] + 0.999) - clip[0],
+                                               int(box[1] + box[3] + 0.999) - clip[1]), shots))
+        finally:
+            b.close()
+
+    def by_side(self, state, mode):
+        got = {"up": [], "down": [], None: []}
+        for (url, m), controls in state.items():
+            if m == mode:
+                for c in controls:
+                    got[c["side"]].append(dict(c, url=url))
+        return got
+
+    def test_the_fixture_reaches_every_control(self):
+        seen = {c["sel"] for controls in self.rest.values() for c in controls}
+        for sel, _side in SIDE_CONTROLS:
+            self.assertIn(sel, seen)
+        for sel in DARK_CONTROLS:
+            self.assertIn(sel, seen)
+
+    def test_at_rest_every_money_button_has_no_shadow(self):
+        for (url, mode), controls in sorted(self.rest.items()):
+            for c in controls:
+                with self.subTest(url=url, mode=mode, control=c["sel"], text=c["text"]):
+                    self.assertEqual((c["shadow"], c["textShadow"], c["filter"]), ("none", "none", "none"))
+
+    def test_the_eye_s_green_never_reaches_a_money_control(self):
+        """Hover and focus forced, in every Ambience: no shadow, text-shadow
+        or filter of a §10 control carries the Eye's green. (S1a's focus
+        outline is the one Eye ring a focused control keeps.)"""
+        for (url, mode), controls in sorted(self.forced.items()):
+            self.assertGreater(len(controls), 3, (url, mode))
+            for c in controls:
+                with self.subTest(url=url, mode=mode, control=c["sel"], text=c["text"]):
+                    for prop in ("shadow", "textShadow", "filter"):
+                        self.assertNotIn(LIGHT_RGB["eye"], c[prop])
+                        self.assertNotIn("120, 255, 180", c[prop])
+
+    def test_a_side_lights_in_its_own_colour_inside_its_own_box(self):
+        """Under Magic and Calm a BUY lights jade and a SELL coral, every
+        layer inset; a bearish card's TAKE TRADE lights coral, never jade."""
+        for mode in ("magic", "calm"):
+            got = self.by_side(self.forced, mode)
+            for side, other in (("up", "down"), ("down", "up")):
+                self.assertGreater(len(got[side]), 3)
+                for c in got[side]:
+                    with self.subTest(mode=mode, url=c["url"], control=c["sel"]):
+                        self.assertIn(LIGHT_RGB[side], c["shadow"])
+                        self.assertNotIn(LIGHT_RGB[other], c["shadow"])
+                        for layer in re.split(r",\s*(?=rgb)", c["shadow"]):
+                            self.assertTrue(layer.endswith("inset"), layer)
+                        self.assertEqual((c["textShadow"], c["filter"]), ("none", "none"))
+        bearish = [c for c in self.by_side(self.forced, "magic")["down"] if "bearish" in c["sel"]]
+        self.assertTrue(bearish)
+
+    def test_off_keeps_s1a_s_hover_with_no_light(self):
+        got = self.by_side(self.forced, "off")
+        for side in ("up", "down"):
+            for c in got[side]:
+                with self.subTest(url=c["url"], control=c["sel"]):
+                    self.assertEqual((c["shadow"], c["textShadow"], c["filter"]), ("none", "none", "none"))
+
+    def test_the_protective_buttons_turn_on_the_confirm_and_a_disabled_side_take_no_light(self):
+        for mode in self.MODES:
+            got = self.by_side(self.forced, mode)[None]
+            self.assertGreater(len(got), 8)
+            for c in got:
+                with self.subTest(mode=mode, url=c["url"], control=c["sel"], text=c["text"]):
+                    for rgb in LIGHT_RGB.values():
+                        self.assertNotIn(rgb, c["shadow"])
+                    self.assertEqual((c["textShadow"], c["filter"]), ("none", "none"))
+
+    def test_turn_on_is_no_green_slab_hovered_or_focused(self):
+        seen = 0
+        for mode in self.MODES:
+            for c in self.forced[("/ops/", mode)]:
+                if c["sel"] != "button.btn-primary":
+                    continue
+                seen += 1
+                with self.subTest(mode=mode, button=c["text"]):
+                    self.assertEqual(c["img"], "none")
+                    self.assertFalse(is_green(c["bg"]), c)
+                    self.assertTrue(is_neutral(c["bg"]), c)
+        self.assertGreater(seen, 0)
+
+    def test_a_lit_control_changes_nothing_beside_it(self):
+        """With one control forced into hover and focus, the picture of the
+        24 px around it is, under Magic, what it is under Off: the side's
+        light adds nothing outside the control's own box (S1a's own hover
+        wash and focus ring are in both pictures). The control's own focus
+        ring, 2 px at 2 px, is the control's: what is compared is what lies
+        beyond it, where every other element's box is."""
+        self.assertGreaterEqual(len(self.ring), 6)
+        for url, sel, box, shots in self.ring:
+            a, b = shots[("rest", "magic")].load(), shots[("rest", "off")].load()
+            c, d = shots[("forced", "magic")].load(), shots[("forced", "off")].load()
+            w, h = shots[("rest", "magic")].size
+            ring = same = spilt = inside = 0
+
+            def differ(p, q):       # by more than 2 levels, this layer's standard for a pixel
+                return max(abs(p[0] - q[0]), abs(p[1] - q[1]), abs(p[2] - q[2])) > 2
+
+            for y in range(h):
+                for x in range(w):
+                    if box[0] <= x < box[2] and box[1] <= y < box[3]:
+                        inside += differ(c[x, y], d[x, y])
+                        continue
+                    if box[0] - 4 <= x < box[2] + 4 and box[1] - 4 <= y < box[3] + 4:
+                        continue            # its own focus ring
+                    ring += 1
+                    if differ(a[x, y], b[x, y]):
+                        continue            # lit by something else at rest (the void's grain)
+                    same += 1
+                    spilt += differ(c[x, y], d[x, y])
+            with self.subTest(url=url, control=sel):
+                self.assertGreater(same, ring * 0.5)
+                self.assertEqual(spilt, 0)
+                self.assertGreater(inside, 0)       # the light is there, inside

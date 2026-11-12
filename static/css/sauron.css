@@ -174,11 +174,6 @@
             position: fixed; top: 0; left: 0;
             width: 100%; height: 100%; z-index: 0; pointer-events: none;
         }
-        #caustics-canvas {
-            position: fixed; top: 0; left: 0;
-            width: 100%; height: 100%; z-index: 0; pointer-events: none;
-            opacity: 0.06; mix-blend-mode: screen;
-        }
         .grid-bg {
             position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
             z-index: 0; pointer-events: none;
@@ -195,15 +190,22 @@
         /* A calm background (UI plan §8, S1a, 2026-11-06). Nothing moves on
            a work page unless a value moved or the operator acted, and
            nothing sits behind a number: the drifting grid, the globe-eye
-           and its glow, the circuit board, the embers and ash, the
-           caustics and the two code-stream paragraphs are not displayed on
-           the pages this sheet styles. Their animation loops in base.html
-           do not start when their layer is not displayed, nor under reduced
-           motion. The atmosphere stays where it belongs: the lock, the
-           login and the intro, standalone pages with their own layers.
-           !important because no later rule may bring one back. */
-        .grid-bg, .eye-glow-shadow, .globe-eye-bg, .globe-circuits-bg,
-        #particles-canvas, #caustics-canvas, .se-cs-paragraph { display: none !important; }
+           and its glow and the circuit board are not displayed on the pages
+           this sheet styles. The atmosphere stays where it belongs: the
+           lock, the login and the intro, standalone pages with their own
+           layers. !important because no later rule may bring one back. */
+        .grid-bg, .eye-glow-shadow, .globe-eye-bg, .globe-circuits-bg { display: none !important; }
+        /* The embers (the magic kept, 2026-11-12): calm, behind opaque
+           cards, and only where all three hold: the page opted in (<body
+           data-sv-embers>: it proved no figure of its sits on the void),
+           the operator's Ambience is Magic, and the theme is dark.
+           static/js/sv-embers.js draws them and schedules nothing where
+           this rule hides the canvas. The caustics canvas and the two
+           code-stream paragraphs of invented log lines are gone from the
+           page, with their rules. */
+        body:not([data-sv-embers]) #particles-canvas,
+        body:not([data-sv-ambience="magic"]) #particles-canvas,
+        body.light-mode #particles-canvas { display: none !important; }
         /* No z-index here. It used to be `z-index: 1`, which established a
            stacking context over the entire application shell — so every modal
            rendered into {% block content %} was trapped inside it and painted
@@ -222,8 +224,9 @@
             display: flex; flex-direction: column; z-index: 100; overflow-y: auto;
         }
         .sidebar-brand { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); overflow: visible; }
-        /* The wordmark keeps Orbitron (2026-11-06): --font-display is Inter
-           now, and Orbitron loads as a subset carrying SAURON VISION alone. */
+        /* The wordmark keeps Orbitron (2026-11-06): --font-display is Inter,
+           and --sv-font-brand reads the frame's display face (Orbitron for
+           the wordmark and the titles, sv-kit.css; 2026-11-12). */
         .sidebar-brand h1 {
             font-family: var(--sv-font-brand, var(--font-display)); font-size: 15px; font-weight: 700;
             letter-spacing: 4px; color: var(--accent);
@@ -750,7 +753,6 @@
         body.light-mode .globe-eye-bg [stroke]:not([stroke="none"]) { stroke: #00994d !important; }
         body.light-mode .globe-eye-bg circle[fill="#00e868"] { fill: #00994d !important; }
         body.light-mode #particles-canvas { opacity: 0.4; }
-        body.light-mode #caustics-canvas { opacity: 0.02; }
 
         /* Light mode: remove ALL shadows from cards, headbands, and UI elements */
         body.light-mode .card,
@@ -4044,71 +4046,6 @@
         .globe-circuits-bg .bg-diff path { animation: none; }
     }
 
-    /* ── Background code-stream — 2 generating paragraphs flanking the
-       big globe-eye, behind page content. Anchored to viewport sides
-       (not the FAB), so they stay fixed while the user scrolls. They
-       respect sidebar / signals-rail width via :has().                  */
-    .se-cs-paragraph {
-        position: fixed;
-        top: 22vh; height: 56vh;
-        pointer-events: none; z-index: 0;
-        font-family: var(--font-mono);
-        font-size: 11px; line-height: 1.7;
-        color: var(--accent);
-        opacity: 0.32;
-        text-shadow: 0 0 4px rgba(0,232,104,0.25);
-        white-space: pre;
-        overflow: hidden;
-        width: 22vw; max-width: 320px; min-width: 220px;
-        display: flex; flex-direction: column;
-        justify-content: flex-start;
-        transition: left 0.35s cubic-bezier(.4,0,.2,1),
-                    right 0.35s cubic-bezier(.4,0,.2,1),
-                    opacity 0.35s ease;
-    }
-    .se-cs-paragraph.left {
-        left: calc(var(--sidebar-width) + 24px);
-        text-align: left;
-        mask-image: linear-gradient(90deg, #000 0%, #000 70%, transparent 100%);
-        -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 70%, transparent 100%);
-    }
-    body:has(.sidebar.mini) .se-cs-paragraph.left {
-        left: calc(68px + 24px);
-    }
-    .se-cs-paragraph.right {
-        right: calc(44px + 24px);  /* signals-rail collapsed = 44px */
-        text-align: right;
-        mask-image: linear-gradient(90deg, transparent 0%, #000 30%, #000 100%);
-        -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 30%, #000 100%);
-    }
-    body:has(.signals-rail.open) .se-cs-paragraph.right {
-        right: calc(280px + 24px);
-    }
-    body:has(.se-eye-fab.working) .se-cs-paragraph { opacity: 0.55; }
-    .se-cs-line {
-        opacity: 0;
-        animation: seLineFade 9s linear forwards;
-    }
-    .se-cs-line .ts   { color: var(--text-muted); }
-    .se-cs-line .tag  { color: var(--accent-bright); }
-    .se-cs-line .num  { color: var(--accent-gold); }
-    .se-cs-line .neg  { color: var(--accent-red); }
-    .se-cs-line .cursor {
-        display: inline-block; width: 6px; height: 1em;
-        background: var(--accent); margin-left: 2px;
-        animation: seCursorBlink 0.8s steps(1) infinite;
-        vertical-align: text-bottom;
-    }
-    @keyframes seCursorBlink { 50% { opacity: 0; } }
-    @keyframes seLineFade {
-        0%   { opacity: 0; transform: translateY(4px); }
-        12%  { opacity: 0.95; transform: translateY(0); }
-        80%  { opacity: 0.95; }
-        100% { opacity: 0; transform: translateY(-4px); }
-    }
-    @media (max-width: 1100px) { .se-cs-paragraph { display: none; } }
-    body.light-mode .se-cs-paragraph { opacity: 0.22; }
-
     /* (FAB no longer uses the old SVG pupil-look / frame keyframes.) */
 
     /* ── Chat panel — the palantír "blooms" outward from the FAB.
@@ -5690,12 +5627,14 @@ body.light-mode .il-overlay { background: var(--bg-secondary); }
     0%, 100% { opacity: .55; transform: scale(1); }
     50%      { opacity: .95; transform: scale(1.04); }
 }
+/* A clock is a figure: the number face, at 400 (2026-11-12; it asked for
+   Orbitron at 200 and got 400). The lock's small words reach 11 px. */
 .il-clock {
-    font-family: var(--font-display); font-size: 46px; font-weight: 200;
+    font-family: var(--sv-font-mono, var(--font-mono)); font-size: 46px; font-weight: 400;
     letter-spacing: .06em; color: var(--text-primary); line-height: 1;
 }
 .il-standby {
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: .28em;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .28em;
     text-transform: uppercase; color: var(--text-muted); margin-top: 12px;
 }
 /* Everything interactive fades in together once the screen is woken. */
@@ -5765,7 +5704,7 @@ body.light-mode .il-overlay { background: var(--bg-secondary); }
 }
 .il-sub {
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 3px;
     text-transform: uppercase;
     color: var(--text-muted);

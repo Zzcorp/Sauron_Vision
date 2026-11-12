@@ -95,6 +95,16 @@ def get_theme(context):
     return "dark"
 
 @register.simple_tag(takes_context=True)
+def get_ambience(context):
+    """How much of Sauron's theme the page shows: "magic" (embers, light,
+    moments), "calm" or "off", printed onto <body data-sv-ambience>
+    (the magic kept, 2026-11-12). Display only: no engine, bot, Orc,
+    alert, gate or ticket reads it. It answers "magic" for everyone until
+    the operator's choice is stored with his profile's other display
+    preferences."""
+    return "magic"
+
+@register.simple_tag(takes_context=True)
 def tour_pending(context):
     """True when this user should see the guided tour: authenticated with
     no TraderProfile row yet, or a profile whose tour_completed_at is
