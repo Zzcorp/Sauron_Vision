@@ -26,6 +26,10 @@ class SignalHold(models.Model):
     #: Why it was released: its levels held against the first price of the
     #: session, or no price came and they were not re-checked.
     VALID, UNCHECKED = "valid", "unchecked"
+    #: Released, and its announcement reached nobody (the banner, the bell
+    #: and the channels all failed): the row says so, where it would
+    #: otherwise read "announced at the open".
+    ANNOUNCE_FAILED = "announce_failed"
     #: Why it was dropped: the engine closed it before the open; its 24
     #: hours ran out while it waited; or the first price was already past
     #: its plan (the three price rules of the rail's own lifecycle).

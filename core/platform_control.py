@@ -149,9 +149,19 @@ PIN_SWITCHES = LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES
 #: switches (ORC_MIND_SWITCHES) are in this set with their seeded rows
 #: (2026-11-05, the Orcs' O2 spec A.1, §4 Q1): one tap never starts AI
 #: spend (tests/test_ops_cockpit.py wants every key here seeded).
+#: The operator's-choice switches (2026-11-12, the review of the signal
+#: market hold) are here for another reason. Each moves no money, spends
+#: none and takes no PIN, and its ON undoes something the operator asked
+#: to keep: signal_market_hold makes a shut market's announcement wait
+#: for the open, and he keeps receiving every signal the moment it fires
+#: (his word of 2026-11-12). One tap of the Pipeline group's "all on"
+#: must not decide that for him: the row's own toggle does, or
+#: `manage.py component on signal_market_hold`.
 LORE_READER_SWITCHES = ("lore_staff", "lore_background")
+OPERATOR_CHOICE_SWITCHES = ("signal_market_hold",)
 BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
-                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES})
+                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES,
+                                *OPERATOR_CHOICE_SWITCHES})
 
 
 # ── Default components to register ───────────────────────
@@ -604,6 +614,9 @@ DEFAULT_COMPONENTS = [
      "category": "pipeline", "is_enabled": True},
 
     # ── The signal market hold (2026-11-12, signals/market_hold.py) ──────
+    # A group's "all on" leaves it OFF (OPERATOR_CHOICE_SWITCHES, above:
+    # the review of 2026-11-12), which corrects this note's last sentence:
+    # its own row or `component on` turns it on, never a bulk button.
     # The operator, 2026-11-11: signals announced while their market is
     # shut. Told the announcements would wait for the open, he asked to
     # keep receiving every signal live (2026-11-12), so a shut market is

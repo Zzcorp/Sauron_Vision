@@ -748,6 +748,22 @@ class AtBirthTests(_HoldBase):
         self.assertNotIn("held", heard.out)
         self.assertEqual(_holds(), [])
 
+    def test_13_a_hold_that_raises_announces_as_today(self):
+        """The outer fence of announce_new_signal: whatever the hold
+        raises, the signal is announced now and the log says why. No test
+        made hold_at_birth raise (the review of 2026-11-12)."""
+        sig = _sig(self.inst, SAT_NOON)
+        with patch("signals.market_hold.hold_at_birth",
+                   side_effect=RuntimeError("the hold broke")), \
+                self.assertLogs("signals.announce", "WARNING") as logs:
+            heard = _announce(sig, SAT_NOON)
+        self.assertIn("announced now", "\n".join(logs.output))
+        self.assertEqual([s[0] for s in heard.steps], ["banner", "channels"])
+        self.assertEqual(len(_bells()), 1)
+        self.assertEqual(set(heard.out),
+                         {"signal_id", "banner", "bell", "channels"})
+        self.assertEqual(_holds(), [])
+
     def test_the_gate_off_holds_nothing_with_the_switch_on(self):
         sig = _sig(self.inst, SAT_NOON)
         heard = _announce(sig, SAT_NOON, gate=False)
@@ -868,7 +884,13 @@ class AtTheOpenTests(_HoldBase):
         self.assertFalse(heard.said)
         hold = _hold_of(sig)
         self.assertEqual((hold.state, hold.reason), ("dropped", "aged_shut"))
-        self.assertIn("24 hours ended Sunday 00:05 UTC", hold.words)
+        # The words claim nothing about the market: a signal can age
+        # inside the no-price grace, after its market has opened and
+        # settled (the review of 2026-11-12).
+        self.assertEqual(hold.words,
+                         "Its 24 hours ended Sunday 00:05 UTC before it "
+                         "could be announced at the open: it was never "
+                         "announced.")
         self.assertIsNone(hold.mark)
 
     def test_17_it_ages_while_its_market_is_still_shut(self):
@@ -912,6 +934,126 @@ class AtTheOpenTests(_HoldBase):
         hold = _hold_of(sig)
         self.assertEqual((hold.state, hold.reason), ("released", "unchecked"))
         self.assertIsNone(hold.mark)
+
+    def test_19_a_first_price_that_cannot_be_judged_is_released_unchecked(
+            self):
+        """A price that cannot be read or judged is no price (rule 5): the
+        row waits out the grace, then is announced, saying so. Left to
+        raise, it stayed held on every pass and ended aged_shut with
+        untrue words, never announced (the review of 2026-11-12)."""
+        from signals import market_hold
+        for n, part in enumerate(("_first_price", "levels_reason")):
+            with self.subTest(part=part):
+                inst = _db_inst(f"MHFJ{n}")
+                sig = self._held(inst)
+                _quote(inst, "1.08450", SUN_2217)
+                with patch.object(market_hold, part,
+                                  side_effect=RuntimeError("unreadable")), \
+                        self.assertLogs("signals.market_hold", "ERROR"):
+                    heard = _release(SUN_2220)      # in the grace: it waits
+                    self.assertFalse(heard.said)
+                    self.assertEqual((heard.out["waiting"],
+                                      heard.out["errors"]), (1, 1))
+                    self.assertEqual(_hold_of(sig).state, "held")
+                    _quote(inst, "1.08450", _t(2026, 11, 8, 22, 47))
+                    heard = _release(SUN_2250)      # past it: announced
+                self.assertEqual(heard.steps, [("banner", sig.pk),
+                                               ("channels", sig.pk)])
+                clause = (f"{FIRED}; its first price could not be judged: "
+                          f"its levels were not re-checked")
+                self.assertEqual(heard.banners[0]["market"], clause)
+                self.assertEqual(heard.notes, [
+                    "Fired Sunday 09:00 UTC, while the market was shut. Its "
+                    "first price since the open could not be judged: its "
+                    "levels were not re-checked."])
+                hold = _hold_of(sig)
+                self.assertEqual((hold.state, hold.reason),
+                                 ("released", "unchecked"))
+                self.assertEqual(hold.words,
+                                 f"Announced at the open: {clause}.")
+                self.assertIsNone(hold.mark)
+                # the pass still says a judgment failed
+                self.assertEqual((heard.out["released"],
+                                  heard.out["errors"]), (1, 1))
+
+    def test_19_a_judgment_that_fails_once_is_made_on_the_next_pass(self):
+        from signals import market_hold
+        sig = self._held()
+        _quote(self.inst, "1.08450", SUN_2217)
+        with patch.object(market_hold, "_first_price",
+                          side_effect=RuntimeError("once")), \
+                self.assertLogs("signals.market_hold", "ERROR"):
+            self.assertEqual(_release(SUN_2220).out["waiting"], 1)
+        heard = _release(SUN_2225)
+        self.assertEqual((heard.out["released"], heard.out["errors"]), (1, 0))
+        self.assertEqual(heard.banners[0]["market"], FIRED)
+        hold = _hold_of(sig)
+        self.assertEqual((hold.state, hold.reason), ("released", "valid"))
+        self.assertEqual(hold.mark, Decimal("1.08450"))
+
+    def test_a_release_that_could_not_be_announced_says_so_on_its_row(self):
+        """The row is settled before the announcement goes out, so that a
+        release is announced at most once. One that fails must not go on
+        reading "announced at the open" (the review of 2026-11-12)."""
+        from core.platform_control import PlatformComponent
+        sig = self._held()
+        _quote(self.inst, "1.08450", SUN_2217)
+        with patch("signals.announce.announce_released",
+                   side_effect=RuntimeError("no announcement")), \
+                self.assertLogs("signals.market_hold", "ERROR"):
+            heard = _release(SUN_2220)
+        self.assertFalse(heard.said)
+        self.assertEqual(_bells(), [])
+        hold = _hold_of(sig)
+        self.assertEqual((hold.state, hold.reason),
+                         ("released", "announce_failed"))
+        self.assertEqual(hold.words, "Released at the open, but its "
+                                     "announcement failed.")
+        self.assertEqual((heard.out["released"], heard.out["errors"]), (0, 1))
+        row = PlatformComponent.objects.get(key=SWITCH)
+        self.assertEqual(row.last_status, "error")
+        self.assertEqual(row.last_message,
+                         "0 waiting for their market · 0 announced at the "
+                         "open · 0 dropped · 1 could not be judged or "
+                         "announced")
+        # it is not tried again: a release is announced at most once
+        self.assertFalse(_release(SUN_2225).said)
+
+    def test_a_release_whose_three_steps_all_failed_says_so_too(self):
+        from signals.market_hold import release_due
+        sig = self._held()
+        _quote(self.inst, "1.08450", SUN_2217)
+        down = RuntimeError("down")
+        with _at(SUN_2220), \
+                patch("dashboard.consumers.push_eye_event",
+                      side_effect=down), \
+                patch("alerts.notify.notify_new_signal", side_effect=down), \
+                patch("alerts.dispatch.dispatch_signal_alert",
+                      side_effect=down), \
+                self.assertLogs("signals.market_hold", "ERROR"):
+            out = release_due()
+        self.assertEqual(_bells(), [])
+        hold = _hold_of(sig)
+        self.assertEqual((hold.state, hold.reason),
+                         ("released", "announce_failed"))
+        self.assertEqual((out["released"], out["errors"]), (0, 1))
+
+    def test_a_release_heard_in_one_place_is_an_announcement(self):
+        from signals.market_hold import release_due
+        sig = self._held()
+        _quote(self.inst, "1.08450", SUN_2217)
+        down = RuntimeError("down")
+        with _at(SUN_2220), \
+                patch("dashboard.consumers.push_eye_event",
+                      side_effect=down), \
+                patch("alerts.dispatch.dispatch_signal_alert",
+                      side_effect=down), \
+                self.assertLogs("signals.announce", "ERROR"):
+            out = release_due()
+        self.assertEqual(len(_bells()), 1)
+        hold = _hold_of(sig)
+        self.assertEqual((hold.state, hold.reason), ("released", "valid"))
+        self.assertEqual((out["released"], out["errors"]), (1, 0))
 
     def test_19_a_bar_opened_since_the_open_counts_as_a_price(self):
         # a bar from before the shut is no price of the new session
@@ -1295,7 +1437,12 @@ class TheSwitchTests(TestCase):
         self.assertLess(len(row["description"]), 300)
         self.assertIn("no money", row["description"])
         self.assertNotIn(SWITCH, pc.LIVE_MONEY_SWITCHES)
-        self.assertNotIn(SWITCH, pc.BULK_ENABLE_EXEMPT)
+        # A group's "all on" leaves it OFF (the review of 2026-11-12):
+        # the operator keeps every signal live, so the hold is a decision
+        # of his own, made by its own row. It is still no PIN switch.
+        self.assertIn(SWITCH, pc.OPERATOR_CHOICE_SWITCHES)
+        self.assertIn(SWITCH, pc.BULK_ENABLE_EXEMPT)
+        self.assertNotIn(SWITCH, pc.PIN_SWITCHES)
 
     def test_the_seed_writes_it_off_and_a_missing_row_reads_off(self):
         from core import platform_control as pc
