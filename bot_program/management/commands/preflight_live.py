@@ -1096,6 +1096,13 @@ class Command(BaseCommand):
                       "on the bots' multiplier)" if _bcap is None else
                       f"        MAX BOT LEVERAGE {_bcap}x (/setup/) — this "
                       f"bot's multiplier at eToro is at most {_bcap}x")
+                # THE VENUE FLOOR FOR BOTS (2026-11-12), beside the cap: the
+                # switch's state and MAX BOT FLOOR RISK, the engine's own
+                # readers (base.venue_floor_words). A line, never a
+                # blocker: OFF is the default and a decision.
+                from bot_program.asset_engine.base import venue_floor_words
+                _vfw = venue_floor_words(cfg)
+                w("        VENUE FLOOR" + _vfw[len("venue floor"):])
                 if cfg.enabled and not list(cfg.symbols or []):
                     if cfg.name != MANUAL_CONFIG_NAME:
                         blockers.append(f"config {cfg.id} ({cfg.name}) is LIVE "

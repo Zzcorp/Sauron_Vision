@@ -186,6 +186,16 @@ class Command(BaseCommand):
             elif not counts:
                 w("        nothing recorded — the tick may never have "
                   "reached this config at all")
+            # THE VENUE FLOOR FOR BOTS (2026-11-12): one line under each
+            # bot — the switch's state and the ceiling, or why it does not
+            # apply. Never a blocker: a switch that is off is a decision.
+            # When the floor is ON and an order was still refused for its
+            # size, the refusal's own words below lead with the reason.
+            try:
+                from bot_program.asset_engine.base import venue_floor_words
+                w(f"        {venue_floor_words(c)}")
+            except Exception as exc:            # noqa: BLE001
+                w(f"        venue floor: could not be read ({exc})")
             for code, n in sorted(counts.items(), key=lambda kv: -int(kv[1])):
                 w(f"        {code:<20} {n}")
             for sym, d in list((ex.get("skips") or {}).items())[:per]:
