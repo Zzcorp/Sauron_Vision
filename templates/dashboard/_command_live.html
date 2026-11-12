@@ -41,10 +41,11 @@ never added; R is a ratio and is said to be "all worlds · R only".
         {% endif %}
     </div>
     {# eToro's OWN used margin, available and total from the sync's cells (2026-10-31, bot_program.etoro_used): the live world as eToro states it. The line under it is etoro_used's cell_t, the total with its own age when it is older than the cells; it wraps (oc-strip-sub--wrap, as on /positions/ and /portfolio/): on one line the ellipsis cut the total and the age at every width. #}
+    {# The figure is in the ACCOUNT's currency, and says so (2026-11-12: it printed 600.00 with none); the line under it is the same account's, in the same currency. With no currency read, none is claimed. #}
     {% if live_etoro %}
     <div class="oc-strip-cell" title="{{ live_etoro.title }}">
         <span class="oc-strip-label"><span class="sv-venue {{ live_etoro.venue_class }}">{{ live_etoro.world_word }}</span> ETORO USED</span>
-        <span class="oc-strip-value"{% if live_etoro.used_t == "—" %} title="{{ why.not_measured }}"{% endif %}>{{ live_etoro.used_t }}</span>{% dash_note live_etoro.used_t why.not_measured %}
+        <span class="oc-strip-value"{% if live_etoro.used_t == "—" %} title="{{ why.not_measured }}"{% elif live_etoro.currency %} data-oc-money{% endif %}>{{ live_etoro.used_t }}{% if live_etoro.used_t != "—" and live_etoro.currency %} {{ live_etoro.currency }}{% endif %}</span>{% dash_note live_etoro.used_t why.not_measured %}
         <span class="oc-strip-sub oc-strip-sub--wrap">{{ live_etoro.cell_t }}</span>
     </div>
     {% endif %}

@@ -60,7 +60,7 @@
             <div class="oc-hero-stat">
                 <span class="oc-hero-stat-label">REGIME</span>
                 <span class="oc-hero-stat-value {{ hero.regime_class }}" data-oc-hero="regime" title="{{ hero.regime_title }}">{{ hero.regime }}</span>{% dash_note hero.regime hero.regime_title %}
-                <span class="oc-hero-stat-sub"><span data-oc-hero="regime_conf" title="{% if hero.regime_conf == '—' %}{{ why.no_report }}{% else %}the report's confidence{% endif %}">{{ hero.regime_conf }}</span>{% dash_note hero.regime_conf why.no_report %} · <span data-oc-hero="regime_age">{{ hero.regime_age }}</span></span>
+                <span class="oc-hero-stat-sub"><span data-oc-hero="regime_conf" title="{{ hero.regime_conf_title }}">{{ hero.regime_conf }}</span>{% dash_note hero.regime_conf hero.regime_conf_title %} · <span data-oc-hero="regime_age">{{ hero.regime_age }}</span></span>
             </div>
             <div class="oc-hero-stat">
                 <span class="oc-hero-stat-label">BRAIN TRUST</span>

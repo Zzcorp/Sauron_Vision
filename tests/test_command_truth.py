@@ -25,7 +25,8 @@ amounts):
   - cost: query budgets cold, fragments without the shell, database
     aggregates equal to the loops they replace;
   - no broker or model call to draw the page;
-  - the page's own poll, under node (tests/js/command_metrics.test.js).
+  - the page's own poll, under node (tests/js/command_metrics.test.js),
+    and what the server makes of it (no session stamp, 423 when locked).
 
 Display only: nothing here places, closes or changes an order.
 
@@ -37,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import timedelta
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -579,6 +581,36 @@ class NumbersTests(TestCase):
                                 f"{path}: {value!r}")
         self.assertGreaterEqual(n, 12)
 
+    def test_etoros_used_figure_carries_the_accounts_currency(self):
+        """ETORO USED printed 600.00 with no currency (the map, 5.7): the
+        figure is eToro's, in the account's own currency
+        (etoro_used.account_used's `currency`), and the cell says it."""
+        _three_worlds(self.user)
+        live = self.client.get("/command/tab/live/").content.decode()
+        cell = live[live.index("ETORO USED"):]
+        cell = cell[:cell.index("</div>")]
+        self.assertRegex(cell, r"data-oc-money[^>]*>600\.00 USD<")
+
+    def test_the_equity_curves_low_and_high_are_grouped(self):
+        """The platform book is 25,000.50 everywhere on the page; the
+        curve's low and high printed 25000.50 (spec §5.2: money is
+        grouped, with two decimals)."""
+        from portfolio.models import PortfolioSnapshot
+        pf = _portfolio(self.user)
+        day = timezone.localdate() - timedelta(days=1)
+        for i, value in enumerate(("25000.5", "10000")):
+            PortfolioSnapshot.objects.create(
+                portfolio=pf, date=day - timedelta(days=i),
+                total_value=Decimal(value), cash=Decimal("9000"),
+                daily_pnl=Decimal("10"), daily_pnl_pct=0.1,
+                cumulative_pnl_pct=1.0, max_drawdown=-2.0)
+        # The visible text: the chart's data attributes keep the plain
+        # numbers its script parses.
+        text = " ".join(t for t, _a, _g in _texts(
+            self.client.get("/command/tab/portfolio/").content.decode()))
+        self.assertIn("low 10,000.00 · high 25,000.50", text)
+        self.assertNotIn("25000.50", text)
+
 
 # ── 5. Windows and ages ──────────────────────────────────────────────────
 
@@ -682,6 +714,75 @@ class DashesTests(TestCase):
                       "min since the broker's reading — none landed yet"):
             self.assertIn(words, dashed, dashed)
 
+    def test_a_dash_the_poll_paints_carries_its_reason(self):
+        """The page's poll writes each hero key's text and, when the
+        payload has it, `<key>_title` over the cell's title. A key that
+        comes back as the dash with no title, or an empty one, left the
+        dash with the title of the figure it replaced, or with none: every
+        hero key the page patches carries its reason whenever it is the
+        dash, with the book walk failing too."""
+        from dashboard.views_command import _hero_metrics, _tab_bar_metrics
+        page = (BASE / "templates" / "dashboard" / "command.html").read_text(
+            encoding="utf-8")
+        keys = sorted(set(re.findall(r'data-oc-hero="(\w+)"', page)))
+        self.assertIn("prev_delta", keys)
+        user = _user("oc_dash_poll")
+        states = {"empty": lambda: (_hero_metrics(user),
+                                    _tab_bar_metrics(user))}
+
+        def failed():
+            with mock.patch("dashboard.views_command._open_book",
+                            side_effect=RuntimeError("quote feed down")):
+                with self.assertLogs("dashboard.views_command",
+                                     level="WARNING"):
+                    return _hero_metrics(user), _tab_bar_metrics(user)
+        states["the walk failed"] = failed
+        for name, read in states.items():
+            hero, tabs = read()
+            dashed = [k for k in keys if hero.get(k) == DASH]
+            self.assertIn("delta", dashed, name)
+            for key in dashed:
+                self.assertTrue(str(hero.get(key + "_title") or "").strip(),
+                                f"{name}: hero {key} is a dash with no reason")
+            for tab, head in tabs.items():
+                for part in ("primary", "secondary"):
+                    if head[part] == DASH:
+                        self.assertTrue(head[part + "_title"].strip(),
+                                        f"{name}: {tab} {part}")
+        hero, _tabs = states["the walk failed"]()
+        self.assertEqual(hero["value"], DASH)
+
+    @skipIf(NODE is None, "node is not installed")
+    def test_both_painters_print_the_dash_and_never_null(self):
+        """The tiles (sv-day-live.js) and the panel (sv-day-scheme.js)
+        print a metric through their own fmt(), which is String(n): a null
+        in the payload would print "null". Each fmt, as shipped, is handed
+        the payload's own values under node: the dash comes out as the
+        dash, and nothing comes out as "null" (spec §5.7)."""
+        from dashboard.views_day import day_live_payload
+        user = _user("oc_dash_painters")
+        cache.delete("morgul:summary")
+        live = day_live_payload(user)
+        values = [m[0] for st in live["stages"].values()
+                  for m in st["metrics"]]
+        self.assertIn(DASH, values)
+        for rel in ("static/js/sv-day-live.js", "static/js/sv-day-scheme.js"):
+            src = (BASE / rel).read_text(encoding="utf-8")
+            fmt = re.search(r"function fmt\(n\) \{.*?\n  \}", src, re.S)
+            self.assertIsNotNone(fmt, f"{rel}: fmt() not found")
+            proc = subprocess.run(
+                [NODE, "-e", fmt.group(0) + ";process.stdout.write(JSON."
+                 "stringify(JSON.parse(process.argv[1]).map(fmt)))",
+                 json.dumps(values)],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 0, proc.stderr[-800:])
+            printed = json.loads(proc.stdout)
+            self.assertEqual(len(printed), len(values), rel)
+            self.assertNotIn("null", printed, rel)
+            for value, text in zip(values, printed):
+                if value == DASH:
+                    self.assertEqual(text, DASH, rel)
+
 
 # ── 7. The bots tab ──────────────────────────────────────────────────────
 
@@ -723,6 +824,32 @@ class BotsTabTests(TestCase):
         self.assertEqual(r.context["n_alive"], 1)
         self.assertNotIn("ALIVE 6H", r.content.decode())
         self.assertIsNotNone(fresh)
+
+    def _pnl_cell(self, body, name):
+        row = re.search(r"<tr[^>]*>(?:(?!</tr>).)*%s.*?</tr>" % re.escape(name),
+                        body, re.S).group(0)
+        cell = re.findall(r"<td[^>]*>.*?</td>", row, re.S)[7]
+        return row, " ".join("".join(t for t, _a, _g in _texts(cell)).split())
+
+    def test_a_close_from_another_world_names_its_world(self):
+        """The P&L cell prints each world's money apart, but one world's
+        alone went unnamed and read as the row chip's. A config switched to
+        paper mode while a REAL row was still open closes real money under
+        a PAPER chip: the cell names the world of its money whenever it is
+        not the chip's (spec §5.2: the world is world_of on the trade)."""
+        was_live = _config(self.user, "was live", "stock", mode="paper")
+        _trade(was_live, "AAPL", 1, 200, world="live", status="CLOSED",
+               pnl=-10, r=-1.0, closed_ago_s=600)
+        own = _config(self.user, "paper own", "crypto")
+        _trade(own, "BTCUSD", 1, 20000, world="paper", status="CLOSED",
+               pnl=100, r=2.0, closed_ago_s=600)
+        body = self.client.get("/command/tab/bots/").content.decode()
+        row, cell = self._pnl_cell(body, "was live")
+        self.assertIn("sv-world--paper", row)
+        self.assertEqual(cell, "-10.00 USD REAL")
+        row, cell = self._pnl_cell(body, "paper own")
+        self.assertIn("sv-world--paper", row)
+        self.assertEqual(cell, "+100.00 USD")
 
 
 # ── 8. Cost ──────────────────────────────────────────────────────────────
@@ -1037,6 +1164,44 @@ class ThePollUnderNodeTests(SimpleTestCase):
                      "resumes_on_pin_unlocked", "resumes_when_visible",
                      "eye_event_refetches"):
             self.assertIn(case, out["passed"], out)
+
+
+class ThePollOnTheServerTests(TestCase):
+    """What the server makes of the page's own poll, asked as the page
+    asks it (X-Requested-With, the header the node test above sees the
+    shipped script send): the idle lock never counts it as a human, so it
+    never stamps the session, and a locked session gets 423. Asked without
+    the header, as the page did before OC0, the same poll stamped the
+    session every 45 s and the server's idle backstop never fired while
+    /command/ was open (core/idle_lock.py)."""
+
+    AS_THE_PAGE = {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
+                   "HTTP_ACCEPT": "application/json"}
+
+    def setUp(self):
+        cache.clear()
+        self.user = _user("oc_poll")
+        self.client.force_login(self.user)
+
+    def test_the_poll_never_stamps_the_session(self):
+        stale = int(time.time()) - 120   # old enough to stamp, too young to lock
+        session = self.client.session
+        session["sv_last_seen"] = stale
+        session.save()
+        r = self.client.get("/command/tab/metrics/", **self.AS_THE_PAGE)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.session["sv_last_seen"], stale)
+        # The same poll with no header is a human to the lock: it stamps.
+        self.client.get("/command/tab/metrics/")
+        self.assertGreater(self.client.session["sv_last_seen"], stale)
+
+    def test_a_locked_session_gets_423_and_no_figure(self):
+        session = self.client.session
+        session["pin_locked"] = True
+        session.save()
+        r = self.client.get("/command/tab/metrics/", **self.AS_THE_PAGE)
+        self.assertEqual(r.status_code, 423)
+        self.assertEqual(r.json(), {"pin_locked": True})
 
 
 class ThePageScriptTests(SimpleTestCase):

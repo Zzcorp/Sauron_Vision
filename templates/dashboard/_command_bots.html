@@ -73,8 +73,8 @@
                 <td>{{ r.open_count }}</td>
                 <td>{{ r.opens_24h }}</td>
                 <td>{{ r.closed_24h }}</td>
-                {# Nothing closed in 24h is not a break-even day: a dash, its reason named. Each world's money apart, in the config's currency. #}
-                <td>{% for c in r.pnl_cells %}<span class="{% if c.pnl > 0 %}up{% elif c.pnl < 0 %}down{% endif %}" data-oc-money>{{ c.text }}</span>{% if r.pnl_cells|length > 1 %} {{ c.name }}{% endif %}{% if not forloop.last %} · {% endif %}{% empty %}<span style="color:var(--text-muted);" title="{{ why.nothing_24h }}">—</span>{% dash_note "—" why.nothing_24h %}{% endfor %}</td>
+                {# Nothing closed in 24h is not a break-even day: a dash, its reason named. Each world's money apart, in the config's currency. The world of the money is the closed trade's own: it is named whenever it is not the row's chip (a config switched to paper while a REAL row was open closes real money), and whenever there is more than one. #}
+                <td>{% for c in r.pnl_cells %}<span class="{% if c.pnl > 0 %}up{% elif c.pnl < 0 %}down{% endif %}" data-oc-money>{{ c.text }}</span>{% if r.pnl_cells|length > 1 or c.world != r.world %} {{ c.name }}{% endif %}{% if not forloop.last %} · {% endif %}{% empty %}<span style="color:var(--text-muted);" title="{{ why.nothing_24h }}">—</span>{% dash_note "—" why.nothing_24h %}{% endfor %}</td>
                 <td>
                     {% if r.cooldown_remaining_min > 0 %}
                         <span style="color:#ffb000;font-family:var(--font-mono);font-size:11px;">

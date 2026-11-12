@@ -791,12 +791,21 @@ def _hero_metrics(user, walk=None, facts=None) -> dict:
     P&L are three lines, never added; the regime and the trust carry their
     age; the "today" change names the snapshot it waits for.
     """
+    # Every key the page's poll patches (data-oc-hero) has its `<key>_title`
+    # here whenever it can be the dash: the poll writes the title with the
+    # text, so a dash never keeps the title of the figure it replaced
+    # (2026-11-12: `value` and `regime` defaulted to no reason, and
+    # `prev_delta` and `regime_conf` sent none under the name the poll
+    # reads).
     out = {
-        "value": DASH, "value_title": "", "currency": "", "value_words": "",
+        "value": DASH, "value_title": WHY["not_measured"], "currency": "",
+        "value_words": "",
         "delta": DASH, "delta_tone": "", "delta_title": WHY["snapshot_today"],
-        "prev_delta": DASH, "prev_title": "",
+        "prev_delta": DASH, "prev_title": "", "prev_delta_title": "",
         "regime": DASH, "regime_class": "oc-regime-unknown",
-        "regime_conf": DASH, "regime_age": "", "regime_title": "",
+        "regime_conf": DASH, "regime_age": "",
+        "regime_title": WHY["not_measured"],
+        "regime_conf_title": WHY["not_measured"],
         "trust": "UNKNOWN", "trust_class": "oc-trust-unknown",
         "trust_age": "", "trust_title": "",
         "mode": "paper", "mode_label": "bots: none enabled",
@@ -860,6 +869,7 @@ def _hero_metrics(user, walk=None, facts=None) -> dict:
     else:
         out["prev_title"] = (f"not yet: no snapshot for "
                              f"{yesterday.isoformat()}")
+    out["prev_delta_title"] = out["prev_title"]
 
     cfg = facts["cfg"]
     if cfg is not None:
@@ -877,6 +887,11 @@ def _hero_metrics(user, walk=None, facts=None) -> dict:
                     "regime_title", "trust", "trust_class", "trust_age",
                     "trust_title"):
             out[key] = brain[key]
+        # A report always states its confidence (the column is not
+        # nullable): the dash is "no report".
+        out["regime_conf_title"] = (WHY["no_report"]
+                                    if out["regime_conf"] == DASH
+                                    else "the report's confidence")
     except Exception as e:
         logger.warning("Op Center hero brain state unavailable: %s", e,
                        exc_info=True)
@@ -1583,6 +1598,12 @@ def command_tab_portfolio(request):
         "equity_points": equity_points,
         "equity_min": min(equity_points) if equity_points else 0,
         "equity_max": max(equity_points) if equity_points else 0,
+        # The curve's low and high as the book itself is printed: grouped,
+        # two decimals, no currency sign (2026-11-12; they read 25000.50).
+        "equity_min_text": (f"{min(equity_points):,.2f}" if equity_points
+                            else DASH),
+        "equity_max_text": (f"{max(equity_points):,.2f}" if equity_points
+                            else DASH),
         "allocation": allocation,
     }
     return _fragment("dashboard/_command_portfolio.html", context)

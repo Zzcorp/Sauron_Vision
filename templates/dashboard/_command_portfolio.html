@@ -80,7 +80,7 @@
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="card-title">Equity curve · the platform book · last 30 daily snapshots (23:30 UTC)</span>
         <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-            {% if equity_points %}low {{ equity_min|floatformat:2 }} · high {{ equity_max|floatformat:2 }} · {{ equity_points|length }} pts · {{ book_currency }}{% endif %}
+            {% if equity_points %}low {{ equity_min_text }} · high {{ equity_max_text }} · {{ equity_points|length }} pts · {{ book_currency }}{% endif %}
         </span>
     </div>
     {# Gradient id namespaced by chart_id: this partial and the portfolio #}
