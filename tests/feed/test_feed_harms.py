@@ -913,12 +913,24 @@ class TheWriterThreadTests(_Autocommit):
     (_background) and its insert recorded: which thread, and what the
     drain had sent to eToro by then."""
 
-    def _drain(self, events, inserted):
+    def _pending_rows(self):
+        """The three CLOSE_PENDING rows the drain books. Saved BEFORE the
+        writer is patched: saving a real row CLOSE_PENDING is a harm row of
+        its own ("real close left pending for the drain"), written here at
+        once (SQLite, no writer thread), so that the patched writer below
+        is handed the drain's rows and nothing else (2026-11-12: made
+        inside the patch, these three rode the same writer thread, and the
+        count of 3 the test waits for was met by whichever rows the
+        writer's first batch happened to hold: three of the fixture's when
+        the thread started late, one when it started at once, and then
+        6 != 3)."""
         from bot_program.models import AssetBotTrade
-        from bot_program.pending_closes import retry_all_pending_closes
         AssetBotTrade.objects.all().delete()
         for i in (1, 2, 3):
             self._row(status="CLOSE_PENDING", position_id=f"d-{i}")
+
+    def _drain(self, events):
+        from bot_program.pending_closes import retry_all_pending_closes
 
         class _Rec(H.EtoroTrader):
             def _note(self_, method, *args):
@@ -934,11 +946,14 @@ class TheWriterThreadTests(_Autocommit):
         request goes out first and every insert runs on the writer thread.
         The insert is held shut until the drain has returned: had one run
         on the drain's thread, the drain would have waited on it and the
-        insert been recorded before the drain's end."""
+        insert been recorded before the drain's end. The drain books three
+        rows: three harm rows, one exit at the mark each, however the
+        writer batches them."""
         fh = _fh()
         events, inserted = [], []
         main = threading.get_ident()
         gate = threading.Event()
+        self._pending_rows()
 
         def slow_insert(rows):
             gate.wait(5)
@@ -948,7 +963,7 @@ class TheWriterThreadTests(_Autocommit):
             time.sleep(0.25)
         with mock.patch.object(fh, "_background", return_value=True), \
                 mock.patch.object(fh, "_insert", side_effect=slow_insert):
-            out = self._drain(events, inserted)
+            out = self._drain(events)
             self.assertEqual(inserted, [], "nothing written during the drain")
             gate.set()
             deadline = time.monotonic() + 10
@@ -956,6 +971,8 @@ class TheWriterThreadTests(_Autocommit):
                     sum(len(k) for _, k in inserted) < 3:
                 time.sleep(0.02)
         self.assertEqual(sum(len(k) for _, k in inserted), 3)
+        self.assertEqual(sorted(k for _, ks in inserted for k in ks),
+                         ["exit_at_mark"] * 3, inserted)
         self.assertTrue(all(tid != main for tid, _ in inserted),
                         "every insert on the writer thread")
         kinds = [e[0] for e in events]
