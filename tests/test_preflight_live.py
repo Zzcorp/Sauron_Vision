@@ -200,6 +200,53 @@ class TheDenominatorIsCheckedAgainstTheAccountTests(TestCase):
         self.assertIn("CURRENCY MISMATCH", out)
         self.assertIn("nothing here converts", out)
 
+    def test_a_followers_wrong_label_is_said_to_be_corrected_by_the_sync(self):
+        """A pool that FOLLOWS the account holds the account's own figure:
+        only its label is wrong, and the account sync writes the reading's
+        currency over it (tasks._follow_the_account, 2026-11-12). Its line
+        says so, and not that every limit is off by an exchange rate."""
+        u = _user()
+        _acct(u, equity=50000, currency="USD")
+        follower = _cfg(u, name="follower", capital="50000",
+                        base_currency="EUR")
+        follower.extras = {"capital_tracks_broker": True}
+        follower.save(update_fields=["extras"])
+        _cfg(u, name="typed", capital="10000", base_currency="EUR")
+        _pin(u)
+        _bars()
+        out = _run()
+        self.assertEqual(out.count("CURRENCY MISMATCH"), 2, out)
+        mine = [b for b in _blockers(out).splitlines()
+                if f"config {follower.id} (follower)" in b
+                and "account reads in" in b]
+        self.assertEqual(len(mine), 1, _blockers(out))
+        self.assertIn("follows the account and is labelled EUR while the "
+                      "account reads in USD", mine[0])
+        self.assertIn("the label is wrong, not the figure", mine[0])
+        self.assertIn("the next sync writes USD", mine[0])
+        self.assertNotIn("wrong by the FX rate", mine[0])
+
+    def test_a_fixed_pool_keeps_the_warning_on_its_typed_figure(self):
+        """A pool that does not follow the account carries a figure the
+        operator typed, read in its own label: every limit derived from it
+        is off by the rate, and nothing converts."""
+        u = _user()
+        _acct(u, equity=50000, currency="USD")
+        typed = _cfg(u, name="typed", capital="10000", base_currency="EUR")
+        _pin(u)
+        _bars()
+        out = _run()
+        mine = [b for b in _blockers(out).splitlines()
+                if f"config {typed.id} (typed)" in b
+                and "while the account is in" in b]
+        self.assertEqual(len(mine), 1, _blockers(out))
+        self.assertIn("does not follow the account: its typed pool of "
+                      "10,000.00 is read in EUR while the account is in USD",
+                      mine[0])
+        self.assertIn("every limit derived from `capital` is wrong by the FX "
+                      "rate, and nothing here converts", mine[0])
+        self.assertNotIn("next sync", mine[0])
+
     def test_matching_currencies_are_not_flagged(self):
         u = _user()
         _acct(u, equity=50000, currency="GBP")

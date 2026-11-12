@@ -765,11 +765,13 @@ class ThePoolsCurrencyTests(_On):
 
     def test_a_label_that_is_not_the_accounts_is_still_refused_at_the_cash_gate(
             self):
-        """A DEFECT OF MAIN, recorded and not fixed here: the account sync
-        writes the account's figure into a follower's pool and never its
-        label, and the cash gate refuses every eToro order of a pool
-        labelled in another currency than the account. A floor entry meets
-        the same refusal."""
+        """The cash gate refuses every eToro order of a pool labelled in
+        another currency than the account, and a floor entry meets the same
+        refusal. (Since 2026-11-12 the account sync writes the reading's
+        currency onto a FOLLOWER's label with its figure, so a follower
+        meets this only until the next sync: tests/
+        test_pools_are_shares_of_the_account.py. This pool does not follow
+        the account: its typed figure is read in its own label.)"""
         eur = H.run(_on("forex_under_min", tag="eur", currency="EUR"))
         self.assertNothingSent(eur)
         skip = H.skip_of(eur)

@@ -185,6 +185,91 @@ class TheSyncWritesSharesTests(TestCase):
         self.assertEqual(float(live.capital), 500.0)   # the whole account
 
 
+class TheSyncWritesTheLabelTooTests(TestCase):
+    """THE POOL'S LABEL (2026-11-12). A follower's figure is the account's
+    reading, in the reading's currency; the sync wrote the figure and never
+    the label (`base_currency`), so a follower labelled in another
+    currency than the account kept the old label for ever, and the cash
+    check refused every eToro order of it ("pool in EUR against cash read
+    in USD"). The label now travels with the figure, in the same save.
+    Synthetic pools and readings only."""
+
+    def test_a_follower_takes_the_readings_label_in_the_same_save(self):
+        from bot_program.models import AssetBotConfig
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        follower = _cfg(u, name="manual", tracks=True)       # EUR, 100
+        typed = _cfg(u, name="typed", capital="150")         # EUR, fixed
+        real_save, saves = AssetBotConfig.save, []
+
+        def spy(self_, *args, **kwargs):
+            saves.append((self_.pk,
+                          tuple(sorted(kwargs.get("update_fields") or ()))))
+            return real_save(self_, *args, **kwargs)
+        with patch.object(AssetBotConfig, "save", spy):
+            _follow_the_account(u, 500.0, "USD")
+        follower.refresh_from_db(); typed.refresh_from_db()
+        self.assertEqual((float(follower.capital), follower.base_currency),
+                         (500.0, "USD"))
+        self.assertEqual(saves, [(follower.pk, ("base_currency", "capital"))])
+        # a pool that does not follow the account keeps its figure and
+        # the label its figure was typed in
+        self.assertEqual((float(typed.capital), typed.base_currency),
+                         (150.0, "EUR"))
+
+    def test_a_follower_already_at_the_figure_is_relabelled_too(self):
+        """The figure is unchanged, so the sync used to write nothing at
+        all: the label stayed wrong while the account did not move."""
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        follower = _cfg(u, name="manual", tracks=True, capital="500")
+        _follow_the_account(u, 500.0, "USD")
+        follower.refresh_from_db()
+        self.assertEqual((float(follower.capital), follower.base_currency),
+                         (500.0, "USD"))
+
+    def test_a_reading_with_no_currency_writes_no_label(self):
+        """The figure follows; the label is the last one a reading
+        carried, never a blank."""
+        from bot_program.tasks import _follow_the_account
+        u = _user()
+        follower = _cfg(u, name="manual", tracks=True)
+        _follow_the_account(u, 500.0, "USD")
+        follower.refresh_from_db()
+        self.assertEqual(follower.base_currency, "USD")
+        for blank in ("", None):
+            _follow_the_account(u, 400.0, blank)
+            follower.refresh_from_db()
+            self.assertEqual((float(follower.capital),
+                              follower.base_currency), (400.0, "USD"))
+
+    def test_a_follower_labelled_in_another_currency_trades_after_the_sync(
+            self):
+        """The real case on synthetic figures: a live follower labelled EUR
+        on an eToro account that reads in USD. Before the sync relabels it
+        the cash check refuses its order; after it, the order is judged on
+        its merits and goes."""
+        from tests import bot_venue_floor_harness as H
+        from bot_program.tasks import _follow_the_account
+        world = H.arm("crypto_clear", "label", currency="EUR")
+        cfg = world["cfg"]
+        cfg.extras = dict(cfg.extras, capital_tracks_broker=True)
+        cfg.save(update_fields=["extras"])
+        before = H.run(world)
+        self.assertEqual(H.orders(before), [])
+        skip = H.skip_of(before)
+        self.assertEqual(skip["code"], "leverage_refused")
+        self.assertIn("pool in EUR against cash read in USD", skip["detail"])
+        _follow_the_account(world["user"], 1000.0, "USD")
+        cfg.refresh_from_db()
+        self.assertEqual((float(cfg.capital), cfg.base_currency),
+                         (1000.0, "USD"))
+        after = H.run(world)
+        self.assertIsNotNone(after.res, H.skip_of(after))
+        self.assertEqual([o[:3] for o in H.orders(after)],
+                         [["BTCUSD", "BUY", 0.001]])
+
+
 def _acct(user, equity="500.00", currency="EUR"):
     from bot_program.models import IBKRAccount
     acct = IBKRAccount.objects.create(user=user, port=4003,
