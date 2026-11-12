@@ -131,6 +131,21 @@ class AmbienceFieldTests(TestCase):
         before = {n for _a, n in loader.graph.forwards_plan(("portfolio", name))}
         self.assertIn("0019_traderprofile_rail_prefs", before)
 
+    def test_the_database_itself_answers_magic(self):
+        """Review 2026-11-12: code that does not know the column (the old
+        containers while the migrate step runs, or a rollback that keeps the
+        migration) still creates a profile: the column keeps its default in
+        the database, not in Python alone. Without it the column was NOT
+        NULL with no default and such a create raised an IntegrityError."""
+        from django.db import connection
+        from portfolio.trader_profile import TraderProfile
+        field = TraderProfile._meta.get_field("ambience")
+        self.assertEqual(getattr(field.db_default, "value", field.db_default), "magic")
+        with connection.cursor() as cursor:
+            columns = {c.name: c for c in connection.introspection.get_table_description(
+                cursor, TraderProfile._meta.db_table)}
+        self.assertIn("magic", str(columns["ambience"].default))
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # 2. The view: POST /ambience/ saves the one column and echoes it

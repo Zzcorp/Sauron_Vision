@@ -8,6 +8,12 @@
    order MAY have reached the broker, when its answer was lost, when the
    lookup stayed unanswered and when a close's answer was lost.
 
+   A fill_close must be a booked close: it carries its own trade and no
+   source. The kill switch's sweep (a held order it withdrew traded
+   nothing; the portfolio rows it only marks closed have no trade) and
+   nl_trader's close written in the database alone say their source, and
+   flare nothing.
+
    A fill_open must be a fill. It is also pushed for an order the broker
    holds unfilled (a WORKING entry), so it flares only when one of these
    proves the fill:
@@ -110,8 +116,10 @@
     d.addEventListener('sv:eye-event', function (e) {
         var msg = (e && e.detail) || {}, data = msg.data || {};
         if (msg.kind === 'fill_close') {
-            var key = 'close:' + (data.trade_id == null ? '' : data.trade_id);
-            if (data.trade_id != null) { if (seen[key]) return; seen[key] = 1; }
+            if (data.trade_id == null || data.source) return;     /* no booked close behind it */
+            var key = 'close:' + data.trade_id;
+            if (seen[key]) return;
+            seen[key] = 1;
             flare(true);
             return;
         }

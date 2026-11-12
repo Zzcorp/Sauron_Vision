@@ -418,3 +418,35 @@ class DesignKitMeasuredTests(TestCase):
                          ("rgba(0, 0, 0, 0)", rgb(PALETTE["--sv-line-3"])))
         self.assertEqual(got["waitLong"], got["ticketLong"])
         self.assertEqual(got["waitShort"], got["ticketShort"])
+
+
+#: Every segment button the page draws: its words and its height.
+SEG_PROBE = r"""(function () {
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.sv-seg-btn'), function (b) {
+        var r = b.getBoundingClientRect();
+        if (r.width && r.height && b.checkVisibility({ checkVisibilityCSS: true }))
+            out.push([(b.textContent || '').trim(), Math.round(r.height * 10) / 10]);
+    });
+    return JSON.stringify(out);
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class DesignKitPhoneMeasuredTests(TestCase):
+    """Review 2026-11-12: at a phone's width every segment button on the
+    kit (the Ambience previews, the 5m...1D sample) takes the 44 px floor,
+    as the user menu's three do."""
+
+    @classmethod
+    def setUpTestData(cls):
+        client = Client()
+        client.force_login(_user("kit_phone", is_staff=True))
+        page = client.get(URL, HTTP_HOST=HOST).content.decode("utf-8")
+        (cls.got,) = _measure({URL: page}, ((390, 844),), SEG_PROBE, "sv-kit-phone-").values()
+
+    def test_every_segment_button_is_44px_tall_on_a_phone(self):
+        self.assertGreaterEqual(len(self.got), 3, self.got)
+        for label, height in self.got:
+            with self.subTest(label=label):
+                self.assertGreaterEqual(height, 44)

@@ -154,8 +154,11 @@ class TraderProfile(models.Model):
     # alert, gate or ticket reads it (tests/test_ambience_pref.py scans
     # every module of the project).
     AMBIENCE_CHOICES = [("magic", "Magic"), ("calm", "Calm"), ("off", "Off")]
+    # db_default (review 2026-11-12): code that does not know the column
+    # (the old containers while the migrate step runs, a rollback that keeps
+    # the migration) still creates a profile; the database answers "magic".
     ambience = models.CharField(
-        max_length=8, default="magic", choices=AMBIENCE_CHOICES,
+        max_length=8, default="magic", db_default="magic", choices=AMBIENCE_CHOICES,
         help_text="Display only: embers, light and moments.")
 
     access_pin_hash = models.CharField(max_length=128, blank=True, default="", help_text="Hashed PIN code (2nd-factor)")

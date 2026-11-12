@@ -176,6 +176,10 @@
     --sv-glow-dot: 0 0 6px rgba(0,232,104,.7);
     --sv-glow-up-in: inset 0 0 0 1px rgba(36,181,130,.55), inset 0 0 12px rgba(36,181,130,.22);
     --sv-glow-down-in: inset 0 0 0 1px rgba(255,107,110,.55), inset 0 0 12px rgba(255,107,110,.22);
+    /* A BUY or a SELL whose label holds a figure (the ticket's live price,
+       a size) takes the side's ring alone: no blur reaches its figure. */
+    --sv-glow-up-ring: inset 0 0 0 1px rgba(36,181,130,.55);
+    --sv-glow-down-ring: inset 0 0 0 1px rgba(255,107,110,.55);
     --sv-spill-active: linear-gradient(90deg, rgba(0,232,104,.13), rgba(0,232,104,.03) 55%, rgba(0,232,104,0) 80%);
     --sv-edge-hero: linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.85) 28%, rgba(120,255,180,.95) 50%, rgba(0,232,104,.85) 72%, rgba(0,232,104,0));
 

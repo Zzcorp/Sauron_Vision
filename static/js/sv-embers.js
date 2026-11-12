@@ -19,20 +19,32 @@
      - never a label, a symbol or a number: this file draws no text;
      - an ember dims to alpha .18 as it passes within 18 px of words on the
        void (.sv-on-void, .sv-page-head), so their dark halo keeps them at
-       4.5:1 or better.
+       4.5:1 or better;
+     - an ember fades out as it nears what covers the void (the cards,
+       panels and bars the map found): gone within 12 px of an edge, whole
+       again at 24 px, so none is ever cut flat by a card or seen in a
+       gutter under 24 px between figures (the magic lives around the
+       numbers, never among them).
 
    It runs under Ambience Magic, in the dark theme, on a page that opted
    in, and nowhere else: there it maps nothing and asks for no frame. Where
    it runs, it asks for no frame while the tab is hidden, while the PIN
    lock is up (sv:pin-locked / sv:pin-unlocked), while a dialog holds the
-   page (body.sv-scroll-locked), or when the page shows no void; under
-   reduced motion it draws one still frame and stops.
+   page (body.sv-scroll-locked) or the "?" shortcut sheet is open
+   (#kbdModalOverlay.open, base.html's own modal outside SV.overlay), or
+   when the page shows no void; under reduced motion it draws one still
+   frame and stops.
 
    The void map: on load, on resize, after a scroll and after a live swap
    that moved the page's shape (sv:live-swapped), the screen is sampled on a
    24 px x 24-column grid with elementFromPoint, in idle slices of about
    4 ms (a hit test that must first refresh can take longer); a point is
-   void when nothing from the hit element up to <body> paints a background.
+   void when nothing from the hit element up to <body> paints a background,
+   and the points a row above and below it are void too (the 10-16 px
+   gutters between stacked cards are not the void). A panel scrolling
+   inside itself (the nav, the rail) moves no void and costs no map. No map
+   runs while the page is held: through a dialog's scrim or the lock's veil
+   it would find no void; one that falls due waits for the hold to end.
    Rows are weighted by their void share and embers are born in them.
    Embers whose row became covered move, faded in, to a void row. The first
    map waits for the page's own entrance (its cards rise 18 px and fade in
@@ -53,11 +65,16 @@
     var body = d.body, root = d.documentElement, locked = false, raf = 0, last = 0, W = 0, H = 0;
     var embers = [], ashes = [], rows = [], cum = [], voidArea = 0, mapTimer = 0, drawn = false, started = false;
     var WORDS = '.sv-on-void, .sv-page-head', NEAR = 18, CAP = 0.18, words = [], wordsDirty = true;
+    /* What covers the void as the last map found it: an ember fades out
+       as it nears one, gone within HUG px of its edge, whole at FAR px. */
+    var HUG = 12, FAR = 24, ground = [], grounds = [];
+    /* base.html's "?" sheet: a modal that is not SV.overlay's (no scroll lock) */
+    var kbd = d.getElementById('kbdModalOverlay'), stale = false;
     /* What the tests read: frames drawn, the last RING draw times (a ring,
        so a late read still sees the latest), the void and the counts. */
     var stats = w.__svEmberStats = {
         frames: 0, ring: new Float32Array(RING), n: 0, maps: 0, mapMs: 0, sliceMax: 0,
-        voidArea: 0, embers: 0, ash: 0, words: 0,
+        voidArea: 0, embers: 0, ash: 0, words: 0, grounds: 0,
         recent: function () {
             var k = Math.min(this.n, RING), out = [];
             for (var i = 0; i < k; i++) out.push(this.ring[(this.n - k + i) % RING]);
@@ -65,6 +82,8 @@
         },
         /* the alpha an ember of alpha `a` is drawn at when it is at (x, y) */
         alphaAt: function (x, y, a) { if (wordsDirty) readWords(); return capNear(x, y, a); },
+        /* the same near what covers the void (a card, a panel, a bar) */
+        groundAt: function (x, y, a) { if (wordsDirty) readWords(); return fade(x, y, a); },
         /* where each ember is, and its own alpha */
         field: function () { return embers.map(function (e) { return [e.x, e.y, e.a]; }); },
         /* the brightest ember the field would draw at (x, y): its largest
@@ -89,6 +108,31 @@
             if (r.width && r.height && r.bottom > -NEAR && r.top < H + NEAR) words.push([r.left, r.top, r.right, r.bottom]);
         }
         stats.words = words.length;
+        grounds = [];
+        for (var k = 0; k < ground.length; k++) {
+            var g = ground[k];
+            if (g.el.isConnected !== false) {           /* a swap that kept the page's shape keeps its box */
+                var b = g.el.getBoundingClientRect();
+                g.box = b.width && b.height ? [b.left, b.top, b.right, b.bottom] : null;
+            }
+            var q = g.box;
+            if (q && q[3] > -FAR && q[1] < H + FAR && q[2] > -FAR && q[0] < W + FAR) grounds.push(q);
+        }
+        stats.grounds = grounds.length;
+    }
+    /* An ember near what covers the void fades out: 0 within HUG px of
+       its edge, rising to its own alpha at FAR px. */
+    function fade(x, y, a) {
+        var dd = FAR * FAR;
+        for (var i = 0; i < grounds.length; i++) {
+            var q = grounds[i];
+            var dx = x < q[0] ? q[0] - x : (x > q[2] ? x - q[2] : 0);
+            if (dx >= FAR) continue;
+            var dy = y < q[1] ? q[1] - y : (y > q[3] ? y - q[3] : 0);
+            if (dy >= FAR) continue;
+            if (dx * dx + dy * dy < dd) { dd = dx * dx + dy * dy; if (dd <= HUG * HUG) return 0; }
+        }
+        return dd >= FAR * FAR ? a : a * (Math.sqrt(dd) - HUG) / (FAR - HUG);
     }
     /* An ember within NEAR px of a word on the void is capped at CAP, rising
        back to its own alpha at NEAR. */
@@ -112,7 +156,10 @@
             && w.getComputedStyle(canvas).display !== 'none';
     }
     /* Held: the tab is hidden, the lock is up, or a dialog holds the page. */
-    function held() { return !!d.hidden || locked || body.classList.contains('sv-scroll-locked'); }
+    function held() {
+        return !!d.hidden || locked || body.classList.contains('sv-scroll-locked')
+            || !!(kbd && kbd.classList.contains('open'));
+    }
     function running() { return shown() && embers.length > 0 && !held() && !reduced.matches; }
 
     /* Three glow sprites, drawn once: a pale core, the Eye's green, a halo
@@ -147,20 +194,23 @@
         var p = m[1].split(/[ ,\/]+/).filter(Boolean);
         return p.length < 4 || parseFloat(p[3]) > 0;
     }
-    function covered(n, memo) {
-        if (!n || n === body || n === root) return false;
+    /* What covers a point: the nearest element up to <body> that paints. */
+    function painter(n, memo) {
+        if (!n || n === body || n === root) return null;
         if (memo.has(n)) return memo.get(n);
-        var v = paints(n) || covered(n.parentElement, memo);
-        memo.set(n, v);
-        return v;
+        var p = paints(n) ? n : painter(n.parentElement, memo);
+        memo.set(n, p);
+        return p;
     }
     /* The map is built in slices of at most ~4 ms (an idle callback each),
        so it never holds the main thread; embers keep the old map meanwhile. */
     var job = null, first = true;
     function mapVoid() {
         if (!shown()) { job = null; return; }
+        if (held()) { job = null; stale = true; return; }   /* through a scrim the page shows no void */
+        stale = false;
         if (first) shape = shapeNow();
-        job = { r: 0, nr: Math.ceil(H / ROW), rows: [], area: 0, ms: 0, slices: 0, memo: new Map() };
+        job = { r: 0, nr: Math.ceil(H / ROW), bits: [], cover: new Set(), ms: 0, slices: 0, memo: new Map() };
         schedule();
     }
     function schedule() {
@@ -171,15 +221,16 @@
         var j = job;
         if (!j) return;
         if (!shown()) { job = null; return; }              /* the Ambience changed meanwhile */
+        if (held()) { job = null; stale = true; return; }  /* a dialog opened meanwhile: map once it closes */
         var t0 = w.performance.now();
         while (j.r < j.nr) {
-            var y = Math.min(H - 1, j.r * ROW + ROW / 2), hit = 0;
+            var y = Math.min(H - 1, j.r * ROW + ROW / 2), bits = [];
             for (var c = 0; c < COLS; c++) {
-                var el = d.elementFromPoint((c + 0.5) * W / COLS, y);
-                if (!el || !covered(el, j.memo)) hit++;
+                var el = d.elementFromPoint((c + 0.5) * W / COLS, y), p = el ? painter(el, j.memo) : null;
+                if (p) j.cover.add(p);
+                bits.push(!p);
             }
-            var share = hit / COLS;
-            j.rows.push(share); j.area += share * W * ROW; j.r++;
+            j.bits.push(bits); j.r++;
             if (w.performance.now() - t0 > 4) break;
         }
         var dt = w.performance.now() - t0;
@@ -187,8 +238,16 @@
         if (dt > stats.sliceMax) stats.sliceMax = dt;
         if (j.r < j.nr) { schedule(); return; }
         job = null;
-        rows = j.rows; voidArea = j.area; cum = [];
-        for (var i = 0, acc = 0; i < rows.length; i++) { acc += rows[i]; cum.push(acc); }
+        /* a point counts where the void also runs a row above and below
+           it: a gutter between stacked cards is no place to be born */
+        rows = []; voidArea = 0; cum = [];
+        for (var r = 0, acc = 0; r < j.bits.length; r++) {
+            var up = j.bits[r - 1], dn = j.bits[r + 1], hit = 0;
+            for (var k = 0; k < COLS; k++) if (j.bits[r][k] && (!up || up[k]) && (!dn || dn[k])) hit++;
+            rows.push(hit / COLS); voidArea += hit / COLS * W * ROW; acc += hit / COLS; cum.push(acc);
+        }
+        ground = [];
+        j.cover.forEach(function (el) { ground.push({ el: el, box: null }); });
         stats.maps++; stats.mapMs = j.ms; stats.mapSlices = j.slices; stats.voidArea = Math.round(voidArea);
         stats.rows = rows.slice(); stats.ROW = ROW;
         readWords();
@@ -225,7 +284,11 @@
     function remap(ev) {
         wordsDirty = true;
         if (!started || !shown()) return;
-        if (ev && ev.type === 'sv:live-swapped' && shapeNow() === shape) return;
+        if (held()) { stale = true; return; }           /* never map through a scrim, the veil or a hidden tab */
+        /* a swap that kept the page's shape, or a panel (the nav, the
+           rail) scrolling inside itself, moved no void */
+        if (ev && (ev.type === 'sv:live-swapped' || (ev.type === 'scroll' && ev.target !== d))
+            && shapeNow() === shape) return;
         if (mapTimer) w.clearTimeout(mapTimer);
         mapTimer = w.setTimeout(function () { mapTimer = 0; shape = shapeNow(); mapVoid(); }, 220);
     }
@@ -271,15 +334,19 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         for (var j = 0; j < ashes.length; j++) {
             var a = ashes[j], c = Math.cos(a.rot) * S, s = Math.sin(a.rot) * S;
+            var aa = grounds.length ? fade(a.x, a.y, a.a) : a.a;
+            if (!aa) continue;                          /* against a card: nothing to draw */
             ctx.setTransform(c, s, -s, c, a.x * S, a.y * S);
-            ctx.globalAlpha = a.a;
+            ctx.globalAlpha = aa;
             ctx.drawImage(ASH, -a.w / 2, -a.h / 2, a.w, a.h);
         }
         if (wordsDirty) readWords();
         ctx.setTransform(S, 0, 0, S, 0, 0);
         for (var i = 0; i < embers.length; i++) {
             var e = embers[i], dd = e.r * 9, y = e.y + Math.sin(e.ph) * e.amp;
-            ctx.globalAlpha = (words.length ? capNear(e.x, y, e.a) : e.a) * e.f * (0.6 + 0.4 * Math.sin(e.ph * 1.7));
+            var ea = grounds.length ? fade(e.x, y, e.a) : e.a;
+            if (!ea) continue;                          /* against a card: nothing to draw */
+            ctx.globalAlpha = (words.length ? capNear(e.x, y, ea) : ea) * e.f * (0.6 + 0.4 * Math.sin(e.ph * 1.7));
             ctx.drawImage(SPR[e.s], e.x - dd / 2, y - dd / 2, dd, dd);
         }
         ctx.globalAlpha = 1;
@@ -315,6 +382,7 @@
         if (!shown()) { halt(); if (drawn) clear(); return; }
         if (!stats.maps && !job) { size(); mapVoid(); return; }    /* shown for the first time: map, then come back */
         if (held()) { halt(); return; }
+        if (stale) { stale = false; remap(); }          /* the hold is over: map the page as it is now */
         if (reduced.matches) {                          /* one still frame: the field is simply there */
             halt();
             if (!drawn && embers.length) { for (var k = 0; k < embers.length; k++) embers[k].f = 1; draw(); }
@@ -342,6 +410,7 @@
        or the page's opt-in */
     if (w.MutationObserver) {
         new w.MutationObserver(wake).observe(body, { attributes: true, attributeFilter: ['class', 'data-sv-ambience', 'data-sv-embers'] });
+        if (kbd) new w.MutationObserver(wake).observe(kbd, { attributes: true, attributeFilter: ['class'] });
     }
     if (reduced.addEventListener) reduced.addEventListener('change', wake);
 })(window, document);

@@ -1131,7 +1131,8 @@ const clockSrc = fs.readFileSync(process.argv[3], 'utf8');
 
 function world(o) {
   o = Object.assign({ ambience: 'magic', embers: true, hidden: false, reduced: false, light: false,
-                      cssHides: false, cover: () => false, hitCost: 0, drawCost: 0, words: [] }, o);
+                      cssHides: false, cover: () => false, hitCost: 0, drawCost: 0, words: [],
+                      cardBox: null, kbd: false }, o);
   let now = 1000, rafQ = [], rafAsked = 0, idleQ = [], timers = [], hits = 0, fontSet = 0;
   const calls = {}, observers = [], listeners = {}, wlisteners = {};
   const context = main => new Proxy({}, {
@@ -1153,10 +1154,16 @@ function world(o) {
     getAttribute: k => (k in attrs ? attrs[k] : null), hasAttribute: k => k in attrs,
     setAttribute: (k, v) => { attrs[k] = v; mutate(); }, removeAttribute: k => { delete attrs[k]; mutate(); } };
   const root = { scrollHeight: 912 };
-  const card = { parentElement: body, isCard: true };
+  const rect = b => (b ? { left: b[0], top: b[1], right: b[2], bottom: b[3], width: b[2] - b[0], height: b[3] - b[1] }
+                       : { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
+  const card = { parentElement: body, isCard: true, getBoundingClientRect: () => rect(o.cardBox) };
+  // base.html's "?" sheet (#kbdModalOverlay), its class watched as <body>'s is
+  const kclasses = new Set();
+  const kbd = o.kbd ? { id: 'kbdModalOverlay', classList: { contains: c => kclasses.has(c),
+    add: c => { kclasses.add(c); mutate(); }, remove: c => { kclasses.delete(c); mutate(); } } } : null;
   const doc = {
     body, documentElement: root, hidden: o.hidden, fonts: null,
-    getElementById: id => (id === 'particles-canvas' ? canvas : null),
+    getElementById: id => (id === 'particles-canvas' ? canvas : (id === 'kbdModalOverlay' ? kbd : null)),
     createElement: () => ({ width: 0, height: 0, getContext: () => context(false) }),
     querySelectorAll: () => o.words.map(b => ({ getBoundingClientRect: () => (
       { left: b[0], top: b[1], right: b[2], bottom: b[3], width: b[2] - b[0], height: b[3] - b[1] }) })),
@@ -1179,12 +1186,13 @@ function world(o) {
   win.window = win;
   vm.runInContext(src, vm.createContext(win));
   return {
-    o, body, doc, root, calls,
+    o, body, doc, root, calls, win, kbd,
     stats: () => win.__svEmberStats,
     idle: () => { let n = 0; while (idleQ.length && n < 2000) { idleQ.shift()({ timeRemaining: () => 4 }); n++; } return n; },
     tick: dt => { now += dt; const q = rafQ; rafQ = []; q.forEach(f => f(now)); return q.length; },
     advance: ms => { now += ms; timers.forEach(t => { if (t.f && t.at <= now) { const f = t.f; t.f = null; f(); } }); },
     fire: t => (listeners[t] || []).forEach(f => f({ type: t })),
+    wfire: (t, ev) => (wlisteners[t] || []).forEach(f => f(Object.assign({ type: t, target: doc }, ev || {}))),
     asked: () => rafAsked, pending: () => rafQ.length, hits: () => hits, fontSet: () => fontSet };
 }
 function settle(w, ticks) { let n = 0; for (let i = 0; i < ticks; i++) n += w.tick(16.7); return n; }
@@ -1262,6 +1270,36 @@ const out = {};
   out.near = { inside: s.alphaAt(500, 305, 0.55), edge: s.alphaAt(500, 300, 0.55), half: s.alphaAt(500, 291, 0.55),
                at18: s.alphaAt(500, 282, 0.55), far: s.alphaAt(100, 100, 0.55), dim: s.alphaAt(500, 305, 0.1),
                words: s.words }; }
+// review 2026-11-12: a resize while a dialog's scrim holds the page; the map waits for the
+// hold to end (through the scrim it would find no void and empty the field), then maps
+{ let scrim = false; const w = world({ cover: () => scrim }); start(w); settle(w, 4);
+  const h = w.hits(), e = w.stats().embers;
+  scrim = true; w.body.classList.add('sv-scroll-locked'); w.wfire('resize'); w.advance(400); w.idle(); settle(w, 3);
+  const during = { hits: w.hits() - h, embers: w.stats().embers };
+  scrim = false; w.body.classList.remove('sv-scroll-locked'); const a = w.asked(); w.advance(400); w.idle(); settle(w, 3);
+  out.heldRemap = { before: e, during, after: { hits: w.hits() - h, embers: w.stats().embers, asked: w.asked() - a } }; }
+// the "?" shortcut sheet, base.html's own modal outside SV.overlay: open, no frame
+{ const w = world({ kbd: true }); start(w); settle(w, 4); const a = w.asked();
+  w.kbd.classList.add('open'); settle(w, 5); out.kbd = [w.asked() - a, w.pending()];
+  w.kbd.classList.remove('open'); out.kbdClosed = w.asked() - a; }
+// a panel scrolling inside itself (the nav, the rail) leaves the void as it was: no map;
+// the page's own scroll that moves it maps once
+{ const w = world(); start(w); const h = w.hits();
+  w.wfire('scroll', { target: { nodeType: 1 } }); w.advance(400); w.idle(); const inner = w.hits() - h;
+  w.win.scrollY = 120; w.wfire('scroll'); w.advance(400); w.idle();
+  out.innerScroll = [inner, w.hits() - h]; }
+// a 10 px gutter between two cards stacked one above the other is no void: no ember is
+// born to run along it (a point counts only where the void runs a row above and below too)
+{ const w = world({ cover: (x, y) => !(y >= 296 && y < 306) }); start(w); settle(w, 3);
+  out.seam = { voidArea: w.stats().voidArea, embers: w.stats().embers, asked: w.asked() }; }
+// near a card's edge an ember fades out: gone within 12 px, whole again at 24 px, so none
+// is ever cut flat by a card or seen in a gutter under 24 px
+{ const w = world({ cover: (x, y) => x >= 400 && x < 700 && y >= 300 && y < 400, cardBox: [400, 300, 700, 400] });
+  start(w); const s = w.stats();
+  out.ground = { grounds: s.grounds, inside: s.groundAt(500, 350, 0.55), at6: s.groundAt(500, 294, 0.55),
+                 at12: s.groundAt(500, 288, 0.55), at18: s.groundAt(500, 282, 0.55), at24: s.groundAt(500, 276, 0.55),
+                 side18: s.groundAt(718, 350, 0.55), far: s.groundAt(100, 100, 0.55),
+                 words: s.alphaAt(500, 282, 0.55) }; }
 // the stats ring: the last 240 draws, so a late read still sees the latest
 { const w = world(); start(w); const s = w.stats(); let n = 0;
   while (s.n < 300) { w.o.drawCost = (s.n + 1) / 100; w.tick(40); if (++n > 2000) break; }
@@ -1360,12 +1398,15 @@ class AmbientGuardNodeTests(SimpleTestCase):
         self.assertEqual(self.got["cap"], 5)
 
     def test_embers_are_born_in_the_void_only(self):
+        """Updated deliberately (review 2026-11-12): a point counts as void
+        where the void runs a row above and below it too, so the row that
+        touches the card's edge (y 456 to 480) is held off as well."""
         m = self.got["map"]
         self.assertEqual(m["embers"], 56)
-        self.assertEqual(m["voidArea"], 1440 * 456)
-        self.assertGreaterEqual(m["minBorn"], 456)
+        self.assertEqual(m["voidArea"], 1440 * 432)
+        self.assertGreaterEqual(m["minBorn"], 480)
         self.assertGreater(m["reborn"], 56)
-        self.assertGreaterEqual(m["minReborn"], 456)
+        self.assertGreaterEqual(m["minReborn"], 480)
 
     def test_the_map_never_holds_the_main_thread(self):
         """Built in slices: none works for more than 4 ms plus one row."""
@@ -1387,6 +1428,47 @@ class AmbientGuardNodeTests(SimpleTestCase):
         self.assertAlmostEqual(n["at18"], 0.55, places=6)
         self.assertAlmostEqual(n["far"], 0.55, places=6)
         self.assertAlmostEqual(n["dim"], 0.1, places=6)       # never raised: a cap, not a floor
+
+    def test_a_map_waits_for_a_dialog_to_close(self):
+        """Review 2026-11-12: a resize under a dialog's scrim mapped the
+        scrim, found no void, emptied the field and drew nothing until the
+        next scroll. The map now waits for the hold to end, then maps the
+        page as it is."""
+        g = self.got["heldRemap"]
+        self.assertEqual(g["before"], 56)
+        self.assertEqual(g["during"], {"hits": 0, "embers": 56})
+        self.assertEqual((g["after"]["hits"], g["after"]["embers"]), (38 * 24, 56))
+        self.assertGreater(g["after"]["asked"], 0)
+
+    def test_no_frame_is_scheduled_under_the_shortcut_sheet(self):
+        """Review 2026-11-12: base.html's "?" sheet is a modal outside
+        SV.overlay (no scroll lock): open, the field asks for no frame;
+        closed, it runs again."""
+        self.assertEqual(self.got["kbd"], [0, 0])
+        self.assertGreater(self.got["kbdClosed"], 0)
+
+    def test_a_panel_scrolling_inside_itself_costs_no_map(self):
+        """Review 2026-11-12: the nav and the rail paint their own ground;
+        their scroll leaves the void as it was. The page's scroll maps."""
+        self.assertEqual(self.got["innerScroll"], [0, 38 * 24])
+
+    def test_a_gutter_between_stacked_cards_is_no_void(self):
+        """Review 2026-11-12 (the brief: the magic around the numbers,
+        never among them): embers glinted in the 10 and 16 px gutters
+        between the KPI tiles."""
+        self.assertEqual(self.got["seam"], {"voidArea": 0, "embers": 0, "asked": 0})
+
+    def test_an_ember_fades_out_near_a_card_s_edge(self):
+        g = self.got["ground"]
+        self.assertEqual(g["grounds"], 1)
+        for k in ("inside", "at6", "at12"):
+            with self.subTest(at=k):
+                self.assertEqual(g[k], 0)
+        self.assertAlmostEqual(g["at18"], 0.275, places=6)
+        self.assertAlmostEqual(g["side18"], 0.275, places=6)
+        self.assertAlmostEqual(g["at24"], 0.55, places=6)
+        self.assertAlmostEqual(g["far"], 0.55, places=6)
+        self.assertAlmostEqual(g["words"], 0.55, places=6)     # alphaAt stays the words' cap (C5)
 
     def test_the_stats_ring_keeps_the_last_240_draws(self):
         r = self.got["ring"]

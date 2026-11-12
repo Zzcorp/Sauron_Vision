@@ -1232,8 +1232,9 @@ input[type=checkbox], input[type=radio] { accent-color: var(--sv-eye); }
    saved" beside the label in the warning's colour when a save fails (the
    row keeps its height, so the menu does not move), and nothing else: the
    menu explains nothing. The light theme's sweep takes every button's
-   shadow away: the pressed value keeps the Eye's underline there, flat. A
-   phone's buttons take the menu rows' 44 px. */
+   shadow away: the pressed value keeps the Eye's underline there, flat. On
+   a phone every segment button takes the 44 px floor: the menu's three,
+   the kit's previews and its timeframe sample (review 2026-11-12). */
 .um-ambience { padding: 10px 16px 12px; }
 .um-ambience-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 18px; }
 .um-ambience-note { font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); font-weight: 600; color: var(--sv-warn); white-space: nowrap; }
@@ -1243,7 +1244,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--sv-eye); }
 .um-ambience[aria-busy="true"] .sv-seg-btn { cursor: progress; }
 body.light-mode .um-ambience .sv-seg-btn[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--sv-eye); }
 @media (max-width: 768px) {
-    .um-ambience .sv-seg-btn { height: 44px; }
+    .sv-seg-btn { height: 44px; }
 }
 
 .sv-popover {
@@ -1381,16 +1382,20 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
    ▶ TICKET (merged 2026-11-12) is LEFT THE RAIL's control: the same light. */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
-body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
-body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-long:not([disabled], .disabled):is(:hover, :focus-visible),
-body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-buy:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-in); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-in); }
 /* Coral after jade: a bearish card's TAKE TRADE is a SELL. */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-short:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
-body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-in); }
+/* A BUY or a SELL whose label holds a figure (the ticket's live bid and
+   ask; a size on a BUY or a SELL): the side's 1 px ring alone, with no
+   blur, so no light reaches the figure (C3's measure: a line or a ring
+   with no blur is no light). Review 2026-11-12. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-long:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-buy:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-ring); }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-short:not([disabled], .disabled):is(:hover, :focus-visible),
-body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-sell:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-in); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-sell:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-ring); }
 
 /* The hero card: a page's one headline figure (pages adopt it from stage
    S2; /design/kit/ shows it). A 1 px edge of light on top and a glow above
@@ -1524,7 +1529,10 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
 /* The flare: a burst and a 1 px ring in one circle, once, when a fill is
    proven (sv-moments.js sets .sv-flare; never for an order the broker only
    holds, a quote or a refresh). A close flares at 60 %. Calm: one soft
-   glow in place, no ring. Off and reduced motion: none. */
+   glow in place, no ring. Off and reduced motion: none. The circle opens
+   to 1.08 and no further: the mark's centre sits 38 px from the window's
+   edges, so the ring blooms whole and is never cut by the window (review
+   2026-11-12; at 1.9 it read as a sonar ping, cut at the top and left). */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare::after {
     content: ""; position: absolute; top: 50%; left: 50%; width: 70px; height: 70px;
     box-sizing: border-box; border-radius: 50%; border: 1px solid rgba(0,232,104,.9);
@@ -1538,12 +1546,12 @@ body:not(.light-mode)[data-sv-ambience="calm"] .brand-eye-wrap.sv-flare::after {
 @keyframes sv-eye-flare {
     0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
     12% { opacity: 1; transform: translate(-50%, -50%) scale(.9); }
-    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.9); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.08); }
 }
 @keyframes sv-eye-flare-soft {
     0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
     12% { opacity: .6; transform: translate(-50%, -50%) scale(.9); }
-    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.9); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.08); }
 }
 @keyframes sv-eye-glow {
     0% { opacity: 0; transform: translate(-50%, -50%) scale(1); }

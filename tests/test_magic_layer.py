@@ -44,6 +44,7 @@ import subprocess
 import tempfile
 import unittest
 import urllib.parse
+from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -206,7 +207,8 @@ class EyeLitTokenTests(SimpleTestCase):
         light = {k: v for k, v in self.root.items()
                  if re.match(r"--sv-(glow|edge|spill)-", k)}
         for want in ("--sv-glow-brand-text", "--sv-glow-edge", "--sv-glow-dot", "--sv-glow-up-in",
-                     "--sv-glow-down-in", "--sv-spill-active", "--sv-edge-hero"):
+                     "--sv-glow-down-in", "--sv-glow-up-ring", "--sv-glow-down-ring",
+                     "--sv-spill-active", "--sv-edge-hero"):
             self.assertIn(want, light)
         for name, value in light.items():
             with self.subTest(token=name):
@@ -214,11 +216,18 @@ class EyeLitTokenTests(SimpleTestCase):
                 self.assertNotRegex(value, r"#[0-9a-fA-F]{3,8}\b")
                 for c in colours(value):
                     self.assertIn(c, (EYE_RGB, PALE_RGB, UP_RGB, DOWN_RGB))
-        for name, colour in (("--sv-glow-up-in", UP_RGB), ("--sv-glow-down-in", DOWN_RGB)):
+        for name, colour in (("--sv-glow-up-in", UP_RGB), ("--sv-glow-down-in", DOWN_RGB),
+                             ("--sv-glow-up-ring", UP_RGB), ("--sv-glow-down-ring", DOWN_RGB)):
             for layer in layers(light[name]):
                 with self.subTest(token=name, layer=layer):
                     self.assertTrue(layer.startswith("inset "), layer)
                     self.assertEqual(colours(layer), [colour])
+        # The ring a figure's button takes is the inset light's own first
+        # layer, alone: a 1 px line, no blur.
+        for ring, light_in in (("--sv-glow-up-ring", "--sv-glow-up-in"), ("--sv-glow-down-ring", "--sv-glow-down-in")):
+            with self.subTest(token=ring):
+                self.assertEqual(layers(light[ring]), layers(light[light_in])[:1])
+                self.assertRegex(light[ring], r"^inset 0 0 0 1px rgba\(")
 
     def test_no_text_glow_token_but_the_brand(self):
         """One text may glow, the wordmark. The kit sets no other
@@ -434,14 +443,18 @@ LIGHT_SOURCES = {
         '.sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket',
         # MARKET SHUT's ▶ TICKET (2026-11-12, the merge of main's #99-#101):
         # LEFT THE RAIL's control in the section beside it, the same light.
-        '.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket',
-        ".tk-long", ".btn.btn-buy")),
+        '.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket')),
     "--sv-glow-down-in": tuple(LIT + " " + s + ":not([disabled], .disabled):is(:hover, :focus-visible)" for s in (
         ".sr-pop-btn.sr-pop-btn-short",
         ".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act",
         '.sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket',
-        '.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket',
-        ".tk-short", ".btn.btn-sell")),
+        '.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket')),
+    # A BUY or a SELL whose label holds a figure (the ticket's live bid and
+    # ask, a size): the side's ring alone, no blur (review 2026-11-12).
+    "--sv-glow-up-ring": tuple(LIT + " " + s + ":not([disabled], .disabled):is(:hover, :focus-visible)"
+                               for s in (".tk-long", ".btn.btn-buy")),
+    "--sv-glow-down-ring": tuple(LIT + " " + s + ":not([disabled], .disabled):is(:hover, :focus-visible)"
+                                 for s in (".tk-short", ".btn.btn-sell")),
 }
 
 
@@ -540,8 +553,8 @@ class LightOnTheFrameTests(SimpleTestCase):
 
     def test_a_money_button_lights_in_its_side_inside_its_box_never_disabled(self):
         kit = read(KIT)
-        for token, want in (("--sv-glow-up-in", LIGHT_SOURCES["--sv-glow-up-in"]),
-                            ("--sv-glow-down-in", LIGHT_SOURCES["--sv-glow-down-in"])):
+        for token in ("--sv-glow-up-in", "--sv-glow-down-in", "--sv-glow-up-ring", "--sv-glow-down-ring"):
+            want = LIGHT_SOURCES[token]
             rule = block(kit, ",\n".join(want))
             self.assertEqual(rule, {"box-shadow": "var(%s)" % token})
         # The bearish card's coral comes after the jade it must outweigh.
@@ -696,6 +709,22 @@ class MomentsSheetTests(SimpleTestCase):
                 props = set(re.findall(r"([\w-]+)\s*:", re.sub(r"[\d.%,\s]+(?=\{)|from|to", "", frames[name])))
                 self.assertTrue(props, frames[name])
                 self.assertLessEqual(props, {"opacity", "background-position"})
+
+    def test_the_flare_s_ring_ends_inside_the_window(self):
+        """Review 2026-11-12 (the brief: never a game effect): the mark's
+        centre sits 38 px from the window's top and left edges (its 36 px
+        box at 20 px), and the flare is a 70 px circle; grown to 1.9 its
+        ring was cut by the window at the top and the left from 300 ms on,
+        a sonar ping. It may grow to 2 x 38 / 70 = 1.086 at most: a bloom
+        that stays whole. The burst, the timing and the easing are C6's."""
+        frames = self.frames()
+        rule = block(read(KIT), LIT + " .brand-eye-wrap.sv-flare::after")
+        self.assertEqual((rule["width"], rule["height"]), ("70px", "70px"))
+        for name in ("sv-eye-flare", "sv-eye-flare-soft"):
+            scales = [float(s) for s in re.findall(r"scale\(([\d.]+)\)", frames[name])]
+            with self.subTest(keyframes=name):
+                self.assertEqual(scales[:2], [0.6, 0.9])
+                self.assertLessEqual(max(scales) * 70 / 2, 38)
 
     def test_a_moment_never_targets_a_button_or_a_figure(self):
         used = 0
@@ -892,6 +921,20 @@ Object.keys(shapes).forEach(k => {
 { const w = world(); w.eye('fill_close', { trade_id: 61 }); out.close = [w.flares(), w.softs()];
   w.advance(5000); ['quote', 'notification', 'run_complete', 'sauron_answer', 'close_pending'].forEach(k => w.eye(k, { trade_id: 62 }));
   out.others = w.flares(); w.eye('fill_close', { trade_id: 61 }); out.closeTwice = w.flares(); }
+// 6b. a close only its own booked trade proves: the kill switch's sweep (a held order it
+// withdrew, "Nothing traded", still pushes fill_close with its trade; the portfolio rows it
+// only marks closed push one with no trade) and nl_trader's close written in the database
+// alone say their source and flare nothing, now or again; the booked close still flares soft
+out.closeUnproven = {};
+const closeShapes = { killSwitchWithdrawn: { source: 'kill_switch', trade_id: 63, asset_class: 'crypto', symbol: 'SYNUSD' },
+                      killSwitchRows: { source: 'kill_switch' },
+                      nlTrader: { symbol: 'SYNUSD', source: 'nl_trader' } };
+Object.keys(closeShapes).forEach(k => {
+  const w = world(); w.eye('fill_close', closeShapes[k]); w.advance(2000); w.eye('fill_close', closeShapes[k]);
+  out.closeUnproven[k] = w.flares();
+});
+{ const w = world(); w.eye('fill_close', { trade_id: 64, asset_class: 'crypto', symbol: 'SYNUSD', side: 'BUY', outcome: 'win', pnl: '' });
+  out.closeBooked = [w.flares(), w.softs()]; }
 // 7. nothing under reduced motion, Off or light mode; Calm flares
 out.quiet = {};
 [['reduced', { reduced: true }], ['off', { ambience: 'off' }], ['light', { light: true }], ['calm', { ambience: 'calm' }]].forEach(([k, o]) => {
@@ -988,6 +1031,19 @@ class MomentsNodeTests(SimpleTestCase):
         g = self.got
         self.assertEqual(g["close"], [1, 1])
         self.assertEqual((g["others"], g["closeTwice"]), (1, 1))
+
+    def test_a_close_its_own_trade_does_not_prove_flares_nothing(self):
+        """Review 2026-11-12: the kill switch pushes fill_close for a held
+        order it withdrew (nothing traded) and, with no trade, for the
+        portfolio rows it only marks closed; nl_trader for a close written
+        in the database alone. Each says its source; none proves a fill, so
+        none flares, the first time or again. The engine's, the
+        reconcile's and the pending closes' booked close carries its trade
+        and no source: it still flares soft."""
+        for shape, got in sorted(self.got["closeUnproven"].items()):
+            with self.subTest(shape=shape):
+                self.assertEqual(got, 0)
+        self.assertEqual(self.got["closeBooked"], [1, 1])
 
     def test_nothing_under_reduced_motion_off_or_light_mode(self):
         for mode in ("reduced", "off", "light"):
@@ -1351,6 +1407,8 @@ class FiguresMeasuredTests(TestCase):
 
     URLS = (POSITIONS, INSTRUMENT, OPS, KIT_URL)
     TABS = tuple(COMMAND + "#" + tab for tab in COMMAND_TABS)
+    #: the controls that open or add to a position (C3's side lights)
+    MONEY = ".tk-long, .tk-short, .btn.btn-buy, .btn.btn-sell, .sr-pop-btn, .sr-gone-btn"
     CHIPS = ("(function () { var p = document.querySelector('.dtl-price'); if (!p) return 0;"
              " p.insertAdjacentHTML('beforeend', '<span class=\"dtl-chg up\">\u25B2 +1.85%</span>"
              "<span class=\"dtl-chg down\">\u25BC 0.42%</span>'); return 1; })()")
@@ -1359,6 +1417,10 @@ class FiguresMeasuredTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         client = _book("magic_figures")
+        # The ticket's BUY and SELL carry the live bid and ask (a quote
+        # without them prints a dash, which holds no figure).
+        from market_data.models import LiveQuote
+        LiveQuote.objects.filter(instrument__symbol="SYN100").update(bid=Decimal("99.9"), ask=Decimal("100.1"))
         pages = {u: _file_page(m) for u, m in _pages(client, cls.URLS).items()}
         for tab in COMMAND_TABS:
             pages[COMMAND + "#" + tab] = _command_page(client, tab)
@@ -1383,6 +1445,22 @@ class FiguresMeasuredTests(TestCase):
                                          " f.empties = document.querySelectorAll('.oc-empty').length;"
                                          " f.loading = document.querySelectorAll('.oc-loading').length;"
                                          " return f; })()")
+            # Review 2026-11-12: a money button whose label holds a figure
+            # (the ticket's BUY and SELL hold the live ask and bid, the
+            # kit's samples a size), hovered and focused, under Magic and
+            # Calm.
+            cls.forced = {}
+            for url in (INSTRUMENT, KIT_URL):
+                b.open(sid, url, PROBES)
+                n = b.force(sid, cls.MONEY, ["hover", "focus-visible", "focus"])
+                for mode in ("magic", "calm"):
+                    f = b.js(sid, "(async function () { __sv.mode('%s'); await __sv.frame();"
+                                  " var f = __sv.figures(); f.prices = Array.prototype.filter.call("
+                                  "   document.querySelectorAll('.tk-long .tk-px, .tk-short .tk-px'),"
+                                  "   function (p) { return /\\d/.test(p.textContent); }).length;"
+                                  " return f; })()" % mode)
+                    cls.forced[(url, mode)] = {"forced": n, "figures": f["figures"], "lit": f["lit"],
+                                               "prices": f["prices"]}
         finally:
             b.close()
 
@@ -1413,6 +1491,20 @@ class FiguresMeasuredTests(TestCase):
             with self.subTest(url=url):
                 self.assertEqual(got["lit"], [])
 
+    def test_no_figure_is_lit_while_a_money_button_is_hovered_or_focused(self):
+        """Review 2026-11-12: the ticket's BUY and SELL hold the live ask
+        and bid, the kit's BUY and SELL samples a size. Hovered or focused
+        under Magic or Calm, a side marks its button with a ring of no blur
+        inside its box, which lights no figure (C3's measure: a line or a
+        ring with no blur is no light); its 12 px inset blur lit both
+        prices."""
+        for (url, mode), got in sorted(self.forced.items()):
+            with self.subTest(url=url, mode=mode):
+                self.assertGreater(got["forced"], 1)
+                self.assertGreater(got["figures"], 20)
+                self.assertEqual(got["lit"], [])
+        self.assertGreaterEqual(self.forced[(INSTRUMENT, "magic")]["prices"], 2)
+
     def test_the_cards_compute_an_opaque_ground(self):
         want = "rgb(%d, %d, %d) none" % hex_rgb(PALETTE["--sv-bg-1"])
         seen = 0
@@ -1434,8 +1526,14 @@ class FiguresMeasuredTests(TestCase):
 LIGHT_PROBE = r"""(async function () {
   var out = {};
   function px(el, pseudo, prop) { return el ? getComputedStyle(el, pseudo || null)[prop] : null; }
+  /* A mode is read once its transitions have ended: a hover's shadow still
+     moving (.se-chat-header-btn's .18 s) read as a difference under load
+     (review 2026-11-12). Loops are left as they are. */
+  function still() {
+    document.getAnimations().forEach(function (a) { if (a instanceof CSSTransition) { try { a.finish(); } catch (e) {} } });
+  }
   for (var m of ['magic', 'calm', 'off', 's1a']) {
-    __sv.mode(m); await __sv.frame();
+    __sv.mode(m); await __sv.frame(); still();
     var nav = document.querySelector('.sidebar .nav-link.active'), wrap = document.querySelector('.brand-eye-wrap');
     out[m] = {
       wordmark: px(document.querySelector('.sidebar-brand h1'), null, 'textShadow'),
@@ -1448,7 +1546,7 @@ LIGHT_PROBE = r"""(async function () {
       shadows: __sv.shadows()
     };
   }
-  document.body.classList.add('light-mode'); __sv.mode('magic'); await __sv.frame();
+  document.body.classList.add('light-mode'); __sv.mode('magic'); await __sv.frame(); still();
   out.light = { wordmarkLit: /0, 232, 104|0, 153, 77/.test(px(document.querySelector('.sidebar-brand h1'), null, 'textShadow')) && false,
                 voidLight: px(document.body, '::before', 'content'), grain: px(document.body, '::after', 'content'),
                 canvas: px(document.getElementById('particles-canvas'), null, 'display'),
@@ -1884,8 +1982,24 @@ class EmbersMeasuredTests(TestCase):
                 b.js(sid, "document.body.classList.remove('sv-scroll-locked');"
                           " document.dispatchEvent(new CustomEvent('sv:pin-locked')); __sv.frame().then(function () { return 0; })")
                 got["locked"] = b.js(sid, EMBER_WINDOW + "(1000)")
+                # Review 2026-11-12: the "?" shortcut sheet is base.html's
+                # own modal (not SV.overlay's): open, no frame.
                 b.js(sid, "document.dispatchEvent(new CustomEvent('sv:pin-unlocked'));"
-                          " document.body.removeAttribute('data-sv-embers'); __sv.frame().then(function () { return 0; })")
+                          " document.getElementById('kbdModalOverlay').classList.add('open');"
+                          " __sv.frame().then(function () { return 0; })")
+                got["kbd"] = b.js(sid, EMBER_WINDOW + "(1000)")
+                # A resize while a dialog's scrim holds the page: the map
+                # waits for it to close, and the field draws again after.
+                b.js(sid, "document.getElementById('kbdModalOverlay').classList.remove('open');"
+                          " (function () { var s = document.createElement('div'); s.id = 'svProbeScrim';"
+                          " s.style.cssText = 'position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,.6)';"
+                          " document.body.appendChild(s); document.body.classList.add('sv-scroll-locked');"
+                          " window.dispatchEvent(new Event('resize'));"
+                          " return new Promise(function (r) { setTimeout(function () { r(0); }, 1200); }); })()")
+                b.js(sid, "document.getElementById('svProbeScrim').remove();"
+                          " document.body.classList.remove('sv-scroll-locked'); 0")
+                got["afterHold"] = b.js(sid, EMBER_WINDOW + "(2000)")
+                b.js(sid, "document.body.removeAttribute('data-sv-embers'); __sv.frame().then(function () { return 0; })")
                 got["notOptedIn"] = b.js(sid, EMBER_WINDOW + "(2000)")
                 cls.got[url] = got
             still = b.tab(reduced=True)
@@ -1927,6 +2041,17 @@ class EmbersMeasuredTests(TestCase):
                 self.assertEqual(got["dialog"]["frames"], 0, got["dialog"])
                 self.assertEqual(got["locked"]["frames"], 0, got["locked"])
 
+    def test_the_shortcut_sheet_holds_the_field_and_a_hold_never_empties_it(self):
+        """Review 2026-11-12: under the "?" sheet no frame is drawn; and a
+        resize while a dialog's scrim holds the page no longer maps the
+        scrim (no void, no ember, no frame until the next scroll): the
+        field draws again once the hold ends."""
+        for url, got in sorted(self.got.items()):
+            with self.subTest(url=url):
+                self.assertEqual(got["kbd"]["frames"], 0, got["kbd"])
+                self.assertGreater(got["afterHold"]["embers"], 0, got["afterHold"])
+                self.assertGreaterEqual(got["afterHold"]["frames"], 10, got["afterHold"])
+
     def test_reduced_motion_draws_one_still_frame(self):
         self.assertEqual(self.reduced["frames"], 0)
         self.assertGreater(self.reducedMaps, 0)
@@ -1958,7 +2083,10 @@ class WordsOnTheVoidMeasuredTests(TestCase):
                       " return new Promise(function (r) { var n = 0, t = setInterval(function () {"
                       "   if ((window.__svEmberStats && __svEmberStats.maps && __svEmberStats.words) || ++n > 100) {"
                       "     clearInterval(t); document.body.classList.add('sv-scroll-locked'); setTimeout(function () { r(0); }, 120); } }, 50); }); })()")
-            b.js(sid, "__sv.settle()")
+            # Settled, the words are read again where they now stand: under
+            # load the map can read them while the page's entrance still
+            # moves them (review 2026-11-12, a run read 4.42:1 that way).
+            b.js(sid, "__sv.settle().then(function () { document.dispatchEvent(new CustomEvent('sv:live-swapped')); return 0; })")
             cls.words = b.js(sid, "Array.prototype.map.call(document.querySelectorAll('.sv-page-head .sv-overline, .sv-page-head .sv-page-head-lead'), function (e) {"
                                   " var r = e.getBoundingClientRect(), c = getComputedStyle(e);"
                                   " return { x: r.left, y: r.top, w: r.width, h: r.height, color: c.color, size: c.fontSize, text: e.textContent.trim().slice(0, 30) }; })")
