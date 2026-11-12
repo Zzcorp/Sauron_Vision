@@ -2854,6 +2854,23 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] %s: the Orc's birth was not "
                            "registered: %s", self.asset_class, trade.symbol,
                            e)
+        # THE FILL, ANNOUNCED (2026-11-07): the entry pushed fill_open
+        # "working": true when it booked this held order; the fill is said
+        # once, here, on the user's Eye WebSocket, as execute_entry and
+        # TAKE TRADE say theirs. Display only, after the booking and last
+        # (review 2026-11-12): the push waits on the channel layer, so
+        # nothing the fill needs (the Orc's registration above) waits on
+        # it. A push that fails is logged and changes nothing.
+        try:
+            from dashboard.consumers import push_eye_event
+            push_eye_event(self.user, "fill_open", {
+                "trade_id": trade.id, "asset_class": self.asset_class,
+                "symbol": trade.symbol, "side": trade.side,
+                "working": False,
+            })
+        except Exception as e:  # noqa: BLE001 — never stops a fill
+            logger.warning("[%s_bot] WS push (fill) failed: %s",
+                           self.asset_class, e)
 
     def _broker_snapshot(self, client, what: str, *, priority=None,
                          why: str = ""):
@@ -8136,11 +8153,15 @@ class AssetBot(ABC):
                                self.asset_class, e)
 
         # Phase-23: push the open event to the user's Eye WebSocket.
+        # `working` (2026-11-07): an order the broker holds is booked
+        # WORKING and announced here too, so a page can tell it from a
+        # fill; its fill is announced by _finish_working_entry.
         try:
             from dashboard.consumers import push_eye_event
             push_eye_event(self.user, "fill_open", {
                 "trade_id": trade.id, "asset_class": self.asset_class,
                 "symbol": symbol, "side": decision.direction,
+                "working": bool((trade.metadata or {}).get("entry_working")),
             })
         except Exception as e:
             logger.warning("[%s_bot] WS push (open) failed: %s",
