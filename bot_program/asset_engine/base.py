@@ -642,6 +642,33 @@ def bot_floor_risk_pct():
     return value
 
 
+def venue_floor_words(cfg) -> str:
+    """One sentence on the venue floor for `cfg`, for the read-only
+    commands (why_no_trade section 4, preflight_live section 4): the
+    switch's state and the ceiling, or why the floor does not apply to
+    this config. Reads the switch and the limits book; asks no broker and
+    writes nothing. The entry path never reads it: AssetBot._venue_floor
+    decides, on the client an order is priced through."""
+    from bot_program.manual_trade import MANUAL_CONFIG_NAME
+    if getattr(cfg, "name", None) == MANUAL_CONFIG_NAME:
+        return ("venue floor does not apply: the hand ticket has its own "
+                "smallest size")
+    if getattr(cfg, "mode", "paper") != "live":
+        return "venue floor does not apply: a paper bot has no venue minimum"
+    if not venue_floor_on():
+        return (f"venue floor OFF ({VENUE_FLOOR_SWITCH_KEY}): an order "
+                f"under the venue's smallest size is refused, as before")
+    ceiling = bot_floor_risk_pct()
+    low, high = BOT_FLOOR_RISK_BOUNDS
+    if ceiling is None:
+        return (f"venue floor ON, and MAX BOT FLOOR RISK cannot be read: no "
+                f"order is raised until it is set on /setup/ ({low:g} to "
+                f"{high:g})")
+    return (f"venue floor ON: an order under eToro's smallest size opens at "
+            f"that size when it risks at most {ceiling:g}% of this pool "
+            f"(MAX BOT FLOOR RISK on /setup/)")
+
+
 #: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
 #: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
 #: missing row reads OFF (core.platform_control.is_component_enabled).
@@ -1070,7 +1097,7 @@ def attack_tier_scales(cfg) -> dict:
 
 
 def judge_order_leverage(cfg, asset_class: str, carrier: str, *,
-                         pick=None) -> tuple:
+                         pick=None, floor_pick=None) -> tuple:
     """(leverage, refusal): what an eToro order body may carry for `cfg`.
 
     ONE rule, read by execute_entry on the client an order goes through
@@ -1101,15 +1128,27 @@ def judge_order_leverage(cfg, asset_class: str, carrier: str, *,
     TAKE TRADE lane, which never levers a hand-taken ticket) "auto"
     answers (None, ""): no kwarg, the unlevered order. `pick` is read
     only under "auto".
+
+    THE VENUE FLOOR FOR BOTS (2026-11-12). A config with NO key answers
+    (None, "") as it always has, with one exception its caller states:
+    `floor_pick`, the multiplier the same chooser picked for an entry
+    raised to the venue's smallest size (AssetBot._order_leverage,
+    floor_auto), is judged by every check below exactly as a typed number
+    would be. Read only when the config carries no key: a typed number and
+    "auto" keep their own rule. None (every caller but that one) is the
+    behaviour before the floor existed.
     """
     extras = getattr(cfg, "extras", None) or {}
     if "leverage" not in extras:
-        return None, ""
-    raw = extras.get("leverage")
-    if leverage_is_auto(extras):
-        if pick is None:
+        if floor_pick is None:
             return None, ""
-        raw = pick
+        raw = floor_pick
+    else:
+        raw = extras.get("leverage")
+        if leverage_is_auto(extras):
+            if pick is None:
+                return None, ""
+            raw = pick
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None, (f"extras['leverage']={raw!r} is not a number — a "
                       f"multiplier this bot cannot read is not sent at 1 "
@@ -5538,7 +5577,46 @@ class AssetBot(ABC):
                 client, symbol, decision, stage, sm_read, qty=qty,
                 price=price, tp=tp, sl=sl, sizing=sizing,
                 level_meta=level_meta, charge=charge, horizon_hours=horizon)
+        # the size before the rounding, for the venue floor below: a size
+        # that is zero HERE was never a small pool's (read, never changed)
+        _sized = qty
         qty = self._round_qty(qty, price, fractional=fractional)
+
+        # THE VENUE FLOOR FOR BOTS (2026-11-12, _venue_floor). The operator:
+        # "je veux tous mes bots live right now", "qu'il soit smart pour
+        # s'ajuster au marché et y pouvoir rentrer tout du moins". With the
+        # live-money switch bots_venue_floor_live ON, a real or demo eToro
+        # order of a bot that is under the venue's MEASURED smallest size
+        # (a size of zero included) is raised to that size HERE, when its
+        # risk at the stop is inside MAX BOT FLOOR RISK and its notional
+        # inside the class's cap. Here and nowhere later: SIZED_TO_ZERO is
+        # decided three lines down, and from here the raised size is the
+        # candidate's own, so every gate that exists judges it — the
+        # judgement below, the desk, the judgement again at the send,
+        # eToro's row, the fee, the multiplier, the cash, the last look.
+        # Nothing is raised at the send. OFF (the switch, a paper entry,
+        # another venue) the verdict is {"state": "off"}: no read, and
+        # every value below is the one it was.
+        _vf = self._venue_floor(client, symbol, stage=stage, qty=qty,
+                                price=price, sl=sl, sizing=sizing,
+                                fractional=fractional, sized=_sized)
+        _vf_note, _vf_lev = "", None
+        if _vf.get("state") == "raise":
+            logger.info("[%s_bot] %s RAISED to the venue's smallest size: "
+                        "%g units in place of the %g the risk budget sized "
+                        "— %.2f%% of the pool at the stop (ceiling %g%%)",
+                        self.asset_class, symbol, _vf["qty"], qty,
+                        _vf["record"]["risk_pct"],
+                        _vf["record"]["ceiling_pct"])
+            qty = float(_vf["qty"])
+            # every refusal of the raised size says which size it judged
+            _vf_note = self.FLOORED_LEAD
+            if _vf.get("chooser"):
+                # no multiplier of its own: MAX SINGLE POSITION counts the
+                # most the chooser could pick, as for the attack mode, and
+                # execute_entry judges it again at the multiplier sent
+                _vf_lev = self._auto_leverage_bound(
+                    self._instrument_class(symbol))
 
         # Steps M-O: the ceiling, the single-position cap, the duplicate and
         # theme gates - on the bot's own final size. execute_entry runs the
@@ -5547,7 +5625,9 @@ class AssetBot(ABC):
         # a size too small to trade says the cut made it so.
         if not self._judge_final_size(
                 symbol, qty=qty, price=price, sl=sl, decision=decision,
-                sizing=sizing, note=proof.cut_note(stage),
+                sizing=sizing, note=proof.cut_note(stage) + _vf_note,
+                leverage=_vf_lev,
+                floor_lead=str(_vf.get("lead") or ""),
                 venue=("paper" if (self.cfg.mode == "paper"
                                    or bool(stage["force_paper"])) else "live")):
             return None
@@ -5579,6 +5659,11 @@ class AssetBot(ABC):
             fractional_units=fractional,
             elite=dict(elite),
             horizon_hours=horizon,
+            # the floor's verdict, when it raised the size or left a size
+            # under the minimum as it was ({} otherwise: nothing to say)
+            venue_floor=(dict(_vf) if _vf.get("state") in ("raise",
+                                                           "refused")
+                         else {}),
         )
 
     def _smart_money(self, symbol, decision, price, sl, tp, level_meta,
@@ -6209,7 +6294,7 @@ class AssetBot(ABC):
     def _judge_final_size(self, symbol: str, *, qty: float, price: float,
                           sl: float, decision, sizing: dict,
                           leverage=None, note: str = "",
-                          venue=None) -> bool:
+                          venue=None, floor_lead: str = "") -> bool:
         """Steps M-O on a FINAL quantity: True when it may go to the book.
 
         `leverage` (2026-09-26) is the multiplier MAX SINGLE POSITION
@@ -6225,6 +6310,14 @@ class AssetBot(ABC):
         under one tradeable unit says the cut did it, not the pool alone.
         The posture and attack callers re-judge a quantity already above
         zero, so their note never reaches that refusal.
+
+        `floor_lead` (2026-11-12, THE VENUE FLOOR FOR BOTS) leads the
+        SIZED_TO_ZERO refusal alone, after `note`: why a size of zero was
+        not raised to the venue's smallest size ("the venue's smallest
+        size would risk 30.00% of the pool, above your 2% ceiling (MAX BOT
+        FLOOR RISK): "), from propose_entry, and only while the floor's
+        switch is ON. "" (the switch OFF, every other caller) leaves the
+        detail byte-identical to before.
 
         Records the skip and returns False otherwise. Shared by
         propose_entry (on the bot's own size) and execute_entry (on that
@@ -6291,7 +6384,8 @@ class AssetBot(ABC):
             # detail is byte-identical to before.
             self._skip(
                 symbol, skips.SIZED_TO_ZERO,
-                note + f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
+                note + floor_lead
+                + f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
                 f"{self.cfg.capital} is below one tradeable unit")
             return False
 
@@ -6470,6 +6564,36 @@ class AssetBot(ABC):
         # floor and its once-a-day notification, the venue's fee and the
         # leverage refusals. Nothing is upsized.
         _cut_note = proof.cut_note(stage)
+        # THE VENUE FLOOR FOR BOTS (2026-11-12): the proposal's verdict
+        # rides the candidate (_venue_floor); nothing is raised here.
+        # `_floored`: qty_default IS the venue's smallest size, and every
+        # refusal below that judges it is led by FLOORED_LEAD. `_vf_lead`:
+        # the size is under the minimum and was NOT raised; it leads
+        # VENUE_MIN_SIZE below with the reason. `_vf_chooser`: a raised
+        # entry of a config with no multiplier of its own, for which the
+        # chooser picks (_order_leverage, floor_auto). A candidate the
+        # floor never judged (its switch OFF, a hand-built one) reads {}:
+        # all three are empty and every line below is the one it was.
+        _vf = getattr(cand, "venue_floor", None)
+        _vf = _vf if isinstance(_vf, dict) else {}
+        _floored = _vf.get("state") == "raise"
+        _vf_note = self.FLOORED_LEAD if _floored else ""
+        _vf_lead = (str(_vf.get("lead") or "")
+                    if _vf.get("state") == "refused" else "")
+        _vf_chooser = bool(_floored and _vf.get("chooser"))
+        if _floored and not venue_floor_on():
+            # THE SWITCH, read again before anything is judged or asked:
+            # OFF means no bot order goes out at a raised size, and the
+            # operator may have turned it off since the proposal (the desk
+            # executes minutes after it proposes)
+            logger.warning("[%s_bot] %s: raised to the venue's smallest "
+                           "size at the proposal, and %s is OFF now — "
+                           "nothing sent", self.asset_class, symbol,
+                           VENUE_FLOOR_SWITCH_KEY)
+            return self._skip(
+                symbol, skips.VENUE_MIN_SIZE,
+                f"{VENUE_FLOOR_SWITCH_KEY} was turned off after this entry "
+                f"was raised to the venue's smallest size — nothing sent")
 
         # The multiplier lands BEFORE rounding and BEFORE the judgement, so
         # the quantity judged is the quantity sent. At 1.0 this is the
@@ -6482,9 +6606,15 @@ class AssetBot(ABC):
         _fr = _fr if (_fr is True or _fr is False) else None
         qty = self._round_qty(float(cand.qty_default) * float(size_mult),
                               price, fractional=_fr)
-        if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
-                                      decision=decision, sizing=sizing,
-                                      venue=cand.venue, note=_cut_note):
+        if not self._judge_final_size(
+                symbol, qty=qty, price=price, sl=sl, decision=decision,
+                sizing=sizing, venue=cand.venue, note=_cut_note + _vf_note,
+                # a raised entry with no multiplier of its own: the most
+                # the chooser could pick, as at the proposal (None reads
+                # the config's own hint, as before)
+                leverage=(self._auto_leverage_bound(
+                    self._instrument_class(symbol)) if _vf_chooser
+                    else None)):
             return None
 
         # THE ELITE ALLOWANCE, counted again at the send (2026-10-01): two
@@ -6722,7 +6852,7 @@ class AssetBot(ABC):
             if _gate:
                 logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
                                symbol, _gate_why)
-                return self._skip(symbol, _gate, _gate_why)
+                return self._skip(symbol, _gate, _vf_note + _gate_why)
             # THE VENUE'S OWN FEE, AT THE SIZE SENT (2026-09-29). The
             # proposal's cost filter charged the table and the quote; eToro
             # also takes 1% a side on crypto and 1.00 USD a side on a stock,
@@ -6736,7 +6866,7 @@ class AssetBot(ABC):
                 side=decision.direction,
                 horizon_hours=getattr(cand, "horizon_hours", None))
             if _fee_why:
-                _fee_why = _cut_note + _fee_why
+                _fee_why = _cut_note + _vf_note + _fee_why
                 logger.info("[%s_bot] skipping %s — %s", self.asset_class,
                             symbol, _fee_why)
                 return self._skip(symbol, skips.COST_FILTER, _fee_why)
@@ -6776,6 +6906,34 @@ class AssetBot(ABC):
                             "— an under-minimum order, if this venue has "
                             "one, will be refused at the order instead",
                             self.asset_class, symbol, _why)
+            # THE VENUE FLOOR FOR BOTS (2026-11-12): a candidate RAISED at
+            # the proposal is checked again on this client, the one its
+            # order goes through — the minimum still measured, the size
+            # still the smallest size it gives, its risk and its notional
+            # still inside the operator's bounds — and otherwise sends
+            # nothing. A raised size the desk's multiplier cut under the
+            # minimum is not this branch's: it meets main's refusal just
+            # below, never a second raise (the desk's cut wins).
+            _vf_no = ""
+            if _floored and not (_floor is not None
+                                 and float(qty) < _floor - 1e-9):
+                _vf_no = self._venue_floor_send_refusal(
+                    _vf, symbol, qty=float(qty), floor=_floor,
+                    why=_why or "", price=price, sl=sl, fractional=_fr)
+            if _vf_no:
+                logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
+                               symbol, _vf_no)
+                return self._skip(symbol, skips.VENUE_MIN_SIZE,
+                                  _cut_note + _vf_no)
+            # what leads main's refusal below: why a size under the
+            # minimum was not raised (the floor ON), or that it had been
+            # raised and is under the minimum now; "" with the floor OFF,
+            # so the detail and the alert are byte-identical to before
+            _under = (("raised to the venue's smallest size at the proposal "
+                       "and under it at the order: ") if _floored
+                      else _vf_lead)
+            if _floor is None:
+                pass
             elif float(qty) < _floor - 1e-9:
                 # NOT resized. Raising it to the floor is a different trade
                 # and lowering it sends nothing; the house answer is to
@@ -6793,11 +6951,11 @@ class AssetBot(ABC):
                 # floor (the review of 2026-10-07).
                 self._notify_venue_min_size(
                     symbol, qty=float(qty), floor=_floor,
-                    note=(_cut_note + (_why or "")),
+                    note=(_cut_note + _under + (_why or "")),
                     cut=((stage or {}).get("proof") or {}).get("cut", 1.0))
                 return self._skip(
                     symbol, skips.VENUE_MIN_SIZE,
-                    _cut_note
+                    _cut_note + _under
                     + (f"sized {float(qty):g} units from the stop distance; "
                      f"this venue's minimum is {_floor:g}. Refused rather "
                      f"than traded at {_floor:g}, which is "
@@ -6829,14 +6987,14 @@ class AssetBot(ABC):
             # at 1 too (E2.6, 2026-09-26).
             leverage, lev_why = self._order_leverage(
                 client, symbol, side=decision.direction, price=float(price),
-                stop=float(sl), qty=float(qty))
+                stop=float(sl), qty=float(qty), floor_auto=_vf_chooser)
             if lev_why:
                 logger.error("[%s_bot] %s REFUSED: %s", self.asset_class,
                              symbol, lev_why)
                 # verdict first; an attack-mode refusal names its tier, and
                 # (2026-10-07) a size the proof cut names the cut first
                 return self._skip(symbol, skips.LEVERAGE_REFUSED,
-                                  _cut_note
+                                  _cut_note + _vf_note
                                   + (f"attack {_attack['tier']}: "
                                      if _attack else "") + lev_why)
             _bcnote = (getattr(self, "_bot_cap_note", None) or {}).pop(
@@ -6883,6 +7041,19 @@ class AssetBot(ABC):
                         note=(f"attack {_attack['tier']}: at "
                               f"{int(leverage or 1)}x: ")):
                     return None
+            if _vf_chooser:
+                # THE CHOOSER'S PICK FOR A RAISED ENTRY (2026-11-12),
+                # judged again by MAX SINGLE POSITION at the multiplier
+                # actually chosen, as the attack mode's is: the proposal
+                # counted the most the chooser could pick
+                if not self._judge_final_size(
+                        symbol, qty=qty, price=price, sl=sl,
+                        decision=decision, sizing=sizing,
+                        venue=cand.venue,
+                        leverage=int(leverage or 1),
+                        note=(f"{self.FLOORED_LEAD}at "
+                              f"{int(leverage or 1)}x: ")):
+                    return None
             from bot_program.engine.capabilities import adapter_key
             if adapter_key(client) == "etoro":
                 # THE ACCOUNT'S HEADROOM, from the sync's cells and never a
@@ -6903,7 +7074,7 @@ class AssetBot(ABC):
                                  leverage or "1 (no key)", lev_why)
                     # the proof's cut note first (2026-10-07), as above
                     return self._skip(symbol, skips.LEVERAGE_REFUSED,
-                                      _cut_note
+                                      _cut_note + _vf_note
                                       + (f"attack {_attack['tier']}: "
                                          if _attack else "")
                                       + f"at {leverage or 1}x: {lev_why}")
@@ -7017,7 +7188,8 @@ class AssetBot(ABC):
                                 float(charge["fraction"]) + _fee, 8)
                     leverage, lev_why = self._order_leverage(
                         client, symbol, side=decision.direction,
-                        price=float(price), stop=float(sl), qty=float(qty))
+                        price=float(price), stop=float(sl), qty=float(qty),
+                        floor_auto=_vf_chooser)
                     if lev_why:
                         return self._skip(symbol, skips.LEVERAGE_REFUSED,
                                           _cut_note
@@ -7131,6 +7303,30 @@ class AssetBot(ABC):
                                _timing["why"])
                 return self._skip(symbol, entry_timing.skip_code(_timing),
                                   _timing["why"])
+            if _floored:
+                # THE RECORD OF A RAISED ENTRY (2026-11-12), on the row:
+                # floored, the size the risk sizing gave and the one that
+                # replaced it, the risk at the stop in percent of the pool
+                # against the bot's normal risk, the ceiling it sat under,
+                # the factors that had cut the replaced size — and the
+                # multiplier sent with who chose it ("chooser": this bot
+                # has none of its own, _order_leverage picked; "typed";
+                # "auto": the config's own attack mode). risk_fraction and
+                # risk_dollars above stay the sizer's own numbers, as on
+                # every row. Read by the fill message (_floor_line) and
+                # the audit chain (audit.record_trade_open); nothing that
+                # decides reads it.
+                _vf_rec = dict(_vf.get("record") or {})
+                _vf_pick = ((getattr(self, "_floor_pick", None) or {})
+                            .pop(symbol, None) or {})
+                _vf_rec["leverage"] = int(leverage or 1)
+                _vf_rec["leverage_by"] = (
+                    "chooser" if _vf_chooser
+                    else "auto" if _attack is not None else "typed")
+                if _vf_chooser:
+                    _vf_rec["leverage_why"] = str(
+                        _vf_pick.get("why") or "")[:300]
+                entry_meta["venue_floor"] = _vf_rec
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then
@@ -7206,6 +7402,16 @@ class AssetBot(ABC):
                         # LEVERAGE_QUIET_HOURS, never a re-send at 1.
                         self._remember_leverage_refusal(
                             symbol, leverage, f"broker status {status}")
+                    elif _floored:
+                        # A RAISED order the venue refused is noted at 1x
+                        # too (2026-11-12): main never sent this order, so
+                        # it is not sent again on every pass — while the
+                        # note is fresh _venue_floor raises nothing for
+                        # the symbol. An order main sends keeps main's
+                        # memory: none at 1x.
+                        self._remember_leverage_refusal(
+                            symbol, int(leverage or 1),
+                            f"broker status {status}")
                     if (getattr(cand, "fractional_units", None) is True
                             and float(qty) != float(int(qty))):
                         # A refused FRACTION quiets the symbol too, and is
@@ -7553,6 +7759,12 @@ class AssetBot(ABC):
                 if leverage is not None and leverage > 1:
                     self._remember_leverage_refusal(
                         symbol, leverage, f"live order failed: {e}")
+                elif _floored:
+                    # a RAISED order that failed is noted at 1x too
+                    # (2026-11-12), as a refused one is above
+                    self._remember_leverage_refusal(
+                        symbol, int(leverage or 1),
+                        f"live order failed: {e}")
                 if (getattr(cand, "fractional_units", None) is True
                         and float(qty) != float(int(qty))
                         and str(e).startswith("eToro refused")):
@@ -8008,7 +8220,8 @@ class AssetBot(ABC):
     # ── the multiplier an eToro order may carry ───────────────────────────
 
     def _order_leverage(self, client, symbol: str, *, side: str = "BUY",
-                        price=None, stop=None, qty=None) -> tuple:
+                        price=None, stop=None, qty=None,
+                        floor_auto: bool = False) -> tuple:
         """judge_order_leverage on the client an order actually goes
         through — the adapter key of its CLASS (capabilities.adapter_key),
         never today's routing rule — keyed on the INSTRUMENT's class
@@ -8048,7 +8261,22 @@ class AssetBot(ABC):
         the multiplier sent, and a refusal there leads with the cap's
         words. The configured and the sent multiplier are kept on
         self._bot_cap_note[symbol] for the row. No key stays no key (1x); a
-        config named "manual" is never capped."""
+        config named "manual" is never capped.
+
+        THE VENUE FLOOR FOR BOTS (2026-11-12): `floor_auto` is True only
+        for an entry execute_entry is sending at the venue's smallest size
+        (AssetBot._venue_floor raised it). A config with NO key then lets
+        the same chooser pick the multiplier, and the pick is judged as a
+        typed number is, by every check here: the switch
+        etoro_leverage_live (OFF: the chooser answers 1, the unlevered
+        order), the platform cap, the class ceiling, the own book, MAX BOT
+        LEVERAGE, the posture cap, the instrument's LIVE list and stop
+        band, the short's proof, the refusal note. The pick and its words
+        are kept on self._floor_pick[symbol] for the row. The attack
+        mode's RISK half (the tier) is not applied: the size is the
+        venue's minimum. A typed number and "auto" are untouched by it,
+        and with floor_auto False (every other order) so is a config
+        with no key."""
         from bot_program.engine.capabilities import adapter_key
         if not isinstance(getattr(self, "_bot_cap_note", None), dict):
             self._bot_cap_note = {}
@@ -8066,15 +8294,32 @@ class AssetBot(ABC):
                         symbol, pick_why)
             if pick is None:
                 return None, pick_why
+        floor_pick = None
+        if not isinstance(getattr(self, "_floor_pick", None), dict):
+            self._floor_pick = {}
+        # a pick is this call's or nothing, as the cap's note above
+        self._floor_pick.pop(symbol, None)
+        if floor_auto and "leverage" not in (
+                getattr(self.cfg, "extras", None) or {}):
+            floor_pick, pick_why = self._choose_auto_leverage(
+                client, symbol, side, price, stop, qty=qty)
+            self._floor_pick[symbol] = {"leverage": floor_pick,
+                                        "why": pick_why}
+            logger.info("[%s_bot] %s at the venue's smallest size, the "
+                        "chooser: %s", self.asset_class, symbol, pick_why)
+            if floor_pick is None:
+                return None, pick_why
         lev, why = judge_order_leverage(self.cfg, self._instrument_class(symbol),
-                                        adapter_key(client), pick=pick)
+                                        adapter_key(client), pick=pick,
+                                        floor_pick=floor_pick)
         if why:
             return lev, why
         # MAX BOT LEVERAGE (2026-11-05): lowers what the rule allowed — to
         # the cap, or to the highest step under it eToro takes — never
         # raises it, never refuses; judged before the posture and the
         # instrument's own entry, so the multiplier sent is the one checked
-        lev, _bcnote = self._bot_cap_leverage(client, symbol, side, lev)
+        lev, _bcnote = self._bot_cap_leverage(
+            client, symbol, side, lev, picked=floor_pick is not None)
         if _bcnote:
             self._bot_cap_note[symbol] = _bcnote
         # a refusal of the multiplier the cap set says the cap set it
@@ -8105,7 +8350,7 @@ class AssetBot(ABC):
         return lev, ""
 
     def _bot_cap_leverage(self, client, symbol: str, side: str,
-                          lev) -> tuple:
+                          lev, *, picked: bool = False) -> tuple:
         """MAX BOT LEVERAGE on a multiplier the engine's rule allowed
         (2026-11-05): (lev, {}) when nothing lowers it, else (sent, note)
         with note {"cap", "configured", "sent", "why"} — "why" in the
@@ -8127,7 +8372,10 @@ class AssetBot(ABC):
         if cap is None or int(lev) <= cap:
             return lev, {}
         sent, step = self._bot_cap_step(client, symbol, side, cap)
+        # `picked` (2026-11-12): the chooser picked it for an entry at the
+        # venue's smallest size, on a config with no key of its own
         asked = ("the attack mode picked" if self._leverage_is_auto()
+                 else "the chooser picked" if picked
                  else "the config asks")
         words = (f"{bot_cap_words(cap)} ({asked} {int(lev)}x)"
                  + (f": {step}" if step else ""))
@@ -9130,6 +9378,393 @@ class AssetBot(ABC):
                           f"floor of zero or less is not a measurement")
         return floor, ""
 
+    # ── the venue floor for bots (2026-11-12) ───────────────────────────
+    #
+    # The operator, 2026-11-12: "je veux tous mes bots live right now",
+    # "qu'il soit smart pour s'ajuster au marché et y pouvoir rentrer tout
+    # du moins". His bots almost never opened: a bot risks 0.25% of its
+    # pool per trade (sizing.DEFAULT_RISK_FRACTION), cut again by the
+    # rule's stage and its proof, and on a small account the size that
+    # gives is under eToro's minimum exposure (VENUE_MIN_SIZE, refused
+    # above "rather than traded at the floor") or rounds to zero
+    # (SIZED_TO_ZERO). Until now the bots never raised a size: nobody is
+    # there to agree. The operator agrees in advance, once, in two acts:
+    # the live-money switch VENUE_FLOOR_SWITCH_KEY (the trading PIN) and
+    # the ceiling MAX BOT FLOOR RISK on /setup/ (bot_floor_risk_pct).
+    #
+    # THE RULE (_venue_floor, asked by propose_entry on the rounded size):
+    # a real or demo eToro order of a bot whose size is under the venue's
+    # MEASURED smallest size — _venue_size_floor above, the one floor
+    # function the hand ticket reads too (manual_trade._venue_min_qty) —
+    # opens at that size, rounded UP to the step this bot's own rounding
+    # keeps, when
+    #   - its risk at the stop (units x |entry - stop| x value_per_unit,
+    #     the arithmetic of _judge_final_size, no currency label read) is
+    #     at most the ceiling, in percent of the bot's pool, and
+    #   - its notional is at most the class's notional cap times the pool
+    #     (sizing.max_notional_fraction on the instrument's class).
+    # Together: the entry is the one this bot's own sizer gives at the
+    # smallest risk fraction that reaches the venue's minimum, with the
+    # same stop and no stop widening, when that fraction is inside the
+    # ceiling. Nothing the sizer forbids at a higher risk setting is
+    # allowed here.
+    #
+    # NEVER RAISED: a paper entry (a paper config, or a live config's
+    # entry its stage, Aragorn or the posture sends to paper: the paper
+    # venue has no minimum); the hand ticket's own config; another venue
+    # than eToro; a size that was zero BEFORE the rounding (a risk per
+    # trade of zero, a setup its stop floor skipped, no dollar rate: a
+    # decision, not a small pool); an unmeasured minimum, or the
+    # operator-declared one (a labelled state, never the venue's); a day
+    # past the daily loss limit
+    # (the elite half is that rule's, unchanged); a symbol eToro refused
+    # in the last LEVERAGE_QUIET_HOURS. And never at the send: there a
+    # raised candidate is only checked again (_venue_floor_send_refusal).
+
+    #: What leads every refusal of an entry that WAS raised: the gate that
+    #: refuses names numbers the bot's own risk setting never sizes, and
+    #: the words say which size they judged.
+    FLOORED_LEAD = "at the venue's smallest size: "
+
+    def _floor_step(self, price, fractional=None):
+        """The size step this bot's own rounding keeps, or None: probed
+        off _round_qty with the venue's fraction answer (three states, as
+        the proposal read it), as the hand ticket probes it
+        (manual_trade._qty_step) — per class AND per mode, never a table:
+        forex 100 units (1 with measured fractions), a live stock one whole
+        share (0.0001 with them), commodity 0.0001, crypto 0.00000001.
+        Probed ABOVE a whole base, so no probe rounds to zero (StockBot
+        logs "smaller than one share" of every size that does)."""
+        base = 1000.0
+        for step in (1e-8, 1e-6, 1e-4, 1e-2, 0.1, 1.0, 10.0, 100.0, 1000.0):
+            try:
+                kept = float(self._round_qty(base + step, price,
+                                             fractional=fractional))
+            except Exception:  # noqa: BLE001 — a class that refuses the size
+                continue
+            if abs(kept - (base + step)) <= step * 1e-3:
+                return step
+        return None
+
+    def _floor_size(self, floor, price, fractional=None):
+        """The venue's minimum `floor` (units) rounded UP to this bot's own
+        step — "a minimum that rounds down is not a minimum"
+        (manual_trade._ceil_to_step, the hand ticket's rule) — and passed
+        through _round_qty, so the second rounding in execute_entry does
+        not move it. None when no size at or above the minimum can be
+        landed on."""
+        import math
+        try:
+            floor = float(floor)
+        except (TypeError, ValueError):
+            return None
+        step = self._floor_step(price, fractional)
+        if not step or not floor > 0:
+            return None
+        size = math.ceil(floor / step - 1e-9) * step
+        size = float(self._round_qty(size, price, fractional=fractional))
+        if size < floor - 1e-9:
+            # the 1e-9 above is in steps and the refusal's is in units:
+            # where they disagree, one step more
+            size = float(self._round_qty(size + step, price,
+                                         fractional=fractional))
+        if not (size > 0 and size >= floor - 1e-9):
+            return None
+        return size
+
+    def _floor_bounds(self, symbol: str, *, qty: float, price: float,
+                      sl: float) -> dict:
+        """Whether `qty`, the venue's smallest size, may be opened by this
+        bot: {"ok", "lead", "risk_pct", "ceiling_pct", "notional_x_pool",
+        "per_unit"}. `lead` is the sentence that leads the refusal when it
+        may not, "" when it may.
+
+        The two bounds of the floor, read at CALL time (the proposal, and
+        again at the send): MAX BOT FLOOR RISK (bot_floor_risk_pct; None
+        refuses) on the risk at the stop, computed exactly as
+        _judge_final_size computes it, and the class's notional cap
+        (sizing.max_notional_fraction on the instrument's class) on the
+        notional. Percentages of the pool's own figure: the pool's
+        currency label is not read, here as there."""
+        from bot_program.asset_engine.sizing import max_notional_fraction
+        out = {"ok": False, "lead": "", "risk_pct": None,
+               "ceiling_pct": None, "notional_x_pool": None,
+               "per_unit": None}
+        unjudged = ("the venue's smallest size cannot be judged here, so "
+                    "nothing is raised to it: ")
+        ceiling = bot_floor_risk_pct()
+        if ceiling is None:
+            out["lead"] = ("MAX BOT FLOOR RISK cannot be read, so nothing "
+                           "is raised to the venue's smallest size: ")
+            return out
+        try:
+            capital = float(self.cfg.capital or 0)
+            vpu = float(self._value_per_unit(symbol) or 0)
+            per_unit = abs(float(price) - float(sl)) * vpu
+            notional = float(qty) * float(price) * vpu
+            cap = float(max_notional_fraction(
+                self.cfg, self._instrument_class(symbol)))
+        except Exception as e:  # noqa: BLE001 — unjudged raises nothing
+            logger.warning("[%s_bot] %s: the venue floor's bounds could not "
+                           "be computed (%s) — nothing raised",
+                           self.asset_class, symbol, e)
+            out["lead"] = unjudged
+            return out
+        if not (capital > 0 and per_unit > 0 and notional > 0 and cap > 0):
+            out["lead"] = unjudged
+            return out
+        risk = float(qty) * per_unit
+        risk_pct = risk / capital * 100.0
+        times = notional / capital
+        out.update({"risk_pct": risk_pct, "ceiling_pct": float(ceiling),
+                    "notional_x_pool": times, "per_unit": per_unit})
+        # the 1e-9 is float noise at the ceiling, as in _judge_final_size
+        if risk > capital * float(ceiling) / 100.0 + 1e-9:
+            shown = f"{risk_pct:.2f}"
+            if float(shown) <= float(ceiling):
+                shown = f"{risk_pct:.4f}"      # never "2.00% above your 2%"
+            out["lead"] = (f"the venue's smallest size would risk {shown}% "
+                           f"of the pool, above your {float(ceiling):g}% "
+                           f"ceiling (MAX BOT FLOOR RISK): ")
+            return out
+        if notional > capital * cap + 1e-9:
+            shown = f"{times:.1f}"
+            if float(shown) <= cap:
+                shown = f"{times:.3f}"
+            out["lead"] = (f"the venue's smallest size is {shown} times the "
+                           f"pool, above the {cap:g} times this class may "
+                           f"carry: ")
+            return out
+        out["ok"] = True
+        return out
+
+    def _venue_floor(self, client, symbol: str, *, stage: dict, qty: float,
+                     price: float, sl: float, sizing: dict,
+                     fractional=None, sized=None) -> dict:
+        """THE VENUE FLOOR FOR BOTS (2026-11-12): the verdict on the
+        proposal's rounded size `qty` (the rule is in the block above).
+
+          {"state": "off"}       the floor does not look at this entry: a
+                                 paper entry, the hand ticket's config,
+                                 another venue than eToro, or the switch
+                                 OFF — checked in that order, and the
+                                 switch BEFORE the venue is asked
+                                 anything, so OFF adds no request
+          {"state": "clear"}     the venue takes the size as it is
+          {"state": "raise", "qty", "record", "chooser"}
+                                 open at "qty", the venue's smallest size;
+                                 "record" is what the row keeps
+                                 (metadata["venue_floor"]); "chooser" is
+                                 True for a config with no multiplier of
+                                 its own (_order_leverage, floor_auto)
+          {"state": "refused", "lead"}
+                                 under the minimum, or the minimum unread,
+                                 and NOT raised; "lead" leads the words of
+                                 the refusal main gives (SIZED_TO_ZERO in
+                                 _judge_final_size, VENUE_MIN_SIZE at the
+                                 send), which keeps its code
+
+        `sized` is the size BEFORE the rounding (propose_entry's own;
+        None from a caller that has none). A size that was zero there is
+        somebody's decision, not a small pool: a risk per trade of zero, a
+        setup its stop floor skipped (extras["on_stop_floor"] = "skip"), a
+        forex pair with no dollar rate. It is never raised, and the venue
+        is not asked.
+
+        Never raises anything by a failure: an unreadable switch is OFF,
+        an unreadable ceiling or an unmeasured minimum is "refused"."""
+        from bot_program.engine.capabilities import adapter_key
+        off = {"state": "off"}
+        if self.cfg.mode != "live" or bool((stage or {}).get("force_paper")):
+            return off
+        from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        if getattr(self.cfg, "name", None) == MANUAL_CONFIG_NAME:
+            return off
+        if adapter_key(client) != "etoro":
+            return off
+        if not venue_floor_on():
+            return off
+        try:
+            decided_zero = (
+                (sized is not None and not float(sized) > 0)
+                or bool((sizing or {}).get("skipped_by_stop_floor"))
+                or not float((sizing or {}).get("risk_fraction") or 0) > 0)
+        except (TypeError, ValueError):
+            decided_zero = True
+        if decided_zero:
+            return {"state": "refused",
+                    "lead": ("the size was zero before any rounding, so "
+                             "nothing is raised to the venue's smallest "
+                             "size: ")}
+        # THE VENUE'S OWN MINIMUM, the function execute_entry and the hand
+        # ticket read, on the client that prices this proposal (the same
+        # adapter class as the one that sends). P1 in the eToro budget,
+        # named: the order's own fact, the eligibility row read once a UTC
+        # day per instrument, the row execute_entry reads at P1.
+        from bot_program.engine import etoro_budget
+        vpu = self._value_per_unit(symbol)
+        try:
+            with etoro_budget.at_priority(etoro_budget.P1,
+                                          "proposal: the venue's smallest "
+                                          "size"):
+                floor, why = self._venue_size_floor(
+                    client, symbol, price=price,
+                    min_notional=self._extras_float("venue_min_notional",
+                                                    0.0),
+                    value_per_unit=vpu)
+        except Exception as e:  # noqa: BLE001 — could not ask IS unmeasured
+            floor, why = None, f"{type(e).__name__}: {e}"
+        if floor is None or why:
+            # unmeasured, or the operator's declared figure (a labelled
+            # state): never a size to raise to. The lead is read only if
+            # the size is then refused (a size of zero; the declared floor)
+            logger.info("[%s_bot] %s: the venue floor raises nothing — the "
+                        "venue's smallest size is not measured (%s)",
+                        self.asset_class, symbol, why)
+            return {"state": "refused",
+                    "lead": ("the venue's smallest size is unread, so "
+                             "nothing is raised to it: ")}
+        floor = float(floor)
+        if float(qty) >= floor - 1e-9:
+            return {"state": "clear"}
+        # UNDER THE VENUE'S MINIMUM. First what never raises:
+        if getattr(self, "_elite_only", ""):
+            # past the daily loss limit an elite entry goes at half its
+            # size (ELITE_SIZE_SCALE): that rule's, and unchanged
+            return {"state": "refused",
+                    "lead": ("past the daily loss limit no entry is raised "
+                             "to the venue's smallest size: ")}
+        note = self._leverage_refusal_note(symbol)
+        if note:
+            # eToro refused an order for it inside the quiet (a floored
+            # order's refusal is noted at 1x too, execute_entry)
+            return {"state": "refused",
+                    "lead": (f"eToro refused {symbol} {note['age_h']:.1f}h "
+                             f"ago, so nothing is raised to the venue's "
+                             f"smallest size for "
+                             f"{self.LEVERAGE_QUIET_HOURS}h: ")}
+        size = self._floor_size(floor, price, fractional)
+        if size is None:
+            return {"state": "refused",
+                    "lead": ("the venue's smallest size cannot be judged "
+                             "here, so nothing is raised to it: ")}
+        bounds = self._floor_bounds(symbol, qty=size, price=price, sl=sl)
+        if not bounds["ok"]:
+            logger.info("[%s_bot] %s: not raised to the venue's smallest "
+                        "size (%g units) — %s", self.asset_class, symbol,
+                        size, bounds["lead"].rstrip(": "))
+            return {"state": "refused", "lead": bounds["lead"]}
+        capital = float(self.cfg.capital or 0)
+        stage = stage or {}
+        try:
+            proof_cut = float((stage.get("proof") or {}).get("cut", 1.0))
+        except (TypeError, ValueError):
+            proof_cut = 1.0
+        try:
+            normal = float((sizing or {}).get("risk_fraction") or 0.0) * 100.0
+        except (TypeError, ValueError):
+            normal = 0.0
+        record = {
+            "floored": True,
+            # what the risk sizing gave, after every factor and the
+            # rounding (0.0: it rounded to zero), and what replaced it
+            "replaced_qty": float(qty),
+            "qty": float(size),
+            "venue_min_units": round(floor, 6),
+            # the risk at the stop, in percent of the pool: at the smallest
+            # size, at the bot's normal setting, and at the replaced size
+            "risk_pct": round(bounds["risk_pct"], 4),
+            "normal_risk_pct": round(normal, 4),
+            "replaced_risk_pct": round(
+                float(qty) * bounds["per_unit"] / capital * 100.0, 4),
+            "ceiling_pct": bounds["ceiling_pct"],
+            "notional_x_pool": round(bounds["notional_x_pool"], 4),
+            # the factors that had cut the size it replaced (the stage's:
+            # live_small, Aragorn, the posture, smart money; the proof's)
+            "stage_factor": round(
+                float(stage.get("live_size_factor", 1.0) or 0.0), 6),
+            "proof_cut": proof_cut,
+        }
+        return {"state": "raise", "qty": float(size), "record": record,
+                "chooser": "leverage" not in (
+                    getattr(self.cfg, "extras", None) or {})}
+
+    def _venue_floor_send_refusal(self, verdict: dict, symbol: str, *,
+                                  qty: float, floor, why: str, price: float,
+                                  sl: float, fractional=None) -> str:
+        """Why a candidate RAISED at the proposal may not be sent now, or
+        "". Asked by execute_entry on the client the order goes through,
+        with the minimum it just read there (`floor`, `why`): nothing is
+        raised at the send, and a raised size that is no longer the
+        venue's smallest size, or no longer inside the operator's bounds,
+        sends nothing. (The switch is read at the top of execute_entry; a
+        size under the minimum is main's own refusal.)"""
+        if floor is None or why:
+            return ("the venue's smallest size was read at the proposal and "
+                    "is unread at the order — nothing sent"
+                    + (f" ({why})" if why else ""))
+        now = self._floor_size(floor, price, fractional)
+        if now is None or abs(float(qty) - now) > 1e-9 * max(1.0, abs(now)):
+            return (f"the venue's smallest size moved between the proposal "
+                    f"and the order ({float(qty):g} units then, "
+                    + (f"{now:g}" if now is not None else "none") + " now) "
+                    f"— nothing sent")
+        bounds = self._floor_bounds(symbol, qty=float(qty), price=price,
+                                    sl=sl)
+        if not bounds["ok"]:
+            return bounds["lead"].rstrip(": ") + " — nothing sent"
+        return ""
+
+    def _floor_line(self, floor: dict, trade) -> str:
+        """The fill message's line for an entry raised to the venue's
+        smallest size (metadata["venue_floor"]), in the words the message
+        prints: "Smallest size: raised to 1,000 units, the least eToro
+        takes, from the 300 units the risk budget sized · 0.81% of the
+        pool at risk, against this bot's usual 0.25% · 20x chosen
+        automatically". The risk is the one the ROW carries at its stop
+        (as the Attack line's), the record's own when the row cannot say;
+        the multiplier is named only where the chooser picked it for a
+        bot with none of its own. No money figure."""
+        from bot_program.notifications import pct_words, units_words
+        meta = getattr(trade, "metadata", None) or {}
+        cls = getattr(trade, "asset_class", "") or self.asset_class
+        size = units_words(floor.get("qty"), cls)
+        if not size:
+            return ""
+        venue = "eToro" if meta.get("broker") == "etoro" else "the venue"
+        try:
+            replaced = float(floor.get("replaced_qty") or 0.0)
+        except (TypeError, ValueError):
+            replaced = 0.0
+        said = (f", from the {units_words(replaced, cls)} the risk budget "
+                f"sized" if replaced > 0
+                else "; the risk budget sized less than one")
+        f = None
+        try:
+            _stop = float(meta.get("initial_stop_loss")
+                          or trade.stop_loss or 0)
+            _pool = float(self.cfg.capital or 0)
+            if _stop > 0 and _pool > 0:
+                f = (float(trade.qty)
+                     * abs(float(trade.entry_price) - _stop)
+                     * float(meta.get("value_per_unit") or 1.0)
+                     / _pool * 100.0)
+        except (TypeError, ValueError, InvalidOperation):
+            f = None
+        if f is None:
+            f = floor.get("risk_pct")
+        parts = [f"Smallest size: raised to {size}, the least {venue} "
+                 f"takes{said}",
+                 f"{pct_words(f)} of the pool at risk, against this bot's "
+                 f"usual {pct_words(floor.get('normal_risk_pct'))}"]
+        try:
+            lev = int(floor.get("leverage") or 0)
+        except (TypeError, ValueError):
+            lev = 0
+        if floor.get("leverage_by") == "chooser" and lev > 1:
+            parts.append(f"{lev}x chosen automatically")
+        return " · ".join(parts)
+
     @staticmethod
     def _venue_fractional_units(client, symbol: str, *, say: bool = True):
         """THREE STATES, off the client AND the switch: True (declares the
@@ -9788,7 +10423,12 @@ class AssetBot(ABC):
           stop_moved  a stop the venue rewrote at the fill
                       (stop_rewritten_by_venue), attack mode or not
                       (stop_moved_words).
-        Each is "" when the row has none."""
+        Each is "" when the row has none. And, for an entry raised to the
+        venue's smallest size only (2026-11-12), a fourth, absent
+        otherwise:
+          floor       "Smallest size: raised to 1,000 units, the least
+                      eToro takes, from the 300 units the risk budget
+                      sized · ..." (_floor_line)."""
         meta = getattr(trade, "metadata", None) or {}
         att = meta.get("attack")
         attack = self._attack_line(att, trade) if isinstance(att, dict) else ""
@@ -9800,8 +10440,18 @@ class AssetBot(ABC):
         slipped = slippage_words(
             meta, asset_class=getattr(trade, "asset_class", "") or self.asset_class,
             symbol=getattr(trade, "symbol", "") or "")
-        return {"attack": attack or "", "stop_moved": moved or "",
-                "slippage": slipped or ""}
+        out = {"attack": attack or "", "stop_moved": moved or "",
+               "slippage": slipped or ""}
+        # THE VENUE FLOOR FOR BOTS (2026-11-12): the line of an entry
+        # raised to the venue's smallest size (_floor_line), under its own
+        # key and ONLY for such a row — every other fill hands the three
+        # arguments it always handed, no fourth.
+        floor = meta.get("venue_floor")
+        if isinstance(floor, dict) and floor.get("floored"):
+            line = self._floor_line(floor, trade)
+            if line:
+                out["floor"] = line
+        return out
 
     def _attack_line(self, att: dict, trade) -> str:
         """"Attack mode: TIER · F% of the pool at risk · Lx · M CCY of

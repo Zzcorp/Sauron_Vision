@@ -1194,7 +1194,7 @@ def _built(build, **kwargs):
 def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
                       rule_name="", trade=None, trade_id=None, manual=False,
                       live=None, attack="", stop_moved="",
-                      slippage="") -> dict:
+                      slippage="", floor="") -> dict:
     """The Telegram message of a fill that OPENED a position:
 
         🟢 Bought EURCAD                 (🔴 Sold short AAPL; ✋ … by hand)
@@ -1206,6 +1206,8 @@ def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
         Risk if the stop is hit: 463.45 USD
         Why: Golden cross                (a hand-taken one: "Taken: …")
         Attack mode: …                   (when the row is attack mode)
+        Smallest size: …                 (when a bot's entry was raised to
+                                          the venue's smallest size)
         Stop moved by eToro: …           (when the venue rewrote it)
         ▸ Trade: #108 · Rule key: golden_cross · Config: FX trend
         [Open position] [Close position]
@@ -1266,7 +1268,9 @@ def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
                            f"signal #{sid}" if sid else "") if w]
         if why:
             lines.append("Why: " + " — ".join(why))
-    for fact in [attack, stop_moved, slippage] + carried:
+    # `floor` (2026-11-12): the engine's line for a bot's entry raised to
+    # the venue's smallest size (AssetBot._floor_line); "" on every other
+    for fact in [attack, floor, stop_moved, slippage] + carried:
         fact = " ".join(str(fact or "").split())
         if fact:
             lines.append(fact)
@@ -1469,14 +1473,17 @@ def _closed_when_words(meta) -> str:
 def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                           qty, entry_price, rule_name: str = "",
                           trade_id=None, trade=None, attack: str = "",
-                          stop_moved: str = "", slippage: str = "") -> bool:
+                          stop_moved: str = "", slippage: str = "",
+                          floor: str = "") -> bool:
     """A bot's entry filled. Telegram gets the message written for people
     (fill_open_message); the bell row takes its title and summary, its
     url kept, and the e-mail and Discord copies the message (2026-09-27).
     `trade` is the row (else `trade_id` names it); `attack`, `stop_moved`
     and `slippage` (2026-10-05) are the engine's own facts
     (AssetBot._fill_words), their own arguments since 2026-09-27 rather
-    than lines inside rule_name."""
+    than lines inside rule_name. `floor` (2026-11-12) is the line of an
+    entry raised to the venue's smallest size; the engine hands it only
+    for such an entry."""
     from alerts.links import page_url
     tid = trade_id or getattr(trade, "id", None)
     rule_key, carried = _rule_key(rule_name)
@@ -1485,7 +1492,7 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                      symbol=symbol, side=side, qty=qty,
                      entry_price=entry_price, rule_name=rule_name,
                      trade=trade, trade_id=tid, attack=attack,
-                     stop_moved=stop_moved, slippage=slippage)
+                     stop_moved=stop_moved, slippage=slippage, floor=floor)
     # The bell's title and body are the message's (2026-09-27: "◉ EURCAD
     # BUY opened" / "FOREX · qty 7900.00000000 @ 1.60725571 ·
     # golden_cross" before), and so are the e-mail and Discord copies
@@ -1503,7 +1510,7 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
         body = (_sentence(_plain_size(qty, entry_price, asset_class, symbol))
                 + (f" Why: {why}." if why else "")).strip()
     plain = [body] + [" ".join(str(f or "").split())
-                      for f in [attack, stop_moved] + carried
+                      for f in [attack, floor, stop_moved] + carried
                       if str(f or "").strip()]
     return dispatch_notification(
         user, "bot_fill_open",
