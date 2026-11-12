@@ -149,9 +149,19 @@ PIN_SWITCHES = LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES
 #: switches (ORC_MIND_SWITCHES) are in this set with their seeded rows
 #: (2026-11-05, the Orcs' O2 spec A.1, §4 Q1): one tap never starts AI
 #: spend (tests/test_ops_cockpit.py wants every key here seeded).
+#: The operator's-choice switches (2026-11-12, the review of the signal
+#: market hold) are here for another reason. Each moves no money, spends
+#: none and takes no PIN, and its ON undoes something the operator asked
+#: to keep: signal_market_hold makes a shut market's announcement wait
+#: for the open, and he keeps receiving every signal the moment it fires
+#: (his word of 2026-11-12). One tap of the Pipeline group's "all on"
+#: must not decide that for him: the row's own toggle does, or
+#: `manage.py component on signal_market_hold`.
 LORE_READER_SWITCHES = ("lore_staff", "lore_background")
+OPERATOR_CHOICE_SWITCHES = ("signal_market_hold",)
 BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
-                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES})
+                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES,
+                                *OPERATOR_CHOICE_SWITCHES})
 
 
 # ── Default components to register ───────────────────────
@@ -605,6 +615,31 @@ DEFAULT_COMPONENTS = [
     {"key": "short_proofs_demo", "name": "Demo Short Proofs (eToro demo)",
      "description": "On (default): at most one step every 25 min, on eToro's DEMO account only, never the real one: a short of the venue minimum on a class no code proves, filled, closed and recorded; a clean one lets the bots short that class at that multiplier. Off: nothing is sent. /short-proofs/ revokes.",
      "category": "pipeline", "is_enabled": True},
+
+    # ── The signal market hold (2026-11-12, signals/market_hold.py) ──────
+    # The operator, 2026-11-11: signals announced while their market is
+    # shut. Told the announcements would wait for the open, he asked to
+    # keep receiving every signal live (2026-11-12), so a shut market is
+    # SAID on every announcement, with no switch, and the hold itself is
+    # this option. OFF on arrival: a signal is announced at birth, as
+    # before. ON: hold_at_birth keeps the announcement of a signal whose
+    # market cannot trade, and the lifecycle task's release pass sends it
+    # once, 15 minutes after the open, or drops it (closed, aged, or its
+    # first price past its plan). ON also moves such a signal's card off
+    # the rail, under MARKET SHUT (the rail's own display module), until
+    # its market has opened and settled: the description says so, and
+    # that the section is hidden until shown, because a card that leaves
+    # the rail unannounced reads as a lost signal. It gates no task of
+    # its own (the pass writes its counts on this row when something is
+    # held), reads no order path and writes no Signal field, so it is not
+    # a live-money switch and not a PIN switch. A group's "all on" leaves
+    # it OFF all the same (OPERATOR_CHOICE_SWITCHES, above; the review of
+    # 2026-11-12): he keeps every signal live, so its own row or
+    # `component on` turns it on, never a bulk button. Description
+    # measured at 295 chars (< 300).
+    {"key": "signal_market_hold", "name": "Signal Market Hold",
+     "description": "Off (default): every signal is announced as it fires; one on a shut market says so. On: its banner, bell and Telegram wait for the open, then go out once, or it is dropped if 24h old or its first price broke its plan; its rail card waits under MARKET SHUT, hidden until shown. It moves no money.",
+     "category": "pipeline"},
 
     # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────
     # Information only: no order, size, stop or gate reads it, so it is not

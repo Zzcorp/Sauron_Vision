@@ -22,6 +22,8 @@ from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
 
+from bot_program import feed_fence
+
 logger = logging.getLogger(__name__)
 
 # Higher wins. A source may always overwrite itself.
@@ -169,4 +171,10 @@ def write_quote(symbol: str, *, last, source: str, change_pct=None,
             pass
 
     LiveQuote.objects.update_or_create(instrument=inst, defaults=defaults)
+    # THE HARM COUNTER (the eToro feed spec, F1, bot_program.feed_harms): a
+    # zero or crossed side kept above, and a poller's price outside its
+    # market's session, counted after this write commits. The write stands
+    # whatever the counter does: through the fence.
+    feed_fence.count("write_quote", "on_quote_written", inst, source,
+                     defaults.get("bid"), defaults.get("ask"))
     return True
