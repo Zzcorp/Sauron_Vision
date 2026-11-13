@@ -1586,8 +1586,11 @@ class EtoroTrader:
         Not a READ of a QUIET pass (`health_quiet`, 2026-11-13): the
         account sync beats every 30 s and the held quotes every 15 s, and
         each notes its read failures from one pass in two, the passes their
-        old beats (60 s, 30 s) ran, so a hiccup makes eToro sick no sooner
-        and no more often than before (venue_health.noting_slot). The read
+        old beats (60 s, 30 s) ran, so the venue's health is noted as often
+        as before, never more (venue_health.noting_slot); when a hiccup
+        turns it sick against the old beats is measured in the PR (the
+        same on time under 5xx and 429s with REAL read first, later or not
+        at all under timeouts). The read
         is logged here and counted where it was asked (the sync's miss); a
         write site's failure (venue_health.WRITE_SITES, the order) is noted
         whatever the pass.

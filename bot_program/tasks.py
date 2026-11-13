@@ -688,7 +688,8 @@ ETORO_SYNC_LOCK_S = 180
 #: is two failed reads (the aggregate and /portfolio), and three inside
 #: 180 s make eToro SICK for ten minutes; noted from every 30 s pass, a
 #: 30 s hiccup would make eToro sick from the sync alone (simulated 57 %,
-#: 0 % at 60 s). 60 s less the beat's jitter.
+#: 0 % at 60 s). 60 s less the beat's jitter. The same turn asks the shock
+#: trigger (the final check, F4, 2026-11-13: sync_etoro_accounts).
 ETORO_SYNC_NOTE_EVERY_S = 55
 ETORO_SYNC_NOTE_KEY = "etoro_sync:noting:{pk}"
 
@@ -1185,12 +1186,15 @@ def _one_etoro_pass(fn):
     return wrapper
 
 
-def _quiet_between_noting_passes(client, account_pk) -> None:
+def _quiet_between_noting_passes(client, account_pk) -> bool:
     """THE VENUE'S HEALTH FROM ONE PASS A MINUTE (2026-11-13): a pass that
     does not hold the account's noting slot (venue_health.noting_slot,
     ETORO_SYNC_NOTE_EVERY_S) reads, writes and counts its miss as every
     pass does, and its client notes no READ failure (EtoroTrader.
-    health_quiet). Never raises: a slot that cannot be claimed notes."""
+    health_quiet). True when this pass holds the turn, the old 60 s beat's
+    pass: it notes, and it alone asks the shock trigger (the final check,
+    F4: sync_etoro_accounts). Never raises: a slot that cannot be claimed
+    notes and asks, as before (True)."""
     try:
         from django.utils import timezone
 
@@ -1202,9 +1206,11 @@ def _quiet_between_noting_passes(client, account_pk) -> None:
             "" if noting else
             f"the account sync notes the venue's health from one pass a "
             f"minute; this {ETORO_SYNC_BEAT_S} s pass reads only")
+        return bool(noting)
     except Exception as e:  # noqa: BLE001 — unread: noted, as before
         logger.debug("broker sync: the noting slot was not read (%s)",
                      type(e).__name__)
+        return True
 
 
 @shared_task
@@ -1232,8 +1238,9 @@ def sync_etoro_accounts():
     refresh etoro par minute est toujours trop long, je suggère 20-30
     secondes non?"), one pass at a time (_one_etoro_pass), each account's
     read failures noted on the venue's health from one pass a minute
-    (_quiet_between_noting_passes), a miss counting the beats it stood for
-    (_beats_missed), the history one row in five minutes.
+    (_quiet_between_noting_passes), the shock trigger asked from that same
+    pass only (the old 60 s beat's, below), a miss counting the beats it
+    stood for (_beats_missed), the history one row in five minutes.
     """
     from django.utils import timezone
 
@@ -1244,7 +1251,18 @@ def sync_etoro_accounts():
     out = {"attempted": 0, "stored": 0, "unreachable": 0, "cells_unread": 0}
     # REAL FIRST (review, 2026-11-13): one key pair opens both worlds and
     # both spend one request budget, so whatever runs short in a pass (the
-    # account minute's tokens, a lock that runs out) reaches DEMO first.
+    # account minute's tokens, a lock that runs out, an exception that
+    # stops the walk) reaches DEMO first, never REAL. SAID WHOLE (the final
+    # check, 2026-11-13): main walked them with no ORDER BY, in whatever
+    # order the database returned (Postgres moves a row with its updates).
+    # Against a main that read REAL first the venue's health is the same
+    # (5xx and 429 hiccups alike; timeouts later or not at all). Against
+    # one that read DEMO first, REAL's reads now come a DEMO read earlier
+    # in the pass, and eToro can be marked sick sooner in some phases of a
+    # hiccup (measured: by 2.4 s under 5xx, 0.4 s under 429s, up to 30 s
+    # under timeouts) and in some 45 to 60 s timeout hiccups that main rode
+    # out: new real entries are then held ten minutes, the cautious way.
+    # Closes and stop moves are never held.
     for acct in (EtoroAccount.objects.exclude(api_key_enc="")
                  .order_by("demo", "pk")):
         user = acct.user
@@ -1255,9 +1273,10 @@ def sync_etoro_accounts():
         reading, rows, margin, cells = None, None, None, CELLS_UNOFFERED
         read_at = None
         book_deferred = aggregate_sent = False
+        holds_turn = True
         try:
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
-            _quiet_between_noting_passes(client, acct.pk)
+            holds_turn = _quiet_between_noting_passes(client, acct.pk)
             # THE STAMP IS TAKEN BEFORE THE READ (2026-10-31). The cells
             # are dated by the instant the GET left, not by the end of the
             # pass: AssetBot._pledged_since charges every row opened AFTER
@@ -1396,7 +1415,22 @@ def sync_etoro_accounts():
             if book is not None and type(book) is type(acct) \
                     and book.pk == acct.pk:
                 _follow_the_account(user, value, currency)
-                _shock_trigger(user, now)
+                # THE SHOCK TRIGGER KEEPS THE OLD 60 s BEAT (the final
+                # check, F4, 2026-11-13). A shock plan is an automated
+                # money path: share_allocator_auto_derisk and the LIVE
+                # mode on, it is applied with no human. It must not change
+                # sensitivity as a side effect of a display refresh: asked
+                # from every 30 s pass, it read the equity twice as often,
+                # and a dip shorter than a minute was caught up to twice
+                # as often. Asked only by the pass that holds the
+                # account's noting turn (_quiet_between_noting_passes):
+                # at most once per old beat, a dip caught exactly as often
+                # as at 60 s. A pass that holds the turn and reads nothing
+                # (a miss, a budget deferral) spends it, as the old beat's
+                # did. The operator decides any change to it. The pools
+                # above are still resized from every pass.
+                if holds_turn:
+                    _shock_trigger(user, now)
     if out["cells_unread"]:
         # Said on the component row in words: the holdings may have landed,
         # but the cells the cash gate reads did not (2026-10-31).

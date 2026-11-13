@@ -34,8 +34,10 @@ instruments to 30 s.
         sync, and from one pass per 30 s for the quotes: the passes the old
         beats would have run. The others read, write and count their miss
         as every pass does, and note nothing (EtoroTrader.health_quiet), so
-        a brief eToro hiccup makes eToro sick no sooner and no more often
-        than before; an order's failure is always noted.
+        the venue's health is noted as often as before, never more (when a
+        hiccup turns eToro sick, per incident, is measured in the PR: the
+        same on time under 5xx and 429s with REAL read first, later or not
+        at all under timeouts); an order's failure is always noted.
   * MONEY: the order gates read eToro's cash, used margin and equity at
     most about 30 s old instead of 60 s, from the same cells by the same
     rules; no limit, threshold, ratio or formula moves (TheMoneyWindows
@@ -507,7 +509,7 @@ class TheHistoryKeepsItsFiveMinutesTests(TestCase):
                             for g in gaps))
 
 
-# ── 4. the venue's health: no sooner and no more often than before ───────
+# ── 4. the venue's health: noted from the old beats' passes only ─────────
 
 class TheSyncNotesTheVenueOnceAMinuteTests(TestCase):
     """REAL on a wire answering 503: each failing pass is two failed reads

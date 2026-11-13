@@ -183,9 +183,9 @@ def note_refusal(venue: str, world: str, where: str, *, detail: str = "",
     429 was then a log line only, while the readers that step aside after
     a 429 (recent_refusals: the demo short proofs, the bar refresh) read
     the noted ones, and the account reads grant no pause. Kept here, apart
-    from the failures: NEVER counted toward SICK, so a brief hiccup makes
-    the venue sick no sooner than before; read by recent_refusals beside
-    the noted 429s. True when kept. Never raises."""
+    from the failures: NEVER counted toward SICK, so a quiet pass's 429
+    never makes the venue sick; read by recent_refusals beside the noted
+    429s. True when kept. Never raises."""
     try:
         now = _now(now)
         key = _refusals_key(venue, world)
@@ -222,6 +222,10 @@ def noting_slot(key: str, hold_s: float, *, now: float) -> bool:
     beats' (simulated over 12,000 random hiccups each, this rule: sick
     after a 10, 20, 30 s hiccup 5.0, 21.0, 47.9 % of the time against 4.7,
     20.7, 47.5 % at 60 s and 30 s, and 32 s into a failure against 33 s).
+    Per incident the instant can differ (the final check, 2026-11-13, on
+    the real code: the same with passes on time under 5xx and 429s, later
+    or not at all under timeouts, up to about 30 s either way once a pass
+    has run late; the sync's walk order: tasks.sync_etoro_accounts).
     An order's failure is always noted (WRITE_SITES), whatever pass sent
     it.
 
