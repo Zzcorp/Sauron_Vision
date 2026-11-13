@@ -2,12 +2,12 @@
 {% load sauron_tags quote_tags static %}
 {% block title %}{{ instrument.symbol }} — Sauron Vision{% endblock %}
 {% block page_title %}{{ instrument.symbol }} — {{ instrument.name }}{% endblock %}
-{% comment %}The Sauron twist on the desk v2 (the board the operator approved,
-"amazing work, bravo, I need it fast!!"): the embers in the gutters and the
-Eye's light reaching the page's void, as on /positions/ and /command/. No
-figure of this page sits on the void (tests/test_magic_layer.py measures it);
-Calm stills them and Off drops them (the review of B10, F7).{% endcomment %}
-{% block sv_embers %} data-sv-embers{% endblock %}
+{% comment %}No embers here yet (the review of B10, F7, held): the Eye's light
+that comes with them reaches the void around the header's SHORT and LONG,
+and §10's measured check of a lit control's neighbours
+(tests/test_money_controls_look.py) needs that ring unlit to prove the side's
+light stays inside its button. The page keeps the light above, fading under
+the chrome.{% endcomment %}
 {% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-chart.css' %}">{% endblock %}
 
 {% block content %}
@@ -127,7 +127,7 @@ rule name is data, never markup.{% endcomment %}
     toolbar row, so the header row holds what the board draws and nothing in
     it ever runs past the card or under the rail (the review of B10, F1 and
     m1). The form, its fields and its words are the watchlist's own.{% endcomment %}
-    <span class="dtl-aux sv-chart-aux">
+    <span class="sv-chart-aux"><span class="dtl-aux">
         <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}">{% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
             <button type="submit" class="sv-ih-icon wl-star{% if instrument.is_watchlist %} on{% endif %}"
@@ -138,7 +138,7 @@ rule name is data, never markup.{% endcomment %}
         <button type="button" class="sv-ih-icon"
                 data-ask-sauron="{{ instrument.symbol }}{% if instrument.name and instrument.name != instrument.symbol %} ({{ instrument.name }}){% endif %}"
                 data-ask-kind="instrument" title="Ask Sauron about {{ instrument.symbol }}" aria-label="Ask Sauron about {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
-    </span>
+    </span></span>
     {{ chart_positions|json_script:"instrument-main-chart-positions" }}
     {{ chart_signals|json_script:"instrument-main-chart-signals" }}
     {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="560" fill=True timeframe="1d" decimals=quote_decimals ticket=True quote=quote asset_class=instrument.asset_class %}
@@ -168,11 +168,14 @@ never disagree about an entry or a stop.
             {% for p in chart_positions_rows %}
                 <tr>
                     <td><span class="sv-inst-side">{% if p.side == "long" %}▲ Long{% else %}▼ Short{% endif %}</span></td>
-                    <td class="sv-inst-via">
+                    {% comment %}A table cell holding a flex row, never a flex
+                    cell: the row's hairline runs under it whole (the review
+                    of B10, F15).{% endcomment %}
+                    <td><span class="sv-inst-via">
                         {% money_world p "compact" %}
                         <span>{{ p.via|default:"—" }}</span>
                         {% if p.protected %}<span class="sv-chip" title="Stop and target rest at the broker: this position survives the platform being down">Bracket</span>{% endif %}
-                    </td>
+                    </span></td>
                     <td class="num">{{ p.qty|qty }}</td>
                     <td class="num">{% px p.entry instrument.asset_class instrument.symbol %}</td>
                     <td class="num">{% px p.stop instrument.asset_class instrument.symbol %}</td>

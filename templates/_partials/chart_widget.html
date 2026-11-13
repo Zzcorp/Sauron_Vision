@@ -2344,9 +2344,12 @@ or none.{% endcomment %}
                    parseInt(h.slice(4, 6), 16) + ',' + a + ')';
         }
         var up = token('--sv-up', isDark ? '#24B582' : '#00994d');
-        var down = token('--sv-down', isDark ? '#FF6B6E' : '#e83030');
+        /* the loss tones from the desk's tokens in both themes; a sheet
+           that failed to load falls back on the dark desk's (the old red
+           literal is gone, the review of B10, B1) */
+        var down = token('--sv-down', '#FF6B6E');
         var upFill = token('--sv-up-fill', isDark ? '#1FA374' : '#00994d');
-        var downFill = token('--sv-down-fill', isDark ? '#E5484D' : '#e83030');
+        var downFill = token('--sv-down-fill', '#E5484D');
         var ink1 = token('--sv-ink-1', isDark ? '#E6F1EA' : '#1a2a1a');
         var cat1 = token('--sv-cat-1', isDark ? '#3987E5' : '#1f6fb2');
         return {
@@ -6590,9 +6593,7 @@ or none.{% endcomment %}
            on the raised surface in ink-1. Read by sv-venue.js lineLook. */
         nowLook: function () {
             var c = levelPalette();
-            /* bare: the line's title stays off the pane, its words are the
-               chip's (the review of B10, F8: one label, not two) */
-            return { color: c.neutral, label: c.bg2, text: c.ink, bare: true };
+            return { color: c.neutral, label: c.bg2, text: c.ink };
         },
         setNow: function (v) {
             var n = (v === null || v === undefined) ? null : Number(v);

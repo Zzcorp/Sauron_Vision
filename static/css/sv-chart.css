@@ -148,8 +148,9 @@
    row (the review of B10, F1 and m1). */
 .sv-chart-aux {
     position: absolute; top: 4px; right: 8px; z-index: 9;
-    display: flex; align-items: center; gap: 4px; height: 28px;
+    display: flex; align-items: center; height: 28px;
 }
+.sv-chart-aux > .dtl-aux { display: flex; align-items: center; gap: 4px; }
 .sv-chart-card:has(> .sv-chart-aux) .sv-chart-toolbar { padding-right: 76px; }
 .sv-ih-icon {
     display: inline-flex; align-items: center; justify-content: center;
@@ -910,10 +911,12 @@
     font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label);
     text-transform: uppercase; color: var(--sv-ink-2);
 }
-.sv-inst-via { display: flex; align-items: center; gap: 6px; color: var(--sv-ink-2); }
+.sv-inst-via { display: inline-flex; align-items: center; gap: 6px; color: var(--sv-ink-2); }
+/* The P&L's note in plain words, as the server writes them (sentence
+   case, the review of B10, F15). */
 .sv-inst-sub {
     display: block; font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro);
-    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
+    color: var(--sv-ink-3);
 }
 .sv-inst-when { color: var(--sv-ink-3); }
 .sv-inst-title { color: var(--sv-ink-2); white-space: normal; }
@@ -962,8 +965,11 @@
 }
 #railSigFacets .rf-chip b { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-3); }
 #railSigFacets .rf-chip[data-f-key="side"] { color: var(--sv-ink-2); border-color: var(--sv-line-3); }
-#railSigFacets .rf-chip .up { color: var(--sv-up); }
-#railSigFacets .rf-chip .down { color: var(--sv-down); }
+/* A side's colour on its arrow only: the arrow and its word are one text
+   (the kit's side mark beside a word), the arrow its first letter. */
+#railSigFacets .rf-side { display: inline-block; }
+#railSigFacets .rf-side--up::first-letter { color: var(--sv-up); }
+#railSigFacets .rf-side--down::first-letter { color: var(--sv-down); }
 #railSigFacets button.rf-chip[aria-pressed="true"] {
     background: var(--sv-bg-4); color: var(--sv-ink-1); border-color: var(--sv-ink-3);
     box-shadow: inset 0 -2px 0 var(--sv-eye);
@@ -998,8 +1004,8 @@
     font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label);
     text-transform: uppercase; color: var(--sv-ink-2); white-space: nowrap;
 }
-.sr-signal-wrap .sr-side .up, .sr-popup .sr-pop-dir .up { color: var(--sv-up); }
-.sr-signal-wrap .sr-side .down, .sr-popup .sr-pop-dir .down { color: var(--sv-down); }
+/* The side on a card and on its pinned card: its arrow and its word in
+   ink-2, as the board's cards say it (the side's colour is the dot's). */
 .sr-signal-wrap .sr-signal .sr-score-num { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
 .sr-signal-wrap .sr-signal .sr-age { margin-left: auto; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
 .sr-signal-wrap .sr-signal .sr-why {
@@ -1022,8 +1028,9 @@
 .sr-signal .sr-dot--neutral { color: var(--sv-ink-3); }
 .signals-rail.open .sr-signal .sr-dot { display: none; }
 
-/* The pinned card: docked at the top of the rail's column, not over the
-   chart (the board); its head the side in words, its score and age; then
+/* The pinned card: docked in the rail under its card's face, not over the
+   chart (the board); the face keeps its symbol, side, score, age and its
+   MARKET SHUT hour, so the docked card's head keeps only its close; then
    its entry, its stop, its target side by side; the facts a label on the
    left, its words on the right; PASS on the left and the side's own button
    on the right (the page's order, so the keyboard's, is the card's own:
@@ -1031,10 +1038,11 @@
    beside the rail. */
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned {
     position: static !important; inset: auto !important; width: auto !important;
-    max-height: none; margin: 8px 10px 6px; transform: none; overflow-x: hidden;
+    max-height: none; margin: 0 10px 8px; transform: none; overflow-x: hidden;
 }
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned::after { display: none; }
-.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal { display: none; }
+.signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned .sr-pop-head { justify-content: flex-end; min-height: 0; }
+.signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned .sr-pop-head > :not(.sv-pop-x) { display: none; }
 .sr-popup .sr-pop-head .sr-pop-score { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
 .sr-popup .sr-pop-head .sr-pop-age { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
 /* the head: one line, as the board draws it (the urgency is the chart dot
@@ -1042,7 +1050,9 @@
 .sr-popup .sr-pop-head { flex-wrap: nowrap; white-space: nowrap; }
 .sr-popup .sr-pop-head .sr-urg { display: none; }
 .sr-popup .sr-pop-head .sv-pop-x { margin-left: auto; }
-.sr-popup .sr-pop-dir { background: transparent; color: var(--sv-ink-2); }
+.sr-popup .sr-pop-dir,
+body .sr-popup .sr-pop-head .sr-pop-dir.sr-pop-dir-bullish,
+body .sr-popup .sr-pop-head .sr-pop-dir.sr-pop-dir-bearish { background: transparent; color: var(--sv-ink-2); }
 .sr-popup .sr-pop-title { font-style: normal; color: var(--sv-ink-2); }
 .sr-popup .sr-pop-lead {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;

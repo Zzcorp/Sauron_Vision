@@ -3497,17 +3497,6 @@
    "inline_visual": 5,
    "sub11": 2
   },
-  "templates/_partials/chart_widget.html": {
-   "accent_role": 12,
-   "eye_literal": 1,
-   "glyph_icon": 4,
-   "gradient": 1,
-   "infinite": 3,
-   "inline_visual": 16,
-   "mono_generic": 2,
-   "old_literal": 4,
-   "sub11": 19
-  },
   "templates/_partials/council_band.html": {
    "glyph_icon": 1
   },
@@ -3534,8 +3523,7 @@
    "sub11": 2
   },
   "templates/_partials/signal_rail_items.html": {
-   "glyph_icon": 8,
-   "inline_visual": 4
+   "glyph_icon": 5
   },
   "templates/_partials/the_horde.html": {
    "glyph_icon": 3
@@ -3888,15 +3876,6 @@
    "glyph_icon": 1,
    "inline_visual": 15
   },
-  "templates/dashboard/instrument_detail.html": {
-   "accent_role": 12,
-   "eye_literal": 1,
-   "glyph_icon": 3,
-   "inline_visual": 15,
-   "old_literal": 1,
-   "old_token": 1,
-   "sub11": 8
-  },
   "templates/dashboard/instruments_list.html": {
    "accent_role": 7,
    "eye_literal": 3,
@@ -4226,7 +4205,11 @@
  },
  "strict": {
   "measured": [],
-  "source": []
+  "source": [
+   "static/css/sv-chart.css",
+   "templates/_partials/chart_widget.html",
+   "templates/dashboard/instrument_detail.html"
+  ]
  },
  "unreached": {
   "/login/pin/forgot/": "status 302: a GET is sent back to /login/pin/ (the view acts on a POST only; its form is on /login/pin/, measured there)"

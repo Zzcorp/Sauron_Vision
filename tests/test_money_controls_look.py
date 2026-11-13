@@ -1258,8 +1258,12 @@ class MarketShutMeasuredTests(TestCase):
         pressed, rest = cards["els"]["chip"][0], section["els"]["chip"][0]
         self.assertDrawnLike(pressed, cards["refs"]["chipPressed"])
         self.assertDrawnLike(rest, section["refs"]["chipRest"])
+        # Pressed as the board's filter chips are (the review of B10, F2: the
+        # raised ground, the ink-3 edge and the Eye's line under it; the
+        # operator approved the board: "amazing work, bravo, I need it
+        # fast!!"), still drawn like ALL pressed (above).
         self.assertEqual((pressed["bg"], pressed["border"], pressed["color"]),
-                         (rgb_of(PALETTE["--sv-bg-3"]), EYE, INK1))
+                         (rgb_of(PALETTE["--sv-bg-4"]), rgb_of(PALETTE["--sv-ink-3"]), INK1))
         self.assertEqual((rest["bg"], rest["border"], rest["color"]),
                          (CLEAR, LINE3, rgb_of(PALETTE["--sv-ink-2"])))
         self.assertDrawnLike(section["els"]["chipCount"][0], section["refs"]["chipCount"])

@@ -51,8 +51,8 @@ first render passes rail_initial and renders those rows itself.
         {% if g.position_words %}<div class="sr-gone-pos">{{ g.position_words }}</div>{% endif %}
         {% if g.takeable or g.yours %}
         <div class="sr-gone-acts">
-            {% if g.takeable %}<button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="Still active in the engine: the ticket is the one TAKE TRADE opens, priced when you open it" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">TICKET</button>{% endif %}
-            {% if g.yours %}<button type="button" class="sr-gone-btn" data-sv-unpass="{{ g.signal_id }}" title="Put it back on your rail">BRING BACK</button>{% endif %}
+            {% if g.takeable %}<button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="Still active in the engine: the ticket is the one TAKE TRADE opens, priced when you open it" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>{% endif %}
+            {% if g.yours %}<button type="button" class="sr-gone-btn" data-sv-unpass="{{ g.signal_id }}" title="Put it back on your rail">↺ BRING BACK</button>{% endif %}
         </div>
         {% endif %}
     </div>
@@ -82,7 +82,7 @@ first render passes rail_initial and renders those rows itself.
         {% if g.position_words %}<div class="sr-gone-pos">{{ g.position_words }}</div>{% endif %}
         {% if g.takeable %}
         <div class="sr-gone-acts">
-            <button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="{% if g.reason == 'market_settling' %}The market has just opened: a paper ticket is refused in its first quarter hour; a live ticket is yours to send{% else %}The market is shut: a paper ticket is refused {% if g.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send{% endif %}" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">TICKET</button>
+            <button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="{% if g.reason == 'market_settling' %}The market has just opened: a paper ticket is refused in its first quarter hour; a live ticket is yours to send{% else %}The market is shut: a paper ticket is refused {% if g.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send{% endif %}" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>
         </div>
         {% endif %}
     </div>
@@ -111,7 +111,7 @@ first render passes rail_initial and renders those rows itself.
                     <div class="sr-detail">
                         <div class="sr-row1">
                             <span class="sr-sym">{{ s.instrument.symbol }}</span>
-                            <span class="sr-side">{% if s.direction == "bullish" %}<span class="up" aria-hidden="true">▲</span> Long{% elif s.direction == "bearish" %}<span class="down" aria-hidden="true">▼</span> Short{% else %}{{ s.direction|capfirst }}{% endif %}</span>
+                            <span class="sr-side sr-side--{{ s.direction }}">{% if s.direction == "bullish" %}▲ Long{% elif s.direction == "bearish" %}▼ Short{% else %}{{ s.direction|capfirst }}{% endif %}</span>
                             <span class="sr-score-num" title="Its score, 0 to 1">{{ s.score|floatformat:2 }}</span>
                             <span class="sr-age" title="{{ s.created_at|date:'Y-m-d H:i' }} UTC">{{ s.created_at|short_age }}</span>
                         </div>
@@ -139,7 +139,7 @@ first render passes rail_initial and renders those rows itself.
                 <div class="sr-popup" role="dialog">
                     <div class="sr-pop-head">
                         <span class="sr-pop-sym">{{ s.instrument.symbol }}</span>
-                        <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{% if s.direction == "bullish" %}<span class="up" aria-hidden="true">▲</span> LONG{% elif s.direction == "bearish" %}<span class="down" aria-hidden="true">▼</span> SHORT{% else %}{{ s.direction|upper }}{% endif %}</span>
+                        <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{% if s.direction == "bullish" %}▲ LONG{% elif s.direction == "bearish" %}▼ SHORT{% else %}{{ s.direction|upper }}{% endif %}</span>
                         <span class="sr-pop-score">{{ s.score|floatformat:2 }}</span>
                         <span class="sr-pop-age">{{ s.created_at|short_age }}</span>
                         {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}">{{ s.urgency }}</span>{% endif %}
@@ -254,13 +254,13 @@ first render passes rail_initial and renders those rows itself.
                         <button type="button"
                                 class="sr-pop-btn sr-pop-btn-act{% if s.acted %} sr-pop-btn-add{% endif %}"
                                 data-signal-id="{{ s.id }}"
-                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">{% if s.direction == "bullish" %}▲{% else %}▼{% endif %} {% if s.acted %}ADD TO POSITION{% else %}TAKE TRADE{% endif %}</button>
+                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">{% if s.acted %}▶ ADD TO POSITION{% else %}▶ TAKE TRADE{% endif %}</button>
                         {% endif %}
                         <button type="button"
                                 class="sr-pop-btn sr-pop-btn-pass"
                                 data-signal-id="{{ s.id }}"
                                 onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">
-                            PASS
+                            ✕ PASS
                         </button>
                     </div>
                     {# Explore row — secondary deep-dive actions. #}

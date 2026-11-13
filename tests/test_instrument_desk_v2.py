@@ -150,8 +150,12 @@ class TheSourcesTests(SimpleTestCase):
             self.assertIn('data-ctl="%s"' % ctl, src)
         for tool in ("crosshair", "hline", "trendline", "measure", "clear"):
             self.assertIn('data-tool="%s"' % tool, src)
+        # a menu's name in its own span, which folds to the icon on a narrow
+        # card (the review of B10, F11; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!")
         for name in ("More", "Range", "Candles", "Indicators", "Levels", "Draw"):
-            self.assertRegex(src, r'aria-haspopup="menu"[^>]*>(<svg[^>]*>.*?</svg>)?(<span data-tb-label>)?%s' % name)
+            self.assertRegex(src, r'aria-haspopup="menu"[^>]*>(<svg[^>]*>.*?</svg>)?'
+                                  r'(<span data-tb-label>|<span class="sv-tb-name">)?%s' % name)
 
     def test_the_one_price_hands_and_the_chart_hooks_stay(self):
         src = read(WIDGET)
@@ -183,8 +187,11 @@ PROBE = r"""(function () {
   R.ihRows = qa('.sv-ih [data-ih-row]').filter(vis).map(function (e) {
     return { h: e.getBoundingClientRect().height, sw: e.scrollWidth, cw: e.clientWidth, t: e.innerText }; });
   R.ihFit = ih ? { sw: ih.scrollWidth, cw: ih.clientWidth } : null;
+  /* the price's own cell is read out, never seen: the price prints once,
+     on the two sides (the review of B10, F8; the operator approved the
+     board: "amazing work, bravo, I need it fast!!") */
   R.ihCut = qa('.sv-ih [data-ih-row] *').filter(vis).filter(function (e) {
-    return e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).display !== 'inline'; })
+    return !e.closest('.dtl-price') && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).display !== 'inline'; })
     .map(function (e) { return String(e.className) + ': ' + e.innerText; });
   R.ihKids = qa('.sv-ih > *').filter(vis).map(function (e) { var o = box(e); o.c = String(e.className); return o; });
   R.ihReal = (function () { var e = ih && ih.querySelector('.sv-world--live');
@@ -357,6 +364,37 @@ CENSUS = r"""(function (TOK, REGIONS) {
 })(__TOK__, __REGIONS__)"""
 
 REGIONS = [".page-content", "#railSigFacets", "#railSignalsBody"]
+
+
+class TheBookRowsWearTheirWorldTests(TestCase):
+    """The review of B10, M5: a legacy book row (a Position on his books)
+    read REAL on main ({% money_world %} on paper=False) and lost its chip
+    on this page; the header's one position is his REAL money first."""
+
+    def setUp(self):
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from instruments.models import Instrument
+        from portfolio.models import Position
+        from portfolio.services import get_or_create_default_portfolio
+        self.user = get_user_model().objects.create_user("b10_m5", password="x")
+        self.client.force_login(self.user)
+        inst = Instrument.objects.create(symbol="M5BOOK", name="M5 Book", asset_class="stock", is_active=True)
+        Position.objects.create(portfolio=get_or_create_default_portfolio(user=self.user), instrument=inst,
+                                direction="long", quantity=Decimal("2"), entry_price=Decimal("100"),
+                                current_price=Decimal("101"), opened_at=timezone.now() - timedelta(days=1))
+
+    def test_a_book_row_wears_real_money_and_leads_the_header(self):
+        res = self.client.get("/instruments/M5BOOK/")
+        self.assertEqual(res.status_code, 200)
+        rows = res.context["chart_positions_rows"]
+        self.assertEqual([r["world"] for r in rows], ["live"])
+        self.assertIs(res.context["chart_positions_head"], rows[0])
+        table = res.content.decode().split('class="sv-table sv-inst-table"', 1)[1].split("</table>", 1)[0]
+        self.assertIn("sv-world--live", table)
 
 
 class _Desk:
@@ -707,8 +745,13 @@ class TheDeskInChromiumTests(TestCase):
                 self.assertEqual(got["creditText"].strip(), "Charts by TradingView")
                 line = got["creditLine"]
                 self.assertIsNotNone(line)
-                self.assertLessEqual(line["h"], 26, "one line of 16 px and its padding")
-                self.assertGreaterEqual(line["y"], key["b"] - 1, "under the key")
+                # The board's one strip of 28 px (the review of B10, F3; the
+                # operator approved the board: "amazing work, bravo, I need
+                # it fast!!"): the credit shares the key's strip where the
+                # card has room, else it takes the line under it.
+                self.assertLessEqual(line["h"], 28, "one line of 16 px and its padding")
+                beside = abs(line["y"] - key["y"]) <= 1 and line["x"] >= key["r"] - 0.5
+                self.assertTrue(beside or line["y"] >= key["b"] - 1, "beside the key on its strip, or under it")
                 self.assertLessEqual(line["b"], card["b"] + 1)
                 self.assertGreaterEqual(credit["r"], card["r"] - 16, "at the card's right edge")
                 for words in ("TradingView Lightweight Charts™", "Copyright (c) 2023 TradingView, Inc."):
@@ -801,7 +844,8 @@ LIVE_PROBE = r"""(function () {
     if ((cs.overflow !== 'visible' || cs.overflowX !== 'visible') && e.scrollWidth > e.clientWidth + 1) R.foot.cut.push([String(e.className), e.textContent.trim().slice(0, 50)]);
   });
   R.chips = Array.prototype.map.call(document.querySelectorAll('.sv-mchip'), function (c) { return c.textContent.replace(/\s+/g, ' ').trim(); });
-  R.embers = document.body.hasAttribute('data-sv-embers');
+  R.cells = Array.prototype.map.call(document.querySelectorAll('.sv-inst-table tbody td'), function (td) { return getComputedStyle(td).display; });
+  R.notes = Array.prototype.map.call(document.querySelectorAll('.sv-inst-table .sv-inst-sub'), function (e) { return [e.textContent.trim(), getComputedStyle(e).textTransform]; });
   var h = window.svCharts && svCharts['instrument-main-chart'];
   R.bars = h && h.bars ? h.bars().length : 0;
   return JSON.stringify(R);
@@ -1036,11 +1080,18 @@ class TheLiveDeskTests(TestCase):
             self.assertEqual([r for r in foot["rows"] if "sv-chart-keyrow" in r[0]][0][1], 28, "the key: one 28 px strip")
         self.assertIn("signal dashed", self.got[(1920, "open")]["foot"]["text"], "how the lines are drawn, where it has room")
 
-    # F7 ─────────────────────────────────────────────────────────────────
-    def test_the_page_wears_the_embers(self):
+    # F15 ────────────────────────────────────────────────────────────────
+    def test_the_positions_table_keeps_its_cells_and_says_its_notes_plainly(self):
+        """The review's F15: the VIA cell was a flex box, not a table cell,
+        so the row's hairline stopped short under it; and the P&L's notes
+        were set in capitals ("ESTIMATE: ETORO QUOTE, 12 S")."""
         for w, rail, got in self._each():
-          with self.subTest(width=w, rail=rail):
-            self.assertTrue(got["embers"])
+            with self.subTest(w=w, rail=rail):
+                self.assertTrue(got["cells"], "no position row on the page")
+                self.assertEqual(set(got["cells"]), {"table-cell"})
+                self.assertTrue(got["notes"], "no P&L note on the row")
+                for text, transform in got["notes"]:
+                    self.assertEqual(transform, "none", text)
 
     # M1 ─────────────────────────────────────────────────────────────────
     def test_the_day_arrow_follows_the_painted_change(self):
