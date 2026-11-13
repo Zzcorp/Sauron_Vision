@@ -1810,7 +1810,10 @@ class TheLoopsCopyIsForTheEyeTests(TestCase):
         self.client.force_login(user)
 
     @staticmethod
-    def tags(html, cls):
+    def anchors_of(html, cls):
+        # Not "tags": Django reads `tags` on every test when a run filters
+        # by tag (the CI's --exclude-tag), and a method by that name stops
+        # the whole run before its first test (tests/test_ci_tags.py).
         return re.findall(r'<a\b[^>]*\bclass="%s"[^>]*>' % cls, html)
 
     def assertCopy(self, tags):
@@ -1833,7 +1836,7 @@ class TheLoopsCopyIsForTheEyeTests(TestCase):
                                        url="https://example.test/mq-copy/%d" % i,
                                        published_at=timezone.now() - timedelta(minutes=i + 1))
         html = _get(self.client, "/partials/ticker/")
-        tags = self.tags(html, "ticker-item")
+        tags = self.anchors_of(html, "ticker-item")
         self.assertEqual(len(tags), 4)
         self.assertCopy(tags)
 
@@ -1841,4 +1844,4 @@ class TheLoopsCopyIsForTheEyeTests(TestCase):
         page = _get(self.client, URL)
         track = page[page.index('id="dhTrack"'):]
         track = track[:track.index('<!-- Restore tabs')]
-        self.assertCopy(self.tags(track, "dh-item"))
+        self.assertCopy(self.anchors_of(track, "dh-item"))

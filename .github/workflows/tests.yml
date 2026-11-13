@@ -61,7 +61,81 @@ jobs:
       # SQLite + locmem cache + in-memory channels, which is exactly the
       # environment the suite is written for. --parallel auto runs one
       # worker per vCPU, each on its own copy of the test database.
+      # The old-design guard's measured half runs in its own job below
+      # (old-design-measured), beside this one: it is excluded here by its
+      # tag so it neither runs twice nor lengthens this job.
       - name: Run test suite
         env:
           DB_ENGINE: sqlite
-        run: python manage.py test tests --parallel auto --verbosity=1
+        run: python manage.py test tests --parallel auto --verbosity=1 --exclude-tag=old_design_measured
+
+  # The zero-old-design guard's measured half (tests/test_zero_old_design.py,
+  # B0 of the old-design redo, 2026-11-13): every routed page and the shell's
+  # states laid out in Chromium, each held to its budget, in four shards.
+  # Its source half runs in the suite above. The budgets were measured in one
+  # browser with one set of faces, and are exact: this job installs the same
+  # (Playwright 1.63.0's Chromium 1243, Chrome for Testing 153.0.8010.12, with
+  # its font packages; Inter and JetBrains Mono; the fontconfig preference
+  # for Inter in tests/old_design/fonts/), and the tests compare the machine
+  # with the one the budget records before the counts. SV_OLD_DESIGN_REQUIRE
+  # turns a missing browser or face into a failure: this job never passes by
+  # skipping. Every run keeps its counts for a week (the old-design-census
+  # artifact), to compare with the budgets scene by scene. Measured on a
+  # 4-vCPU machine another agent's suite kept busy (load 7-15): 4 to 6
+  # minutes held to two CPUs as on the private runner, beside the suite's
+  # 46-minute job, not after it.
+  old-design-measured:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SV_OLD_DESIGN_REQUIRE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci.txt
+
+      - name: The browser and the faces the budgets were measured with
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes playwright@1.63.0 install --with-deps chromium
+          sudo apt-get install -y -qq fonts-inter fonts-jetbrains-mono fonts-dejavu-core fonts-dejavu-mono \
+            fonts-liberation2 fonts-opensymbol fonts-crosextra-carlito fonts-crosextra-caladea
+          sudo cp tests/old_design/fonts/56-prefer-inter.conf /etc/fonts/conf.d/
+          sudo fc-cache -f > /dev/null
+          chrome="$HOME/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+          test -x "$chrome"
+          echo "SV_CHROME=$chrome" >> "$GITHUB_ENV"
+          fc-list : family > "$RUNNER_TEMP/faces.txt"
+          grep -q "^Inter" "$RUNNER_TEMP/faces.txt"
+          grep -q "^JetBrains Mono" "$RUNNER_TEMP/faces.txt"
+          echo "sans-serif: $(fc-match -f '%{family[0]}' sans-serif)"
+
+      - name: Collect static assets
+        env:
+          DB_ENGINE: sqlite
+        run: python manage.py collectstatic --noinput
+
+      - name: Run the measured half of the old-design guard
+        env:
+          DB_ENGINE: sqlite
+          SV_OLD_DESIGN_DUMP: ${{ runner.temp }}/old_design_census
+        run: python manage.py test tests.test_zero_old_design --tag=old_design_measured --parallel auto --verbosity=1
+
+      - name: Keep the measured counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: old-design-census
+          path: ${{ runner.temp }}/old_design_census_shard*.json
+          if-no-files-found: ignore
+          retention-days: 7
