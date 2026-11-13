@@ -1,0 +1,832 @@
+{
+ "about": "The old-design guard's budgets (tests/test_zero_old_design.py, B0, 2026-11-13): per file and per page, today's count of each old marker on origin/main 1b94a50. A count may only go down, and its budget follows it down in the same change; a file or page absent from here must be at zero. STRICT lists what a batch has emptied for good (none at B0). B24 deletes the budgets: then everything is strict.",
+ "measured": {},
+ "source": {
+  "bot_program/templates/bot_program/configure.html": {
+   "accent_role": 2,
+   "inline_visual": 5,
+   "sub11": 1
+  },
+  "bot_program/templates/bot_program/home.html": {
+   "accent_role": 17,
+   "eye_literal": 8,
+   "gradient": 2,
+   "infinite": 1,
+   "inline_visual": 34,
+   "old_literal": 1,
+   "old_token": 2,
+   "share_tech": 1,
+   "sub11": 13
+  },
+  "bot_program/templates/bot_program/link.html": {
+   "accent_role": 1,
+   "inline_visual": 4,
+   "old_literal": 2,
+   "sub11": 1
+  },
+  "bot_program/templates/bot_program/scenario_detail.html": {
+   "accent_role": 1,
+   "eye_literal": 1,
+   "inline_visual": 2
+  },
+  "bot_program/templates/bot_program/scenario_new.html": {
+   "inline_visual": 1
+  },
+  "bot_program/templates/bot_program/scenarios.html": {
+   "inline_visual": 1
+  },
+  "core/templatetags/sauron_tags.py": {
+   "inline_visual": 2,
+   "off_token_hex": 5
+  },
+  "dashboard/reports.py": {
+   "off_token_hex": 9
+  },
+  "static/css/sauron.css": {
+   "accent_role": 134,
+   "eye_literal": 128,
+   "glass": 12,
+   "glow": 104,
+   "glyph_icon": 2,
+   "gradient": 55,
+   "infinite": 48,
+   "old_literal": 55,
+   "old_token": 68,
+   "scrollbar": 12,
+   "sub11": 197
+  },
+  "static/css/sv-activity.css": {
+   "accent_role": 3,
+   "infinite": 1,
+   "old_token": 3,
+   "scrollbar": 1,
+   "sub11": 7
+  },
+  "static/css/sv-close-advice.css": {
+   "accent_role": 7,
+   "sub11": 4
+  },
+  "static/css/sv-council-band.css": {
+   "accent_role": 3,
+   "infinite": 1,
+   "scrollbar": 1,
+   "sub11": 24
+  },
+  "static/css/sv-day-scheme.css": {
+   "accent_role": 9,
+   "eye_literal": 4,
+   "glow": 12,
+   "old_literal": 2,
+   "old_token": 29,
+   "sub11": 17
+  },
+  "static/css/sv-horde.css": {
+   "accent_role": 15,
+   "glyph_icon": 2,
+   "gradient": 1,
+   "infinite": 1,
+   "old_token": 10,
+   "scrollbar": 1,
+   "sub11": 28
+  },
+  "static/css/sv-overlay.css": {
+   "accent_role": 8,
+   "glass": 1,
+   "glow": 4,
+   "gradient": 1,
+   "infinite": 3,
+   "old_token": 2,
+   "sub11": 14
+  },
+  "static/css/sv-rail.css": {
+   "accent_role": 8,
+   "eye_literal": 7,
+   "old_literal": 3,
+   "old_token": 7,
+   "sub11": 28
+  },
+  "static/css/sv-responsive.css": {
+   "accent_role": 1
+  },
+  "static/css/sv-tour.css": {
+   "accent_role": 3,
+   "sub11": 2
+  },
+  "static/css/sv-venue.css": {
+   "glow": 1
+  },
+  "static/js/sv-venue.js": {
+   "old_literal": 1
+  },
+  "templates/_chart_assets.html": {
+   "accent_role": 1,
+   "eye_literal": 4,
+   "glow": 1,
+   "gradient": 3,
+   "old_literal": 2,
+   "old_token": 1,
+   "share_tech": 1,
+   "sub11": 2
+  },
+  "templates/_modal.html": {
+   "accent_role": 2,
+   "glass": 1
+  },
+  "templates/_partials/capital_card.html": {
+   "inline_visual": 5,
+   "sub11": 2
+  },
+  "templates/_partials/chart_widget.html": {
+   "accent_role": 12,
+   "eye_literal": 1,
+   "glyph_icon": 3,
+   "gradient": 1,
+   "infinite": 3,
+   "inline_visual": 16,
+   "mono_generic": 2,
+   "old_literal": 4,
+   "sub11": 19
+  },
+  "templates/_partials/council_band.html": {
+   "glyph_icon": 1
+  },
+  "templates/_partials/dh_item.html": {
+   "accent_role": 2,
+   "inline_visual": 3
+  },
+  "templates/_partials/live_region.html": {
+   "accent_role": 1,
+   "sub11": 1
+  },
+  "templates/_partials/passation_card.html": {
+   "accent_role": 2,
+   "eye_literal": 3,
+   "glow": 2,
+   "gradient": 2,
+   "old_literal": 1,
+   "old_token": 2
+  },
+  "templates/_partials/position_filter.html": {
+   "accent_role": 2,
+   "sub11": 2
+  },
+  "templates/_partials/signal_rail_items.html": {
+   "inline_visual": 4
+  },
+  "templates/_partials/the_horde.html": {
+   "glyph_icon": 3
+  },
+  "templates/_partials/ticker_item.html": {
+   "glyph_icon": 1
+  },
+  "templates/_partials/ticker_items.html": {
+   "inline_visual": 1
+  },
+  "templates/base.html": {
+   "accent_role": 19,
+   "eye_literal": 33,
+   "glyph_icon": 86,
+   "inline_visual": 36,
+   "js_style": 9,
+   "old_literal": 1,
+   "sub11": 5
+  },
+  "templates/bigmoney/board.html": {
+   "sub11": 1
+  },
+  "templates/dashboard/_admin_bots.html": {
+   "accent_role": 2,
+   "inline_visual": 3
+  },
+  "templates/dashboard/_backtest_metrics.html": {
+   "accent_role": 1,
+   "inline_visual": 2
+  },
+  "templates/dashboard/_command_bots.html": {
+   "accent_role": 6,
+   "glow": 1,
+   "glyph_icon": 3,
+   "inline_visual": 25,
+   "old_literal": 3
+  },
+  "templates/dashboard/_command_history.html": {
+   "accent_role": 2,
+   "inline_visual": 14,
+   "old_literal": 1,
+   "sub11": 1
+  },
+  "templates/dashboard/_command_live.html": {
+   "accent_role": 5,
+   "inline_visual": 14,
+   "sub11": 1
+  },
+  "templates/dashboard/_command_portfolio.html": {
+   "accent_role": 1,
+   "inline_visual": 4
+  },
+  "templates/dashboard/_council_card.html": {
+   "inline_visual": 9
+  },
+  "templates/dashboard/_eye_body.html": {
+   "accent_role": 5,
+   "inline_visual": 23,
+   "sub11": 6
+  },
+  "templates/dashboard/_hq_divisions.html": {
+   "accent_role": 3,
+   "sub11": 1
+  },
+  "templates/dashboard/_news_metrics.html": {
+   "inline_visual": 1,
+   "old_literal": 1
+  },
+  "templates/dashboard/_popout.html": {
+   "accent_role": 5,
+   "eye_literal": 3,
+   "inline_visual": 2,
+   "old_face_load": 2,
+   "old_literal": 6,
+   "old_token": 1,
+   "share_tech": 1,
+   "sub11": 2
+  },
+  "templates/dashboard/_portfolio_metrics.html": {
+   "inline_visual": 1
+  },
+  "templates/dashboard/_positions_metrics.html": {
+   "sub11": 1
+  },
+  "templates/dashboard/_profile_credentials.html": {
+   "accent_role": 2,
+   "glass": 1,
+   "inline_visual": 4
+  },
+  "templates/dashboard/_profile_password_modal.html": {
+   "inline_visual": 1
+  },
+  "templates/dashboard/_profile_pin_modal.html": {
+   "inline_visual": 2
+  },
+  "templates/dashboard/_signal_cards.html": {
+   "accent_role": 4,
+   "old_token": 1
+  },
+  "templates/dashboard/_signals_metrics.html": {
+   "inline_visual": 1
+  },
+  "templates/dashboard/_strategies_metrics.html": {
+   "inline_visual": 1
+  },
+  "templates/dashboard/_strategy_wizard.html": {
+   "inline_visual": 4
+  },
+  "templates/dashboard/admin_dashboard.html": {
+   "accent_role": 29,
+   "inline_visual": 245,
+   "js_style": 2,
+   "sub11": 31
+  },
+  "templates/dashboard/admin_eye.html": {
+   "accent_role": 5,
+   "eye_literal": 2,
+   "glow": 1,
+   "inline_visual": 11,
+   "old_literal": 1,
+   "sub11": 5
+  },
+  "templates/dashboard/admin_newsletters.html": {
+   "accent_role": 5,
+   "inline_visual": 4,
+   "sub11": 3
+  },
+  "templates/dashboard/ai_insights.html": {
+   "inline_visual": 13,
+   "sub11": 1
+  },
+  "templates/dashboard/ai_journal.html": {
+   "inline_visual": 3
+  },
+  "templates/dashboard/ai_models.html": {
+   "inline_visual": 20
+  },
+  "templates/dashboard/ai_tasks_list.html": {
+   "inline_visual": 19,
+   "sub11": 1
+  },
+  "templates/dashboard/allocator.html": {
+   "inline_visual": 6,
+   "sub11": 1
+  },
+  "templates/dashboard/asset_bots.html": {
+   "accent_role": 1,
+   "inline_visual": 19,
+   "sub11": 2
+  },
+  "templates/dashboard/audit_log.html": {
+   "accent_role": 1,
+   "inline_visual": 7,
+   "old_literal": 1,
+   "sub11": 1
+  },
+  "templates/dashboard/backtest_list.html": {
+   "accent_role": 5,
+   "eye_literal": 1,
+   "glass": 1,
+   "gradient": 1,
+   "infinite": 2,
+   "inline_visual": 16,
+   "old_literal": 7,
+   "old_token": 1,
+   "sub11": 3
+  },
+  "templates/dashboard/bot_backtest.html": {
+   "accent_role": 1,
+   "inline_visual": 5,
+   "old_literal": 1
+  },
+  "templates/dashboard/bot_backtest_detail.html": {
+   "accent_role": 1,
+   "inline_visual": 26,
+   "old_literal": 3,
+   "sub11": 3
+  },
+  "templates/dashboard/bot_charts.html": {
+   "inline_visual": 11
+  },
+  "templates/dashboard/bot_console.html": {
+   "accent_role": 2,
+   "inline_visual": 9
+  },
+  "templates/dashboard/bot_performance.html": {
+   "accent_role": 2,
+   "inline_visual": 9,
+   "old_literal": 1
+  },
+  "templates/dashboard/brain.html": {
+   "accent_role": 4,
+   "glyph_icon": 1,
+   "inline_visual": 20,
+   "sub11": 2
+  },
+  "templates/dashboard/briefing.html": {
+   "accent_role": 6,
+   "badge_side": 2,
+   "glyph_icon": 2,
+   "inline_visual": 15
+  },
+  "templates/dashboard/brokers.html": {
+   "accent_role": 2,
+   "inline_visual": 52,
+   "sub11": 2
+  },
+  "templates/dashboard/calibration.html": {
+   "inline_visual": 15
+  },
+  "templates/dashboard/command.html": {
+   "accent_role": 9,
+   "eye_literal": 5,
+   "glow": 2,
+   "glyph_icon": 5,
+   "gradient": 2,
+   "inline_visual": 1,
+   "js_style": 1,
+   "old_literal": 13,
+   "old_token": 1,
+   "sub11": 9
+  },
+  "templates/dashboard/consolidation.html": {
+   "accent_role": 2,
+   "inline_visual": 19,
+   "sub11": 5
+  },
+  "templates/dashboard/council.html": {
+   "inline_visual": 28
+  },
+  "templates/dashboard/dashboard.html": {
+   "accent_role": 29,
+   "eye_literal": 10,
+   "glass": 1,
+   "glow": 5,
+   "glyph_icon": 3,
+   "gradient": 3,
+   "inline_visual": 48,
+   "js_style": 2,
+   "old_literal": 7,
+   "sub11": 9
+  },
+  "templates/dashboard/design_kit.html": {
+   "glyph_icon": 2,
+   "inline_visual": 4
+  },
+  "templates/dashboard/desk.html": {
+   "accent_role": 5,
+   "gradient": 1,
+   "inline_visual": 92,
+   "sub11": 3
+  },
+  "templates/dashboard/discoveries.html": {
+   "accent_role": 1,
+   "inline_visual": 9
+  },
+  "templates/dashboard/earnings_reviews.html": {
+   "accent_role": 2,
+   "inline_visual": 15,
+   "old_token": 1
+  },
+  "templates/dashboard/economic_calendar.html": {
+   "accent_role": 6,
+   "eye_literal": 1,
+   "glyph_icon": 2,
+   "inline_visual": 28,
+   "js_style": 2,
+   "old_literal": 4,
+   "sub11": 11
+  },
+  "templates/dashboard/events.html": {
+   "inline_visual": 5
+  },
+  "templates/dashboard/evidence.html": {
+   "inline_visual": 24,
+   "sub11": 17
+  },
+  "templates/dashboard/evolution.html": {
+   "accent_role": 8,
+   "glow": 3,
+   "gradient": 5,
+   "sub11": 26
+  },
+  "templates/dashboard/eye.html": {
+   "accent_role": 2,
+   "eye_literal": 1,
+   "inline_visual": 1,
+   "js_style": 1,
+   "old_literal": 4,
+   "sub11": 1
+  },
+  "templates/dashboard/eye_exposure.html": {
+   "accent_role": 1,
+   "eye_literal": 1,
+   "inline_visual": 13,
+   "sub11": 3
+  },
+  "templates/dashboard/eye_fills.html": {
+   "inline_visual": 4
+  },
+  "templates/dashboard/eye_gate_events.html": {
+   "inline_visual": 5
+  },
+  "templates/dashboard/forensics_detail.html": {
+   "accent_role": 6,
+   "inline_visual": 17
+  },
+  "templates/dashboard/forensics_list.html": {
+   "inline_visual": 5
+  },
+  "templates/dashboard/generated.html": {
+   "accent_role": 3,
+   "badge_side": 1,
+   "inline_visual": 24
+  },
+  "templates/dashboard/getting_started.html": {
+   "accent_role": 12,
+   "inline_visual": 29
+  },
+  "templates/dashboard/horizon.html": {
+   "inline_visual": 20,
+   "sub11": 2
+  },
+  "templates/dashboard/hq_books.html": {
+   "inline_visual": 16,
+   "sub11": 2
+  },
+  "templates/dashboard/hypotheses.html": {
+   "accent_role": 3,
+   "inline_visual": 15
+  },
+  "templates/dashboard/instrument_detail.html": {
+   "accent_role": 12,
+   "eye_literal": 1,
+   "glyph_icon": 1,
+   "inline_visual": 15,
+   "old_literal": 1,
+   "old_token": 1,
+   "sub11": 8
+  },
+  "templates/dashboard/instruments_list.html": {
+   "accent_role": 7,
+   "eye_literal": 3,
+   "glow": 3,
+   "glyph_icon": 6,
+   "gradient": 4,
+   "inline_visual": 19,
+   "old_literal": 1,
+   "old_token": 1,
+   "sub11": 5
+  },
+  "templates/dashboard/intelligence.html": {
+   "accent_role": 8,
+   "badge_side": 2,
+   "inline_visual": 32
+  },
+  "templates/dashboard/intro.html": {
+   "eye_literal": 28,
+   "glow": 4,
+   "gradient": 4,
+   "infinite": 4,
+   "inline_visual": 1,
+   "old_face_load": 2,
+   "old_literal": 2,
+   "share_tech": 6,
+   "sub11": 2
+  },
+  "templates/dashboard/knowledge.html": {
+   "accent_role": 2,
+   "inline_visual": 8
+  },
+  "templates/dashboard/knowledge_history.html": {
+   "accent_role": 1,
+   "inline_visual": 2
+  },
+  "templates/dashboard/liquidations.html": {
+   "accent_role": 5,
+   "eye_literal": 2,
+   "glow": 1,
+   "inline_visual": 13,
+   "old_literal": 4,
+   "share_tech": 1,
+   "sub11": 7
+  },
+  "templates/dashboard/locked.html": {
+   "glow": 1,
+   "glyph_icon": 2,
+   "old_face_load": 2,
+   "old_token": 1,
+   "share_tech": 1
+  },
+  "templates/dashboard/market_quotes.html": {
+   "inline_visual": 6
+  },
+  "templates/dashboard/news_detail.html": {
+   "accent_role": 10,
+   "glow": 4,
+   "inline_visual": 2,
+   "old_literal": 3,
+   "old_token": 2,
+   "sub11": 16
+  },
+  "templates/dashboard/news_feed.html": {
+   "glyph_icon": 1,
+   "inline_visual": 9,
+   "sub11": 1
+  },
+  "templates/dashboard/newsletter_archive.html": {
+   "accent_role": 2,
+   "inline_visual": 2,
+   "sub11": 1
+  },
+  "templates/dashboard/newsletter_detail.html": {
+   "accent_role": 3,
+   "inline_visual": 1
+  },
+  "templates/dashboard/notifications_inbox.html": {
+   "inline_visual": 4
+  },
+  "templates/dashboard/oculus.html": {
+   "accent_role": 2,
+   "inline_visual": 6,
+   "sub11": 6
+  },
+  "templates/dashboard/opportunities.html": {
+   "inline_visual": 9
+  },
+  "templates/dashboard/ops.html": {
+   "accent_role": 5,
+   "badge_side": 3,
+   "glyph_icon": 2,
+   "inline_visual": 44,
+   "sub11": 1
+  },
+  "templates/dashboard/orc_detail.html": {
+   "accent_role": 2,
+   "sub11": 2
+  },
+  "templates/dashboard/passation.html": {
+   "accent_role": 8,
+   "eye_literal": 7,
+   "glow": 5,
+   "gradient": 2,
+   "inline_visual": 1,
+   "old_literal": 3,
+   "old_token": 5
+  },
+  "templates/dashboard/performance.html": {
+   "badge_side": 1,
+   "inline_visual": 3
+  },
+  "templates/dashboard/personas.html": {
+   "inline_visual": 38,
+   "sub11": 6
+  },
+  "templates/dashboard/portfolio_overview.html": {
+   "accent_role": 1,
+   "inline_visual": 10
+  },
+  "templates/dashboard/positions_list.html": {
+   "accent_role": 7,
+   "eye_literal": 2,
+   "gradient": 2,
+   "inline_visual": 32,
+   "old_token": 2,
+   "sub11": 14
+  },
+  "templates/dashboard/profile.html": {
+   "accent_role": 2,
+   "eye_literal": 1,
+   "glow": 1,
+   "inline_visual": 15,
+   "old_token": 1,
+   "sub11": 4
+  },
+  "templates/dashboard/promotions.html": {
+   "glyph_icon": 2,
+   "inline_visual": 8
+  },
+  "templates/dashboard/report.html": {
+   "accent_role": 1,
+   "eye_literal": 1,
+   "inline_visual": 22,
+   "old_face_load": 2,
+   "old_literal": 2,
+   "share_tech": 1,
+   "sub11": 13
+  },
+  "templates/dashboard/research.html": {
+   "accent_role": 17,
+   "infinite": 1,
+   "old_token": 5,
+   "sub11": 12
+  },
+  "templates/dashboard/risk_depth.html": {
+   "inline_visual": 14
+  },
+  "templates/dashboard/rule_control.html": {
+   "inline_visual": 4
+  },
+  "templates/dashboard/setup.html": {
+   "accent_role": 5,
+   "inline_visual": 70,
+   "sub11": 22
+  },
+  "templates/dashboard/setups.html": {
+   "badge_side": 1,
+   "inline_visual": 17,
+   "sub11": 1
+  },
+  "templates/dashboard/shares.html": {
+   "badge_side": 1,
+   "inline_visual": 20
+  },
+  "templates/dashboard/short_proofs.html": {
+   "accent_role": 1,
+   "inline_visual": 8
+  },
+  "templates/dashboard/signals_list.html": {
+   "inline_visual": 31,
+   "sub11": 13
+  },
+  "templates/dashboard/strategy_detail.html": {
+   "inline_visual": 10,
+   "sub11": 1
+  },
+  "templates/dashboard/system_health.html": {
+   "inline_visual": 9
+  },
+  "templates/dashboard/system_map.html": {
+   "accent_role": 8,
+   "glyph_icon": 1,
+   "gradient": 1,
+   "infinite": 1,
+   "inline_visual": 1,
+   "sub11": 10
+  },
+  "templates/dashboard/tax_lots.html": {
+   "accent_role": 1,
+   "inline_visual": 8
+  },
+  "templates/dashboard/treasury.html": {
+   "inline_visual": 56
+  },
+  "templates/dashboard/user_notifications.html": {
+   "accent_role": 3,
+   "inline_visual": 23,
+   "js_style": 3,
+   "sub11": 1
+  },
+  "templates/dashboard/withdrawals.html": {
+   "accent_role": 1,
+   "inline_visual": 31
+  },
+  "templates/email/briefing.html": {
+   "inline_visual": 26,
+   "off_token_hex": 29
+  },
+  "templates/email/newsletter.html": {
+   "eye_literal": 4,
+   "inline_visual": 20,
+   "off_token_hex": 34,
+   "sub11": 1
+  },
+  "templates/investor/_panel_body.html": {
+   "inline_visual": 10
+  },
+  "templates/investor/panel.html": {
+   "old_face_load": 2,
+   "share_tech": 1,
+   "sub11": 1
+  },
+  "templates/landing/the_book.html": {
+   "accent_role": 31,
+   "eye_literal": 51,
+   "glass": 2,
+   "glow": 29,
+   "glyph_icon": 6,
+   "gradient": 30,
+   "infinite": 31,
+   "old_face_load": 2,
+   "old_literal": 31,
+   "old_token": 16,
+   "share_tech": 1,
+   "sub11": 5
+  },
+  "templates/landing/the_wall.html": {
+   "accent_role": 63,
+   "eye_literal": 111,
+   "glass": 5,
+   "glow": 53,
+   "glyph_icon": 6,
+   "gradient": 45,
+   "infinite": 34,
+   "inline_visual": 46,
+   "js_style": 9,
+   "old_face_load": 2,
+   "old_literal": 56,
+   "old_token": 42,
+   "share_tech": 2,
+   "sub11": 65
+  },
+  "templates/landing/withheld.html": {
+   "glyph_icon": 1,
+   "old_literal": 1
+  },
+  "templates/lore/entry.html": {
+   "inline_visual": 3,
+   "sub11": 2
+  },
+  "templates/lore/index.html": {
+   "inline_visual": 5,
+   "sub11": 1
+  },
+  "templates/newsletter/unsubscribe.html": {
+   "accent_role": 2,
+   "eye_literal": 1,
+   "off_token_hex": 17
+  },
+  "templates/registration/_key_eye.html": {
+   "eye_literal": 1,
+   "glow": 1,
+   "old_literal": 1,
+   "old_token": 1
+  },
+  "templates/registration/login.html": {
+   "accent_role": 2,
+   "eye_literal": 36,
+   "glass": 1,
+   "glow": 7,
+   "gradient": 7,
+   "infinite": 5,
+   "old_face_load": 2,
+   "old_literal": 8,
+   "old_token": 2,
+   "share_tech": 7,
+   "sub11": 3
+  },
+  "templates/registration/login_pin.html": {
+   "accent_role": 6,
+   "eye_literal": 37,
+   "glass": 1,
+   "glow": 9,
+   "glyph_icon": 1,
+   "gradient": 7,
+   "infinite": 5,
+   "old_face_load": 2,
+   "old_literal": 8,
+   "old_token": 2,
+   "share_tech": 9,
+   "sub11": 5
+  }
+ },
+ "strict": {
+  "measured": [],
+  "source": []
+ }
+}
