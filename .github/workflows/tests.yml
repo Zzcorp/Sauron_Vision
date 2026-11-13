@@ -61,7 +61,66 @@ jobs:
       # SQLite + locmem cache + in-memory channels, which is exactly the
       # environment the suite is written for. --parallel auto runs one
       # worker per vCPU, each on its own copy of the test database.
+      # The old-design guard's measured half runs in its own job below
+      # (old-design-measured), beside this one: it is excluded here by its
+      # tag so it neither runs twice nor lengthens this job.
       - name: Run test suite
         env:
           DB_ENGINE: sqlite
-        run: python manage.py test tests --parallel auto --verbosity=1
+        run: python manage.py test tests --parallel auto --verbosity=1 --exclude-tag=old_design_measured
+
+  # The zero-old-design guard's measured half (tests/test_zero_old_design.py,
+  # B0 of the old-design redo, 2026-11-13): every routed page and the shell's
+  # states laid out in Chromium (the runner's Google Chrome, which the tests
+  # find on the PATH), each held to its budget. Four shards, one per worker.
+  # Inter and JetBrains Mono are installed so the glyph census reads which
+  # face drew each glyph as it does where the budgets were taken; without
+  # them it is skipped, never failed. Its source half runs in the suite
+  # above. Measured on a 4-vCPU machine another suite kept busy: about 4
+  # minutes in four workers, 5.5 held to two CPUs as on the private runner,
+  # all of it beside the suite's job, not after it.
+  old-design-measured:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci.txt
+
+      - name: Install the two faces the census reads (Inter, JetBrains Mono)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-inter fonts-jetbrains-mono
+          fc-list : family | grep -E "^(Inter|JetBrains Mono)" | sort -u
+
+      - name: Collect static assets
+        env:
+          DB_ENGINE: sqlite
+        run: python manage.py collectstatic --noinput
+
+      # Each shard writes its counts beside the run (SV_OLD_DESIGN_DUMP); a
+      # failed run keeps them for a week, to compare with the budgets
+      # scene by scene.
+      - name: Run the measured half of the old-design guard
+        env:
+          DB_ENGINE: sqlite
+          SV_OLD_DESIGN_DUMP: ${{ runner.temp }}/old_design_census
+        run: python manage.py test tests.test_zero_old_design --tag=old_design_measured --parallel auto --verbosity=1
+
+      - name: Keep the measured counts of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: old-design-census
+          path: ${{ runner.temp }}/old_design_census_shard*.json
+          if-no-files-found: ignore
+          retention-days: 7

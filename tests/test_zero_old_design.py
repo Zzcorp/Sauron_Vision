@@ -25,6 +25,10 @@ TWO HALVES, ONE BUDGET FILE (tests/old_design_budget.json):
     budget. Its notes are below, with its classes. It is tagged
     "old_design_measured" and runs as its own CI job, in four shards.
 
+THE META-TEST (SourceGuardBitesTests, MeasuredGuardBitesTests): one old
+marker added to a temp copy fails with its file and line (its page,
+selector, property and value); removed, the copy passes.
+
 THE MARKERS (the plan's "final guard", and the critic's hole 4):
 
   eye_literal     the Eye's literal green (#00E868, rgb(0, 232, 104))
@@ -2959,3 +2963,127 @@ def lower_measured_budgets(results=None, write=True):
     if write and changes:
         write_budget(budget)
     return changes
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# The guard bites: one old marker added to a copy fails, removed it passes
+# ══════════════════════════════════════════════════════════════════════════
+
+class SourceGuardBitesTests(SimpleTestCase):
+    """B0's meta-test, the source half: in a temp copy of a template under
+    budget, one neon glow on a card fails the comparison with that file,
+    that line and that marker; the copy without it passes; a new template
+    with one marker fails as a file absent from the budget."""
+
+    REL = "templates/dashboard/ops.html"
+
+    def setUp(self):
+        import tempfile
+        import shutil as _shutil
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="sv-guard-"))
+        self.addCleanup(_shutil.rmtree, self.tmp, True)
+        self.budget = load_budget()["source"]
+        self.text = (ROOT / self.REL).read_text(encoding="utf-8")
+
+    def compare(self, text, rel=None):
+        copy = self.tmp / "copy.html"
+        copy.write_text(text, encoding="utf-8")
+        hits = file_hits(copy, rel or self.REL)
+        others = {f: v for f, v in self.budget.items() if f == (rel or self.REL)}
+        return compare_source(counts(hits), others, hits)
+
+    def test_a_glow_added_to_a_card_fails_with_its_file_line_and_marker(self):
+        clean_over, clean_under = self.compare(self.text)
+        self.assertEqual((clean_over, clean_under), ([], []))
+        lines = self.text.split("\n")
+        at = next(i for i, line in enumerate(lines) if "{% block content %}" in line) + 1
+        marked = lines[:at] + ['<div class="card" style="box-shadow: 0 0 18px rgba(0, 232, 104, .5)">census</div>'] + lines[at:]
+        over, _under = self.compare("\n".join(marked))
+        joined = "\n".join(over)
+        self.assertTrue(over, "the census did not see the glow")
+        self.assertIn("%s: glow" % self.REL, joined)
+        self.assertIn("%s:%d glow [B11]" % (self.REL, at + 1), joined)
+        self.assertIn("%s:%d eye_literal" % (self.REL, at + 1), joined)
+        self.assertIn("%s:%d inline_visual" % (self.REL, at + 1), joined)
+        # removed again: it passes
+        self.assertEqual(self.compare("\n".join(lines)), ([], []))
+
+    def test_a_non_token_colour_on_a_figure_in_a_sheet_fails(self):
+        rel = "static/css/sv-kit.css"
+        kit = (ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(self.compare(kit, rel), ([], []))
+        marked = kit + "\n.sv-kpi-value { color: #3a6850; font-size: 9px; }\n"
+        over, _u = self.compare(marked, rel)
+        n = marked[:marked.index(".sv-kpi-value { color: #3a6850")].count("\n") + 1
+        joined = "\n".join(over)
+        self.assertIn("%s:%d old_literal" % (rel, n), joined)
+        self.assertIn("%s:%d sub11" % (rel, n), joined)
+        self.assertIn("a file absent from the budget must be at zero", joined)
+
+    def test_a_new_template_starts_at_zero(self):
+        over, _u = self.compare('<span class="badge badge-bullish">ARMED</span>', "templates/dashboard/new_page.html")
+        self.assertEqual(len(over), 1)
+        self.assertIn("templates/dashboard/new_page.html:1 badge_side", over[0])
+        self.assertIn("a file absent from the budget must be at zero", over[0])
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+@tag("old_design_measured")
+class MeasuredGuardBitesTests(TestCase):
+    """B0's meta-test, the measured half: the kit's page, rendered and laid
+    out in Chromium as a temp copy, measured clean, is its own budget; a
+    neon glow on a card and a colour off the tokens on a figure added to the
+    copy fail the comparison, naming the page, the selector, the property
+    and the value; the clean copy passes again."""
+
+    MARKS = ('<style>.sv-meta-card { box-shadow: 0 0 18px rgba(0, 232, 104, .6); }</style>'
+             '<div class="card sv-meta-card">A card that glows</div>'
+             '<span class="sv-meta-fig mono" style="color: #123456">1,234.50</span>')
+
+    @classmethod
+    def setUpTestData(cls):
+        import shutil as _shutil
+        import tempfile
+        user = get_user_model().objects.create_user("census_bites", password="x", is_staff=True)
+        client = Client()
+        client.force_login(user)
+        page = client.get("/design/kit/", HTTP_HOST=HOST).content.decode("utf-8")
+        page = re.sub(r"<script\b.*?</script>", "", page, flags=re.S)
+        page = re.sub(r'<link\b[^>]*href="https?://[^>]*>', "", page)
+        page = page.replace("/static/", "file://%s/static/" % settings.BASE_DIR)
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="sv-guard-measured-"))
+        clean, marked = tmp / "clean.html", tmp / "marked.html"
+        clean.write_text(page, encoding="utf-8")
+        i = page.index('<div class="page-content')
+        i = page.index(">", i) + 1
+        marked.write_text(page[:i] + cls.MARKS + page[i:], encoding="utf-8")
+        source = CENSUS_JS.read_text(encoding="utf-8")
+        opts = {"tokens": token_rgbs(), "radii": token_radii(), "money": MONEY, "examples": 40}
+        chrome = _Chrome(CHROME)
+        try:
+            sid = chrome.page(1440, 900, False)
+            cls.got = {}
+            for name, path in (("clean", clean), ("marked", marked), ("again", clean)):
+                chrome.open(sid, path.as_uri())
+                chrome.eval(sid, SETTLE % 100)
+                cls.got[name] = chrome.eval(sid, source + "\n;census(%s)" % json.dumps(opts))
+        finally:
+            chrome.close()
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+    def result(self, name):
+        g = self.got[name]
+        return {"/design/kit/": {"counts": g["counts"], "examples": g["examples"], "error": None}}
+
+    def test_a_glow_and_an_off_token_figure_fail_and_their_removal_passes(self):
+        budget = measured_budget_from(self.result("clean"), glyphs=False)
+        self.assertEqual(compare_measured(self.result("clean"), budget, glyphs=False), [])
+        over = compare_measured(self.result("marked"), budget, glyphs=False)
+        joined = "\n".join(over)
+        self.assertIn("/design/kit/: glow", joined)
+        self.assertIn("x1  div.card.sv-meta-card  box-shadow: rgba(0, 232, 104, 0.6) 18px", joined)
+        self.assertIn("/design/kit/: color_off 1, budget 0", joined)
+        self.assertIn("x1  span.sv-meta-fig.mono  color: rgb(18, 52, 86)  '1,234.50'", joined)
+        self.assertIn("/design/kit/: inline_visual", joined)
+        # the copy without them passes again
+        self.assertEqual(compare_measured(self.result("again"), budget, glyphs=False), [])
