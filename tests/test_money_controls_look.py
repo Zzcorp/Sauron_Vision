@@ -662,11 +662,18 @@ class MoneyControlsMeasuredTests(TestCase):
                 self.assertTrue(is_neutral(b["bg"]), b)
 
     def test_the_ticket_sides_in_jade_and_coral_on_no_fill(self):
+        """Updated deliberately (desk v2, 2026-11-13). The operator approved
+        the desk v2 boards ("amazing work, bravo, I need it fast!!"): Ticket2
+        prints the bid and the ask in ink, the figure, and gives each side
+        its colour on its label and its outline. A side is still jade or
+        coral, and never a fill."""
         tk = self.got["/instruments/BTCUSD/"]
-        for px in tk["tkLongPx"]:
-            self.assertEqual(px["color"], UP)
-        for px in tk["tkShortPx"]:
-            self.assertEqual(px["color"], DOWN)
+        self.assertTrue(tk["tkLongPx"] and tk["tkShortPx"])
+        for px in tk["tkLongPx"] + tk["tkShortPx"]:
+            self.assertEqual(px["color"], INK1)
+        for buttons, hue in ((tk["tkLong"], UP), (tk["tkShort"], DOWN)):
+            for b in buttons:
+                self.assertEqual((b["color"], b["border"]), (hue, hue))
         for side in tk["tkLong"] + tk["tkShort"]:
             self.assertFalse(is_red(side["bg"], 0.05) or is_green(side["bg"], 0.05), side)
         for chip in tk["tkVenue"]:

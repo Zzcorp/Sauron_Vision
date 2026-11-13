@@ -585,9 +585,10 @@ class PositionCardsMeasuredTests(TestCase):
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class TicketFaceMeasuredTests(TestCase):
-    """Every price and label on every ticket of the instrument page (the
-    header's and the chart's compact one) computes to the mono token, the
-    face the spread between them already wore."""
+    """Every price on every ticket of the instrument page (the header's and
+    the chart's compact one) computes to the mono token, the face the spread
+    between them already wore; the side labels compute to the word face
+    (desk v2, 2026-11-13: see the test). None of them is Arial any more."""
 
     PROBE = r"""(function () {
         function face(el) { return getComputedStyle(el).fontFamily; }
@@ -626,9 +627,19 @@ class TicketFaceMeasuredTests(TestCase):
             self.assertEqual(face, self.got["mono"], self.got)
 
     def test_so_do_the_side_labels_and_the_spread(self):
+        """Updated deliberately (desk v2, 2026-11-13). The operator approved
+        the desk v2 boards ("amazing work, bravo, I need it fast!!"): Ticket2
+        draws the side labels as words, ▼ SHORT · BID and ▲ LONG · ASK in the
+        word face (Inter 11/600), as plan §4.2 has every word, and keeps the
+        bid, the ask and the spread in the number face. What S0 fixed holds:
+        a label computes to the page's own word face, never the button's
+        Arial, and the spread to the mono token."""
         self.assertGreaterEqual(len(self.got["labels"]), 2, self.got)
-        for face in self.got["labels"] + self.got["spreads"]:
+        for face in self.got["spreads"]:
             self.assertEqual(face, self.got["mono"], self.got)
+        for face in self.got["labels"]:
+            self.assertEqual(face, self.got["body"], self.got)
+            self.assertNotIn("Arial", face)
 
 
 # ══════════════════════════════════════════════════════════════════════════

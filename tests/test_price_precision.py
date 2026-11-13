@@ -122,10 +122,17 @@ class BidAskSitsBesideTheButtonsThatUseItTests(TestCase):
                                  source="ibkr")
 
     def test_bid_and_ask_are_on_the_page_head(self):
+        """Updated deliberately (desk v2, 2026-11-13; the operator approved
+        the boards: "amazing work, bravo, I need it fast!!"): the ticket now
+        brings its own sheet and names the quote each side trades at, which
+        moved the ask past the first 1,200 characters of the head. The head
+        is read whole now, up to its next group (the aux buttons), so both
+        hooks must still be on the page head, before anything else."""
         body = self.client.get("/instruments/BRNUSD/").content.decode()
-        head = body.split("dtl-actions")[1][:1200]
+        head = body.split("dtl-actions")[1].split("dtl-aux")[0]
         self.assertIn('data-dq="bid"', head)
         self.assertIn('data-dq="ask"', head)
+        self.assertLess(len(head), 2400)
 
     def test_the_spread_is_shown_and_correct(self):
         body = self.client.get("/instruments/BRNUSD/").content.decode()
