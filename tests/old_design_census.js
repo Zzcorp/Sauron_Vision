@@ -31,9 +31,17 @@
    its start it reads the same in every run, and the loop itself is still
    counted (anim_loop).
 
-   census(opts) returns {counts: {marker: n}, examples: {marker: [[n, key,
-   property, value, text]]} (the elements grouped by selector and property),
-   glyphs: [[index, signature, key, text]], geo: {...}}. */
+   The review of B0 (2026-11-13) closed its blind spots: an opaque mix of
+   the Eye on a neutral is an Eye wash, an Eye outline outside focus is an
+   Eye border, SVG shapes are read for their fill and stroke, a red or Eye
+   fill drawn by ::before, ::after or an inset shadow that covers the box is
+   a fill, and the kit page's specimens are the kit's.
+
+   census(opts) returns {counts: {marker: n}, regions: {region: {marker:
+   n}} (the shell region each element sits in, opts.regions), examples:
+   {marker: [[n, key, property, value, text]]} (the elements grouped by
+   selector and property), glyphs: [[index, signature, key, text,
+   region]], geo: {...}}. */
 'use strict';
 
 function census(opts) {
@@ -50,6 +58,7 @@ function census(opts) {
   Array.prototype.forEach.call(document.querySelectorAll('svg'), function (s) {
     try { if (!s.animationsPaused()) { s.pauseAnimations(); s.setCurrentTime(0); } } catch (e) { /* no SMIL here */ }
   });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-svc]'), function (e) { e.removeAttribute('data-svc'); });
   var VW = innerWidth, VH = innerHeight;
   var MAXEX = opts.examples || 40;
   var TITLE_SEL = '.sidebar-brand h1, .sidebar-brand h1 *, .topbar-title, .topbar-title *, .card-title, .card-title *, .sv-panel-title, .sc-heading-title, .modal-title, .kbd-modal-title, .gollum-dialog .gl-title, .nav-section, .nav-section *, .il-title, .sv-overline, .brand-text';
@@ -67,12 +76,15 @@ function census(opts) {
   var CODEISH = 'code, code *, kbd, kbd *, pre, pre *, samp, .sv-ident, .sv-ident *, .mono-id, .sv-pnl-src';
   /* The kit page's specimens (/design/kit/): a swatch shows a token by
      painting it, the wordmark and icon samples wear the Eye they document. */
-  var SPECIMEN = '.dk-chip-sample, .dk-icon, .dk-scale-row .sv-panel-title';
+  var SPECIMEN = '.dk-chip-sample, .dk-icon, .dk-scale-row .sv-panel-title, .dk-scale-row > span, [data-kit="numbers"] dt';
   var POPOVERS = /sr-popup|dh-pop|ip-dropdown|notif-dropdown|user-menu-dropdown|lsp-dropdown|exchange-dropdown|ticker-popup|nf-pop|pos-pop|se-chat-panel|sv-dialog|gollum-dialog|sv-horde|sv-council|sv-activity|sv-popover|sv-menu/;
   var LOOPS_OK = /^(sv-heartbeat|sv-armed-beat|sv-eye-breath)$/;
   var SKIP = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, BR: 1, WBR: 1, META: 1, LINK: 1, HEAD: 1, TITLE: 1,
                OPTION: 1, OPTGROUP: 1, PARAM: 1, SOURCE: 1, TRACK: 1 };
   var SVG_KEEP = { svg: 1, text: 1, tspan: 1 };
+  /* SVG shapes: read for their fill and stroke only (the final guard). */
+  var SVG_SHAPE = { path: 1, circle: 1, rect: 1, line: 1, polyline: 1, polygon: 1, ellipse: 1, use: 1 };
+  var REGIONS = opts.regions || [];
 
   // ── colours ─────────────────────────────────────────────────────────
   var TOK = opts.tokens;          // {name: [r, g, b]}
@@ -125,7 +137,13 @@ function census(opts) {
     return out;
   }
   function isEye(c) {
-    return !!c && (((c.k === 'tok' || c.k === 'tok@a') && c.n === 'eye') || (c.k === 'off' && c.n === 'eye' && c.d <= 60));
+    return !!c && (((c.k === 'tok' || c.k === 'tok@a') && c.n === 'eye') || (c.k === 'off' && c.n === 'eye' && c.d <= 60)
+                   || ((c.k === 'mix' || c.k === 'mix@a') && /^eye /.test(c.n)));
+  }
+  /* A mix of the Eye on a neutral paints like the Eye at that share. */
+  function eyeShare(c) {
+    if ((c.k === 'mix' || c.k === 'mix@a') && /^eye /.test(c.n)) return (parseInt(c.n.split(' ')[1], 10) / 100) * c.a;
+    return c.a;
   }
   function colorsIn(s) { return (s && s !== 'none') ? (s.match(/rgba?\([^)]*\)|color\(srgb[^)]*\)/g) || []) : []; }
   function shadows(s) {
@@ -171,15 +189,48 @@ function census(opts) {
   // ── the walk ────────────────────────────────────────────────────────
   /* Each marker's count, and its elements grouped by selector and
      property (up to MAXEX groups), so a count that rose names the new one. */
-  var counts = {}, groups = {}, glyphs = [], seenSig = {};
+  var counts = {}, groups = {}, glyphs = [], seenSig = {}, regions = {};
+  function regionOf(el) {
+    if (el.__svRegion !== undefined) return el.__svRegion;
+    var name = 'other';
+    for (var q = 0; q < REGIONS.length; q++) {
+      try { if (el.closest(REGIONS[q][1])) { name = REGIONS[q][0]; break; } } catch (e) { /* a bad selector */ }
+    }
+    el.__svRegion = name;
+    return name;
+  }
   function F(marker, el, prop, value, text) {
     counts[marker] = (counts[marker] || 0) + 1;
+    var rg = regions[regionOf(el)] || (regions[regionOf(el)] = {});
+    rg[marker] = (rg[marker] || 0) + 1;
     var key = keyOf(el), g = groups[marker] || (groups[marker] = {}), id = key + '|' + prop;
     if (g[id]) { g[id][0]++; return; }
     if (Object.keys(g).length >= MAXEX) return;
     g[id] = [1, key, prop, String(value).slice(0, 120), String(text || '').slice(0, 50)];
   }
   var MONO = /^(jetbrains mono|share tech mono|monospace|ui-monospace|sfmono-regular|menlo|consolas|courier|courier new|liberation mono|dejavu sans mono)$/;
+  /* An SVG shape's paint (the final guard: "SVG fill and stroke"): the Eye
+     outside its marks is Eye ink, a colour of no token is off. Its host
+     (the <svg>) decides the roles: the brand's Eye, the active row's icon,
+     a live dot, the empty state's mark. */
+  function shape(el) {
+    var svg = el.ownerSVGElement || el.closest('svg');
+    if (!svg || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+    var r = el.getBoundingClientRect();
+    if (r.width < 1 && r.height < 1) return;
+    if (r.right <= 0) return;
+    var cs = getComputedStyle(el), host = svg.matches(SPECIMEN) || el.matches(SPECIMEN) || svg.closest(SPECIMEN);
+    if (host) return;
+    [['fill', cs.fill, parseFloat(cs.fillOpacity)], ['stroke', cs.stroke, parseFloat(cs.strokeOpacity) * (parseFloat(cs.strokeWidth) > 0 ? 1 : 0)]]
+      .forEach(function (pv) {
+        if (!pv[1] || pv[1].indexOf('rgb') !== 0 || !(pv[2] > 0)) return;
+        var c = classify(pv[1]);
+        if (!c) return;
+        var eyeOk = svg.matches(EYE_TEXT_OK) || svg.closest('.sidebar-brand, .brand-eye, .nav-link.active, .sv-empty-state, .dk-icon') || svg.matches(EYE_FILL_OK) || el.matches(EYE_FILL_OK);
+        if (isEye(c) && !eyeOk) F('eye_text', el, 'svg ' + pv[0], pv[1], '');
+        else if (c.k === 'off') F('color_off', el, 'svg ' + pv[0], pv[1], '');
+      });
+  }
   var nEl = 0, nText = 0;
   var all = document.querySelectorAll('body, body *');
   for (var ii = 0; ii < all.length; ii++) {
@@ -187,6 +238,7 @@ function census(opts) {
     var tag = el.tagName;
     var isSvg = el instanceof SVGElement;
     if (SKIP[tag.toUpperCase()]) continue;
+    if (isSvg && SVG_SHAPE[tag.toLowerCase()]) { shape(el); continue; }
     if (isSvg && !SVG_KEEP[tag.toLowerCase()]) continue;
     if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
     var r = el.getBoundingClientRect();
@@ -260,7 +312,7 @@ function census(opts) {
         if (!(sg in seenSig)) {
           seenSig[sg] = glyphs.length;
           el.setAttribute('data-svc', String(glyphs.length));
-          glyphs.push([glyphs.length, sg, keyOf(el), shown.slice(0, 30)]);
+          glyphs.push([glyphs.length, sg, keyOf(el), shown.slice(0, 30), regionOf(el)]);
         }
       }
     }
@@ -268,7 +320,7 @@ function census(opts) {
     var area = r.width * r.height;
     var cardish = area >= 3000 && (borderOn || parseFloat(cs.borderTopLeftRadius) > 0 || parseFloat(cs.paddingTop) >= 6);
     if (bg && bg.a > 0 && !el.matches(SPECIMEN)) {
-      if (isEye(bg) && !el.matches(EYE_FILL_OK)) F(bg.a >= 0.6 ? 'eye_fill' : 'eye_wash', el, 'background-color', cs.backgroundColor, shown);
+      if (isEye(bg) && !el.matches(EYE_FILL_OK)) F(eyeShare(bg) >= 0.6 ? 'eye_fill' : 'eye_wash', el, 'background-color', cs.backgroundColor, shown);
       else if (bg.k === 'off') F('bg_off', el, 'background-color', cs.backgroundColor, shown);
       if (bg.a < 0.97 && cardish && !((bg.k === 'tok@a') && ['up', 'down', 'ink-2', 'ink-3', 'warn', 'demo', 'ai', 'black'].indexOf(bg.n) >= 0 && area < 12000)) F('see_through', el, 'background-color', cs.backgroundColor, shown);
       var pbg = parseColor(cs.backgroundColor);
@@ -290,11 +342,21 @@ function census(opts) {
     }
     if (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) {
       var oc = classify(cs.outlineColor);
-      if (oc && oc.k === 'off') F('border_off', el, 'outline-color', cs.outlineColor, shown);
+      if (oc && isEye(oc) && !el.matches(EYE_BORDER_OK)) F('eye_border', el, 'outline-color', cs.outlineColor, shown);
+      else if (oc && oc.k === 'off') F('border_off', el, 'outline-color', cs.outlineColor, shown);
     }
     // shadows and glows
     if (cs.boxShadow && cs.boxShadow !== 'none') {
       var sh = shadows(cs.boxShadow);
+      /* An inset shadow whose spread covers the box is a fill. */
+      sh.forEach(function (s) {
+        if (!s.inset || !s.c || s.spread < Math.min(r.width, r.height) / 2 - 1) return;
+        var fc = classify(s.col);
+        if (!fc) return;
+        if (s.c[3] >= 0.85 && ((fc.k === 'tok' && REDS[fc.n]) || (fc.k === 'off' && s.c[0] >= 150 && s.c[1] <= 110 && s.c[2] <= 110 && s.c[0] - s.c[1] >= 90)) && !el.matches(WORLD)) F('red_fill', el, 'box-shadow inset', s.col, shown);
+        else if (isEye(fc) && !el.matches(EYE_FILL_OK)) F(eyeShare(fc) * s.c[3] >= 0.6 ? 'eye_fill' : 'eye_wash', el, 'box-shadow inset', s.col, shown);
+        else if (fc.k === 'off') F('bg_off', el, 'box-shadow inset', s.col, shown);
+      });
       for (var si = 0; si < sh.length; si++) {
         var s = sh[si];
         if (s.blur > 0 && coloured(s.c)) {
@@ -364,8 +426,10 @@ function census(opts) {
       if (p.boxShadow && p.boxShadow !== 'none' && !hostOk && shadows(p.boxShadow).some(function (x) { return x.blur > 0 && coloured(x.c); })) F('glow', el, pe + ' box-shadow', p.boxShadow, shown);
       if (p.textShadow && p.textShadow !== 'none' && !hostOk && shadows(p.textShadow).some(function (x) { return x.blur > 0 && coloured(x.c); })) F('text_glow', el, pe + ' text-shadow', p.textShadow, shown);
       if (p.backgroundImage && /gradient/.test(p.backgroundImage) && !hostOk) F('gradient', el, pe + ' background-image', p.backgroundImage, shown);
-      var pbg2 = classify(p.backgroundColor);
-      if (pbg2 && isEye(pbg2) && !hostOk && !el.matches(EYE_FILL_OK)) F(pbg2.a >= 0.6 ? 'eye_fill' : 'eye_wash', el, pe + ' background-color', p.backgroundColor, shown);
+      var pbg2 = classify(p.backgroundColor), praw = parseColor(p.backgroundColor);
+      if (pbg2 && praw && praw[3] >= 0.85 && ((pbg2.k === 'tok' && REDS[pbg2.n]) || (pbg2.k === 'off' && praw[0] >= 150 && praw[1] <= 110 && praw[2] <= 110 && praw[0] - praw[1] >= 90))
+          && !el.matches(WORLD) && !hostOk && parseFloat(p.width) * parseFloat(p.height) >= 16) F('red_fill', el, pe + ' background-color', p.backgroundColor, shown);
+      else if (pbg2 && isEye(pbg2) && !hostOk && !el.matches(EYE_FILL_OK)) F(eyeShare(pbg2) >= 0.6 ? 'eye_fill' : 'eye_wash', el, pe + ' background-color', p.backgroundColor, shown);
       else if (pbg2 && pbg2.k === 'off' && !hostOk) F('bg_off', el, pe + ' background-color', p.backgroundColor, shown);
       if (p.animationName && p.animationName !== 'none' && /infinite/.test(p.animationIterationCount) && p.animationPlayState !== 'paused'
           && !p.animationName.split(',').every(function (n) { return LOOPS_OK.test(n.trim()); })) F('anim_loop', el, pe + ' animation', p.animationName, shown);
@@ -424,7 +488,7 @@ function census(opts) {
     examples[m] = Object.keys(groups[m]).map(function (k) { return groups[m][k]; })
       .sort(function (a, b) { return b[0] - a[0]; });
   });
-  return { counts: counts, examples: examples, glyphs: glyphs, geo: geo, n: nEl, nText: nText,
+  return { counts: counts, regions: regions, examples: examples, glyphs: glyphs, geo: geo, n: nEl, nText: nText,
            url: location.pathname, title: document.title };
 }
 
