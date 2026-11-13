@@ -1345,7 +1345,7 @@ SCENES.noPrims = async function (R) {
 
 SCENES.pin = async function (R) {
     renderLayer();
-    const money = function () { return lineOpts().filter(function (l) { return ['LONG 1000', 'SL', 'TP'].indexOf(l.title) >= 0; }); };
+    const money = function () { return lineOpts().filter(function (l) { return ['▲ LONG 1000', 'Your stop', 'Your target'].indexOf(l.title) >= 0; /* his lines in his words (the desk v2's review, F5; the operator approved the board) */ }); };
     R.before = { geom: geom(), money: money() };
     click(M.sigX, 200, M.t.sig);
     renderLayer();
@@ -1495,7 +1495,8 @@ class ThePo3WidgetTests(SimpleTestCase):
     def test_the_stages_ride_the_level_layer_and_add_no_price_line(self):
         r = self.main
         self.assertEqual(r["prims"], [["candle", 1], ["hist", 0]])
-        self.assertEqual(r["others"], ["LONG 1000", "SL", "TP"])
+        # his lines in his words (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertEqual(r["others"], ["▲ LONG 1000", "Your stop", "Your target"])
         self.assertEqual(r["data"]["po3"]["stages"], STAGES)
         self.assertEqual((r["data"]["po3"]["phase"], r["data"]["po3"]["direction"]), ("distribution", "up"))
         self.assertEqual(set(r["data"]["asia"]), {"high", "low", "opened", "closed"})
@@ -1586,7 +1587,8 @@ class ThePo3WidgetTests(SimpleTestCase):
         self.assertIsNone(after["geom"]["asia"])
         self.assertEqual(after["phase"]["text"], "D ▲ distribution", "the phase still said while hidden")
         self.assertEqual(after["key"]["keys"]["asia"]["pressed"], "false")
-        self.assertEqual(after["others"], ["LONG 1000", "SL", "TP"])
+        # his lines in his words (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertEqual(after["others"], ["▲ LONG 1000", "Your stop", "Your target"])
         again = _po3_run("boot", prefs=after["saved"])
         self.assertIsNone(again["geom"]["po3"])
         self.assertIsNone(again["geom"]["asia"])
@@ -1664,7 +1666,8 @@ class ThePo3WidgetTests(SimpleTestCase):
     # W9
     def test_without_primitives_only_the_two_asia_lines(self):
         out = _po3_run("noPrims", no_prims=True)
-        self.assertEqual(out["others"], ["LONG 1000", "SL", "TP", "", ""])
+        # his lines in his words (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertEqual(out["others"], ["▲ LONG 1000", "Your stop", "Your target", "", ""])
         self.assertEqual([l["price"] for l in out["lines"][3:]], [1.08608, 1.08441])
         self.assertEqual(out["phase"]["text"], "D ▲ distribution")
 

@@ -266,7 +266,11 @@ class TheWeeklyCandleTests(SimpleTestCase):
         self.assertEqual(self.r["countdown"], "")
 
     def test_the_crosshair_names_the_week_and_says_forming(self):
-        self.assertIn("week of " + self.r["monday"], self.r["legend"])
+        # the board's date, "week of 9 Nov 2026" (the desk v2's review, F10;
+        # the operator approved the board: "amazing work, bravo, I need it fast!!")
+        m = self.r["monday"]
+        months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        self.assertIn("week of %d %s %s" % (int(m[8:10]), months[int(m[5:7]) - 1], m[:4]), self.r["legend"])
         self.assertIn("FORMING", self.r["legend"])
 
 

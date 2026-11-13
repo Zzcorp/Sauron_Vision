@@ -86,11 +86,17 @@
 .sv-ih-pos .sv-world { align-self: center; }
 .sv-ih-feed .sv-ih-r1 { font-size: var(--sv-fs-small); color: var(--sv-ink-2); align-items: center; gap: 6px; }
 /* Whose price and how old: whole, always (the price itself is printed on
-   the two sides; its hooks ride hidden beside the words, read with them). */
-.sv-ih-feed [data-hero="src"] { flex: none; }
+   the two sides; its hooks ride hidden beside the words, read with them).
+   A shut market's words are long ("closed · eToro ask 22:00 · opens Sun
+   23:00 UTC"): they wrap between words onto a second line rather than
+   push the two sides out of the row; never cut. */
+.sv-ih > .sv-ih-feed { flex: 0 1 auto; min-width: 0; }
+.sv-ih-feed .sv-ih-r1 { white-space: normal; }
+.sv-ih-feed [data-hero="src"] { flex: 0 1 auto; min-width: 0; white-space: normal; line-height: 15px; }
 .sv-ih .dtl-price {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
     overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+    font-family: var(--sv-font-mono);
 }
 .sv-ih-feed { position: relative; }
 .sv-ih-dot { width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ink-2); flex: none; }
@@ -187,15 +193,21 @@
 }
 /* The narrowest desk (1280 with the rail open): the day folds whole (its
    change is the headband's and the quote panel's too); his position, whose
-   price it is and the two sides stay. */
+   price it is and the two sides stay. A shut market's longer words fold
+   the day sooner, on any desk under 1000 px of row. */
 @container svih (max-width: 700px) {
     .sv-ih > .sv-ih-day { display: none; }
+}
+@container svih (max-width: 1000px) {
+    .sv-ih:has(.dtl-mkt.mk-closed) > .sv-ih-day { display: none; }
 }
 /* A phone: the row becomes lines (the day, his position, the two sides),
    each whole, rather than one row that runs past the screen. */
 @media (max-width: 640px) {
     .sv-ih { flex-wrap: wrap; height: auto; padding: 8px 10px; row-gap: 8px; }
     .sv-ih-act { margin-left: 0; }
+    /* a finger's target: 44 px (B0's target_small) */
+    .sv-ih .sv-ticket, .sv-ih .sv-ticket .tk-side { height: 44px; }
 }
 
 /* ══ 2. The chart card ══════════════════════════════════════════════════
@@ -1007,7 +1019,8 @@
 /* The side on a card and on its pinned card: its arrow and its word in
    ink-2, as the board's cards say it (the side's colour is the dot's). */
 .sr-signal-wrap .sr-signal .sr-score-num { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
-.sr-signal-wrap .sr-signal .sr-age { margin-left: auto; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
+/* an age is a figure: the number face (B0's figs) */
+.sr-signal-wrap .sr-signal .sr-age { margin-left: auto; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
 .sr-signal-wrap .sr-signal .sr-why {
     display: block; margin-top: 4px; font-size: var(--sv-fs-small); color: var(--sv-ink-2);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1028,23 +1041,25 @@
 .sr-signal .sr-dot--neutral { color: var(--sv-ink-3); }
 .signals-rail.open .sr-signal .sr-dot { display: none; }
 
-/* The pinned card: docked in the rail under its card's face, not over the
-   chart (the board); the face keeps its symbol, side, score, age and its
-   MARKET SHUT hour, so the docked card's head keeps only its close; then
-   its entry, its stop, its target side by side; the facts a label on the
-   left, its words on the right; PASS on the left and the side's own button
-   on the right (the page's order, so the keyboard's, is the card's own:
-   the side's button first, plan §10). A card only hovered still opens
-   beside the rail. */
+/* The pinned card: docked in the rail in its card's place, not over the
+   chart (the board); its head the symbol, the side in words, its score and
+   age; then its entry, its stop, its target side by side; the facts a
+   label on the left, its words on the right; PASS on the left and the
+   side's own button on the right (the page's order, so the keyboard's, is
+   the card's own: the side's button first, plan §10). The card's face
+   gives it its place, all but a shut market's line, which stays above it
+   whole with its hour; the face's hover × goes with it (PASS is on the
+   card). A card only hovered still opens beside the rail. */
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned {
     position: static !important; inset: auto !important; width: auto !important;
-    max-height: none; margin: 0 10px 8px; transform: none; overflow-x: hidden;
+    max-height: none; margin: 8px 10px 6px; transform: none; overflow-x: hidden;
 }
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned::after { display: none; }
-.signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned .sr-pop-head { justify-content: flex-end; min-height: 0; }
-.signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned .sr-pop-head > :not(.sv-pop-x) { display: none; }
+.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal:not(:has(.sr-shut)),
+.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-x,
+.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal .sr-detail > :not(.sr-shut) { display: none; }
 .sr-popup .sr-pop-head .sr-pop-score { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
-.sr-popup .sr-pop-head .sr-pop-age { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sr-popup .sr-pop-head .sr-pop-age { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
 /* the head: one line, as the board draws it (the urgency is the chart dot
    card's word; here the side, the score and the age) */
 .sr-popup .sr-pop-head { flex-wrap: nowrap; white-space: nowrap; }

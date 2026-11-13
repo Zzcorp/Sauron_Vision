@@ -200,6 +200,25 @@ def seed_desk(user, now=None):
     return {"gold": gold, "trade": trade, "pinned": pinned, "others": others}
 
 
+def market_open():
+    """The instrument's market open, whatever the clock says: the file page
+    keeps no script that would repaint the market's chip, and its checks
+    read the trading day's header (a shut market's own check rides the live
+    page, tests/test_instrument_desk_v2.py, TheLiveDeskTests). A patch of
+    core.exchange_status.market_status_for, which the view reads per
+    request; display only."""
+    from unittest import mock
+
+    import core.exchange_status as ex
+    real = ex.market_status_for
+
+    def opened(*args, **kwargs):
+        out = dict(real(*args, **kwargs))
+        out.update(is_open=True)
+        return out
+    return mock.patch.object(ex, "market_status_for", opened)
+
+
 # ── the page as Chromium opens it, offline ────────────────────────────────
 
 CHART_ID = "instrument-main-chart"

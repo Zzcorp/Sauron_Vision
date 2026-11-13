@@ -474,8 +474,11 @@ class TheDeskInChromiumTests(TestCase):
         cls.book = F.seed_desk(user)
         client = Client()
         client.force_login(user)
-        page = client.get(F.PAGE_URL, HTTP_HOST="127.0.0.1").content.decode("utf-8")
-        payloads = {tf: F.chart_payload(client, tf) for tf in ("1h", "1d")}
+        # the trading day's header on any day of the week (a Friday night's
+        # shut market folded the day, and these checks read it)
+        with F.market_open():
+            page = client.get(F.PAGE_URL, HTTP_HOST="127.0.0.1").content.decode("utf-8")
+            payloads = {tf: F.chart_payload(client, tf) for tf in ("1h", "1d")}
         markup = F.file_page(page, payloads, base_dir=str(ROOT), lib=LIB, prefs={"tf": "1h"})
         desk = _Desk(markup)
         try:
@@ -933,7 +936,7 @@ class TheLiveDeskTests(TestCase):
         client = Client()
         client.force_login(user)
         desk = _LiveDesk(client)
-        cls.got, cls.states = {}, {}
+        cls.got, cls.states, cls.shut = {}, {}, {}
         try:
             for w, h, rail in LIVE_SIZES:
                 tid, sid = desk.open(w, h, rail)
@@ -1002,6 +1005,18 @@ class TheLiveDeskTests(TestCase):
                         return { left: r.left, right: r.right, chartRight: c.right, sw: p.scrollWidth, cw: p.clientWidth,
                                  lead: Array.prototype.map.call(p.querySelectorAll('.sr-pop-lead .sr-pop-k'), function (k) { return k.textContent.trim(); }),
                                  money: Array.prototype.map.call(p.querySelectorAll('.sr-pop-btn-act, .sr-pop-btn-pass'), function (b) { return b.className.indexOf('pass') >= 0 ? 'pass' : 'act'; }) }; })())""")
+                # A shut market, whatever the clock says today: the one
+                # painter's weekend words and sv-market-status.js's shut chip,
+                # as they write them (the header pushed LONG out of its row
+                # on a Friday night at 22:00 UTC).
+                desk.js(sid, """(function () {
+                    var s = document.querySelector('.sv-ih .dtl-src');
+                    if (s) s.textContent = 'closed \u00b7 eToro ask 22:00 \u00b7 opens Sun 23:00 UTC';
+                    var m = document.querySelector('.sv-ih .dtl-mkt');
+                    if (m) { m.classList.remove('mk-open'); m.classList.add('mk-closed');
+                      var t = m.querySelector('.mk-text'); if (t) t.textContent = 'CLOSED'; }
+                    return 0; })()""")
+                cls.shut[(w, rail)] = desk.probe(sid)
                 desk.driver.close_tab(tid)
         finally:
             desk.close()
@@ -1021,12 +1036,28 @@ class TheLiveDeskTests(TestCase):
             self.assertEqual(got["esc"], [], "nothing runs past the header")
             self.assertEqual(got["cut"], [], "no word cut short")
 
+    def test_a_shut_market_keeps_the_row_whole_and_both_sides_in_it(self):
+        """Its words are longer ("closed · eToro ask 22:00 · opens Sun 23:00
+        UTC"): they wrap between words and the day folds sooner; nothing
+        runs past the row, no word is cut, and SHORT and LONG stay in it."""
+        for (w, rail), got in sorted(self.shut.items()):
+          with self.subTest(width=w, rail=rail):
+            self.assertEqual(got["esc"], [], "nothing runs past the header")
+            self.assertEqual(got["cut"], [], "no word cut short")
+            src = got["src"]
+            self.assertTrue(src and src["vis"])
+            self.assertIn("opens Sun 23:00 UTC", src["t"])
+            self.assertTrue(got["mkt"] and got["mkt"]["vis"])
+            self.assertIn("CLOSED", got["mkt"]["t"])
+            self.assertLessEqual(got["ih"]["h"], 53, "the row keeps its 52 px")
+
     def test_whose_price_and_how_old_is_always_whole(self):
         for w, rail, got in self._each():
           with self.subTest(width=w, rail=rail):
             src = got["src"]
             self.assertTrue(src and src["vis"], "the quote's words show")
-            self.assertRegex(src["t"], r"eToro \w+ · \d+ s")
+            # its age while the market trades, the hour it stopped once shut
+            self.assertRegex(src["t"], r"eToro \w+ (· \d+ s|\d\d:\d\d)")
             self.assertLessEqual(src["sw"], src["cw"] + 1, "its words and age whole")
             self.assertGreater(src["w"], 60)
 

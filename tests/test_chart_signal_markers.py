@@ -386,7 +386,7 @@ class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
         html = widget()
         i = html.index('id="t-sig-legend"')
         block = html[i:html.index("</div>", i)]
-        self.assertEqual(_visible(block), "Signals")
+        self.assertEqual(_visible(block[block.index(">") + 1:]), "Signals")
         self.assertIn('data-sig-toggle aria-pressed="true"', block)
         self.assertIn("weak · medium · strong · very strong", block)
         self.assertIn("▲ a long under its bar, ▼ a short over it", block)
@@ -527,7 +527,8 @@ class TheWiringTests(SimpleTestCase):
     def test_the_levels_are_dashed_and_titled_in_words(self):
         body = self._fn("drawSignalLevels")
         self.assertIn("LightweightCharts.LineStyle.Dashed", body)
-        for title in ("'Entry'", "'Stop'", "'Target'"):
+        # named by their owner (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        for title in ("'Signal entry'", "'Signal stop'", "'Signal target'"):
             self.assertIn(title, body)
         self.assertIn("clearSignalLevels();", body)
 
@@ -564,7 +565,9 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn("price: p.stop, color: c.red, lineWidth: 2,\n"
                       "                        lineStyle: LightweightCharts.LineStyle.Solid,\n"
                       "                        axisLabelVisible: true, axisLabelColor: c.bg2, axisLabelTextColor: c.red,\n"
-                      "                        title: 'SL',",
+                      # its title the owner's words, the line itself drawn by
+                      # the chart's layer from his entry (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+                      "                        title: 'Your stop', lineVisible: false,",
                       self.src.replace("\r\n", "\n"))
 
 
@@ -1047,7 +1050,8 @@ sandbox.window = sandbox;
 vm.createContext(sandbox);
 
 const flush = function () { return new Promise(function (r) { setImmediate(r); }); };
-const SIG_TITLES = ['Entry', 'Stop', 'Target'];
+/* named by their owner (the desk v2's review, F5: a line says whose it is; the operator approved the board: 'amazing work, bravo, I need it fast!!') */
+const SIG_TITLES = ['Signal entry', 'Signal stop', 'Signal target'];
 /* The main series: the candles, or whatever a type switch put in their
    place (the volume histogram is the only other series on this chart). */
 const candle = function () { return chart.series.find(function (s) { return s.kind !== 'hist'; }); };
@@ -1315,8 +1319,9 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         self.assertEqual(len(arrows), 1)
         self.assertEqual((arrows[0]["shape"], arrows[0]["text"]),
                          ("arrowUp", "LONG @ 1.08000"))
-        self.assertEqual(first["others"], ["LONG 1000", "SL", "TP"])
-        self.assertEqual(self.r["cleared"]["others"], ["LONG 1000", "SL", "TP"])
+        # his lines in his words (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertEqual(first["others"], ["▲ LONG 1000", "Your stop", "Your target"])
+        self.assertEqual(self.r["cleared"]["others"], ["▲ LONG 1000", "Your stop", "Your target"])
 
     def test_a_signal_after_the_last_bars_close_is_not_drawn_on_that_bar(self):
         """On the daily default the newest bar is the previous session's
@@ -1462,8 +1467,10 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         # "amazing work, bravo, I need it fast!!"
         named = self.r["named"]
         self.assertEqual(named["moveErrors"], 0)
-        self.assertIn("2026-08-10", named["legend"])
-        self.assertIn("2026-08-10", self.r["legend"])
+        # the board's date, "10 Aug 2026" (the desk v2's review, F10; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertIn("10 Aug 2026", named["legend"])
+        self.assertIn("10 Aug 2026", self.r["legend"])
         self.assertFalse(named["card"]["hidden"])
         self.assertIn(">▼ SHORT<", named["card"]["html"])
         self.assertIn("RSI reversal 4h", named["card"]["html"])
