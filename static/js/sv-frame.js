@@ -467,10 +467,17 @@
       if (words) dot.setAttribute('title', words); else dot.removeAttribute('title');
     });
   }
-  if (w.SVVenue && w.SVVenue.onPaint) w.SVVenue.onPaint(function () { setTimeout(freshness, 0); });
+  /* The one price loads after the frame (its script sits at the foot of
+     the page): wired once the document is parsed, when it has read the
+     page's prices. */
+  function wireFresh() {
+    if (w.SVVenue && w.SVVenue.onPaint) w.SVVenue.onPaint(function () { setTimeout(freshness, 0); });
+    freshness();
+  }
+  if (d.readyState === 'loading' || d.readyState === 'interactive') d.addEventListener('DOMContentLoaded', wireFresh);
+  else wireFresh();
   d.addEventListener('sv:live-swapped', function () { setTimeout(freshness, 0); });
   setInterval(freshness, 15000);
-  freshness();
 
   /* ── the Eye, the system's heartbeat ─────────────────────────────── */
   /* The brand's Eye says what the feed says (the desk v2 board, Twist2 "Le

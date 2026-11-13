@@ -1266,7 +1266,12 @@ class FrameLookDetailTests(TestCase):
                  r" stateAt: function (p) { return p.state; }, onPaint: function () {} };")
         page = _get(client, POSITIONS)
         cls.page = page
-        pages = {POSITIONS: _file_page(page, scripts=("sv-frame.js",), before=venue)}
+        # The one price's script stands at the foot of the page, after the
+        # frame's (base.html): its stand-in is read after sv-frame.js too,
+        # as the operator's browser reads them.
+        framed = _file_page(page, scripts=("sv-frame.js",))
+        i = framed.rindex("</body>")
+        pages = {POSITIONS: framed[:i] + "<script>%s</script>" % venue + framed[i:]}
         b = _Browser(pages, "sv-frame-detail-")
         cls.got = {}
         try:
