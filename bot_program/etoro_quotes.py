@@ -6,7 +6,9 @@ refresh des valeurs et de eToro surtout svp?". The instruments of his open
 real rows were marked from a keyless yfinance poll every 600 s, with no bid
 and no ask, while eToro values a long at its bid and a short at its ask.
 
-EVERY 30 s (config/celery.py "refresh-etoro-quotes", the fast queue) this
+EVERY 30 s (config/celery.py "refresh-etoro-quotes", the fast queue; EVERY
+15 s since 2026-11-13, BEAT_S, the operator: "aussi le refresh etoro par
+minute est toujours trop long, je suggère 20-30 secondes non?") this
 beat reads eToro's rates — bid, ask and last — for the instruments of the
 OPEN REAL eToro rows, and writes them to LiveQuote under the source "etoro"
 through market_data.quotes.write_quote: priority 70 against yfinance's 20,
@@ -29,12 +31,16 @@ WHICH INSTRUMENTS: each once, less
     a metal, XAUUSD's GC=F, or a cash index, SPX500's ^GSPC): eToro's own
     rate written over it would put the basis into every paper mark of the
     symbol (bot_program.paper_exits: "a basis, not a crossing"). The row's
-    P&L reads eToro's own figure from the sync's holdings (every 60 s);
+    P&L reads eToro's own figure from the sync's holdings (every 30 s);
   * a market the shut cadence holds shut (engine/etoro_rates.shut_max_age,
     E2: a forex or commodity weekend whose clock is known): its price does
-    not move, and a quote rewritten every 30 s would read fresh;
-  * an instrument the shared rates cache answered within PREFETCH_FRESH_S
-    (another reader, the manage tick or the CLOSE button, has just asked).
+    not move, and a quote rewritten every 15 s would read fresh;
+  * an instrument the shared rates cache answered within OWN_FRESH_S, half
+    the beat (another reader, the manage tick or the CLOSE button, has just
+    asked). PREFETCH_FRESH_S (15 s) until 2026-11-13: every answer writes
+    that cache, this beat's own included, so at a 15 s beat it skipped its
+    own last answer and read each instrument every 30 s (measured: 1, 0, 1,
+    0 reads in passes 15 s apart).
 
 THE eTORO REQUEST BUDGET (engine/etoro_budget, E1): every read is taken at
 P3, the marks' priority, never P1 (a row eToro holds no stop for keeps its
@@ -48,8 +54,9 @@ request) once the shared rates cache is on and the operator's measurement
 (manage.py etoro_rates_shape) proved the batch's shape; a row the batch
 left out, or an unproven batch, is read alone. Until then one read an
 instrument, at most SINGLE_READS_PER_PASS a pass, the instruments asked
-longest ago first: at 2 or 3 open positions every instrument every pass;
-at 20, each about every two minutes, inside the hold over yfinance.
+longest ago first: at 2 or 3 open positions every instrument every pass
+(every 15 s); at 4 to 6 every 30 s, as before; at 20, each about every two
+minutes, inside the hold over yfinance.
 
 A PASS STOPS, never retried in a loop, at a budget refusal (the rest of the
 family is the orders' and the closes'), at the venue's failure (a 429,
@@ -57,12 +64,16 @@ which grants the shared pause, a 5xx after the read's one bounded retry, a
 transport failure, a refused redirect) and when PASS_BUDGET_S has gone; it
 does not start while eToro is SICK (bot_program.venue_health) or while the
 shared 429 pause holds. A failed read is noted on the venue's health as
-every read is.
+every read is, from one pass per 30 s (NOTE_EVERY_S, 2026-11-13): the
+passes the old 30 s beat ran, so a hiccup makes eToro sick no sooner and
+no more often than before; the passes between read and note nothing
+(EtoroTrader.health_quiet, venue_health.noting_slot).
 
 UNDER THE SYNC'S SWITCHES (platform_master, broker_account_sync), read
 inline as tasks.refresh_etoro_cells does: the component row is the sync's
-verdict, and a beat every 30 s must not overwrite it. One pass at a time
-(LOCK_KEY). No account figure, key or host in any line.
+verdict, and a beat every 15 s must not overwrite it. One pass at a time
+(LOCK_KEY), and a run not started within 10 s is dropped (the beat's
+expiry). No account figure, key or host in any line.
 
 THE FEED SPEC'S ASKS (2026-11-06, its P-c; this beat is the interim
 writer the eToro feed retires at the end of its F11, and none of these
@@ -80,7 +91,10 @@ extends what it writes):
     batch that left rows out was followed by six single reads: seven),
     and none past READS_PER_MINUTE in any rolling minute of a key (a run
     started late, up to its 25 s expiry, beside the next beat's run made
-    three passes in a minute). Every read is still taken at P3.
+    three passes in a minute). Every read is still taken at P3. At the
+    15 s beat (2026-11-13) a pass sends three: twelve a minute still, and
+    a run late by its 10 s expiry beside the next beats' puts five passes
+    in a minute, the fifth sending nothing.
   * The tick pushed to the browsers names its source
     (dashboard.consumers.push_quote_update), so a row's switch back to
     Yahoo's quote, once its position closed and the hold ended, shows.
@@ -93,15 +107,17 @@ from datetime import datetime, timezone as dt_tz
 
 logger = logging.getLogger(__name__)
 
-#: The beat (config/celery.py "refresh-etoro-quotes").
-BEAT_S = 30
+#: The beat (config/celery.py "refresh-etoro-quotes"): 30 s from
+#: 2026-11-06, 15 s since 2026-11-13 ("je suggère 20-30 secondes non?").
+BEAT_S = 15
 #: The most requests one pass sends (2026-11-06, the feed spec's P-c.3:
 #: a batch and the single reads after it together; the single reads alone
 #: before): 12 a minute at the beat, a fifth of the market family's start
 #: rate (etoro_budget.RATE_MARKET_PER_MIN, 60). A batch is one request for
 #: up to twenty instruments and counts as one; a retry or a cold /search
-#: counts as the request it is.
-SINGLE_READS_PER_PASS = 6
+#: counts as the request it is. Six at the 30 s beat, three at 15 s
+#: (2026-11-13): never slower than before for any number of instruments.
+SINGLE_READS_PER_PASS = 3
 #: THE BEAT'S OWN CAP (2026-11-06, P-c.3): no more requests than this in
 #: any rolling minute (SENT_WINDOW_S) of one key, whatever the passes:
 #: SINGLE_READS_PER_PASS at BEAT_S. The feed's request budget counts on it.
@@ -116,8 +132,20 @@ LAST_KEY = "etoro_quotes:last"
 DAY_KEY = "etoro_quotes:day:{day}"
 RECORD_TTL_S = 2 * 86400
 #: A pass starts no read past this many seconds, so it never runs into the
-#: next beat (a read at P3 gives up after about 9 s with its retry).
-PASS_BUDGET_S = 20.0
+#: next beat (a read at P3 on a connection that never opens gives up after
+#: about 9 s with its retry: 5 + 9 < 15). 20 s at the 30 s beat.
+PASS_BUDGET_S = 5.0
+#: THE BEAT'S OWN ANSWER (2026-11-13): an instrument the shared rates
+#: cache answered within this many seconds is not asked again. Half the
+#: beat, so the beat's own last answer (one beat old) is asked again and
+#: another reader's that fresh is not; PREFETCH_FRESH_S (15 s) until the
+#: 15 s beat, which then read every instrument every other pass.
+OWN_FRESH_S = BEAT_S // 2
+#: THE VENUE'S HEALTH FROM ONE PASS PER 30 s (2026-11-13,
+#: venue_health.noting_slot): the passes the 30 s beat ran, per account.
+#: 30 s less the beat's jitter.
+NOTE_EVERY_S = 25
+NOTE_KEY = "etoro_quotes:noting:{pk}"
 #: One pass at a time; a pass that died holds it this long at most.
 LOCK_KEY = "etoro_quotes:pass"
 LOCK_S = 60
@@ -191,7 +219,7 @@ def _accounts() -> list:
 def _wanted(client, rows) -> tuple:
     """(the symbols to ask, {symbol: why not}) of `rows`: not a stand-in,
     not a market the shut cadence holds shut, not answered within
-    PREFETCH_FRESH_S by another reader. Never raises."""
+    OWN_FRESH_S (half the beat) by another reader. Never raises."""
     from bot_program.engine import etoro_rates
     from market_data.public_feed import yf_stand_in
     ask, left = [], {}
@@ -204,8 +232,7 @@ def _wanted(client, rows) -> tuple:
             if etoro_rates.shut_max_age(symbol, cls):
                 left[symbol] = "its market is shut"
                 continue
-            if etoro_rates.cached(client, symbol,
-                                  max_age_s=etoro_rates.PREFETCH_FRESH_S):
+            if etoro_rates.cached(client, symbol, max_age_s=OWN_FRESH_S):
                 left[symbol] = "answered in the last seconds"
                 continue
         except Exception as e:  # noqa: BLE001 — unread: asked
@@ -508,6 +535,26 @@ def report(now=None) -> dict:
     return out
 
 
+def _quiet_between_noting_passes(client, account_pk) -> None:
+    """THE VENUE'S HEALTH FROM ONE PASS PER 30 s (2026-11-13): a pass that
+    does not hold the account's noting slot (NOTE_EVERY_S) reads and
+    writes as every pass does, and its client notes no READ failure
+    (EtoroTrader.health_quiet); it still stops at its first failure. Set
+    on every pass, the noting one included: the client may outlive one.
+    Never raises: a slot that cannot be claimed notes."""
+    try:
+        from bot_program import venue_health
+        noting = venue_health.noting_slot(NOTE_KEY.format(pk=account_pk),
+                                          NOTE_EVERY_S, now=_now())
+        client.health_quiet = (
+            "" if noting else
+            f"the held quotes note the venue's health from one pass per "
+            f"30 s; this {BEAT_S} s pass reads only")
+    except Exception as e:  # noqa: BLE001 — unread: noted, as before
+        logger.debug("eToro quotes: the noting slot was not read (%s)",
+                     type(e).__name__)
+
+
 def _pass(out, started) -> dict:
     from bot_program import venue_health
     from bot_program.engine import etoro_budget
@@ -535,6 +582,7 @@ def _pass(out, started) -> dict:
             out.setdefault("left", {}).update(left)
         if not ask:
             continue
+        _quiet_between_noting_passes(client, acct.pk)
         with etoro_budget.at_priority(etoro_budget.P3, "live quotes"):
             stop = _read_account(client, _stalest_first(client._bkey(), ask),
                                  out, started)

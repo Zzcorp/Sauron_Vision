@@ -166,6 +166,44 @@ def note(venue: str, world: str, where: str, *, code=None, detail: str = "",
         return {"sick": False}
 
 
+def noting_slot(key: str, hold_s: float, *, now: float) -> bool:
+    """THE NOTING SLOT (2026-11-13): may the pass that asks it note its
+    READ failures on the venue's health? True for the pass that claims
+    `key` (free, or held by a pass `hold_s` or more before `now`, epoch
+    seconds on the caller's clock), False while another pass holds it.
+
+    The eToro beats went faster (the operator: "aussi le refresh etoro par
+    minute est toujours trop long, je suggère 20-30 secondes non?"): the
+    account sync from 60 s to 30 s, the held quotes from 30 s to 15 s. A
+    beat that notes every pass would note twice as often, and a brief
+    hiccup would make eToro SICK sooner and more often for the same
+    trouble (simulated: a 30 s hiccup sick 57 % of the time from the sync
+    alone, 0 % at 60 s). The slot keeps the notes to the passes the old
+    beat would have run: `hold_s` a little under the old beat (55 s for
+    the sync, 25 s for the quotes), so the pass after the old beat's
+    interval claims it again. Every other pass reads, writes and counts
+    its miss as before, and its client notes nothing
+    (EtoroTrader.health_quiet): the odds and the time to sick stay the old
+    beats' (simulated over 12,000 random hiccups each, this rule: sick
+    after a 10, 20, 30 s hiccup 5.0, 21.0, 47.9 % of the time against 4.7,
+    20.7, 47.5 % at 60 s and 30 s, and 32 s into a failure against 33 s).
+    An order's failure is always noted (WRITE_SITES), whatever pass sent
+    it.
+
+    Never raises: a cache that cannot be read notes, as before the slot."""
+    try:
+        from django.core.cache import cache
+        if cache.add(key, float(now), int(hold_s) + 5):
+            return True
+        held = cache.get(key)
+        if held is None or float(now) - float(held) >= float(hold_s):
+            cache.set(key, float(now), int(hold_s) + 5)
+            return True
+        return False
+    except Exception:  # noqa: BLE001 — unread: noted, as before the slot
+        return True
+
+
 def _episode_failures(state: dict, added: int = 0) -> int:
     """The failures of the running episode: the stored count, or — for a
     memory written before the count existed — the kept failures from

@@ -1472,6 +1472,12 @@ class EtoroTrader:
         # A BACKGROUND read (klines, for the bar refresh) notes nothing on
         # the venue's health and grants no 429 pause: see klines.
         self._background = False
+        # A QUIET pass of a beat (2026-11-13, venue_health.noting_slot):
+        # why its READ failures are not noted on the venue's health, or ""
+        # (they are). Set by the account sync and the held quotes on the
+        # passes between the ones their old beats ran; an order's failure
+        # is noted whatever it says (_note_health).
+        self.health_quiet = ""
         # The quota-looking headers of the last answer _read received.
         self.last_rate_headers: dict = {}
         # Wire requests _read sent (each attempt, retries included) and the
@@ -1575,12 +1581,34 @@ class EtoroTrader:
 
         Not while a BACKGROUND read runs (klines): the bar refresh's
         refusals are its own, it stops at its first 429 and fills from the
-        public feed, and they must not hold real entries."""
+        public feed, and they must not hold real entries.
+
+        Not a READ of a QUIET pass (`health_quiet`, 2026-11-13): the
+        account sync beats every 30 s and the held quotes every 15 s, and
+        each notes its read failures from one pass in two, the passes their
+        old beats (60 s, 30 s) ran, so a hiccup makes eToro sick no sooner
+        and no more often than before (venue_health.noting_slot). The read
+        is logged here and counted where it was asked (the sync's miss); a
+        write site's failure (venue_health.WRITE_SITES, the order) is noted
+        whatever the pass."""
         if getattr(self, "_background", False):
             log.info("eToro %s failed (%s) during a background read — not "
                      "noted on the venue's health", where,
                      code or str(detail or "")[:80] or "no answer")
             return
+        quiet = getattr(self, "health_quiet", "")
+        if quiet and isinstance(quiet, str):
+            try:
+                from bot_program.venue_health import WRITE_SITES
+                read = str(where or "") not in WRITE_SITES
+            except Exception:  # noqa: BLE001 — unread: noted, the safe way
+                read = False
+            if read:
+                log.info("eToro %s failed (%s) — not noted on the venue's "
+                         "health: %s", where,
+                         code or str(detail or "")[:80] or "no answer",
+                         quiet[:120])
+                return
         try:
             from bot_program.venue_health import note
             note("etoro", self._world(), where, code=code, detail=detail)

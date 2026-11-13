@@ -1033,7 +1033,9 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
 #: eToro's own figure. The sync reads the holdings every 300 s
 #: (config/celery.py "sync-etoro-accounts"): 900 s is three passes, the
 #: count after which the stall alert says the sync has stopped answering
-#: (bot_program.tasks.BROKER_MISS_ALERT_AFTER).
+#: (bot_program.tasks.BROKER_MISS_ALERT_AFTER). A wall-clock window: the
+#: sync beats every 30 s since 2026-11-13 and the stall alert still waits
+#: fifteen minutes (tasks.ETORO_STALL_AFTER_S), so it stays 900 s.
 ETORO_PNL_MAX_AGE_S = 900
 #: How old an eToro-written quote may be and still value a row at its
 #: closing side: the bound a venue print must meet to value a real row as

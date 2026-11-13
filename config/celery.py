@@ -71,9 +71,9 @@ app.conf.task_routes = {
     # Beside the quote poller: the next order is judged on what it reads.
     "bot_program.tasks.refresh_etoro_cells": {"queue": "fast"},
     # 2026-11-06 -- eToro's own quotes for the open real positions
-    # (bot_program/etoro_quotes.py): every 30 s, a few rates reads at P3 in
-    # the eToro request budget, beside the quote poller whose LiveQuote it
-    # writes.
+    # (bot_program/etoro_quotes.py): every 30 s (every 15 s since
+    # 2026-11-13), a few rates reads at P3 in the eToro request budget,
+    # beside the quote poller whose LiveQuote it writes.
     "bot_program.tasks.refresh_etoro_quotes": {"queue": "fast"},
     "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
     # 2026-10-31 -- the demo short proofs (bot_program/short_proofs.py): one
@@ -678,8 +678,8 @@ app.conf.beat_schedule = {
     # and the digest judge against its most frequent writer (at */2 the
     # reconcile, not the 300 s tick, would answer for it). The 60 s sync
     # already shows within a minute what eToro holds and each position's
-    # own P&L; a stop or a target eToro filled is still booked within five
-    # minutes.
+    # own P&L (the 30 s sync, within half a minute, since 2026-11-13); a
+    # stop or a target eToro filled is still booked within five minutes.
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
         "schedule": crontab(minute="*/5"),
@@ -737,9 +737,36 @@ app.conf.beat_schedule = {
     # read is now two notes on the venue's health a minute: a venue that
     # fails is sick within two passes (new real entries held, closes and
     # stop moves never).
+    # EVERY 30 s (2026-11-13, the operator: "aussi le refresh etoro par
+    # minute est toujours trop long, je suggère 20-30 secondes non?"):
+    # tasks.ETORO_SYNC_BEAT_S, inside his 20-30 s. The cash, the used
+    # margin and the equity every eToro order is judged on are at most
+    # about 30 s old. A pass is still two account GETs per keyed account at
+    # P2, so the account family's rolling minute holds at most three
+    # passes, 12 reads for REAL and DEMO, and the worst minute beside it
+    # (both accounts re-read after orders at their pace, the reconcile, a
+    # /status, a key probe) 25 of P2's 28. NOT 20 s: one key pair opens
+    # both worlds, so REAL and DEMO spend ONE budget (engine/etoro_budget's
+    # header, MEASURED 2026-09-23); at 20 s the sync alone holds 16, past
+    # the 15 at which the demo short proofs stand aside, and the same
+    # minute needs 29 of 28: a refused sync read holds that account's eToro
+    # entries until the next read (AssetBot._cash_gate). 20 s would be safe
+    # only with two distinct keys. KEPT IN WALL-CLOCK TERMS: the stall
+    # alert after thirty missed beats, fifteen minutes, a pass that held
+    # the beats behind it counting them (tasks.BROKER_MISS_ALERT_AFTER_BY_
+    # KIND, _beats_missed); the history one row in five minutes
+    # (tasks.ETORO_HISTORY_SLACK_S, half a beat); the venue's health noted
+    # from ONE pass a minute per account (tasks.ETORO_SYNC_NOTE_EVERY_S,
+    # EtoroTrader.health_quiet), so a hiccup makes eToro sick no sooner
+    # and no more often than at 60 s. ONE PASS AT A TIME (tasks.
+    # ETORO_SYNC_LOCK_KEY): a beat that finds a pass running is idle, and
+    # a run not started within 25 s is dropped (expire_seconds: the
+    # database scheduler's spelling), so a pass slowed by timeouts holds
+    # one worker slot, never piles up in front of the tick.
     "sync-etoro-accounts": {
         "task": "bot_program.tasks.sync_etoro_accounts",
-        "schedule": 60.0,
+        "schedule": 30.0,
+        "options": {"expires": 25, "expire_seconds": 25},
     },
     # EVERY 30 s (2026-11-06, bot_program/etoro_quotes.py): eToro's own
     # quotes (bid, ask, last) for the instruments of the OPEN REAL eToro
@@ -752,10 +779,17 @@ app.conf.beat_schedule = {
     # asked while eToro is sick or the pause holds. Under the sync's
     # switches, read inline. A run not started within 25 s is dropped
     # (expire_seconds: the database scheduler's spelling).
+    # EVERY 15 s (2026-11-13, with the sync's 30 s): etoro_quotes.BEAT_S.
+    # Three requests a pass, so the beat's own cap stays twelve a rolling
+    # minute (P3's limit is 54); a run not started within 10 s is dropped;
+    # a pass starts no read past 5 s. The beat skips only an answer younger
+    # than half its beat (etoro_quotes.OWN_FRESH_S): at 15 s it skipped its
+    # own last answer and read every 30 s. Its failures are noted on the
+    # venue's health from one pass per 30 s, the passes the old beat ran.
     "refresh-etoro-quotes": {
         "task": "bot_program.tasks.refresh_etoro_quotes",
-        "schedule": 30.0,
-        "options": {"expires": 25, "expire_seconds": 25},
+        "schedule": 15.0,
+        "options": {"expires": 10, "expire_seconds": 10},
     },
     # 2026-11-12 — ONE PRICE EVERYWHERE, the held relay (display only):
     # every 10 s the one price rule's answer for each instrument held open
