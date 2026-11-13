@@ -1,3 +1,5 @@
+import re
+
 from django import template
 register = template.Library()
 
@@ -66,6 +68,51 @@ def currency_sign(code):
 
     code = (code or "").strip().upper()
     return CURRENCY_SYMBOLS.get(code, f"{code} " if code else "")
+
+
+#: A glyph that opens a page's title (⦿ ◉ ◎ ⌁ ⇩ ▦ …, or one written as an
+#: entity), and the space after it.
+_TITLE_GLYPH = re.compile(r"^\s*(?:&#x?[0-9a-fA-F]+;|[^\w\s<&'\"(])+\s*")
+#: The words that follow a page's name in its title (" · every cycle…").
+_TITLE_SEP = " · "
+
+
+@register.filter(is_safe=True)
+def sv_bar_title(markup):
+    """A page's title as the top bar writes it (the desk v2 board, approved
+    2026-11-13: "amazing work, bravo, I need it fast!!"): the page's name,
+    plain, then what follows its first " · " in its own quieter span, which
+    the frame lets go first when the bar runs short (static/js/sv-frame.js);
+    never a cut name.
+
+    The glyph a title opens with (⦿ OCULUS, ◎ PORTFOLIO) goes: the board's
+    titles are words, and a glyph was drawn by a fallback face. The split
+    happens only on a " · " the title writes outside any tag of its own, so
+    a title that wraps its words in a span (the position page's, the demo
+    proofs') keeps its markup as it is. Display only."""
+    from django.utils.safestring import mark_safe
+
+    html = _TITLE_GLYPH.sub("", str(markup or ""), count=1).strip()
+    depth, i = 0, 0
+    while i < len(html):
+        if html[i] == "<":
+            end = html.find(">", i)
+            if end < 0:
+                break
+            tag = html[i:end + 1]
+            if tag.startswith("</"):
+                depth -= 1
+            elif not tag.endswith("/>"):
+                depth += 1
+            i = end + 1
+            continue
+        if depth == 0 and html.startswith(_TITLE_SEP, i):
+            name, rest = html[:i].rstrip(), html[i:]
+            if name:
+                return mark_safe('%s<span class="sv-ttl-sub">%s</span>' % (name, rest))
+            break
+        i += 1
+    return mark_safe(html)
 
 
 @register.simple_tag(takes_context=True)

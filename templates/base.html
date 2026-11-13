@@ -138,6 +138,8 @@
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}" data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}{% block sv_light %}{% endblock %}>
 
 {% include "_partials/sv_icons.html" %}
+{# The keyboard's first stop (the desk v2 board's review, 2026-11-13): past the menu, the top bar, the band's moving prices and the bar, straight to the page. Seen only while it has the focus. #}
+<a class="sv-skip" href="#svPage">Skip to the page</a>
 
 <!-- Animated grid background -->
 <div class="grid-bg"></div>
@@ -447,7 +449,7 @@
                         <polygon points="12,1.4 21.2,6.7 21.2,17.3 12,22.6 2.8,17.3 2.8,6.7"
                                  stroke-width="1"/>
                         <defs><clipPath id="svBrandLid"><path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"/></clipPath></defs>
-                        <path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"
+                        <path class="sv-brand-almond" d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"
                               fill="currentColor" fill-opacity="0.14" stroke-width="1.5"/>
                         {# The iris looks toward the pointer under Ambience Magic (sv-moments.js moves this group, inside the lid's own almond). #}
                         <g clip-path="url(#svBrandLid)">
@@ -456,6 +458,9 @@
                                 <circle cx="12" cy="12" r="1.25" fill="var(--bg-secondary, #081410)" stroke="none"/>
                             </g>
                         </g>
+                        {# The Eye's two other states (the desk v2 board, Twist2 "Le battement du système"): the market shut, its lids lower over the iris; the session locked, it shuts. Drawn only in those states (sv-frame.css). #}
+                        <g class="sv-brand-lids"><path d="M4.2 12Q12 3.4 19.8 12Q12 7.4 4.2 12Z M4.2 12Q12 20.6 19.8 12Q12 16.6 4.2 12Z" class="sv-lid-fill" stroke="none"/><path d="M4.2 12Q12 7.4 19.8 12M4.2 12Q12 16.6 19.8 12" stroke-width="1.5"/></g>
+                        <g class="sv-brand-shut"><path d="M4.2 12Q12 18.4 19.8 12" stroke-width="1.5"/><path d="M7.2 14.6l-1.1 1.6M12 15.9v1.9M16.8 14.6l1.1 1.6" stroke-width="1"/></g>
                         <path d="M12 1.4V3.2M12 22.6V20.8" stroke-width="0.9"/>
                     </svg>
                 </span>
@@ -647,7 +652,10 @@
         <header class="topbar">
             <div style="display:flex;align-items:center;gap:8px;">
                 <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileSidebar()" aria-label="Toggle menu">&#9776;</button>
-                <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
+                {# The page's name on one line, never cut (the desk v2 board, 2026-11-13): sv_bar_title drops the glyph a title opens with and puts what follows its first " · " in a quieter span the frame lets go first; static/js/sv-frame.js gives the name its room. #}
+                <span class="topbar-title">{% filter sv_bar_title %}{% block page_title %}Dashboard{% endblock %}{% endfilter %}</span>
+                {# A page that names nothing (/treasury/, /evidence/, …: the block's default) takes its menu row's name, before the first paint. #}
+                <script>(function () { var t = document.currentScript && document.currentScript.parentNode.querySelector('.topbar-title'); if (!t || t.textContent.trim() !== 'Dashboard') return; var a = document.querySelector('#mainSidebar .nav-link.active .label-text'); if (a && a.textContent.trim()) t.textContent = a.textContent.trim(); })();</script>
             </div>
             {# "/ Symbol or command" (the desk v2 board, 2026-11-13): "/" comes here from anywhere outside a field. Enter goes to a symbol the page knows, then to a page of the menu by its name, else to the instruments list searched for the words (its own ?q=). static/js/sv-frame.js reads it; it sends nothing anywhere but a page the menu already links. #}
             <form class="sv-cmd" role="search" action="{% url 'instruments_list' %}" method="get" data-sv-sym-url="{% url 'instrument_detail' 'SVSYM' %}">
@@ -701,7 +709,7 @@
                     </div>
                   </div>
                 </div>
-                {# REAL ARMED after the feed (the desk v2 board, 2026-11-13); the pill is not focusable, so no stop moves in the tab order. #}
+                {# REAL ARMED after the feed (the desk v2 board, 2026-11-13). It is a link, so a tab stop: the money stops keep their order (REAL ARMED, the bell, the lock, the operator), measured in tests/test_shell_frame_measured.py. #}
                 {% comment %}THE ARMED PILL (2026-09-30): on every page while a LIVE config is enabled — the one indicator that real money is in play. The "LIVE" pill beside it is the data feeds, and said nothing about money.{% endcomment %}
                 {% if panel_bot and panel_bot.live %}
                 <a href="{% url 'asset_bots_dashboard' %}" class="sv-armed-pill" title="{{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed on real money — open the bots page">
@@ -888,12 +896,12 @@
 <button type="button" class="hb-restore-tab ticker" data-restore="ticker" aria-label="Show ticker bar" title="Show ticker bar">
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>
-  </svg>
+  </svg><span class="sv-restore-word">News</span>
 </button>
 <button type="button" class="hb-restore-tab data" data-restore="data" aria-label="Show data headband" title="Show data headband">
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>
-  </svg>
+  </svg><span class="sv-restore-word">Prices</span>
 </button>
 
         <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
@@ -927,8 +935,8 @@
             <div class="info-panel-scroll" id="ipScroll">
             <div class="info-panel-bar">
                 {# THE STATUS BAR (UI redo B1, the desk v2 board, 2026-11-13): one scope said once, the real book at eToro, then the bots, the Horde in POSITIONS' place, the rest behind "N more", the keys. Every old cell keeps its regions, keys and dropdown. #}
-                <div class="sv-sgrp" role="group" aria-label="The real book at eToro, eToro's own figures">
-                <span class="sv-world sv-world--live sv-sb-real" title="Real money: the cells to the right are the real book at eToro">REAL</span>
+                <div class="sv-sgrp" role="group" aria-label="The real book at eToro: its equity, open P&amp;L and margin as eToro reports them, and its risk at the stops as the entry gate measures it">
+                <span class="sv-world sv-world--live sv-sb-real" title="Real money: the cells up to the rule are the real book at eToro (PORTFOLIO, OPEN P&amp;L and MARGIN as eToro reports them; AT STOPS as the entry gate measures them)">REAL</span>
                 <a href="{% url 'portfolio_overview' %}" data-sv-cell="portfolio" class="ip-cat ip-cat-link ip-cat-pf">
                     <span class="ip-label">PORTFOLIO</span>
                     {# THE REAL BOOK AT ETORO (the desk v2 board, 2026-11-13): eToro's own equity for the REAL account, read with its age; an account read in DEMO, or none, is not the real book: a dash with its reason. The both-books value, P&L and count below stay in their regions (and in the dropdown), out of the one-line bar. #}
@@ -1047,7 +1055,7 @@
                 <a href="{% url 'positions_list' %}" data-sv-cell="pnl" class="ip-cat ip-cat-link ip-cat-pnl">
                     <span class="ip-label">OPEN P&amp;L</span>
                     {# The real book alone (the desk v2 board): the same per-row figures the PORTFOLIO cell's LIVE line sums by world, never a sum of two worlds; the arrow in its own slot after the figure; a dash with its reason when no real row is marked. The both-books figure stays in its region and its dropdown. #}
-                    <span class="ip-v" data-sv-live="hb-real-pnl" data-sv-live-key="hb-real-pnl">{% if panel_open_pnl_live_display %}<span class="sv-bar-fig {% if panel_open_pnl_live > 0 %}up{% elif panel_open_pnl_live < 0 %}down{% endif %}"{% if panel_live_pnl_title %} title="{{ panel_live_pnl_title }}"{% endif %}>{{ panel_open_pnl_live_display }}<span class="sv-dg" aria-hidden="true">{% if panel_open_pnl_live > 0 %}&#9650;{% elif panel_open_pnl_live < 0 %}&#9660;{% endif %}</span></span>{% if panel_live_coverage_short %}<span class="sbsub sv-unknown" title="{{ panel_live_coverage_title }}">&middot; {{ panel_live_coverage_short }}</span>{% endif %}{% if panel_live_stale_title %}<span class="sbsub sv-unknown" title="{{ panel_live_stale_title }}">&middot; stale</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ panel_live_dash_title|default:'No real-money position is open' }}">&mdash;</span>{% endif %}</span>
+                    <span class="ip-v" data-sv-live="hb-real-pnl" data-sv-live-key="hb-real-pnl">{% if panel_open_pnl_live_display %}<span class="sv-bar-fig {% if panel_open_pnl_live > 0 %}up{% elif panel_open_pnl_live < 0 %}down{% endif %}"{% if panel_live_pnl_title %} title="{{ panel_live_pnl_title }}"{% endif %}>{{ panel_open_pnl_live_display }}<span class="sv-dg" aria-hidden="true">{% if panel_open_pnl_live > 0 %}&#9650;{% elif panel_open_pnl_live < 0 %}&#9660;{% endif %}</span></span>{% if panel_live_coverage_short %}<span class="sv-bar-mark sv-unknown" title="{{ panel_live_coverage_title }}">&middot; {{ panel_live_coverage_short }}</span>{% endif %}{% if panel_live_stale_title %}<span class="sv-bar-mark sv-unknown" title="{{ panel_live_stale_title }}">&middot; stale</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ panel_live_dash_title|default:'No real-money position is open' }}">&mdash;</span>{% endif %}</span>
                     <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books: eToro's own figure for each eToro position its holdings list, live marks otherwise. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
                     {# The count is the positions the figure HOLDS (2026-11-06, the review's probe J): a row the book could not price is in it when eToro's figure for it is (panel_pnl_unpriced), never "0 of 1" under a figure that holds it. #}
                     <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_pnl_unpriced and panel_pnl_positions < panel_positions %}real + paper across {{ panel_pnl_positions }} of {{ panel_positions }} positions{% elif panel_pnl_unpriced %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% elif panel_positions_priced < panel_positions %}real + paper across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
@@ -1077,12 +1085,14 @@
                     <span class="ip-label">MARGIN</span>
                     <span class="ip-v" data-sv-live="hb-real-margin" data-sv-live-key="hb-real-margin">{% if panel_etoro and panel_etoro.world == "live" and panel_etoro.used is not None and panel_etoro.total %}{% widthratio panel_etoro.used panel_etoro.total 1000 as sv_margin_pm %}<span title="eToro's used margin {{ panel_etoro.used_t }} of its equity {{ panel_etoro.total_t }}">{% if sv_margin_pm|length == 1 %}0{% else %}{{ sv_margin_pm|slice:":-1" }}{% endif %}.{{ sv_margin_pm|slice:"-1:" }}%</span>{% else %}<span class="sv-unknown" title="No REAL eToro account is read: its margin is not measured here">&mdash;</span>{% endif %}</span>
                 </a>
+                </div>
                 {% comment %}
                 DRAWDOWN and VOLATILITY had no panel at all, and DRAWDOWN
                 rendered `|default:"0"` — so with no snapshot ever taken it
                 showed a confident red 0%, which reads as "no downside".
                 {% endcomment %}
-                <a href="{% url 'portfolio_overview' %}" data-sv-cell="drawdown" class="ip-cat ip-cat-link">
+                {# DRAWDOWN stands outside the REAL group (the review of the desk v2 build, 2026-11-13): its figure is this book's daily snapshots (the per-user portfolio, bot trades not in it), not the real book at eToro; its title says so. #}
+                <a href="{% url 'portfolio_overview' %}" data-sv-cell="drawdown" class="ip-cat ip-cat-link" title="Drawdown from the peak of this book's daily snapshots: the per-user portfolio, without the bot trades, not the real book at eToro">
                     <span class="ip-label">DRAWDOWN</span>
                     <span class="ip-count red" data-sv-live="hb-dd" data-sv-live-key="hb-dd">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="No daily snapshot exists for this book">&mdash;</span>{% endif %}</span>
                     <span class="ip-sub sbsub">from peak</span>
@@ -1117,7 +1127,6 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Portfolio</div>
                     </div>
                 </a>
-                </div>
                 <a href="{% url 'asset_bots_dashboard' %}" data-sv-cell="bots" class="ip-cat ip-cat-link">
                     {% comment %}
                     This cell printed ARMED whenever one config had enabled=True,
@@ -1133,7 +1142,7 @@
                     {% endcomment %}
                     <span class="ip-label">BOTS</span>
                     <span class="ip-count" data-sv-live="hb-bot-state" data-sv-live-key="hb-bot-state">{% if panel_bot %}<span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}" title="{{ panel_bot.reason }}">{{ panel_bot.state }}</span>{% else %}<span class="sv-unknown" title="The bot program's state could not be read — this cell claims nothing">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live · {{ panel_bot.paper }} paper<span class="sv-bot-open"> · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live<span class="sv-bot-paper"> · {{ panel_bot.paper }} paper</span><span class="sv-bot-open"> · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">BOT PROGRAM &middot; IS IT RUNNING? <span class="sv-live-chip" data-sv-live-status></span></div>
                         <div data-sv-live="hb-bot-detail">
@@ -1193,7 +1202,7 @@
                 {# THE HORDE (the desk v2 board, his default "yes", 2026-11-13): in POSITIONS' place, one standard per seat, REAL (solid REAL red) then DEMO (gold outline) then PAPER (grey outline), at most eight then "+n"; the count in words. It opens the Horde's sheet (h). The standards are this render's book; sv-horde.js repaints them from its own answer. #}
                 <button type="button" data-sv-cell="horde" class="ip-cat sv-sb-horde" id="svHordeCell" aria-controls="svHordePanel" aria-expanded="false" aria-keyshortcuts="h" aria-label="The Horde: {{ panel_positions|default:0 }} seat{{ panel_positions|default:0|pluralize }}, {{ panel_live_positions|default:0 }} real, {{ panel_demo_positions|default:0 }} demo, {{ panel_paper_positions|default:0 }} paper. Key h">
                     <span class="ip-label">HORDE</span>
-                    <span class="sv-seats-wrap" data-sv-live="hb-horde" data-sv-live-key="hb-horde">{% include "_partials/horde_seats.html" with live=panel_live_positions demo=panel_demo_positions paper=panel_paper_positions none=panel_unvenued_positions total=panel_positions %}<span class="sbsub"><span class="sv-n">{{ panel_positions|default:0 }}</span> seat{{ panel_positions|default:0|pluralize }}</span></span>
+                    <span class="sv-seats-wrap" data-sv-live="hb-horde" data-sv-live-key="hb-horde">{% include "_partials/horde_seats.html" with live=panel_live_positions demo=panel_demo_positions paper=panel_paper_positions none=panel_unvenued_positions total=panel_positions %}<span class="sv-seats-n"><span class="sv-n">{{ panel_positions|default:0 }}</span><span class="sv-seats-word"> seat{{ panel_positions|default:0|pluralize }}</span></span></span>
                     <span class="sv-seat-alarm" id="svBarAlarms" hidden></span>
                 </button>
                 <div class="sv-more">
@@ -1574,6 +1583,7 @@
         </div>
 
 
+<span class="sv-skip-to" id="svPage" tabindex="-1"></span>
 <div class="page-content fade-in">
             {% if passation_card %}{% include "_partials/passation_card.html" %}{% endif %}
             {# A Telegram button's page (2026-10-24): what the link opens. #}

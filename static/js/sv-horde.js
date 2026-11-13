@@ -627,12 +627,41 @@
       }
     }
     var alarms = document.getElementById('svBarAlarms');
+    var n = t.alarms || 0;
+    var said = n ? (n === 1 ? fill(W('tab_alarm'), { n: 1 }) : fill(W('tab_alarms'), { n: n })) : '';
     if (alarms) {
-      var n = t.alarms || 0;
-      alarms.textContent = n ? (n === 1 ? fill(W('tab_alarm'), { n: 1 }) : fill(W('tab_alarms'), { n: n })) : '';
-      alarms.hidden = !n;
+      /* Kept as data, never shown: the bar shows the mark, and the cell's
+         name and title say the words (review of the desk v2 build,
+         2026-11-13). */
+      alarms.textContent = said;
+      alarms.hidden = true;
     }
+    state.barAlarm = { n: n, real: !!t.alarm_real, said: said };
+    markSeats();
   }
+  /* The amber mark over a standard in alarm (Twist2 "alarme · marque
+     ambre"): a real seat's when a real seat is in alarm, else the first
+     seat of the other worlds; the count goes into the cell's name and
+     title. The standards are swapped by the sweep (hb-horde): marked again
+     after each swap. */
+  function markSeats() {
+    var cell = document.getElementById('svHordeCell');
+    var a = state.barAlarm;
+    if (!cell || !a) return;
+    var seats = cell.querySelectorAll('.sv-seat');
+    Array.prototype.forEach.call(seats, function (s) { s.classList.remove('is-alarm'); });
+    if (a.n) {
+      var pick = a.real ? cell.querySelector('.sv-seat[data-world="live"]')
+                        : cell.querySelector('.sv-seat:not([data-world="live"])');
+      var target = pick || seats[0];
+      if (target) target.classList.add('is-alarm');
+    }
+    if (!cell.hasAttribute('data-sv-label')) cell.setAttribute('data-sv-label', cell.getAttribute('aria-label') || '');
+    var base = cell.getAttribute('data-sv-label');
+    cell.setAttribute('aria-label', a.n ? base.replace(/\. Key h$/, '') + '; ' + a.said + '. Key h' : base);
+    cell.title = a.n ? a.said : '';
+  }
+  document.addEventListener('sv:live-swapped', function () { markSeats(); });
   function paintTab(t) {
     var n = t.seats || 0;
     state.seatN = n;

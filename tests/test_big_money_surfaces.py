@@ -188,7 +188,12 @@ class PageTests(TestCase):
         self.assertIn('<span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false">'
                       '<use href="#svi-big-money"/></svg></span> <span class="label-text">'
                       "Big Money</span>", body)
-        self.assertIn("◆ BIG MONEY", body)
+        # The page's title in the bar is its name in words (updated
+        # deliberately, the desk v2 board, approved 2026-11-13: "amazing
+        # work, bravo, I need it fast!!"): the ◆ it opened with, drawn by a
+        # fallback face, goes (sauron_tags.sv_bar_title); the template's
+        # block keeps it.
+        self.assertIn('<span class="topbar-title">BIG MONEY</span>', body)
 
 
 class TicketNoteTests(TestCase):

@@ -1143,7 +1143,12 @@ class PhoneTests(_Base):
         self.assertIn("--se-bottom-edge: calc(149px", panel.split("}", 1)[0])
 
     def test_the_topbar_keeps_a_short_title_on_a_phone(self):
-        self.assertIn('<span class="topbar-title">\u25ce <span class='
+        # Updated deliberately (the desk v2 board, approved 2026-11-13:
+        # "amazing work, bravo, I need it fast!!"): the bar's titles are
+        # words, the glyph that opened them (\u25ce, drawn by a fallback face)
+        # goes (core.templatetags.sauron_tags.sv_bar_title); the short
+        # title on a phone is unchanged.
+        self.assertIn('<span class="topbar-title"><span class='
                       '"pd-title-long">Long EURCAD \u00b7 </span>Position #',
                       self.page)
         phone = self.css.split("@media (max-width: 768px) {", 1)[1]
