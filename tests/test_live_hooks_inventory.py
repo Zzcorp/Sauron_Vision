@@ -151,6 +151,11 @@ DATA_ATTRS = (
     # script, no rule and no test reads it today, so nothing breaks without
     # it; it joins when something does.
     "data-market", "data-f-shutoff", "data-f-shut", "data-sv-shut",
+    # THE STRIPS SCROLL AGAIN (2026-11-13, the operator's decision), joined
+    # with the branch that adds them: each frame's speed in px per second,
+    # which static/js/sv-marquee.js reads to take the strip at all, and the
+    # cards that hold it still while one is open (data-sv-marquee-pop).
+    "data-sv-marquee-speed", "data-sv-marquee-pop",
 )
 
 IDS = (
@@ -191,6 +196,10 @@ GLOBALS = (
     "svCharts", "svLevels", "svSignalDots", "svHoverCards",
     "svRenderSparks", "svWheelMarquee", "svLiveRefresh", "svRenderDonuts",
     "svRenderLines", "SAURON_CHART_COLORS",
+    # The strips' one position (2026-11-13): base.html's wheel, drag and
+    # arrow crawl move it through SVMarquee; under another name they would
+    # write transforms of their own again, two drivers on one strip.
+    "SVMarquee",
 )
 SV_NAMESPACE = ("overlay", "ages", "flash", "dwell", "popup", "tour", "council")
 
@@ -1122,6 +1131,19 @@ RECORDED = {
     },
     'window.svWheelMarquee': {
         'templates/base.html': 1,
+    },
+    # The strips scroll again (2026-11-13): their hooks, counted on the
+    # branch that adds them (claude/marquee).
+    'data-sv-marquee-speed': {
+        'static/js/sv-marquee.js': 3,
+        'templates/base.html': 4,
+    },
+    'data-sv-marquee-pop': {
+        'static/js/sv-marquee.js': 2,
+        'templates/base.html': 3,
+    },
+    'window.SVMarquee': {
+        'static/js/sv-marquee.js': 1,
     },
 }
 

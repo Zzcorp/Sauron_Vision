@@ -6,9 +6,10 @@ riding through that half of each pass opened nothing on hover. The data
 headband has always included its full dh_item.html twice; so does this.
 The card (.ticker-popup) stays hidden inside the item until base.html's
 popup engine portals it to <body> on hover, and goes back into the item
-when it closes.
+when it closes. The second half's copy (`twin`) is for the eye only: out
+of the tab order, hidden from screen readers (2026-11-13).
 {% endcomment %}
-<a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}"{% if item.news_id %} data-news-id="{{ item.news_id }}"{% endif %}>
+<a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}"{% if item.news_id %} data-news-id="{{ item.news_id }}"{% endif %}{% if twin %} aria-hidden="true" tabindex="-1"{% endif %}>
     {% comment %}Signals were removed from this band by
     request — the rail is their home; the ticker is news
     only (quote/strategy branches remain for the payloads
