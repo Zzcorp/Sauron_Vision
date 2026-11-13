@@ -53,6 +53,10 @@ KEEP_FAILURES = 12
 #: The cache key and the memory's life (the quiet is far shorter).
 KEY = "venue_health:{venue}:{world}"
 TTL_S = 6 * 3600
+#: THE QUIET PASSES' 429s (review, 2026-11-13, note_refusal): kept apart
+#: from the failures, never counted toward SICK, read by recent_refusals
+#: beside the noted ones. The newest KEEP_FAILURES, for TTL_S.
+REFUSALS_KEY = "venue_health:{venue}:{world}:quiet429"
 #: The venues this memory knows the words for.
 VENUE_NAMES = {"etoro": "eToro"}
 
@@ -164,6 +168,37 @@ def note(venue: str, world: str, where: str, *, code=None, detail: str = "",
         logger.warning("[venue health] could not note %s/%s at %s: %s",
                        venue, world, where, e)
         return {"sick": False}
+
+
+def _refusals_key(venue: str, world: str) -> str:
+    return REFUSALS_KEY.format(venue=str(venue or "").lower(),
+                               world=str(world or "").lower() or "live")
+
+
+def note_refusal(venue: str, world: str, where: str, *, detail: str = "",
+                 now=None) -> bool:
+    """Keep ONE HTTP 429 a QUIET pass met (review, 2026-11-13): the account
+    sync and the held quotes note the venue's health from the passes their
+    old beats ran (noting_slot), and the passes between note nothing. Their
+    429 was then a log line only, while the readers that step aside after
+    a 429 (recent_refusals: the demo short proofs, the bar refresh) read
+    the noted ones, and the account reads grant no pause. Kept here, apart
+    from the failures: NEVER counted toward SICK, so a brief hiccup makes
+    the venue sick no sooner than before; read by recent_refusals beside
+    the noted 429s. True when kept. Never raises."""
+    try:
+        now = _now(now)
+        key = _refusals_key(venue, world)
+        kept = _load(key).get("refusals") or []
+        kept = [f for f in kept if isinstance(f, dict)]
+        kept.append({"at": now.isoformat(), "where": str(where or "?"),
+                     "code": 429, "detail": str(detail or "")[:120],
+                     "quiet": True})
+        return _store(key, {"refusals": kept[-KEEP_FAILURES:]})
+    except Exception as e:  # noqa: BLE001 — a lost refusal must not raise
+        logger.warning("[venue health] could not keep a 429 of %s/%s at "
+                       "%s: %s", venue, world, where, e)
+        return False
 
 
 def noting_slot(key: str, hold_s: float, *, now: float) -> bool:
@@ -291,19 +326,21 @@ def recent_refusals(venue: str, world: str, *, within_s: float,
     seconds, oldest first: what a background reader (the bar refresh)
     reads to step aside while the trading lane meets the venue's quota
     (2026-10-07). A failure whose time cannot be read is not recent.
-    Never raises."""
+    With them, the 429s the quiet passes met (note_refusal, 2026-11-13),
+    which count toward nothing else. Never raises."""
     try:
         now = _now(now)
         since = now - timedelta(seconds=float(within_s))
         state = _load(_key(venue, world))
+        quiet = _load(_refusals_key(venue, world)).get("refusals") or []
         out = []
-        for f in state.get("failures") or []:
+        for f in list(state.get("failures") or []) + list(quiet):
             if not isinstance(f, dict) or f.get("code") != 429:
                 continue
             at = _when(f.get("at"))
             if at is not None and at >= since:
-                out.append(f)
-        return out
+                out.append((at, f))
+        return [f for _at, f in sorted(out, key=lambda pair: pair[0])]
     except Exception:  # noqa: BLE001
         return []
 
@@ -392,6 +429,7 @@ def clear(venue: str, world: str) -> None:
     from django.core.cache import cache
     try:
         cache.delete(_key(venue, world))
+        cache.delete(_refusals_key(venue, world))
     except Exception:  # noqa: BLE001
         logger.warning("[venue health] the cache could not be cleared")
 

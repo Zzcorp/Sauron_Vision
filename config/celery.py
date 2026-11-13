@@ -743,11 +743,16 @@ app.conf.beat_schedule = {
     # margin and the equity every eToro order is judged on are at most
     # about 30 s old. A pass is still two account GETs per keyed account at
     # P2, so the account family's rolling minute holds at most three
-    # passes, 12 reads for REAL and DEMO, and the worst minute beside it
-    # (both accounts re-read after orders at their pace, the reconcile, a
-    # /status, a key probe) 25 of P2's 28. NOT 20 s: one key pair opens
-    # both worlds, so REAL and DEMO spend ONE budget (engine/etoro_budget's
-    # header, MEASURED 2026-09-23); at 20 s the sync alone holds 16, past
+    # passes, 12 reads for REAL and DEMO (14 in the reconcile's minute),
+    # and the worst minute beside it (both accounts re-read after orders at
+    # their pace, the reconcile, a /status, a key probe) 25 of P2's 28. The
+    # orders' own P1 reads count in that same minute, never refused (the
+    # review, 2026-11-13): from the fourth a sync read waits a pass, DEMO's
+    # aggregate from the fifth, REAL's from the seventh (the eighth, ninth
+    # and eleventh at 60 s); the walk reads REAL first. NOT 20 s: one key
+    # pair opens both worlds, so REAL and DEMO spend ONE budget
+    # (engine/etoro_budget's header, MEASURED 2026-09-23); at 20 s the
+    # sync alone holds 16, past
     # the 15 at which the demo short proofs stand aside, and the same
     # minute needs 29 of 28: a refused sync read holds that account's eToro
     # entries until the next read (AssetBot._cash_gate). 20 s would be safe
@@ -758,11 +763,16 @@ app.conf.beat_schedule = {
     # (tasks.ETORO_HISTORY_SLACK_S, half a beat); the venue's health noted
     # from ONE pass a minute per account (tasks.ETORO_SYNC_NOTE_EVERY_S,
     # EtoroTrader.health_quiet), so a hiccup makes eToro sick no sooner
-    # and no more often than at 60 s. ONE PASS AT A TIME (tasks.
+    # and no more often than at 60 s; the passes between grant no 429 pause
+    # either (the review: their pause skipped the noting pass, and a 429
+    # storm made eToro sick later than at 60 s). ONE PASS AT A TIME (tasks.
     # ETORO_SYNC_LOCK_KEY): a beat that finds a pass running is idle, and
     # a run not started within 25 s is dropped (expire_seconds: the
     # database scheduler's spelling), so a pass slowed by timeouts holds
-    # one worker slot, never piles up in front of the tick.
+    # one worker slot, never piles up in front of the tick. The price of
+    # it, said: under timeouts the failing passes run one after the other,
+    # one every 90 to 120 s, so eToro turns sick LATER than at 60 s, whose
+    # passes overlapped (never sooner).
     "sync-etoro-accounts": {
         "task": "bot_program.tasks.sync_etoro_accounts",
         "schedule": 30.0,
@@ -785,7 +795,10 @@ app.conf.beat_schedule = {
     # a pass starts no read past 5 s. The beat skips only an answer younger
     # than half its beat (etoro_quotes.OWN_FRESH_S): at 15 s it skipped its
     # own last answer and read every 30 s. Its failures are noted on the
-    # venue's health from one pass per 30 s, the passes the old beat ran.
+    # venue's health from one pass per 30 s, the passes the old beat ran,
+    # each turn spent whatever the pass does; the passes between grant no
+    # 429 pause. The cap judges a pass at the instant it starts
+    # (etoro_quotes._note_sent), so a steady pass is never blank.
     "refresh-etoro-quotes": {
         "task": "bot_program.tasks.refresh_etoro_quotes",
         "schedule": 15.0,

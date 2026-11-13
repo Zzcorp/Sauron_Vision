@@ -375,7 +375,9 @@ class TheBeatDecidesWhoCanBeSilentTests(_ComponentsOnly):
         floor, never on a single missed beat. (The fifteen-minute sync
         until 2026-10-31: the eToro walk, the row's most frequent, beats
         every 300 s since, every 60 s from 2026-11-06 and every 30 s since
-        2026-11-13; a beat under a minute is still said "every minute".)"""
+        2026-11-13, the operator: "je suggère 20-30 secondes non?"; a beat
+        under a minute is said in seconds, "every 30 s", since the review
+        of that day: "every minute" named it wrong.)"""
         from core.component_digest import collect_faults
         row = _component("broker_account_sync", category="pipeline",
                          last_run_at=timezone.now() - timedelta(hours=20))
@@ -384,7 +386,7 @@ class TheBeatDecidesWhoCanBeSilentTests(_ComponentsOnly):
         row.save(update_fields=["last_run_at"])
         silent = collect_faults()["silent"]
         self.assertEqual([f["key"] for f in silent], ["broker_account_sync"])
-        self.assertIn("every minute", silent[0]["message"])
+        self.assertIn("(every 30 s)", silent[0]["message"])
 
     def test_a_night_task_that_missed_one_run_is_in_the_next_digest(self):
         """Real fault, kept up, and no later than before: the rule actuator

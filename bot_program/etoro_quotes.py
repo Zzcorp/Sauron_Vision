@@ -67,7 +67,11 @@ shared 429 pause holds. A failed read is noted on the venue's health as
 every read is, from one pass per 30 s (NOTE_EVERY_S, 2026-11-13): the
 passes the old 30 s beat ran, so a hiccup makes eToro sick no sooner and
 no more often than before; the passes between read and note nothing
-(EtoroTrader.health_quiet, venue_health.noting_slot).
+(EtoroTrader.health_quiet, venue_health.noting_slot), and grant no 429
+pause either (review, 2026-11-13: their pause skipped the next noting
+pass, and a 429 storm made eToro sick later than before, or not at all);
+a 429 they meet is kept for the readers that step aside after one
+(venue_health.note_refusal), never counted toward SICK.
 
 UNDER THE SYNC'S SWITCHES (platform_master, broker_account_sync), read
 inline as tasks.refresh_etoro_cells does: the component row is the sync's
@@ -131,9 +135,15 @@ SENT_WINDOW_S = 60
 LAST_KEY = "etoro_quotes:last"
 DAY_KEY = "etoro_quotes:day:{day}"
 RECORD_TTL_S = 2 * 86400
-#: A pass starts no read past this many seconds, so it never runs into the
-#: next beat (a read at P3 on a connection that never opens gives up after
-#: about 9 s with its retry: 5 + 9 < 15). 20 s at the 30 s beat.
+#: A pass starts no read past this many seconds. On a connection that
+#: never opens, a read at P3 gives up after about 9 s with its retry (two
+#: 4 s connects and the pause between): 5 + 9 < 15, the pass ends inside
+#: its beat. On one that opens and then never answers, each attempt also
+#: waits its 10 s read timeout (up to about 29 s with the retry), so such a
+#: pass OUTLIVES its beat (review, 2026-11-13): the lock (LOCK_S) outlives
+#: it and the beats behind it find it held and send nothing, and a run not
+#: started within its expiry is dropped; never two passes at once. 20 s at
+#: the 30 s beat.
 PASS_BUDGET_S = 5.0
 #: THE BEAT'S OWN ANSWER (2026-11-13): an instrument the shared rates
 #: cache answered within this many seconds is not asked again. Half the
@@ -276,30 +286,40 @@ def _note_asked(kh, symbols) -> None:
         pass
 
 
-def _sent_lately(kh) -> int:
-    """The requests this beat sent for key hash `kh` in the last
-    SENT_WINDOW_S (the cap, P-c.3). Never raises: unread, 0 (a pass whose
-    cache cannot be read takes no lock either)."""
+def _sent_lately(kh, now=None) -> int:
+    """The requests this beat sent for key hash `kh` in the SENT_WINDOW_S
+    before `now` (default: now) (the cap, P-c.3). Never raises: unread, 0
+    (a pass whose cache cannot be read takes no lock either)."""
     try:
         held = _cache().get(SENT_KEY.format(kh=kh))
-        now = _now()
+        now = _now() if now is None else float(now)
         return sum(1 for at in (held if isinstance(held, list) else [])
                    if now - float(at) < SENT_WINDOW_S)
     except Exception:  # noqa: BLE001
         return 0
 
 
-def _note_sent(kh, n) -> None:
-    """Stamp `n` requests sent now for `kh` (the cap). Never raises."""
+def _note_sent(kh, n, at=None) -> None:
+    """Stamp `n` requests sent for `kh` at `at` (default: now) (the cap).
+
+    STAMPED AT THE PASS'S INSTANT (review, 2026-11-13): _read_account
+    judges a pass's room once, when it starts, and stamps its reads with
+    that same instant. Stamped when each read ENDED, they sat a few hundred
+    milliseconds later than the pass that sent them: with three reads every
+    15 s the fifth pass starts exactly 60 s after the first, its reads were
+    still inside the minute, the room read 0, and every fifth pass sent
+    nothing (four held instruments then waited 45 s, 30 s at the old
+    beat). The cap reads the same: twelve requests in any minute of
+    passes. Never raises."""
     if n <= 0:
         return
     try:
         c = _cache()
         key = SENT_KEY.format(kh=kh)
-        now = _now()
+        now = _now() if at is None else float(at)
         held = c.get(key)
-        kept = [float(at) for at in (held if isinstance(held, list) else [])
-                if now - float(at) < SENT_WINDOW_S]
+        kept = [float(t) for t in (held if isinstance(held, list) else [])
+                if now - float(t) < SENT_WINDOW_S]
         c.set(key, kept + [now] * int(n), 2 * SENT_WINDOW_S)
     except Exception:  # noqa: BLE001 — the budget still counts every read
         pass
@@ -387,10 +407,13 @@ def _read_account(client, symbols, out, started) -> str:
     none past READS_PER_MINUTE in the key's rolling minute (2026-11-06,
     P-c.3): what each call put on the wire is counted (EtoroTrader
     .wire_reads). Returns why the pass must stop ("" to go on). Inside the
-    caller's P3 scope."""
+    caller's P3 scope. The room is judged, and every read of this pass is
+    stamped, at ONE instant, the pass's (_note_sent, 2026-11-13)."""
     from bot_program.engine import etoro_rates
     kh = client._bkey()
-    left = min(SINGLE_READS_PER_PASS, READS_PER_MINUTE - _sent_lately(kh))
+    at = _now()
+    left = min(SINGLE_READS_PER_PASS,
+               READS_PER_MINUTE - _sent_lately(kh, now=at))
     if left <= 0:
         return (f"the beat's {READS_PER_MINUTE} reads a minute are spent "
                 f"(its own cap)")
@@ -402,7 +425,7 @@ def _read_account(client, symbols, out, started) -> str:
         before = _wire(client)
         answers = client.tickers(carried)
         sent = max(0, _wire(client) - before)
-        _note_sent(kh, sent)
+        _note_sent(kh, sent, at=at)
         left -= sent
         out["asked"] += -(-len(carried) // etoro_rates.BATCH_MAX_IDS)
         singles = []
@@ -426,7 +449,7 @@ def _read_account(client, symbols, out, started) -> str:
             tick = client.ticker(symbol)
         except Exception as e:  # noqa: BLE001 — sorted below
             sent = max(0, _wire(client) - before)
-            _note_sent(kh, sent)
+            _note_sent(kh, sent, at=at)
             left -= sent
             if _venue_failed(e):
                 return str(getattr(e, "why", "") or e)[:160]
@@ -434,7 +457,7 @@ def _read_account(client, symbols, out, started) -> str:
                          str(e)[:120])
             continue
         sent = max(0, _wire(client) - before)
-        _note_sent(kh, sent)
+        _note_sent(kh, sent, at=at)
         left -= sent
         _write(symbol, tick, out)
     return ""
@@ -555,7 +578,25 @@ def _quiet_between_noting_passes(client, account_pk) -> None:
                      type(e).__name__)
 
 
+def _spend_noting_turn(account_pk) -> None:
+    """The old 30 s beat's turn, spent by a pass that reads nothing (eToro
+    sick): see _pass. Never raises."""
+    try:
+        from bot_program import venue_health
+        venue_health.noting_slot(NOTE_KEY.format(pk=account_pk),
+                                 NOTE_EVERY_S, now=_now())
+    except Exception:  # noqa: BLE001 — unread: the next pass notes
+        pass
+
+
 def _pass(out, started) -> dict:
+    """THE OLD BEAT'S TURN IS SPENT WHATEVER THE PASS DOES (review,
+    2026-11-13): each account's noting turn is claimed before anything can
+    skip the pass (the venue sick, the 429 pause, nothing to ask), as the
+    old 30 s beat's pass was spent when it skipped. A turn left free by a
+    skipped pass was taken by the next one, 15 s later: re-run on the fix,
+    the review's harness found a 429 noted 15 s sooner than the old beat
+    could have, eToro sick 0.2 s sooner in 12 of 432 phases."""
     from bot_program import venue_health
     from bot_program.engine import etoro_budget
     accounts = _accounts()
@@ -564,6 +605,8 @@ def _pass(out, started) -> dict:
         return out
     sick = venue_health.sick("etoro", "live")
     if sick:
+        for acct, _rows in accounts:
+            _spend_noting_turn(acct.pk)
         out["skipped"] = f"eToro is sick: {sick.get('words', '')}"[:200]
         return out
     for acct, rows in accounts:
@@ -571,6 +614,7 @@ def _pass(out, started) -> dict:
         if client is None:
             continue
         out["accounts"] += 1
+        _quiet_between_noting_passes(client, acct.pk)
         pause = venue_health.pause_s(client)
         if pause > 0:
             out["skipped"] = (f"the shared 429 pause holds ({pause:.0f} s "
@@ -582,7 +626,6 @@ def _pass(out, started) -> dict:
             out.setdefault("left", {}).update(left)
         if not ask:
             continue
-        _quiet_between_noting_passes(client, acct.pk)
         with etoro_budget.at_priority(etoro_budget.P3, "live quotes"):
             stop = _read_account(client, _stalest_first(client._bkey(), ask),
                                  out, started)

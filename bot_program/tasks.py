@@ -676,6 +676,11 @@ ETORO_HISTORY_SLACK_S = ETORO_SYNC_BEAT_S // 2
 #: no miss and writes no component row. The lock outlives the longest
 #: failing pass and is given back when the pass ends, however it ends; a
 #: pass killed mid-way holds the sync three minutes at most.
+#: SIZED FOR TWO KEYED ACCOUNTS ON ONE RESOLVED ADDRESS (review,
+#: 2026-11-13): 2 x 2 x (2 x 20 s + 0.8 s) = 163 s. A third account, an
+#: API host whose several addresses each eat the 10 s connect, or a DNS or
+#: database stall can outlive it; the next beat's pass then starts beside
+#: it, never a third, since a pass gives back only its own lock.
 ETORO_SYNC_LOCK_KEY = "etoro_sync:pass"
 ETORO_SYNC_LOCK_S = 180
 #: THE VENUE'S HEALTH FROM ONE PASS A MINUTE PER ACCOUNT (2026-11-13,
@@ -1133,15 +1138,25 @@ def _one_etoro_pass(fn):
     (core.task_gate writes no component row for it), reads nothing and
     counts no miss; the lock is given back however the pass ends. A lock
     that cannot be read runs the pass, as before the lock: the request
-    budget asks no account read while its cache is down anyway."""
+    budget asks no account read while its cache is down anyway.
+
+    GIVEN BACK BY ITS OWNER ONLY (review, 2026-11-13): the lock holds the
+    pass's own token, and the pass deletes it only while it still holds
+    that token. A pass can outlive the lock's ETORO_SYNC_LOCK_S (an API
+    host whose several addresses each eat the 10 s connect, a stalled DNS
+    or database); the next beat's pass then takes the lock, and the first,
+    ending, freed THAT pass's lock, so the beat after started a third
+    beside it. Now at most two ever overlap, and only past the lock's
+    three minutes."""
     import functools
+    import uuid
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         from django.core.cache import cache
+        token = f"{timezone_now_iso()} {uuid.uuid4().hex[:12]}"
         try:
-            held = cache.add(ETORO_SYNC_LOCK_KEY, timezone_now_iso(),
-                             ETORO_SYNC_LOCK_S)
+            held = cache.add(ETORO_SYNC_LOCK_KEY, token, ETORO_SYNC_LOCK_S)
         except Exception as e:  # noqa: BLE001 — no lock: the pass as before
             logger.warning("broker sync (etoro): the pass lock could not be "
                            "read (%s); the pass runs without it",
@@ -1157,7 +1172,14 @@ def _one_etoro_pass(fn):
         finally:
             if held:
                 try:
-                    cache.delete(ETORO_SYNC_LOCK_KEY)
+                    if cache.get(ETORO_SYNC_LOCK_KEY) == token:
+                        cache.delete(ETORO_SYNC_LOCK_KEY)
+                    else:
+                        logger.warning(
+                            "broker sync (etoro): this pass outlived its "
+                            "lock (%d s); the lock is gone or another "
+                            "pass's, and is left as it is",
+                            ETORO_SYNC_LOCK_S)
                 except Exception:  # noqa: BLE001 — it expires on its own
                     pass
     return wrapper
@@ -1220,7 +1242,11 @@ def sync_etoro_accounts():
     from .models import EtoroAccount
 
     out = {"attempted": 0, "stored": 0, "unreachable": 0, "cells_unread": 0}
-    for acct in EtoroAccount.objects.exclude(api_key_enc=""):
+    # REAL FIRST (review, 2026-11-13): one key pair opens both worlds and
+    # both spend one request budget, so whatever runs short in a pass (the
+    # account minute's tokens, a lock that runs out) reaches DEMO first.
+    for acct in (EtoroAccount.objects.exclude(api_key_enc="")
+                 .order_by("demo", "pk")):
         user = acct.user
         k, u = acct.get_credentials()
         if not (k and u):

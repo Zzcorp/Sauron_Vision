@@ -1590,30 +1590,57 @@ class EtoroTrader:
         and no more often than before (venue_health.noting_slot). The read
         is logged here and counted where it was asked (the sync's miss); a
         write site's failure (venue_health.WRITE_SITES, the order) is noted
-        whatever the pass."""
+        whatever the pass.
+
+        A 429 ON A QUIET PASS (review, 2026-11-13) is still KEPT where the
+        readers that step aside after one read it (venue_health.
+        note_refusal: the demo short proofs, the bar refresh), never
+        counted toward SICK; it grants no pause either (_quiet_read)."""
         if getattr(self, "_background", False):
             log.info("eToro %s failed (%s) during a background read — not "
                      "noted on the venue's health", where,
                      code or str(detail or "")[:80] or "no answer")
             return
-        quiet = getattr(self, "health_quiet", "")
-        if quiet and isinstance(quiet, str):
+        if self._quiet_read(where):
+            refused = False
             try:
-                from bot_program.venue_health import WRITE_SITES
-                read = str(where or "") not in WRITE_SITES
-            except Exception:  # noqa: BLE001 — unread: noted, the safe way
-                read = False
-            if read:
-                log.info("eToro %s failed (%s) — not noted on the venue's "
-                         "health: %s", where,
-                         code or str(detail or "")[:80] or "no answer",
-                         quiet[:120])
-                return
+                if code is not None and int(code) == 429:
+                    from bot_program.venue_health import note_refusal
+                    refused = note_refusal("etoro", self._world(), where,
+                                           detail=detail)
+            except Exception:  # noqa: BLE001 — a lost refusal: a log line
+                refused = False
+            log.info("eToro %s failed (%s) — not noted on the venue's "
+                     "health%s: %s", where,
+                     code or str(detail or "")[:80] or "no answer",
+                     " (kept as a 429 for the readers that step aside)"
+                     if refused else "",
+                     str(getattr(self, "health_quiet", ""))[:120])
+            return
         try:
             from bot_program.venue_health import note
             note("etoro", self._world(), where, code=code, detail=detail)
         except Exception as e:  # noqa: BLE001 — a lost note must not raise
             log.debug("eToro health note (%s) skipped: %s", where, e)
+
+    def _quiet_read(self, where: str) -> bool:
+        """Is a failure at `where` a READ of a QUIET pass (health_quiet,
+        2026-11-13)? Such a read notes nothing toward SICK and grants no
+        429 pause: the passes between the ones the old beats ran are
+        invisible to the venue's health, so a 429 storm is met, noted and
+        paused by the next noting pass, as the old beat's pass did
+        (review, 2026-11-13: a quiet pass's pause skipped that very pass,
+        and eToro went sick later than before, or not at all). A write
+        site (venue_health.WRITE_SITES, the order) is never quiet. Never
+        raises: unread, not quiet."""
+        quiet = getattr(self, "health_quiet", "")
+        if not (quiet and isinstance(quiet, str)):
+            return False
+        try:
+            from bot_program.venue_health import WRITE_SITES
+            return str(where or "") not in WRITE_SITES
+        except Exception:  # noqa: BLE001 — unread: noted, the safe way
+            return False
 
     def _read_redirected(self, where: str, refused) -> None:
         """A READ answered with a redirect (2026-11-01): a failed read,
@@ -1703,11 +1730,18 @@ class EtoroTrader:
         candles of this process are judged on the pause; the entry side
         reads it once the flusher, woken at once, has written it. Below P0
         the grant stays on the read's path, as before: the next ask of
-        that very lane meets it."""
+        that very lane meets it.
+
+        NOT ON A QUIET PASS (review, 2026-11-13, _quiet_read): the beats'
+        passes between the ones their old beats ran grant no pause, so the
+        next noting pass meets the 429, notes it and grants the pause, as
+        the old beat's pass did; the 429 is kept for the readers that step
+        aside (_note_health)."""
         try:
             wait, raw = _retry_after_s(r)
             pause = (RATE_PAUSE and where in RATE_PAUSE_SITES
-                     and not getattr(self, "_background", False))
+                     and not getattr(self, "_background", False)
+                     and not self._quiet_read(where))
             if pause and priority is not None \
                     and int(priority) <= etoro_budget.P0:
                 etoro_budget.later(_grant_rate_pause, self._bkey(),

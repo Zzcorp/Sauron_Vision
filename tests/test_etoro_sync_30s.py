@@ -41,6 +41,15 @@ instruments to 30 s.
     rules; no limit, threshold, ratio or formula moves (TheMoneyWindows
     DoNotMoveTests).
 
+THE REVIEW (2026-11-13, on 6be0d77): a quiet pass that meets a 429 grants
+no shared pause (the pause skipped the next noting pass, and a 429 storm
+made eToro sick later than before, or not at all); its 429 is still kept
+for the readers that step aside for one (venue_health.note_refusal),
+never toward SICK; the pass lock is given back only by the pass that
+holds it, and REAL is read before DEMO; the held quotes' cap judges a
+pass by the instant it started, so a steady pass is never blank; the
+digest says "every 30 s"; the operator's live check reads the database.
+
 Fakes only: no network, broker or model call.
 
 Run with:  python manage.py test tests.test_etoro_sync_30s
@@ -83,6 +92,16 @@ CHECK = ("from django_celery_beat.models import PeriodicTask as T; "
          "'|', 'on' if t.enabled else 'OFF') for t in T.objects.filter("
          "name__in=['sync-etoro-accounts', 'refresh-etoro-quotes'])"
          ".order_by('name')]")
+#: The operator's LIVE check (review M1, 2026-11-13): each keyed account's
+#: last sync, read from the database. The beat's own "Sending due task"
+#: lines are INFO, and production writes the celery loggers at WARNING
+#: (core/logging_config, DEBUG False): a grep of the beat's log reads 0.
+LIVE = ("from django.utils import timezone as tz; "
+        "from bot_program.models import EtoroAccount as E; "
+        "[print(a.pk, 'DEMO' if a.demo else 'REAL', 'last sync', "
+        "(str(int((tz.now()-a.last_sync).total_seconds()))+' s ago') "
+        "if a.last_sync else 'never') "
+        "for a in E.objects.exclude(api_key_enc='').order_by('pk')]")
 
 
 def _pass():
@@ -237,6 +256,26 @@ class TheDatabaseSchedulerMovesTheStoredBeatsTests(TestCase):
         self.assertIn(
             "sync-etoro-accounts | every 30 seconds | expires 25 | OFF",
             self._the_check_line())
+
+    def test_the_live_check_reads_each_keyed_accounts_last_sync(self):
+        """The operator's second check after the deploy (review M1): the
+        age of each keyed account's last sync, from the database, run a
+        few times. Under about 35 s on a healthy 30 s sync; "never" for an
+        account no pass has read; an account without keys is not listed."""
+        real = _account(User.objects.create_user("e30_live_r", password="x"))
+        demo = _account(User.objects.create_user("e30_live_d", password="x"),
+                        demo=True)
+        unkeyed = _account(User.objects.create_user("e30_live_u",
+                                                    password="x"))
+        type(unkeyed).objects.filter(pk=unkeyed.pk).update(api_key_enc="")
+        type(real).objects.filter(pk=real.pk).update(
+            last_sync=timezone.now() - timedelta(seconds=12))
+        out = StringIO()
+        with contextlib.redirect_stdout(out):
+            call_command("shell", command=LIVE, verbosity=0)
+        self.assertEqual(out.getvalue().splitlines(), [
+            f"{real.pk} REAL last sync 12 s ago",
+            f"{demo.pk} DEMO last sync never"])
 
 
 # ── 2. the stall alert keeps its fifteen minutes ─────────────────────────
@@ -618,6 +657,160 @@ class TheQuotesNoteAsTheirOldBeatDidTests(_QuotesCase):
                          "every pass asked: one read and its retry each")
 
 
+class AQuietPassGrantsNoPauseTests(_QuotesCase):
+    """THE REVIEW, V1 (2026-11-13). At 6be0d77 a QUIET pass that met a 429
+    still granted the shared 429 pause, and the pause then skipped the next
+    NOTING pass, the one the old 30 s beat ran: in a 429 storm eToro went
+    sick later than at the old beats, or not at all, so the ten-minute
+    hold on new real entries came later. A quiet pass now grants no pause
+    either: the noting pass after it meets the 429, notes it and grants
+    the pause, as the old beat's pass did (passes at 0 and 30: the 429
+    noted at 30, the pause from 30)."""
+
+    def test_the_noting_pass_after_a_quiet_429_notes_it_and_pauses(self):
+        _held(self.cfg, "AAA")
+        self.wire.status = [200, 429]
+        base = 1_900_000_000.0
+        t0 = datetime.fromtimestamp(base, tz=UTC)
+        clock = _Clock(base)
+        outs = {}
+        with mock.patch.object(eq, "_now", clock), \
+                mock.patch.object(eb, "_now", clock), \
+                mock.patch.object(ec, "RATE_PAUSE", True), \
+                self.assertLogs("bot_program.engine.etoro_client",
+                                level="INFO") as said:
+            for s in (0, 15, 30):
+                clock.t = base + s
+                with mock.patch("django.utils.timezone.now",
+                                return_value=t0 + timedelta(seconds=s)):
+                    outs[s] = _refresh()
+                if s == 15:
+                    self.assertIn("stopped", outs[15])
+                    self.assertEqual(eb.pause_left(KH, "live"), 0.0,
+                                     "a quiet pass grants no pause")
+                    self.assertEqual(_failures(), [])
+            self.assertGreater(eb.pause_left(KH, "live"), 0.0,
+                               "the noting pass granted it")
+        self.assertNotIn("skipped", outs[30])
+        self.assertIn("stopped", outs[30])
+        self.assertEqual(
+            [(f["where"], f["code"],
+              (parse_datetime(f["at"]) - t0).total_seconds())
+             for f in _failures()], [("ticker", 429, 30.0)])
+        self.assertEqual(len(self.wire.rates()), 3)
+        self.assertTrue(any("not noted on the venue's health" in line
+                            and "429" in line for line in said.output),
+                        said.output)
+
+    def test_a_noting_turn_the_pause_skips_is_spent_as_the_old_beats_was(
+            self):
+        """The review's harness, re-run on the fix: the old 30 s beat's
+        pass that the pause skipped was gone, and its next came 30 s later.
+        Here the noting pass the pause skipped left its turn free, the
+        quiet pass 15 s later took it and noted the 429 15 s sooner than
+        the old beat could (sick up to 0.2 s sooner in 12 of the 432
+        phases of a 60 or 90 s 429 storm, beside the sync's notes). A
+        pass the pause skips now spends the turn it would have held:
+        noted at 0 (paused 40 s) and at 60, as the old beat's passes at 0,
+        30 (skipped) and 60."""
+        _held(self.cfg, "AAA")
+        self.wire.status = [429]
+        self.wire.answer_headers = {"Retry-After": "40"}
+        base = 1_900_000_000.0
+        t0 = datetime.fromtimestamp(base, tz=UTC)
+        clock = _Clock(base)
+        outs = {}
+        with mock.patch.object(eq, "_now", clock), \
+                mock.patch.object(eb, "_now", clock), \
+                mock.patch.object(ec, "RATE_PAUSE", True), \
+                self.assertLogs("bot_program.engine.etoro_client",
+                                level="INFO"):
+            for s in (0, 15, 30, 45, 60):
+                clock.t = base + s
+                with mock.patch("django.utils.timezone.now",
+                                return_value=t0 + timedelta(seconds=s)):
+                    outs[s] = _refresh()
+        for s in (15, 30):
+            self.assertIn("429 pause holds", outs[s].get("skipped", ""), s)
+        self.assertEqual(
+            [(parse_datetime(f["at"]) - t0).total_seconds()
+             for f in _failures()], [0.0, 60.0])
+        self.assertEqual(len(self.wire.rates()), 3, "asked at 0, 45, 60")
+
+
+class TheQuiet429sAreKeptForTheReadersThatStepAsideTests(TestCase):
+    """THE REVIEW, M3 (2026-11-13). A 429 a QUIET pass met was a log line
+    only: the readers that step aside after a 429 (the demo short proofs
+    for ten minutes, the bar refresh for two) read the noted ones
+    (venue_health.recent_refusals), and the sync's account reads grant no
+    pause. It is now kept where they read it (venue_health.note_refusal),
+    and never counted toward SICK: the operator's "no sooner sick" stays
+    whole. A quiet 5xx or timeout stays a log line."""
+
+    def setUp(self):
+        cache.clear()
+        vh.reset()
+        self.addCleanup(cache.clear)
+        self.addCleanup(vh.reset)
+        self.t = REAL("api-k", USER_KEY, env="live")
+        self.t.health_quiet = "a quiet pass of the account sync"
+        self.t0 = timezone.now().replace(microsecond=0)
+
+    def _note(self, s, where, code=None, client=None, detail=""):
+        with mock.patch("django.utils.timezone.now",
+                        return_value=self.t0 + timedelta(seconds=s)):
+            (client or self.t)._note_health(where, code=code, detail=detail)
+
+    def _refusals(self, world="live", s=0):
+        return vh.recent_refusals("etoro", world, within_s=600,
+                                  now=self.t0 + timedelta(seconds=s))
+
+    def test_a_quiet_429_is_kept_and_never_counted_toward_sick(self):
+        with self.assertLogs("bot_program.engine.etoro_client", level="INFO"):
+            for s in (0, 1, 2):
+                self._note(s, "account", 429, detail="no Retry-After")
+        self.assertEqual(_failures(), [])
+        self.assertIsNone(vh.sick("etoro", "live",
+                                  now=self.t0 + timedelta(seconds=2)))
+        self.assertEqual([(f["where"], f["code"]) for f in self._refusals()],
+                         [("account", 429)] * 3)
+        self.assertEqual(self._refusals("demo"), [])
+
+    def test_a_quiet_5xx_or_timeout_stays_a_log_line(self):
+        with self.assertLogs("bot_program.engine.etoro_client", level="INFO"):
+            self._note(0, "portfolio", 503, detail="unavailable")
+            self._note(1, "account", detail="ConnectTimeout: no answer")
+        self.assertEqual(self._refusals(), [])
+        self.assertEqual(_failures(), [])
+
+    def test_merged_oldest_first_with_the_noted_ones_and_aged_out(self):
+        noting = REAL("api-k", USER_KEY, env="live")
+        with self.assertLogs("bot_program.engine.etoro_client", level="INFO"):
+            self._note(5, "account", 429)
+        self._note(0, "ticker", 429, client=noting)
+        self.assertEqual([f["where"] for f in self._refusals(s=5)],
+                         ["ticker", "account"])
+        self.assertEqual([f["where"] for f in self._refusals(s=604)],
+                         ["account"])
+        self.assertEqual(self._refusals(s=606), [])
+
+    def test_the_demo_proofs_and_the_bars_step_aside_for_it(self):
+        from bot_program import short_proofs
+        from market_data import bot_bars
+        self.assertEqual(short_proofs.refusing(), "")
+        self.assertEqual(bot_bars._etoro_refusing("live"), "")
+        with self.assertLogs("bot_program.engine.etoro_client", level="INFO"):
+            self.t._note_health("portfolio", code=429, detail="")
+        self.assertIn("answered HTTP 429", short_proofs.refusing())
+        self.assertIn("HTTP 429 (portfolio)", bot_bars._etoro_refusing("live"))
+
+    def test_forgotten_with_the_venues_memory(self):
+        with self.assertLogs("bot_program.engine.etoro_client", level="INFO"):
+            self._note(0, "account", 429)
+        vh.reset()
+        self.assertEqual(self._refusals(), [])
+
+
 # ── 5. the budget: both worlds on one key ────────────────────────────────
 
 class TheBudgetHoldsBothWorldsOnOneKeyTests(TestCase):
@@ -733,6 +926,82 @@ class TheBudgetHoldsBothWorldsOnOneKeyTests(TestCase):
         self.assertTrue(any(out.get("deferred") or out.get("book_deferred")
                             for out in syncs), syncs)
 
+    def _with_p1_reads(self, k):
+        """The same worst minute at the 30 s beat with `k` P1 account reads
+        of the orders themselves (their eligibility, the drain's book), at
+        5 s: never refused, but counted in the same rolling minute the P2
+        limit is judged on. (the sync passes, the accounts whose aggregate
+        a pass deferred: their pks)"""
+        from bot_program import etoro_cells
+        self.clock.t = self.BASE + 5
+        for _ in range(k):
+            eb.spend(KH, eb.ACCOUNT, eb.P1, where="eligibility",
+                     why="the order's eligibility")
+        eb.flush()
+        syncs, _rereads, _refused, _n = self._burst_minute(
+            int(_beat("sync-etoro-accounts")["schedule"]))
+        held = {a.pk for a in (self.real, self.demo)
+                if etoro_cells.sync_deferred_at(a.pk) is not None}
+        return syncs, held
+
+    def test_the_margin_beside_the_orders_own_reads_real_held_last(self):
+        """THE REVIEW, V3 (2026-11-13): "25 of P2's 28" counts the P2 reads
+        alone. The orders' own P1 reads in that minute leave three: the
+        fourth refuses a sync read (a holdings read, its cells still
+        written), the fifth defers DEMO's aggregate (its entries wait a
+        pass), the seventh REAL's. REAL is read first, so the budget defers
+        DEMO first, whatever the accounts' order in the database (DEMO
+        first, REAL's was deferred from the fifth). (a sync read refused,
+        DEMO's aggregate deferred, REAL's) for k = 0 to 7."""
+        from bot_program.models import EtoroAccount
+        EtoroAccount.objects.filter(pk=self.real.pk).delete()
+        self.real = _account(User.objects.create_user("e30_real_2",
+                                                      password="x"))
+        self.assertLess(self.demo.pk, self.real.pk, "DEMO first in the base")
+        outcomes = {}
+        for k in range(0, 8):
+            cache.clear()
+            eb.forget_all()
+            _components()
+            syncs, held = self._with_p1_reads(k)
+            outcomes[k] = (
+                any(out.get("book_deferred") or out.get("deferred")
+                    for out in syncs),
+                self.demo.pk in held, self.real.pk in held)
+        self.assertEqual(outcomes, {
+            0: (False, False, False), 1: (False, False, False),
+            2: (False, False, False), 3: (False, False, False),
+            4: (True, False, False), 5: (True, True, False),
+            6: (True, True, False), 7: (True, True, True)})
+
+
+class RealIsReadFirstTests(TestCase):
+    """THE REVIEW, V3 (2026-11-13): the walk read the keyed accounts in no
+    stated order; REAL now comes first (demo, then pk), so the request
+    budget, a slow pass or a lock that runs out reaches DEMO first."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        _components()
+        self.demo = _account(User.objects.create_user("e30_first_d",
+                                                      password="x"),
+                             demo=True)
+        self.real = _account(User.objects.create_user("e30_first_r",
+                                                      password="x"))
+        self.wire = _AccountWire()
+        p = mock.patch(TRADER, side_effect=_over(self.wire))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_real_is_read_before_demo_whatever_their_order_in_the_base(self):
+        self.assertLess(self.demo.pk, self.real.pk)
+        out = _pass()
+        self.assertEqual((out["attempted"], out["stored"]), (2, 2), out)
+        self.assertEqual(["demo" if "demo/" in url else "real"
+                          for _method, url in self.wire.calls],
+                         ["real", "real", "demo", "demo"])
+
 
 class TheQuotesKeepTwelveARollingMinuteTests(_QuotesCase):
     """Three requests a pass at 15 s: twelve a minute, the feed spec's
@@ -762,6 +1031,82 @@ class TheQuotesKeepTwelveARollingMinuteTests(_QuotesCase):
         self.assertIn("12 reads a minute", outs[4]["stopped"])
         for t in at:
             self.assertLessEqual(sum(1 for u in at if t - 60 < u <= t), 12)
+
+
+class TheQuotesCapNeverBlanksASteadyPassTests(_QuotesCase):
+    """THE REVIEW, M2 (2026-11-13). The cap stamped each read when it
+    ENDED and judged a pass's room when it STARTED: with three reads every
+    15 s, the fifth pass starts exactly 60 s after the first, whose reads
+    ended a little after it started, still inside the minute: the room
+    read 0 and every fifth pass sent nothing (four held instruments then
+    waited up to 45 s, 30 s at the old beat). A pass's reads are now
+    stamped at the instant the pass judged its room: twelve in any minute
+    of passes, and a steady pass never blank. Here each read takes 0.25 s
+    and the passes are exactly 15 s apart."""
+
+    BASE = 1_900_000_000.0
+
+    def _passes(self, symbols, n=20, read_s=0.25):
+        for s in symbols:
+            _held(self.cfg, s)
+        clock = _Clock(self.BASE)
+        wire_get = self.wire.get
+
+        def slow(url, **kw):
+            if "/instruments/rates" in url:
+                clock.t += read_s
+            return wire_get(url, **kw)
+        self.wire.get = slow
+        sent, reads = [], []
+        with mock.patch.object(eq, "_now", clock):
+            for k in range(n):
+                clock.t = self.BASE + 15 * k
+                before = len(self.wire.rates())
+                _refresh()
+                asked = self.wire.rates()[before:]
+                sent.append(len(asked))
+                reads += [(15 * k, i) for i in asked]
+        return sent, reads
+
+    def _worst_gap(self, reads):
+        worst = 0
+        for i in {i for _t, i in reads}:
+            ats = [t for t, j in reads if j == i]
+            worst = max([worst] + [b - a for a, b in zip(ats, ats[1:])])
+        return worst
+
+    def _twelve_a_minute(self, sent):
+        for k in range(len(sent)):
+            self.assertLessEqual(sum(sent[max(0, k - 3):k + 1]), 12, k)
+
+    def test_three_held_instruments_every_pass(self):
+        sent, reads = self._passes(["AAA", "BBB", "CCC"])
+        self.assertEqual(sent, [3] * 20)
+        self.assertEqual(self._worst_gap(reads), 15)
+        self._twelve_a_minute(sent)
+
+    def test_four_held_instruments_never_wait_more_than_the_old_30_s(self):
+        sent, reads = self._passes(["AAA", "BBB", "CCC", "DDD"])
+        self.assertEqual(sent, [3] * 20)
+        self.assertEqual(self._worst_gap(reads), 30)
+        self._twelve_a_minute(sent)
+
+    def test_a_run_late_by_its_expiry_still_leaves_the_fifth_blank(self):
+        """The cap's own case, kept: the beat at 0 ran 10 s late (its
+        expiry), so five passes fall inside one minute of starts and the
+        fifth sends nothing."""
+        for s in ("AAA", "BBB", "CCC", "DDD"):
+            _held(self.cfg, s)
+        clock = _Clock(self.BASE)
+        sent, outs = [], []
+        with mock.patch.object(eq, "_now", clock):
+            for start in (10, 15, 30, 45, 60, 75):
+                clock.t = self.BASE + start
+                before = len(self.wire.rates())
+                outs.append(_refresh())
+                sent.append(len(self.wire.rates()) - before)
+        self.assertEqual(sent, [3, 3, 3, 3, 0, 3])
+        self.assertIn("12 reads a minute", outs[4]["stopped"])
 
 
 # ── 6. no pile-up ─────────────────────────────────────────────────────────
@@ -805,6 +1150,29 @@ class OnePassAtATimeTests(TestCase):
         self.assertIsNone(cache.get(tasks.ETORO_SYNC_LOCK_KEY))
         self.assertEqual(_sync_etoro(_client())["attempted"], 1)
 
+    def test_a_pass_that_outlived_its_lock_never_frees_the_next_passes(self):
+        """THE REVIEW, V2 and N1 (2026-11-13): a pass can outlive the lock's
+        180 s (an API host whose several addresses each eat a 10 s connect,
+        a DNS stall, a third keyed account); the next beat's pass then
+        takes the lock. The first pass, ending, gave the lock back without
+        asking whose it was: it freed the second pass's, and the beat after
+        started a third beside it. It now gives back only its own."""
+        from tests.test_sync_walks_etoro import _client, _sync_etoro
+
+        def the_next_pass_takes_it(*_a, **_kw):
+            # mid-pass: the lock ran out and the next beat's pass took it
+            cache.set(tasks.ETORO_SYNC_LOCK_KEY, "the next pass",
+                      tasks.ETORO_SYNC_LOCK_S)
+        with mock.patch.object(tasks, "_warm_etoro_names",
+                               side_effect=the_next_pass_takes_it):
+            self.assertEqual(_sync_etoro(_client())["attempted"], 1)
+        self.assertEqual(cache.get(tasks.ETORO_SYNC_LOCK_KEY),
+                         "the next pass")
+        with mock.patch(TRADER) as made:
+            out = _pass()
+        self.assertIn("still running", out["idle"])
+        made.assert_not_called()
+
     def test_the_lock_outlives_the_longest_failing_pass(self):
         """Two accounts, two reads each, each read and its one retry
         timing out on connect AND on read (requests' timeout bounds each),
@@ -819,16 +1187,36 @@ class OnePassAtATimeTests(TestCase):
 
     def test_the_quotes_pass_starts_no_read_it_cannot_end_inside_its_beat(
             self):
-        """A P3 read on a connection that never opens gives up after its
-        4 s connect, the retry's pause and the retry's 4 s; a pass starts
-        no read past PASS_BUDGET_S. One pass at a time (LOCK_KEY) and a run
-        not started within its expiry dropped: no pile-up."""
+        """ON A CONNECTION THAT NEVER OPENS (review N3: the bound is that
+        case's alone): a P3 read gives up after its 4 s connect, the
+        retry's pause and the retry's 4 s, and a pass starts no read past
+        PASS_BUDGET_S, so such a pass ends inside its beat. One pass at a
+        time (LOCK_KEY) and a run not started within its expiry dropped:
+        no pile-up."""
         give_up = 2 * ec.READ_CONNECT_TIMEOUT_S + ec.READ_RETRY_DELAY_S
         self.assertLessEqual(eq.PASS_BUDGET_S + give_up, eq.BEAT_S)
         self.assertLess(
             _beat("refresh-etoro-quotes")["options"]["expire_seconds"],
             eq.BEAT_S)
         self.assertGreaterEqual(eq.LOCK_S, eq.BEAT_S)
+
+    def test_a_quotes_pass_that_outlives_its_beat_never_meets_another(self):
+        """THE REVIEW, V5 and N3 (2026-11-13): a P3 read whose connection
+        opens and then never answers waits its 10 s read timeout on each
+        attempt: up to 2 x (4 + 10) + 0.8 s, so a pass that starts one at
+        PASS_BUDGET_S outlives its 15 s beat. The lock outlives that pass:
+        the beats behind it find it held and send nothing, and a run not
+        started within its 10 s expiry is dropped. Never two at once."""
+        t = REAL("k", "u", env="live")
+        self.assertEqual(t._read_timeout(eb.P3), (ec.READ_CONNECT_TIMEOUT_S,
+                                                  ec.READ_TIMEOUT_S))
+        stalled = (2 * (ec.READ_CONNECT_TIMEOUT_S + ec.READ_TIMEOUT_S)
+                   + ec.READ_RETRY_DELAY_S)
+        self.assertGreater(eq.PASS_BUDGET_S + stalled, eq.BEAT_S,
+                           "said as it is: such a pass outlives its beat")
+        self.assertGreaterEqual(eq.LOCK_S, eq.PASS_BUDGET_S + stalled)
+        cache.add(eq.LOCK_KEY, 1, eq.LOCK_S)
+        self.assertEqual(eq.refresh()["skipped"], "a pass is running")
 
 
 # ── 7. the quotes' own answer ─────────────────────────────────────────────
@@ -922,6 +1310,16 @@ class TheWordsTests(TestCase):
         out = StringIO()
         call_command("etoro_budget", stdout=out)
         self.assertIn("eToro's own quotes (every 15 s)", out.getvalue())
+
+    def test_the_digest_says_every_30_s_not_every_minute(self):
+        """THE REVIEW, N2 (2026-11-13): the digest's "stopped" line named
+        the 30 s beat "every minute" (whole minutes rounded it to one)."""
+        from core.component_digest import _cadence_words
+        self.assertEqual(_cadence_words(30 / 3600), "every 30 s")
+        self.assertEqual(_cadence_words(15 / 3600), "every 15 s")
+        self.assertEqual(_cadence_words(60 / 3600), "every minute")
+        self.assertEqual(_cadence_words(300 / 3600), "every 5 minutes")
+        self.assertEqual(_cadence_words(0.5), "every 30 minutes")
 
 
 # ── 9. the money windows do not move ─────────────────────────────────────
