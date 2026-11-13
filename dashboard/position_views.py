@@ -64,6 +64,9 @@ GROUPS = (("", "No grouping"), ("class", "Group by type"),
           ("symbol", "Group by asset"))
 SIDES = ("long", "short")
 VENUES = ("live", "paper")
+#: The money worlds the desk's tabs filter on (2026-11-13, the desk v2:
+#: All, Real, Demo, Paper), as position_summary.world_of reads a row.
+WORLDS = ("live", "demo", "paper")
 #: A value longer than this is junk, not a symbol.
 MAX_PARAM = 64
 #: What a dropped type or asset must look like to be echoed back: a ticker
@@ -72,7 +75,8 @@ MAX_PARAM = 64
 ECHO_TOKEN = re.compile(r"[A-Za-z0-9._:/^=-]{1,24}")
 #: The filters: (view key, query param, what the page calls it).
 FILTERS = (("asset_class", "class", "type"), ("symbol", "symbol", "asset"),
-           ("side", "side", "side"), ("venue", "venue", "venue"))
+           ("side", "side", "side"), ("venue", "venue", "venue"),
+           ("world", "world", "world"))
 
 
 # ── Reading a row: a live dict, a UnifiedPosition or a legacy Position ────
@@ -141,6 +145,15 @@ def row_venue(row, detail=None) -> str:
     if paper is None:
         return ""
     return "paper" if paper else "live"
+
+
+def row_world(row, detail=None) -> str:
+    """live | demo | paper | "" (a row that states no venue): the card
+    detail's world on the positions page, else the row's own (the open
+    book's live dicts carry it, dashboard.views._live_row)."""
+    if isinstance(detail, dict) and detail.get("world") is not None:
+        return str(detail.get("world") or "").lower()
+    return str(_field(row, "world") or "").lower()
 
 
 def row_pnl(row):
@@ -222,8 +235,10 @@ def parse_view(params, pairs, *, history=False) -> dict:
     symbols = _counts(row_symbol(row) for row, _d in pairs)
     sides = _counts(row_side(row) for row, _d in pairs)
     venues = _counts(row_venue(row, detail) for row, detail in pairs)
+    worlds = _counts(row_world(row, detail) for row, detail in pairs)
     side = _param(params, "side").lower()
     venue = _param(params, "venue").lower()
+    world = _param(params, "world").lower()
     group = _param(params, "group").lower()
     asked_class = _param(params, "class")
     asked_symbol = _param(params, "symbol")
@@ -235,7 +250,10 @@ def parse_view(params, pairs, *, history=False) -> dict:
         "symbol": _pick(asked_symbol, symbols),
         "side": side if side in SIDES else "",
         "venue": venue if venue in VENUES else "",
+        "world": world if world in WORLDS else "",
         "group": group if group in dict(GROUPS) else "",
+        # The desk's tabs count the whole book, world by world.
+        "world_counts": {w: worlds.get(w, 0) for w in WORLDS},
     }
     # A type or an asset asked for and not in the book: off, and said so.
     # The value is echoed (escaped) only when it looks like a ticker; any
@@ -271,6 +289,8 @@ def matches(row, detail, view) -> bool:
     if view["side"] and row_side(row) != view["side"]:
         return False
     if view["venue"] and row_venue(row, detail) != view["venue"]:
+        return False
+    if view.get("world") and row_world(row, detail) != view["world"]:
         return False
     return True
 
@@ -461,7 +481,35 @@ def _build(params, pairs, *, history, limit, keep, base_url):
         "keep": keep,
         "clear_href": base_url + ("?" + urlencode(keep) if keep else ""),
     })
+    view["world_tabs"] = _world_tabs(view, keep, base_url, len(pairs))
     return view
+
+
+#: The desk's tabs: (value, the word on the tab).
+WORLD_TABS = (("", "All"), ("live", "Real"), ("demo", "Demo"),
+              ("paper", "Paper"))
+
+
+def _world_tabs(view, keep, base_url, n_total):
+    """[{value, label, n, href, current}]: the desk's world tabs, each a
+    link that keeps the chosen order, filters and grouping and sets only
+    the world (a filter in the query string rides every refresh)."""
+    chosen = [("sort", view["sort"] if view["sort"] != view["default_sort"]
+               else ""),
+              ("class", view["asset_class"]), ("symbol", view["symbol"]),
+              ("side", view["side"]), ("venue", view["venue"]),
+              ("group", view["group"])]
+    base = list(keep) + [(k, v) for k, v in chosen if v]
+    out = []
+    for value, label in WORLD_TABS:
+        params = base + ([("world", value)] if value else [])
+        out.append({"value": value, "label": label,
+                    "n": (n_total if not value
+                          else view["world_counts"].get(value, 0)),
+                    "href": base_url + ("?" + urlencode(params)
+                                        if params else ""),
+                    "current": view.get("world", "") == value})
+    return out
 
 
 def build_view(params, pairs, *, history=False, limit=None, keep=None,

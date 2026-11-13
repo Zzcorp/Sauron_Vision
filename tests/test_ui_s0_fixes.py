@@ -489,10 +489,15 @@ class CloseInViewMeasuredTests(TestCase):
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class PositionCardsMeasuredTests(TestCase):
-    """/positions/' row of small cards (direction, asset class, monthly
-    realized P&L): no card narrower than 300 px while the column is wider
-    than that, and the asset-class table whole without a sideways scroll,
-    at 1280, 1440 and 1920, rail shut and open."""
+    """/positions/' row of small cards: no card narrower than 300 px while
+    the column is wider than that, and its tables whole without a sideways
+    scroll, at 1280, 1440 and 1920, rail shut and open.
+
+    The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+    "amazing work, bravo, I need it fast!!") replaced the old row
+    (direction, asset class, monthly realized P&L) with its lower row:
+    closed in 24 h, the REAL exposure by class and by side, closed in 30
+    days by world. The same measures stand, on that row."""
 
     VIEWPORTS = ((1280, 800), (1440, 900), (1920, 1080))
 
@@ -508,7 +513,7 @@ class PositionCardsMeasuredTests(TestCase):
             });
         }
         var rail = document.querySelector(".signals-rail");
-        var grid = document.querySelector(".grid.grid-3");
+        var grid = document.querySelector(".pd-lower");
         var out = { width: window.innerWidth, states: {} };
         var states = ["closed", "open"];
         for (var i = 0; i < states.length; i++) {
@@ -523,10 +528,12 @@ class PositionCardsMeasuredTests(TestCase):
                     return c.getBoundingClientRect().width;
                 }),
                 tables: Array.prototype.map.call(
-                    grid.querySelectorAll(".table-wrapper"), function (w) {
-                        return { head: w.querySelector("thead").textContent
+                    grid.querySelectorAll("table"), function (t) {
+                        var w = t.parentElement;
+                        return { head: t.querySelector("thead").textContent
                                          .replace(/\s+/g, " ").trim(),
-                                 scrollWidth: w.scrollWidth,
+                                 scrollWidth: Math.max(w.scrollWidth,
+                                     Math.ceil(t.getBoundingClientRect().width)),
                                  clientWidth: w.clientWidth };
                     })
             };
@@ -540,22 +547,33 @@ class PositionCardsMeasuredTests(TestCase):
         _quote("BTCUSD", 60600)
         _trade(user)
         _legacy(user)
+        # The lower row's three cards with something in each: a REAL
+        # position for the exposure, a close in the last 24 hours.
+        _trade(user, paper=False, qty="0.1")
+        from bot_program.models import AssetBotTrade
+        closed = _trade(user, status="CLOSED", qty="0.2")
+        AssetBotTrade.objects.filter(pk=closed.pk).update(
+            exit_price=Decimal("61200"), pnl=Decimal("240"),
+            closed_at=timezone.now() - timedelta(hours=3))
         client = Client()
         client.force_login(user)
         page = _get(client, "/positions/")
-        if "By asset class" not in page:
-            raise AssertionError("/positions/ no longer shows the asset-class "
-                                 "card this measures")
+        if 'aria-label="Closed in thirty days, by world"' not in page:
+            raise AssertionError("/positions/ no longer shows the lower row "
+                                 "this measures")
         cls.got = _measure({"/positions/": page}, cls.VIEWPORTS, cls.PROBE,
                            "sv-s0-cards-")
 
     def test_the_asset_class_table_is_there(self):
+        # The lower row's tables (S2.2, 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"): the 24 h closes and the 30 days by world.
         for (url, width), got in sorted(self.got.items()):
             for state, row in sorted(got["states"].items()):
                 with self.subTest(width=width, rail=state):
                     self.assertEqual(len(row["cards"]), 3, row)
-                    self.assertTrue(any("unreal" in t["head"].lower()
-                                        for t in row["tables"]), row)
+                    heads = [t["head"].lower() for t in row["tables"]]
+                    self.assertTrue(any("exit" in h for h in heads), row)
+                    self.assertTrue(any("won" in h for h in heads), row)
 
     def test_no_card_is_squeezed_under_300_px(self):
         for (url, width), got in sorted(self.got.items()):

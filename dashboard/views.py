@@ -3356,11 +3356,13 @@ def _render_positions(request, live_only, *, deep_link=None):
                                         orcs=True, venues=open_venues,
                                         quotes=for_request(request)))),
         keep={"tab": "open"}, base_url=positions_url)
+    closed_pairs = list(zip(
+        closed_positions,
+        _position_card_details(request.user, closed_positions)))
     closed_view = build_view(
         request.GET if tab == "history" else {},
-        list(zip(closed_positions,
-                 _position_card_details(request.user, closed_positions))),
-        history=True, keep={"tab": "history"}, base_url=positions_url)
+        closed_pairs, history=True, keep={"tab": "history"},
+        base_url=positions_url)
 
     # eToro's OWN used figure heads the strip (2026-10-31): see
     # _etoro_cell; the split rides under the strip.
@@ -3368,6 +3370,15 @@ def _render_positions(request, live_only, *, deep_link=None):
     etoro = (capital or {}).get("etoro")
     if etoro:
         strip["etoro"] = _etoro_cell(etoro)
+    # THE DESK (2026-11-13, the desk v2 the operator approved: "amazing
+    # work, bravo, I need it fast!!"): the figures the board draws around
+    # the open table, read off the rows above (dashboard.positions_desk).
+    # Display only; the open tab and its refresh only.
+    desk = None
+    if tab == "open":
+        from .positions_desk import desk as _desk
+        desk = _desk(request.user, open_objects, open_rows, closed_pairs,
+                     etoro)
 
     context = {
         "page_id": "positions",
@@ -3404,6 +3415,7 @@ def _render_positions(request, live_only, *, deep_link=None):
         # A "Close position" link's note and dialog (2026-10-24): the full
         # page only, so the live refresh never opens it a second time.
         "deep_link": None if live_only else deep_link,
+        "desk": desk,
     }
 
     if not live_only:

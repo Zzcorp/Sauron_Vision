@@ -586,11 +586,13 @@ class PositionsLayoutTests(TestCase):
 
     @staticmethod
     def _positions_style():
+        # The page's style block moved into the desk's own sheet (S2.2, the
+        # desk v2 the operator approved, 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"); these rules moved with it, unchanged.
         from pathlib import Path
         from django.conf import settings
-        src = (Path(settings.BASE_DIR) / "templates" / "dashboard"
-               / "positions_list.html").read_text(encoding="utf-8")
-        return src.split("<style>", 1)[1].split("</style>", 1)[0]
+        return (Path(settings.BASE_DIR) / "static" / "css"
+                / "sv-positions.css").read_text(encoding="utf-8")
 
     def test_the_trade_row_wraps_instead_of_pushing_the_page(self):
         """Flex items do not shrink below min-content and .card is
@@ -620,7 +622,9 @@ class PositionsLayoutTests(TestCase):
         from django.conf import settings
         src = (Path(settings.BASE_DIR) / "templates" / "dashboard"
                / "positions_list.html").read_text(encoding="utf-8")
-        open_tab = src.split("Current Positions", 1)[1].split(
+        # "Open positions", the desk v2's title for the card (S2.2,
+        # 2026-11-13: "amazing work, bravo, I need it fast!!").
+        open_tab = src.split(">Open positions<", 1)[1].split(
             "Position Analytics", 1)[0]
         self.assertIn('<div class="table-wrapper">', open_tab)
         # Numbers and dates keep nowrap; only the identifier column wraps,

@@ -1,0 +1,881 @@
+/* Sauron Vision: the desk on /positions/ (UI batch B7, S2.2, 2026-11-13).
+
+   The operator approved the desk v2 board ("amazing work, bravo, I need it
+   fast!!"): Bloomberg's discipline and TradingView's calm, in Sauron's
+   identity. This sheet draws that board's page inside the frame, on the
+   tokens (sv-tokens.css) and the kit (sv-kit.css), and nowhere else: it is
+   linked by templates/dashboard/positions_list.html alone, so every rule
+   here is this page's.
+
+     - THE KPI STRIP: two cards of 104 px, the open P&L by world (REAL,
+       DEMO, PAPER apart, never summed) and the REAL book at eToro;
+     - OPEN POSITIONS: a 40 px head (title, count, the world tabs, the keys,
+       CLOSE ALL with its square), one line a position (36 px), the Orc
+       line and the row's other facts in a disclosure row;
+     - THE LOWER ROW: closed in 24 h, the REAL exposure, closed in 30 days;
+     - the cards under it, the close dialog, the level editor and the
+       selection bar, on the same tokens: their words, steps and PIN are
+       their scripts', untouched.
+
+   Rules this page keeps (plan §2.2, §3.9, §10): every figure on an opaque
+   ground, in the number face; colour never alone (a sign and an arrow, a
+   word); REAL is the only solid red fill (the chip and a row's 3 px edge,
+   kept under hover and focus); the Eye's green only on the live dot, the
+   selected tab and a checked box; nothing glows; nothing under 11 px. */
+
+.pd-desk {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sv-gutter);
+    min-width: 0;
+    font-family: var(--sv-font-sans);
+    color: var(--sv-ink-1);
+}
+.pd-desk .pd-card {
+    position: relative;
+    min-width: 0;
+    background: var(--sv-bg-1);
+    border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card);
+    box-shadow: none;
+}
+.pd-desk .pd-title { margin: 0; font-size: 12px; color: var(--sv-ink-2); white-space: nowrap; }
+.pd-desk .pd-note { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
+.pd-desk .pd-note--end { margin-left: auto; }
+.pd-desk .pd-lbl {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    text-transform: uppercase;
+    color: var(--sv-ink-3);
+    white-space: nowrap;
+}
+.pd-desk .pd-m, .pd-desk .pd-pv, .pd-desk .pd-kv, .pd-desk td.num {
+    font-family: var(--sv-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+.pd-desk .pd-sr {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* A P&L figure: its sign colour, the arrow in a fixed 2ch slot after it so
+   every decimal point of a column stands at one x, the estimate mark ≈
+   before it. Zero and unknown are ink-2 and the em dash. */
+.pd-desk .pd-pv { color: var(--sv-ink-2); white-space: nowrap; }
+.pd-desk .pd-pv.up { color: var(--sv-up); }
+.pd-desk .pd-pv.down { color: var(--sv-down); }
+.pd-desk .pd-dg { display: inline-block; width: 2ch; text-align: right; font-family: var(--sv-font-mono); }
+.pd-desk .pd-est { margin-right: .5ch; }
+.pd-desk td.up { color: var(--sv-up); }
+.pd-desk td.down { color: var(--sv-down); }
+
+/* The world chips at the board's 18 px. */
+.pd-desk .sv-world {
+    display: inline-flex; align-items: center; box-sizing: border-box;
+    height: 18px; line-height: 1; flex: none; vertical-align: middle;
+}
+
+/* ── 1. The KPI strip ───────────────────────────────────────────────────── */
+.pd-strip { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pd-kpis {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sv-gutter);
+}
+.pd-desk .pd-kgrp { display: flex; flex-direction: column; height: 104px; overflow: hidden; }
+.pd-khead {
+    display: flex; align-items: center; gap: 10px;
+    height: 28px; padding: 0 14px; box-sizing: border-box; flex: none;
+    border-bottom: 1px solid var(--sv-line-1);
+}
+.pd-desk .pd-khead .pd-title { font-size: var(--sv-fs-micro); }
+.pd-kcells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1 1 auto; min-height: 0; }
+.pd-kc {
+    display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    padding: 0 14px; min-width: 0;
+    border-right: 1px solid var(--sv-line-1);
+}
+.pd-kc:last-child { border-right: 0; }
+/* The history tab's strip: the closed book's five figures on one card. */
+.pd-kcells--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pd-kl { display: flex; align-items: center; gap: 8px; height: 18px; }
+.pd-kr { display: flex; align-items: baseline; gap: 8px; height: 24px; min-width: 0; }
+.pd-desk .pd-kv {
+    font-size: var(--sv-fs-figure); font-weight: var(--sv-figure-weight);
+    line-height: 24px; white-space: nowrap; color: var(--sv-ink-1);
+}
+.pd-desk .pd-kv--2 { font-size: 16px; }
+.pd-desk .pd-kv--over { color: var(--sv-warn); }
+.pd-desk .pd-ks {
+    font-size: var(--sv-fs-micro); color: var(--sv-ink-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+/* eToro's own used figure and its split, one line under the cards. */
+.pd-etoro {
+    margin: 0; padding: 0 2px;
+    font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-3);
+}
+.pd-etoro .pd-lbl { margin-right: 4px; }
+.pd-etoro .pd-etoro-v { color: var(--sv-ink-1); }
+
+/* ── 2. Open positions ──────────────────────────────────────────────────── */
+.pd-chead {
+    display: flex; align-items: center; gap: 12px;
+    height: var(--sv-card-head); padding: 0 14px; box-sizing: border-box;
+    border-bottom: 1px solid var(--sv-line-2);
+    min-width: 0;
+}
+.pd-desk .pd-bub {
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); line-height: 16px;
+    padding: 0 6px; border-radius: var(--sv-radius-round);
+    background: var(--sv-bg-3); color: var(--sv-ink-1); flex: none;
+}
+.pd-seg {
+    display: inline-flex; align-items: stretch; height: 24px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    overflow: hidden; flex: none;
+}
+.pd-desk .pd-seg-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 9px; text-decoration: none; white-space: nowrap;
+    font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button);
+    color: var(--sv-ink-2); background: transparent;
+    border-right: 1px solid var(--sv-line-2);
+}
+.pd-desk .pd-seg-btn:last-child { border-right: 0; }
+.pd-desk .pd-seg-btn:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+/* The chosen world is selected: bg-4, ink-1 and the Eye's underline. */
+.pd-desk .pd-seg-btn.is-on { color: var(--sv-ink-1); background: var(--sv-bg-4); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+.pd-keys {
+    margin-left: auto; display: flex; align-items: center; gap: 5px;
+    font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; min-width: 0; overflow: hidden;
+}
+.pd-desk .pd-kbd {
+    display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+    min-width: 16px; height: 16px; padding: 0 4px; margin-left: 4px;
+    border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-chip);
+    background: var(--sv-bg-2); color: var(--sv-ink-2);
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); font-weight: 500; line-height: 1;
+}
+.pd-desk .sv-live-chip {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); color: var(--sv-ink-2); white-space: nowrap; flex: none;
+}
+.pd-desk .sv-live-chip.is-offline { color: var(--sv-ink-3); }
+.pd-keys + .sv-live-chip { margin-left: 4px; }
+.pd-chead > .sv-live-chip:first-of-type:not(.pd-keys + .sv-live-chip) { margin-left: auto; }
+/* CLOSE ALL: the kit's stop variant with its square, at the board's 28 px
+   (a desk's height; the phone tier keeps its 48 px tap floor). */
+.pd-desk .pd-chead .btn.btn-stop {
+    display: inline-flex; align-items: center; gap: 7px; flex: none;
+    padding: 0 12px; margin: 0;
+    border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button); text-transform: uppercase; line-height: 1;
+}
+@media (min-width: 769px) {
+    .pd-desk .pd-chead .btn.btn-stop { height: 28px; min-height: 28px; }
+}
+
+/* The order-and-filter bar, folded in the head: its form is main's, in a
+   popover under its button (the top layer: nothing in the table paints
+   over it, and this sheet sets no stacking number). */
+.pd-desk .pd-filter-btn {
+    anchor-name: --pd-filter;
+    display: inline-flex; align-items: center; flex: none; height: 24px; padding: 0 9px; margin: 0; cursor: pointer;
+    box-sizing: border-box;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button);
+    color: var(--sv-ink-2); background: transparent; white-space: nowrap;
+}
+.pd-desk .pd-filter-btn::after { content: "▾"; margin-left: 6px; font-family: var(--sv-font-mono); }
+.pd-desk .pd-filter-btn:hover, .pd-desk .pd-filter-btn.is-on { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+.pd-desk .pd-filter-pop {
+    position-anchor: --pd-filter;
+    inset: auto; top: anchor(bottom); right: anchor(right); margin: 6px 0 0;
+    width: 560px; max-width: 80vw; box-sizing: border-box; overflow: visible;
+    padding: 12px; color: var(--sv-ink-1);
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+}
+@supports not (anchor-name: --pd-filter) {
+    .pd-desk .pd-filter-pop { inset: 0; margin: auto; }
+}
+.pd-desk .pd-filter-pop > .pos-filter { gap: 8px 12px; margin: 0; padding: 0; border: 0; background: transparent; }
+.pd-desk .pos-filter .pos-filter-field {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); color: var(--sv-ink-3);
+}
+.pd-desk .pos-filter .pos-filter-field select { font-size: 12px; }
+.pd-desk .pos-filter-clear { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2); }
+.pd-desk .pos-view-note {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2);
+    padding: 7px 14px; border-bottom: 1px solid var(--sv-line-1);
+}
+.pd-desk .pos-view-note b { color: var(--sv-ink-1); }
+
+/* The table: one line a position. The board's widths, fixed, so a figure
+   that grows never pushes CLOSE out of the card; under 1440 px the table
+   keeps them and scrolls inside its wrapper with CLOSE pinned (S0). */
+.pd-desk .pd-pos .table-wrapper { overflow-x: auto; }
+.pd-desk .pd-table {
+    table-layout: fixed; width: 100%; min-width: 960px;
+    border-collapse: collapse; margin: 0;
+    font-size: var(--sv-fs-base); color: var(--sv-ink-1);
+}
+.pd-table .pd-c-sel { width: 31px; }
+.pd-table .pd-c-sym { width: 120px; }
+.pd-table .pd-c-side { width: 76px; }
+.pd-table .pd-c-world { width: 68px; }
+.pd-table .pd-c-qty { width: 64px; }
+.pd-table .pd-c-px { width: 78px; }
+.pd-table .pd-c-lvl { width: 84px; }
+.pd-table .pd-c-pnl { width: 92px; }
+.pd-table .pd-c-r { width: 66px; }
+.pd-table .pd-c-act { width: 86px; }
+.pd-table.pd-table--retry .pd-c-act { width: 116px; }
+.pd-desk .pd-table > thead > tr > th {
+    height: 28px; padding: 0 7px; box-sizing: border-box;
+    background: var(--sv-bg-2); color: var(--sv-ink-3);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+    text-align: left; white-space: nowrap; overflow: hidden;
+    border-bottom: 1px solid var(--sv-line-2);
+}
+.pd-desk .pd-table > thead > tr > th.num { text-align: right; }
+.pd-desk .pd-table > tbody > tr { background: transparent; }
+.pd-desk .pd-table > tbody > tr > td {
+    height: 36px; padding: 0 7px; box-sizing: border-box;
+    border-bottom: 1px solid var(--sv-line-1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    vertical-align: middle; line-height: 1.25;
+    background: transparent; color: var(--sv-ink-1);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-base);
+}
+.pd-desk .pd-table > tbody > tr > td.num { text-align: right; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+/* Under the pointer the row takes bg-3, its cells and the pinned CLOSE
+   cell with it (S0: the pin paints the row's ground). */
+.pd-desk .pd-table > tbody > tr[data-sv-position-row]:hover { background: var(--sv-bg-3); }
+.pd-desk .pd-table > tbody > tr[data-sv-position-row]:hover > td { background: var(--sv-bg-3); }
+/* DEMO and PAPER figures one step down (the board): REAL stays the brightest. */
+.pd-desk .pd-table tr[data-pos-world="demo"] > td.pd-f,
+.pd-desk .pd-table tr[data-pos-world="paper"] > td.pd-f { color: var(--sv-ink-2); }
+/* The REAL edge rides the row's first cell (sauron.css: tr.sv-row--live >
+   td:first-child), an inset stroke drawn over any ground the cell takes;
+   the closed list's rows keep a cell of their own for it. */
+.pd-desk .pd-table > tbody > tr.sv-row--live > td:first-child { box-shadow: inset var(--sv-edge-world) 0 0 var(--sv-real); }
+.pd-desk .pd-tc th.pd-edge, .pd-desk .pd-tc td.pd-edge { width: 3px; padding: 0; }
+.pd-desk .pd-table td.sv-sel-cell, .pd-desk .pd-table th.sv-sel-cell { padding: 0 0 0 11px; text-align: left; overflow: visible; text-overflow: clip; }
+.pd-desk .pd-table .sv-sel-box { margin: 0; vertical-align: middle; }
+/* The chevron leads the symbol's cell: the disclosure of the row. */
+.pd-desk .pd-table > tbody > tr > td.pd-symtd { padding-left: 2px; }
+.pd-desk .pd-table .pd-symtd > .pd-disc { display: inline-flex; vertical-align: middle; margin-right: 4px; }
+.pd-desk .pd-disc {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; padding: 0; margin: 0;
+    border: 0; border-radius: var(--sv-radius-ctl);
+    background: transparent; color: var(--sv-ink-3); cursor: pointer;
+}
+.pd-desk .pd-disc:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+.pd-desk .pd-disc[aria-expanded="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+.pd-desk .pd-disc svg { transition: transform var(--sv-dur-hover) var(--sv-ease); }
+.pd-desk .pd-disc[aria-expanded="true"] svg { transform: rotate(90deg); }
+/* The symbol: the instrument's own page, a link that reads as one before
+   the pointer arrives (a dotted rule in the line ink, solid under the
+   pointer). Two marks in one cell wrap inside it, never widen the table. */
+.pd-desk .pos-sym-cell {
+    display: inline-flex; align-items: center; vertical-align: middle;
+    flex-wrap: wrap; gap: 2px 7px; min-width: 0; max-width: calc(100% - 28px);
+    white-space: normal;
+}
+.pd-desk .pos-sym-cell .pos-sym-link {
+    font-family: var(--sv-font-mono); font-weight: 500; letter-spacing: 0;
+    color: var(--sv-ink-1); overflow-wrap: anywhere;
+    text-decoration: underline; text-decoration-style: dotted;
+    text-decoration-color: var(--sv-line-3); text-underline-offset: 3px;
+}
+.pd-desk .pos-sym-cell .pos-sym-link:hover,
+.pd-desk .pos-sym-cell .pos-sym-link:focus-visible { text-decoration-style: solid; text-decoration-color: var(--sv-ink-3); }
+.pd-desk .pos-sym-plain { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-2); }
+.pd-desk .pd-sym {
+    font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-1);
+    text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0;
+}
+.pd-desk a.pd-sym:hover { text-decoration: underline; text-decoration-color: var(--sv-line-3); text-underline-offset: 3px; }
+.pd-desk .pd-orcm { display: inline-flex; flex: none; color: var(--sv-ink-3); }
+.pd-desk .pd-sd {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+    color: var(--sv-ink-2); white-space: nowrap;
+}
+/* Stop and target: ink-2, editable where they are read (sv-level-edit.js). */
+.pd-desk .pd-table .lvl-edit {
+    display: block; width: 100%; margin: 0; padding: 4px 0; box-sizing: border-box;
+    border: 1px dashed transparent; border-radius: var(--sv-radius-chip);
+    background: transparent; color: var(--sv-ink-2); text-align: right; cursor: pointer;
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-base);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pd-desk .pd-table .lvl-edit:hover,
+.pd-desk .pd-table .lvl-edit:focus-visible { border-color: var(--sv-line-3); background: var(--sv-bg-3); color: var(--sv-ink-1); }
+.pd-desk .pd-table .pos-price-cell .pos-price { color: inherit; }
+.pd-desk .lvl-add { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); letter-spacing: var(--sv-track-label); }
+/* Priced by (§3.7): a 6 px dot, the source and the age in words. */
+.pd-desk .pd-src {
+    position: relative; display: block; padding-left: 12px;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pd-desk .pd-src::before {
+    content: ""; position: absolute; left: 0; top: 50%; margin-top: -3px;
+    width: 6px; height: 6px; border-radius: var(--sv-radius-round); box-sizing: border-box;
+    background: var(--sv-ink-2);
+}
+.pd-desk .pd-src[data-q-state="live"]::before { background: var(--sv-eye); }
+.pd-desk .pd-src[data-q-state="shut"]::before { background: transparent; border: 1px solid var(--sv-ink-3); }
+.pd-desk .pd-src.sv-age--stale::before, .pd-desk .pd-src.sv-age--dead::before { background: var(--sv-warn); }
+.pd-desk .pd-src[data-q-state="none"]::before, .pd-desk .pd-src--none::before { display: none; }
+.pd-desk .pd-src--none { padding-left: 0; color: var(--sv-ink-3); }
+/* CLOSE: the neutral outline (.btn-danger, sauron.css), always in view; a
+   desk's 28 px, the phone tier's 48 px tap floor under 769 px. */
+.pd-desk .pd-table > tbody > tr > td.pd-act { text-align: right; padding-right: 10px; overflow: visible; text-overflow: clip; }
+.pd-desk .pd-table td.pd-act .btn {
+    display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; margin: 0;
+    border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button); line-height: 1;
+}
+@media (min-width: 769px) {
+    .pd-desk .pd-table td.pd-act .btn { height: 28px; min-height: 28px; }
+}
+/* A level the price went through: the price in the warning ink, the words
+   in its title and in the row's detail. */
+.pd-desk .pd-table .pos-price-cell.is-through .lvl-edit,
+.pd-desk .pd-table .pos-price-cell.is-through .pos-price { color: var(--sv-warn); }
+/* A ticked row is selected: bg-4 (the kit's selected row), never a wash. */
+.pd-desk .pd-table [data-sv-position-row]:has(> td > .sv-sel-box:checked) > td { background: var(--sv-bg-4); }
+.pd-desk .pd-table [data-sv-position-row]:has(> td > .sv-sel-box:checked) { --sv-pin-tint: var(--sv-bg-4); }
+/* The row the keys are on (J and K): a frame in ink-2 on bg-3, no light;
+   the REAL edge stays drawn inside it. */
+.pd-desk .pd-table > tbody > tr.is-focus > td {
+    background: var(--sv-bg-3);
+    box-shadow: inset 0 1px 0 var(--sv-ink-2), inset 0 -1px 0 var(--sv-ink-2);
+}
+.pd-desk .pd-table > tbody > tr.sv-row--live.is-focus > td:first-child {
+    box-shadow: inset var(--sv-edge-world) 0 0 var(--sv-real), inset 0 1px 0 var(--sv-ink-2), inset 0 -1px 0 var(--sv-ink-2);
+}
+/* The row's detail: the Orc line, then what the one line leaves out; its
+   ground is the row's own, so the pinned column shows it too. */
+.pd-desk .pd-table > tbody > tr.pd-det { background: var(--sv-bg-2); }
+/* The pinned CLOSE column paints the row's own ground (S0: --sv-pin-row):
+   no zebra on this table, the detail row's bg-2 on its own pad. */
+body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr[data-sv-position-row]:not(:hover) { --sv-pin-row: transparent; }
+body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
+.pd-desk .pd-table > tbody > tr.pd-det { --sv-pin-row: var(--sv-bg-2); }
+.pd-desk .pd-table > tbody > tr.pd-det > td {
+    height: auto; padding-top: 6px; padding-bottom: 7px;
+    background: var(--sv-bg-2); border-bottom: 1px solid var(--sv-line-2);
+    white-space: normal; overflow: visible; line-height: 18px; vertical-align: middle;
+}
+.pd-desk .pd-table > tbody > tr.pd-det > td.pd-det-cell { padding-left: 8px; }
+.pd-detl { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sv-ink-2); }
+.pd-desk .pos-orc-line { font-family: var(--sv-font-sans); font-size: 12px; line-height: 18px; color: var(--sv-ink-2); margin: 0; max-width: none; }
+.pd-desk .pos-orc-line a { color: var(--sv-ink-2); text-decoration: none; }
+.pd-desk .pos-orc-line a:hover { color: var(--sv-ink-1); text-decoration: underline; text-decoration-color: var(--sv-line-3); text-underline-offset: 3px; }
+.pd-det2 {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 3px;
+    font-size: var(--sv-fs-micro); color: var(--sv-ink-3);
+}
+.pd-desk .pd-det2 .pd-m { color: var(--sv-ink-2); }
+.pd-desk .pd-det2 .pd-m.up, .pd-desk .pd-det2 .sign-up { color: var(--sv-up); }
+.pd-desk .pd-det2 .pd-m.down, .pd-desk .pd-det2 .sign-down { color: var(--sv-down); }
+.pd-desk .pd-det2 .sign-flat { color: var(--sv-ink-2); }
+.pd-desk .pd-det2 a { color: var(--sv-ink-2); text-decoration: underline; text-decoration-color: var(--sv-line-3); text-underline-offset: 3px; }
+.pd-desk .pd-det2 a:hover { color: var(--sv-ink-1); }
+.pd-desk .pd-det2 .sv-ident { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-2); background: transparent; padding: 0; }
+.pd-desk .pd-pnlsrc { color: var(--sv-ink-3); }
+.pd-desk .pd-det2 .pos-cap-share, .pd-desk .pd-det2 .cap-pct { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); font-variant-numeric: tabular-nums; color: var(--sv-ink-2); }
+.pd-desk .pd-thru { font-weight: 600; color: var(--sv-warn); }
+.pd-desk .pd-empty { margin: 0; padding: 14px; font-size: 12px; color: var(--sv-ink-3); }
+.pd-desk .empty-state { padding: 28px 16px; text-align: center; color: var(--sv-ink-2); font-size: 12px; }
+.pd-desk .empty-state p { color: var(--sv-ink-2); font-size: 12px; letter-spacing: var(--sv-track-label); }
+.pd-desk .empty-state a { color: var(--sv-ink-1); }
+.pd-desk .empty-state .empty-icon { color: var(--sv-ink-3); font-size: 20px; opacity: 1; }
+
+/* The selection bar (sv-close-advice.js): on bg-2, its buttons neutral; the
+   close among them neutral-strong, never coral. */
+.pd-desk .sv-sel-bar {
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+    font-family: var(--sv-font-sans); font-size: 12px; color: var(--sv-ink-1);
+}
+.pd-desk .sv-sel-bar .sv-sel-sep { color: var(--sv-ink-3); }
+.pd-desk .sv-sel-bar .sv-sel-btn, .pd-desk .sv-sel-bar .sv-sel-clear {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button); text-transform: uppercase;
+    border-radius: var(--sv-radius-ctl); filter: none;
+}
+.pd-desk .sv-sel-bar .sv-sel-btn--ask { background: var(--sv-bg-3); border: 1px solid var(--sv-line-3); color: var(--sv-ink-1); }
+.pd-desk .sv-sel-bar .sv-sel-btn--close { background: transparent; border: 1.5px solid var(--sv-ink-1); color: var(--sv-ink-1); }
+.pd-desk .sv-sel-bar .sv-sel-clear { background: transparent; border: 1px solid var(--sv-line-2); color: var(--sv-ink-2); }
+.pd-desk .sv-sel-bar .sv-sel-btn:hover { background: var(--sv-bg-4); filter: none; }
+
+/* ── 3. The lower row ───────────────────────────────────────────────────── */
+.pd-lower {
+    display: grid; gap: var(--sv-gutter); align-items: stretch;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* The board's three cards (590 : 248 : 274 at 1440) under the S0 floor:
+   no card under 300 px while the row is wider. A desk 1160 px wide or
+   more holds the three on one line (the 24 hours takes the rest, the
+   exposure and the 30 days 300 each); narrower, the 24 hours runs the
+   full width above the other two; on a phone, one card a line. */
+.pd-desk { container: pd-desk / inline-size; }
+.pd-desk .pd-low { display: flex; flex-direction: column; min-height: 298px; min-width: 0; overflow: hidden; }
+.pd-desk .pd-low--c24 { grid-column: 1 / -1; }
+@container pd-desk (min-width: 1160px) {
+    .pd-lower { grid-template-columns: minmax(0, 1fr) 300px 300px; }
+    .pd-desk .pd-low--c24 { grid-column: auto; }
+}
+@container pd-desk (max-width: 639px) {
+    .pd-lower { grid-template-columns: minmax(0, 1fr); }
+}
+/* A card with nothing to list hugs its one line rather than pretend to
+   hold a table; the ground it leaves is the page's void. */
+.pd-desk .pd-low:has(> .pd-empty) { align-self: start; min-height: 0; }
+.pd-low .pd-chead { gap: 10px; }
+.pd-csum { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; flex: none; }
+.pd-desk .pd-none { color: var(--sv-ink-3); font-size: 12px; }
+.pd-desk .pd-lk {
+    margin-left: auto; flex: none;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button); text-transform: uppercase;
+    color: var(--sv-ink-2); text-decoration: none; white-space: nowrap;
+}
+.pd-desk .pd-lk:hover { color: var(--sv-ink-1); }
+.pd-desk .pd-tc, .pd-desk .pd-t30 {
+    width: 100%; table-layout: fixed; border-collapse: collapse; margin: 0;
+    font-size: 12px; color: var(--sv-ink-1);
+}
+.pd-tc .pd-tc-sym { width: 66px; }
+.pd-tc .pd-tc-side { width: 78px; }
+.pd-tc .pd-tc-world { width: 64px; }
+.pd-tc .pd-tc-px { width: 70px; }
+.pd-tc .pd-tc-pnl { width: 80px; }
+.pd-tc .pd-tc-r { width: 58px; }
+.pd-tc .pd-tc-by { width: 46px; }
+.pd-desk .pd-tc > thead > tr > th, .pd-desk .pd-t30 > thead > tr > th {
+    height: 26px; padding: 0 6px; box-sizing: border-box;
+    background: var(--sv-bg-2); color: var(--sv-ink-3);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+    text-align: left; white-space: nowrap; overflow: hidden;
+    border-bottom: 1px solid var(--sv-line-2);
+}
+.pd-desk .pd-tc > thead > tr > th.num, .pd-desk .pd-t30 > thead > tr > th.num { text-align: right; }
+.pd-desk .pd-tc > tbody > tr > td, .pd-desk .pd-t30 > tbody > tr > td {
+    height: 29px; padding: 0 6px; box-sizing: border-box;
+    border-bottom: 1px solid var(--sv-line-1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+    background: transparent; color: var(--sv-ink-1);
+    font-family: var(--sv-font-sans); font-size: 12px;
+}
+.pd-desk .pd-tc > tbody > tr > td.num, .pd-desk .pd-t30 > tbody > tr > td.num { text-align: right; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+.pd-desk .pd-tc > tbody > tr:not(.sv-row--live) > td.pd-f { color: var(--sv-ink-2); }
+.pd-desk .pd-tc .pd-by { color: var(--sv-ink-2); }
+.pd-t30 .pd-t30-w { width: 66px; }
+.pd-t30 .pd-t30-n { width: 46px; }
+.pd-t30 .pd-t30-r { width: 66px; }
+.pd-t30 .pd-t30-k { width: 34px; }
+.pd-desk .pd-t30 > thead > tr > th, .pd-desk .pd-t30 > tbody > tr > td { padding: 0 6px; }
+.pd-desk .pd-t30 > tbody > tr > td { height: 33px; }
+.pd-desk .pd-t30 > tbody > tr:not(:first-child) > td.pd-f { color: var(--sv-ink-2); }
+/* The REAL exposure: ink bars by class on a bg-3 track (weights by
+   brightness, no hue), the sides at the volume dose of their fills. */
+.pd-exb { padding: 12px 14px; display: flex; flex-direction: column; gap: 11px; }
+.pd-exr { display: grid; grid-template-columns: 72px minmax(0, 1fr) 44px; align-items: center; column-gap: 8px; row-gap: 5px; }
+.pd-desk .pd-exl { font-size: 12px; color: var(--sv-ink-2); }
+.pd-desk .pd-exv { font-size: 12px; text-align: right; color: var(--sv-ink-1); }
+.pd-desk .pd-exs { font-size: var(--sv-fs-micro); text-align: right; color: var(--sv-ink-3); }
+.pd-bar { grid-column: 1 / -1; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-bg-3); overflow: hidden; }
+.pd-bar i { display: block; height: 100%; border-radius: var(--sv-radius-round); background: var(--sv-ink-2); }
+.pd-desk .pd-exside { margin-top: 2px; }
+.pd-split { display: flex; gap: 2px; height: 8px; }
+.pd-split i { display: block; height: 100%; }
+.pd-split .pd-split-l { background: var(--sv-up-vol); border-radius: var(--sv-radius-round) 0 0 var(--sv-radius-round); }
+.pd-split .pd-split-s { background: var(--sv-down-vol); border-radius: 0 var(--sv-radius-round) var(--sv-radius-round) 0; }
+.pd-split .pd-split-l:last-child { border-radius: var(--sv-radius-round); }
+.pd-split .pd-split-s:first-child { border-radius: var(--sv-radius-round); }
+.pd-splitl { display: flex; justify-content: space-between; margin-top: -4px; font-size: var(--sv-fs-micro); color: var(--sv-ink-2); }
+.pd-desk .pd-foot {
+    margin: 0; padding-top: 9px; border-top: 1px solid var(--sv-line-1);
+    font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-3);
+}
+.pd-desk .pd-foot--c30 { margin: 10px 12px 12px; }
+
+.pd-desk .pd-low .table-wrapper { overflow-x: auto; margin: 0; padding: 0; border: 0; background: transparent; }
+
+/* ── The cards under the board ──────────────────────────────────────────── */
+.pd-desk .pd-broker .table-wrapper { overflow-x: auto; }
+.pd-desk .pd-broker .bkp-table { width: 100%; border-collapse: collapse; margin: 0; font-size: 12px; color: var(--sv-ink-1); }
+.pd-desk .pd-broker .bkp-table > thead > tr > th {
+    height: 26px; padding: 0 8px; box-sizing: border-box;
+    background: var(--sv-bg-2); color: var(--sv-ink-3);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+    text-align: left; white-space: nowrap; border-bottom: 1px solid var(--sv-line-2);
+}
+.pd-desk .pd-broker .bkp-table > tbody > tr > td {
+    height: 29px; padding: 0 8px; box-sizing: border-box;
+    border-bottom: 1px solid var(--sv-line-1); white-space: nowrap; vertical-align: middle;
+    background: transparent; color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: 12px;
+}
+.pd-desk .pd-broker .bkp-up { color: var(--sv-up); }
+.pd-desk .pd-broker .bkp-down { color: var(--sv-down); }
+.pd-desk .pd-broker .bkp-claim {
+    display: inline-flex; align-items: center; height: 18px; padding: 0 6px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-chip);
+    background: transparent; color: var(--sv-ink-2);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); line-height: 1;
+}
+.pd-desk .pd-broker .bkp-claim--unclaimed, .pd-desk .pd-broker .bkp-claim--stopped { color: var(--sv-warn); border-color: var(--sv-warn); }
+.pd-desk .pd-broker .bk-age { font-family: var(--sv-font-mono); }
+.pd-desk .pd-broker td:is([data-label="Qty"], [data-label="Avg cost"], [data-label="Mark"], [data-label="Value"], [data-label="Unreal P&L"]) {
+    text-align: right; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums;
+}
+.pd-desk .pd-broker thead th:nth-child(n+4):nth-child(-n+8) { text-align: right; }
+/* Capital · pools & cash (the shared card): on the kit here. Its two
+   inline sizes are beaten on this page only; the card itself is shared. */
+.pd-desk [data-sv-live="cap-card"] > .card {
+    margin: 0; padding: 0; overflow: hidden;
+    background: var(--sv-bg-1); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); box-shadow: none;
+}
+.pd-desk [data-sv-live="cap-card"] .card-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    height: var(--sv-card-head); margin: 0; padding: 0 14px; box-sizing: border-box;
+    border-bottom: 1px solid var(--sv-line-2); background: transparent;
+}
+.pd-desk [data-sv-live="cap-card"] .card-header > span[style] {
+    font-family: var(--sv-font-sans) !important; font-size: var(--sv-fs-micro) !important;
+    letter-spacing: var(--sv-track-label) !important; color: var(--sv-ink-3) !important;
+}
+.pd-desk [data-sv-live="cap-card"] .card-title { font-size: 12px; color: var(--sv-ink-2); }
+.pd-desk [data-sv-live="cap-card"] .cap-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0; margin: 0 !important; padding: 0;
+}
+.pd-desk [data-sv-live="cap-card"] .cap-tile {
+    display: flex; flex-direction: column; gap: 3px; min-width: 0;
+    padding: 10px 14px; margin: 0; border: 0; border-right: 1px solid var(--sv-line-1);
+    border-bottom: 1px solid var(--sv-line-1); border-radius: 0; background: transparent; box-shadow: none;
+}
+.pd-desk [data-sv-live="cap-card"] .cap-tile .ck {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
+}
+.pd-desk [data-sv-live="cap-card"] .cap-tile .cv {
+    font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums;
+    font-size: 16px; font-weight: 500; color: var(--sv-ink-1); text-shadow: none;
+}
+.pd-desk [data-sv-live="cap-card"] .cap-tile .cv.down { color: var(--sv-down); }
+.pd-desk [data-sv-live="cap-card"] .cap-tile .cs { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.pd-desk [data-sv-live="cap-card"] .ip-dd-note {
+    margin: 0 !important; padding: 8px 14px; border: 0; background: transparent;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-3);
+}
+.pd-desk [data-sv-live="cap-card"] .sv-perf-table { margin: 0 !important; width: 100%; font-size: 12px; }
+.pd-desk [data-sv-live="cap-card"] .sv-perf-table td { color: var(--sv-ink-1); }
+.pd-desk [data-sv-live="cap-card"] .sv-perf-table td[style] {
+    font-family: var(--sv-font-mono) !important; font-size: 12px !important;
+    letter-spacing: 0 !important; color: var(--sv-ink-2) !important;
+}
+.pd-desk [data-sv-live="cap-card"] .sv-live-chip { margin-left: 8px; }
+/* The shared table inside the cards here: hairlines, no stripes. */
+.pd-desk .sv-perf-table > tbody > tr { background: transparent; }
+.pd-desk .sv-perf-table > tbody > tr > td,
+.pd-desk .sv-perf-table > thead > tr > th { border-bottom-color: var(--sv-line-1); }
+
+/* Position analytics (the htmx panel /htmx/metrics/positions/): its frame,
+   its key figures and its charts' words on the kit, on this page. */
+.pd-desk .pd-analytics .sv-metrics-wrapper { padding: 12px 14px 14px; min-height: 48px; }
+.pd-desk .pd-analytics .oc-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0; margin: 0 0 12px; border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); overflow: hidden; background: var(--sv-bg-1);
+}
+.pd-desk .pd-analytics .oc-strip-cell {
+    display: flex; flex-direction: column; gap: 3px; min-width: 0;
+    padding: 10px 14px; margin: 0; border: 0; border-right: 1px solid var(--sv-line-1);
+    border-radius: 0; background: var(--sv-bg-1); box-shadow: none;
+}
+.pd-desk .pd-analytics .oc-strip-label {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
+}
+.pd-desk .pd-analytics .oc-strip-value {
+    font-family: var(--sv-font-mono); font-size: 16px; font-weight: 500; color: var(--sv-ink-1); text-shadow: none;
+}
+.pd-desk .pd-analytics .oc-strip-value.up { color: var(--sv-up); }
+.pd-desk .pd-analytics .oc-strip-value.down { color: var(--sv-down); }
+.pd-desk .pd-analytics .oc-strip-sub { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.pd-desk .pd-analytics .pa-section {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
+    border-bottom-color: var(--sv-line-1);
+}
+.pd-desk .pd-analytics .sv-bars-cap { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.pd-desk .pd-analytics .sv-bars span, .pd-desk .pd-analytics .sv-bars-axis span {
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-3);
+}
+.pd-desk .pd-analytics .oc-mini-row { border-bottom: 1px solid var(--sv-line-1); font-size: 12px; }
+.pd-desk .pd-analytics .oc-mini-side, .pd-desk .pd-analytics .oc-mini-meta {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label);
+}
+.pd-desk .pd-analytics .oc-mini-side.bullish { color: var(--sv-up); }
+.pd-desk .pd-analytics .oc-mini-side.bearish { color: var(--sv-down); }
+.pd-desk .pd-analytics .oc-mini-meta { color: var(--sv-ink-3); }
+.pd-desk .pd-analytics .oc-mini-sym { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-1); }
+.pd-desk .pd-analytics .oc-mini-pnl { font-family: var(--sv-font-mono); font-weight: 500; }
+.pd-desk .pd-analytics .oc-mini-pnl.up { color: var(--sv-up); }
+.pd-desk .pd-analytics .oc-mini-pnl.down { color: var(--sv-down); }
+.pd-desk .pd-analytics .oc-empty { font-size: 12px; color: var(--sv-ink-3); }
+
+/* ── The history tab ────────────────────────────────────────────────────── */
+.pd-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sv-gutter); }
+.pd-best-body { padding: 12px 14px; }
+.pd-best-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.pd-desk .pd-best-note { margin-top: 8px; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.ph-kv {
+    display: flex; justify-content: space-between; padding: 5px 0;
+    font-family: var(--sv-font-mono); font-size: 12px;
+    border-bottom: 1px solid var(--sv-line-1);
+}
+.ph-kv span:first-child { font-family: var(--sv-font-sans); color: var(--sv-ink-3); }
+.ph-kv span:last-child { color: var(--sv-ink-1); }
+.ph-kv span.up { color: var(--sv-up); }
+.ph-kv span.down { color: var(--sv-down); }
+.ph-trade-card { border-bottom: 1px solid var(--sv-line-1); cursor: pointer; }
+.ph-trade-card:hover { background: var(--sv-bg-3); }
+.ph-trade-card.sv-row--live { box-shadow: inset var(--sv-edge-world) 0 0 var(--sv-real); }
+/* The row is two flex clusters of fixed-min-width cells. Flex items do not
+   shrink below min-content, and a card is overflow:visible — so on any width
+   narrower than their sum the row pushed straight out of the card and took
+   the whole PAGE sideways with it. Wrapping is the honest fix: the cluster
+   drops to a second line instead of the body growing a scrollbar. */
+.ph-trade-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px; gap: 12px;
+    flex-wrap: wrap; row-gap: 8px;
+}
+.ph-trade-row > div { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+.ph-trade-l { display: flex; align-items: center; gap: 10px; }
+.ph-trade-r { display: flex; align-items: center; gap: 16px; }
+.pd-desk .ph-via { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.pd-desk .ph-when { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.ph-expand-icon { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
+.ph-trade-card.expanded .ph-expand-icon { transform: rotate(180deg); }
+/* Expandable detail. overflow:hidden is what makes the collapse work, and
+   while EXPANDED it was an amputation: content past the cap was cut with no
+   scrollbar and no sign. The leftover scrolls inside the panel, so nothing
+   in the card is ever silently lost. */
+.ph-trade-detail { max-height: 0; overflow: hidden; padding: 0 14px; }
+.ph-trade-card.expanded .ph-trade-detail {
+    max-height: 300px; padding: 0 14px 16px; overflow: auto;
+}
+/* Bare 1fr tracks cannot shrink below their content, so a grid set the
+   card's floor width and blew the page out sideways with it. */
+.ph-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.ph-detail-label {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+    color: var(--sv-ink-3); margin-bottom: 3px;
+}
+.ph-detail-value { font-family: var(--sv-font-mono); font-size: 13px; font-weight: 500; color: var(--sv-ink-1); }
+.ph-detail-value.sign-up { color: var(--sv-up); }
+.ph-detail-value.sign-down { color: var(--sv-down); }
+.ph-detail-value.sign-flat { color: var(--sv-ink-2); }
+.pd-desk .ph-detail-note { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); font-weight: 400; }
+.ph-num { font-family: var(--sv-font-mono); font-weight: 500; font-size: 13px; text-align: right; }
+.ph-num--pnl { min-width: 80px; }
+.ph-num.is-sm { font-weight: 400; font-size: var(--sv-fs-micro); min-width: 55px; }
+.ph-chart-bar { position: relative; padding: 18px 0 4px; }
+.ph-chart-label { position: absolute; top: 0; font-size: var(--sv-fs-micro); font-family: var(--sv-font-mono); color: var(--sv-ink-3); }
+.ph-chart-label--l { left: 0; }
+.ph-chart-label--r { right: 0; }
+.ph-chart-track { height: 6px; background: var(--sv-bg-3); border-radius: var(--sv-radius-round); overflow: visible; position: relative; }
+.ph-chart-fill { height: 100%; border-radius: var(--sv-radius-round); position: relative; }
+.ph-chart-fill.up { background: var(--sv-up-fill); }
+.ph-chart-fill.down { background: var(--sv-down-fill); }
+/* `sign_class` has a third answer: an invisible bar would read as no bar at
+   all, which is the one thing an unmeasured value must not look like. */
+.ph-chart-fill.flat { background: var(--sv-ink-3); }
+.ph-chart-marker { position: absolute; right: -4px; top: -5px; font-size: var(--sv-fs-micro); color: var(--sv-ink-1); }
+/* A close nothing could price gets an honest blank, not a full track. */
+.ph-chart-empty { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); line-height: 6px; }
+/* A symbol anywhere on this page is the instrument and goes to it. */
+.ph-sym { font-family: var(--sv-font-mono); font-size: 13px; font-weight: 500; color: var(--sv-ink-1); overflow-wrap: anywhere; text-decoration: none; }
+.ph-sym.is-lg { font-size: 16px; }
+a.ph-sym:hover, a.ph-sym:focus-visible { text-decoration: underline; text-decoration-color: var(--sv-line-3); text-underline-offset: 3px; }
+.pd-desk .ph-group-row { background: var(--sv-bg-2); border-bottom: 1px solid var(--sv-line-1); }
+
+/* ── Groups in the open table (position_group_row.html) ─────────────────── */
+.pd-desk .pd-table tr.pos-group-row > th {
+    background: var(--sv-bg-2); border-top: 1px solid var(--sv-line-2); border-bottom: 1px solid var(--sv-line-1);
+    text-transform: none; letter-spacing: 0; font-weight: 400; padding: 6px 14px; height: auto;
+}
+.pd-desk .pos-group, .pd-desk .ph-group-row { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.pd-desk .pos-group-name { font-family: var(--sv-font-sans); font-size: 12px; font-weight: 600; letter-spacing: var(--sv-track-label); color: var(--sv-ink-1); }
+.pd-desk .pos-group-fig b { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
+.pd-desk .pos-group-fig b.up { color: var(--sv-up); }
+.pd-desk .pos-group-fig b.down { color: var(--sv-down); }
+
+/* ── The close dialog and the level editor, on this page ─────────────────
+   Their words, steps, PIN and focus are their scripts' (base.html's
+   closeFlow, sv-overlay.js, sv-level-edit.js), untouched: only the look.
+   Labels at 11 px in Inter, the facts in the number face, the PIN field
+   mono at .3em, a warning in amber with its title. */
+body:not(.light-mode) .sv-dialog-fact { font-size: 12px; color: var(--sv-ink-1); padding: 7px 12px; }
+body:not(.light-mode) .sv-dialog-fact .lbl { font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label); color: var(--sv-ink-3); }
+body:not(.light-mode) .sv-dialog-facts { border-color: var(--sv-line-2); border-radius: var(--sv-radius-card); background: var(--sv-bg-1); }
+body:not(.light-mode) .sv-dialog-fact + .sv-dialog-fact { border-top-color: var(--sv-line-1); }
+body:not(.light-mode) .sv-dialog-msg { color: var(--sv-ink-1); }
+body:not(.light-mode) .sv-dialog-detail { font-size: 12px; color: var(--sv-ink-3); }
+body:not(.light-mode) .sv-dialog-head { border-bottom-color: var(--sv-line-2); }
+body:not(.light-mode) .sv-dialog-foot { border-top-color: var(--sv-line-2); }
+body:not(.light-mode) .sv-dialog-x { color: var(--sv-ink-3); border-radius: var(--sv-radius-ctl); }
+body:not(.light-mode) .sv-dialog-confirm-text { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-2); }
+body:not(.light-mode) .sv-dialog-confirm-text input {
+    font-family: var(--sv-font-mono); letter-spacing: .3em; text-transform: none;
+    background: var(--sv-bg-0); border-color: var(--sv-line-2); color: var(--sv-ink-1);
+    border-radius: var(--sv-radius-ctl);
+}
+body:not(.light-mode) .sv-dialog .sz-warn {
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    box-shadow: inset 3px 0 0 var(--sv-warn); color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: 12px;
+}
+body:not(.light-mode) .sv-dialog .sz-warn b { color: var(--sv-warn); }
+body:not(.light-mode) .sv-dialog-btn[disabled] { opacity: 1; background: var(--sv-bg-2); color: var(--sv-ink-4); border-color: var(--sv-line-1); }
+body:not(.light-mode) .sv-dialog-btn.sv-dialog-btn--go[disabled] { background: var(--sv-bg-2); color: var(--sv-ink-3); border-color: var(--sv-line-3); }
+body:not(.light-mode) .lvl-dlg {
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card);
+    box-shadow: var(--sv-shadow-dialog); padding: 14px; min-width: 260px;
+    font-family: var(--sv-font-sans); color: var(--sv-ink-1);
+}
+body:not(.light-mode) .lvl-dlg h4 {
+    margin: 0 0 10px; font-family: var(--sv-font-sans); font-size: 12px; font-weight: 600;
+    letter-spacing: var(--sv-track-label); color: var(--sv-ink-1);
+}
+body:not(.light-mode) .lvl-dlg label {
+    display: block; margin: 8px 0 3px;
+    font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); color: var(--sv-ink-3);
+}
+body:not(.light-mode) .lvl-dlg input {
+    width: 100%; box-sizing: border-box; height: 32px; padding: 0 10px;
+    background: var(--sv-bg-0); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    color: var(--sv-ink-1); font-family: var(--sv-font-mono); font-size: 13px; text-align: right;
+}
+body:not(.light-mode) .lvl-dlg input[type="password"] { text-align: left; letter-spacing: .3em; }
+body:not(.light-mode) .lvl-dlg-row button {
+    height: 32px; padding: 0 12px; border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button);
+    background: var(--sv-bg-3); border: 1px solid var(--sv-line-2); color: var(--sv-ink-1);
+}
+body:not(.light-mode) .lvl-dlg-row button.primary { background: var(--sv-ink-1); border-color: var(--sv-ink-1); color: var(--sv-bg-0); }
+body:not(.light-mode) .lvl-dlg-row button[disabled] { opacity: 1; background: var(--sv-bg-2); color: var(--sv-ink-4); border-color: var(--sv-line-1); }
+body:not(.light-mode) .lvl-warn {
+    font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-1);
+    padding: 6px 8px 6px 11px; border-radius: var(--sv-radius-ctl);
+    background: var(--sv-bg-1); box-shadow: inset 3px 0 0 var(--sv-warn);
+}
+body:not(.light-mode) .lvl-err { font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-down); }
+
+@media (prefers-reduced-motion: reduce) {
+    .pd-desk .pd-disc svg, .ph-expand-icon { transition: none; }
+}
+
+/* Under 1280 px the board's two rows stack: the KPI cards and the lower
+   row one under the other, the table scrolling inside its card. */
+@media (max-width: 1279px) {
+    .pd-kpis { grid-template-columns: minmax(0, 1fr); }
+    .pd-pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 768px) {
+    .pd-desk .pd-kgrp { height: auto; }
+    .pd-kcells { grid-template-columns: minmax(0, 1fr); }
+    .pd-kc { border-right: 0; border-bottom: 1px solid var(--sv-line-1); padding: 8px 14px; }
+    .pd-chead { flex-wrap: wrap; height: auto; min-height: var(--sv-card-head); padding: 6px 14px; }
+    .pd-keys { display: none; }
+    .pd-desk .pd-table td.pd-det-pad { display: none; }
+    .pd-desk .pd-table { min-width: 0; table-layout: auto; }
+    .pd-desk .pd-table > tbody > tr > td { height: auto; overflow: visible; white-space: normal; }
+}
+
+/* ── Carried from the page's own block on main (2026-11-13) ─────────────────
+   The rules main's <style> gave this page and that the desk keeps: a row
+   with a destination behaves like one, the keyboard sees where it is, and
+   the dwell card (static/js/sv-position-card.js, portalled to <body>) keeps
+   its named sections, its ledger's bottom line and its actions that
+   collapse. Their meaning is main's; their colours are the tokens'. */
+[data-sv-position-row]:not([data-pos-href=""]) { cursor: pointer; }
+.pos-sym-cell a:focus-visible,
+.ph-sym:focus-visible,
+.pd-desk .pos-row-detail:focus-visible {
+    outline: 2px solid var(--sv-eye); outline-offset: 2px;
+}
+.pos-pop .pos-pop-sec-cap {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+}
+.pos-pop .pos-pop-sec-cap::after {
+    content: ""; flex: 1 1 auto; min-width: 0; height: 1px;
+    background: var(--sv-line-2);
+}
+.pos-pop a.pos-pop-sym {
+    display: inline-block; text-decoration: none;
+    text-underline-offset: 3px;
+}
+.pos-pop a.pos-pop-sym::after {
+    content: " ›"; font-family: var(--sv-font-mono); font-size: 13px;
+    opacity: .75;
+}
+.pos-pop a.pos-pop-sym:hover,
+.pos-pop a.pos-pop-sym:focus-visible {
+    color: var(--sv-ink-1); text-decoration: underline;
+}
+.pos-pop .pos-pop-mrow.is-net {
+    margin-top: 5px; padding-top: 6px;
+    border-top: 1px solid var(--sv-line-2);
+}
+.pos-pop .pos-pop-mrow.is-net .ml {
+    color: var(--sv-ink-2); font-weight: 700;
+}
+.pos-pop .pos-pop-mrow.is-net .mv { font-size: 14px; }
+.pos-pop .pos-pop-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
+    gap: 6px;
+}
+.pos-pop .pos-pop-close { grid-column: 1 / -1; }
+.pos-pop .pos-pop-inst,
+.pos-pop .pos-pop-open { min-width: 0; overflow-wrap: anywhere; }
+.pos-pop .nf-pop-cta { text-align: left; line-height: 1.5; }
+
+/* The card is nearly the whole screen at this width, and three action
+   buttons across it would each be four characters wide. */
+@media (max-width: 420px) {
+    .pos-pop .pos-pop-actions { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pd-desk .pd-disc svg, .ph-expand-icon, .pos-pop a.pos-pop-sym { transition: none; }
+}
