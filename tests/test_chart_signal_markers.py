@@ -418,22 +418,30 @@ class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
         self.assertLess(key, first_script)
 
     def test_the_card_is_the_sites_card_in_both_themes(self):
-        src = widget_source()
+        # The desk v2 (B10, 2026-11-13): the card's style lives in
+        # static/css/sv-chart.css and names the kit's tokens (a raised
+        # surface, its line, the card radius, the popover shadow, ink-1),
+        # its tone the data's up and down; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        src = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         rule = re.search(r"\n\.sv-sig-card \{([^}]*)\}", src).group(1)
-        for token in ("var(--bg-card", "var(--border", "var(--radius-md",
-                      "var(--shadow-card", "var(--text-primary",
-                      "var(--font-mono"):
+        for token in ("var(--sv-bg-2", "var(--sv-line-3", "var(--sv-radius-card",
+                      "var(--sv-shadow-pop", "var(--sv-ink-1",
+                      "var(--sv-font-sans"):
             self.assertIn(token, rule)
         # It can never outgrow the chart's box.
         self.assertIn("max-width: calc(100% - 12px);", rule)
         self.assertIn("max-height: calc(100% - var(--sv-toolbar-h, 36px) - 12px);",
                       rule)
-        self.assertIn(".sv-sig-card--bull { --sv-sig-tone: var(--accent", src)
-        self.assertIn(".sv-sig-card--bear { --sv-sig-tone: var(--accent-red",
+        self.assertIn(".sv-sig-card--bull { --sv-sig-tone: var(--sv-up", src)
+        self.assertIn(".sv-sig-card--bear { --sv-sig-tone: var(--sv-down",
                       src)
 
     def test_no_signal_rule_paints_a_colour_the_theme_cannot_move(self):
-        css = widget_source().split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         offenders = []
         for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
@@ -444,7 +452,9 @@ class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
         self.assertEqual(offenders, [])
 
     def test_the_card_stills_for_reduced_motion(self):
-        src = widget_source()
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        src = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         self.assertRegex(
             src, r"@media \(prefers-reduced-motion: reduce\) \{\s*"
                  r"\.sv-sig-card \{ transition: none; transform: none; \}")
@@ -548,9 +558,13 @@ class TheWiringTests(SimpleTestCase):
                       self.src)
         # The SL is 2 px SOLID (2026-10-07): solid is the operator's money,
         # dashed a signal's idea — it no longer reads like the pinned Stop.
+        # The desk v2 (B10, 2026-11-13): its axis label on the chart's raised
+        # surface in its tone, beside the board's chips; the operator
+        # approved the board: "amazing work, bravo, I need it fast!!".
         self.assertIn("price: p.stop, color: c.red, lineWidth: 2,\n"
                       "                        lineStyle: LightweightCharts.LineStyle.Solid,\n"
-                      "                        axisLabelVisible: true, title: 'SL',",
+                      "                        axisLabelVisible: true, axisLabelColor: c.bg2, axisLabelTextColor: c.red,\n"
+                      "                        title: 'SL',",
                       self.src.replace("\r\n", "\n"))
 
 
@@ -1266,6 +1280,9 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
                 if str(m.get("id", "")).startswith("sv-sig-")}
 
     def test_each_signal_is_a_dot_on_the_bar_that_contains_it(self):
+        # The desk v2 (B10, 2026-11-13): a buy's dot in the desk's up token
+        # (#24B582), a sell's in its down token (#FF6B6E), where the Eye and
+        # the old #e83030 were; the operator approved the board: "amazing work, bravo, I need it fast!!".
         first = self.r["first"]
         dots = self._sig_markers(first["markers"])
         self.assertEqual(sorted(dots), ["sv-sig-11", "sv-sig-12", "sv-sig-14"])
@@ -1274,15 +1291,15 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         self.assertEqual((shared["time"], shared["position"], shared["size"],
                           shared["color"], shared["text"]),
                          ("2026-08-10", "aboveBar", 0.9,
-                          "rgba(232,48,48,0.65)", "▼"))
+                          "rgba(255,107,110,0.65)", "▼"))
         self.assertEqual((s1["time"], s1["position"], s1["shape"], s1["size"],
                           s1["color"], s1["text"]),
                          ("2026-08-10", "belowBar", "circle", 1.25,
-                          "rgba(0,232,104,0.85)", "▲"))
+                          "rgba(36,181,130,0.85)", "▲"))
         self.assertEqual((s2["time"], s2["position"], s2["size"],
                           s2["color"], s2["text"]),
                          ("2026-08-25", "aboveBar", 1.7,
-                          "rgba(232,48,48,1)", "▼"))
+                          "rgba(255,107,110,1)", "▼"))
         self.assertFalse(first["legendHidden"])
         self.assertTrue(first["card"]["hidden"])
 
@@ -1381,7 +1398,9 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
             self.assertEqual(len(self.r[step]["lines"]), 3, step)
         self.assertTrue(self.r["tapThrough"]["card"]["hidden"])
         self.assertEqual(self.r["tapThrough"]["lines"], [])
-        src = widget_source()
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        src = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8") + widget_source()
         pinned = re.search(r"\n\.sv-sig-card\.is-pinned \{([^}]*)\}", src).group(1)
         self.assertNotIn("pointer-events", pinned)
         self.assertIn("\n.sv-sig-card.is-pinned .sv-sig-close { pointer-events: auto; }",

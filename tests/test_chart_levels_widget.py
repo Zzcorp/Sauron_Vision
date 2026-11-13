@@ -614,11 +614,13 @@ class TheLevelLayerTests(SimpleTestCase):
             self.assertLessEqual(c["x1"], 740 - 80 + 1e-9, c)
 
     def test_the_money_lines_are_the_loudest(self):
-        """Entry 3 px in its side's colour; SL and TP 2 px SOLID; the
+        """Entry 2 px solid in the chart's ink, the world chip beside its
+        title saying whose money (the desk v2, B10, 2026-11-13: the board
+        the operator approved, "amazing work, bravo, I need it fast!!"); SL and TP 2 px SOLID; the
         last price dotted; the volume prints no last value."""
         lines = {l["title"]: l for l in self.main["first"]["lines"]}
         self.assertEqual((lines["LONG 1000"]["width"], lines["LONG 1000"]["style"],
-                          lines["LONG 1000"]["color"]), (3, 0, "#00e868"))
+                          lines["LONG 1000"]["color"]), (2, 0, "#E6F1EA"))
         self.assertEqual((lines["SL"]["width"], lines["SL"]["style"], lines["SL"]["axis"]),
                          (2, 0, True))
         self.assertEqual((lines["TP"]["width"], lines["TP"]["style"], lines["TP"]["axis"]),
@@ -642,18 +644,24 @@ class TheLevelLayerTests(SimpleTestCase):
         raw = {l["title"]: l for l in self.main["pinned"]["lines"]
                if l["title"] in ("Entry", "Stop", "Target")}
         self.assertEqual(sorted(raw), ["Entry", "Stop", "Target"])
+        # The desk v2 (B10, 2026-11-13): the desk's tokens (ink-1 on bg-0,
+        # the stop in --sv-down, the target in --sv-up); the operator
+        # approved the board: "amazing work, bravo, I need it fast!!".
         self.assertEqual((raw["Entry"]["color"], raw["Entry"]["labelColor"],
-                          raw["Entry"]["labelText"]), ("#daf0e6", "#030806", "#daf0e6"))
+                          raw["Entry"]["labelText"]), ("#E6F1EA", "#040B07", "#E6F1EA"))
         self.assertEqual((raw["Stop"]["labelColor"], raw["Stop"]["labelText"]),
-                         ("#030806", "#e83030"))
+                         ("#040B07", "#FF6B6E"))
         self.assertEqual((raw["Target"]["labelColor"], raw["Target"]["labelText"]),
-                         ("#030806", "#00e868"))
+                         ("#040B07", "#24B582"))
         self.assertTrue(all(l["style"] == 2 and l["width"] == 1 for l in raw.values()),
                         "dashed, 1 px: an idea")
-        # The position's own labels stay filled: no ghost on the money.
+        # The position's own labels are never the idea's ghost: the desk v2
+        # (B10, 2026-11-13) sets them on the chart's raised surface (bg-2),
+        # in their tone, beside the board's chips; the idea's sit on the
+        # ground (bg-0). The operator approved the board: "amazing work, bravo, I need it fast!!".
         money = [l for l in self.main["pinned"]["lines"] if l["title"] in ("LONG 1000", "SL", "TP")]
         self.assertEqual(len(money), 3)
-        self.assertTrue(all(l["labelColor"] is None for l in money))
+        self.assertTrue(all(l["labelColor"] == "#0D1B14" for l in money), money)
 
     # §6.3 D 2
     def test_a_type_switch_reattaches_on_the_new_series(self):
@@ -816,7 +824,10 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
         soft = apart["lines"][3]
         self.assertEqual((soft["price"], soft["style"], soft["axis"], soft["width"]),
                          (1.079, 4, False, 1))
-        self.assertEqual(soft["color"], "rgba(232,48,48,0.7)")
+        # The desk v2 (B10, 2026-11-13): the loss tone is the desk's down
+        # token (--sv-down), the old #e83030 is gone; the operator approved
+        # the board: "amazing work, bravo, I need it fast!!".
+        self.assertEqual(soft["color"], "rgba(255,107,110,0.7)")
         same = _run("lines", payload=_levels_payload(positions=[dict(pos, soft_stop=1.075)]))
         self.assertEqual(same["others"], ["LONG 1000", "SL", "TP"])
 
@@ -943,13 +954,15 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
         mouse = _run("keep", payload=NO_MONEY, timeframe="1h")
         g = mouse["geom"]
         overlays = g["keep"]["overlays"]
-        self.assertEqual(len(overlays), 2, "the crosshair legend and the bar-close countdown")
-        legend, countdown = overlays
-        self.assertEqual((legend["x0"], legend["y0"], legend["y1"]), (0, 0, 34))
+        # The desk v2 (B10, 2026-11-13): the legend is one box of two lines
+        # at the pane's top left (9 px down, 18 px a line), the next bar's
+        # countdown on its second line, where the board draws it; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!".
+        self.assertEqual(len(overlays), 1, "the legend's two lines, the countdown on the second")
+        legend = overlays[0]
+        self.assertEqual((legend["x0"], legend["y0"], legend["y1"]), (0, 0, 47))
         self.assertGreater(legend["x1"], 300, "a date and four prices at five decimals")
-        self.assertEqual((countdown["y0"], countdown["y1"]), (0, 34))
-        self.assertLessEqual(countdown["x1"], 740)
-        self.assertLess(countdown["x0"], 740 - 80, "wider than the lane's top corner")
+        self.assertLessEqual(legend["x1"], 740)
         bars, candles = mouse["bars"], g["keep"]["candles"]
         self.assertEqual(len(candles), 30)
         i = len(bars) - 30                       # the fake's logical x is 20 + 10 i, 10 px a bar
@@ -963,12 +976,14 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
             if not c["role"]:
                 for b in candles:
                     self.assertFalse(_meets(c, b), (c["text"], b))
-        # A finger raises no legend; a daily frame has no countdown.
+        # A finger raises no legend, and the countdown rides the legend's
+        # second line (the desk v2), so nothing is left to keep clear; a
+        # daily frame keeps the legend's two lines, without a countdown.
         touch = _run("keep", payload=NO_MONEY, timeframe="1h", coarse=True)
-        self.assertEqual(touch["geom"]["keep"]["overlays"], [countdown])
+        self.assertEqual(touch["geom"]["keep"]["overlays"], [])
         daily = _run("keep", payload=NO_MONEY)["geom"]["keep"]["overlays"]
         self.assertEqual(len(daily), 1)
-        self.assertEqual((daily[0]["x0"], daily[0]["y1"]), (0, 34))
+        self.assertEqual((daily[0]["x0"], daily[0]["y1"]), (0, 47))
 
     def test_the_asia_label_keeps_off_the_title_boxes_not_the_whole_lane(self):
         """The harness, 2026-10-07: with a position up, today's Asian box
@@ -1078,7 +1093,10 @@ class ThePaintTests(SimpleTestCase):
         2 px ticks, the Asian box named ASIA."""
         before = self.toggles["before"]
         g, ops = before["geom"], before["ops"]
-        gold, blue = "#d8b020", "#30a0e8"
+        # The desk v2 (B10, 2026-11-13): the pools in the desk's gold
+        # (--sv-demo), the old #d8b020 is gone; the operator approved the
+        # board: "amazing work, bravo, I need it fast!!".
+        gold, blue = "#D6BC5E", "#30a0e8"
         fills = [o for o in ops if o["op"] == "fillRect" and o["fill"] == gold]
         self.assertEqual(len(fills), 4, "one fill per band")
         self.assertEqual(sorted(tuple(o["args"][:2]) for o in fills),
@@ -1111,8 +1129,12 @@ class ThePaintTests(SimpleTestCase):
         175 %) in a box measured at 10 × ratio: it ran out of the box. The
         1 px border, at DPR 2 a 2 px stroke on the half pixel, blurred."""
         out = _run("dpr", payload=NO_MONEY, timeframe="1h")["out"]
-        for k, font in (("1", "600 10px monospace"), ("1.25", "600 12.5px monospace"),
-                        ("2", "600 20px monospace")):
+        # The desk v2 (B10, 2026-11-13): the chips print in the desk's
+        # number face (JetBrains Mono, 500); the operator approved the
+        # board: "amazing work, bravo, I need it fast!!".
+        face = ' "JetBrains Mono", ui-monospace, monospace'
+        for k, font in (("1", "500 10px" + face), ("1.25", "500 12.5px" + face),
+                        ("2", "500 20px" + face)):
             texts = [o for o in out[k]["ops"] if o["op"] == "fillText"]
             self.assertTrue(texts, k)
             self.assertEqual({o["font"] for o in texts}, {font}, k)

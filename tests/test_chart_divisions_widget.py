@@ -214,8 +214,10 @@ class _FineFrame:
         self.assertIn("the last candle has closed", self.r["closed"]["tick"]["text"])
 
     def test_the_bar_close_countdown_runs(self):
-        self.assertTrue(self.r["countdown"].startswith("BAR CLOSE "),
-                        self.r["countdown"])
+        # The desk v2 (B10, 2026-11-13): the legend's second line says
+        # "next bar in 06:34", as the board draws it; the operator approved
+        # the board: "amazing work, bravo, I need it fast!!".
+        self.assertRegex(self.r["countdown"], r"^next bar in \d+:\d\d")
 
 
 @unittest.skipUnless(NODE, "node is not installed")

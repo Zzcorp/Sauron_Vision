@@ -4,265 +4,177 @@
 {% block page_title %}{{ instrument.symbol }} — {{ instrument.name }}{% endblock %}
 
 {% block content %}
-<div class="detail-header fade-in-up">
-    <div>
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <h2 style="margin:0;">{{ instrument.symbol }}</h2>
-            <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}" style="display:inline;margin:0;">{% csrf_token %}
-                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                <button type="submit" class="wl-star {% if instrument.is_watchlist %}on{% endif %}"
-                        title="{% if instrument.is_watchlist %}Remove from watchlist{% else %}Add to watchlist — bars, quotes and signal scans follow{% endif %}"
-                        aria-pressed="{% if instrument.is_watchlist %}true{% else %}false{% endif %}"
-                        aria-label="Toggle watchlist for {{ instrument.symbol }}">
-                    {% if instrument.is_watchlist %}&#9733;{% else %}&#9734;{% endif %}
-                </button>
-            </form>
+{% comment %}
+THE INSTRUMENT PAGE, THE DESK V2 (2026-11-13, B10). The operator approved the
+board ("amazing work, bravo, I need it fast!!"): the symbol once (the title
+row above), then ONE header row of 52 px, then the chart at the height of the
+screen, then the rest of the page. The header says, left to right:
+  * the day: its change (the one price's own field, repainted with it) and
+    the day's range, read off the chart's own candles once they load;
+  * his position on the symbol: the world chip (REAL solid red), the side in
+    words, the size, the P&L at the side it closes at, its R, the entry and
+    its age; a second position is counted, the table under the chart has it;
+  * whose price this is and how old (the one price's words), and the
+    market's state with its next change;
+  * the two sides: the deal ticket, its price on the button that trades at
+    it, its venue and spread between them. Its words, its form and its PIN
+    path are the ticket's own (plan §10): this page only lays it out.
+Display only: nothing here reaches an order, a stop, a size or a switch.
+{% endcomment %}
+{% with p0=chart_positions_rows.0 n_pos=chart_positions_rows|length %}
+<section class="sv-ih" aria-label="{{ instrument.symbol }}: the day, your position and the two sides">
+    <div class="sv-ih-g sv-ih-day">
+        <div class="sv-ih-r1" data-ih-row>
+            <span class="sv-ih-lbl">Day</span>
             {% if quote %}
-            {% comment %}data-instrument-live: sv-instrument-live.js polls
-            the preview API every 15s and repaints last/change (with a
-            flash), and nudges the chart's last candle — the price used to
-            render once and freeze under a live market badge, the worst
-            combination.{% endcomment %}
-            {% comment %}Whose price this is (2026-10-31, dashboard.chart_source):
-            the feed, its age and the stand-in words under it ("Yahoo GC=F,
-            the front-month future"), and for a venue-routed instrument the
-            venue's last known price beside it, from what the platform
-            already holds. data-decimals is the page's one count, so the
-            15-second repaint prints what this first paint prints. A day
-            change measured by another feed than the price's is a dash,
-            its title says whose.{% endcomment %}
-            <div class="dtl-price" data-decimals="{{ quote_decimals }}">
-                <span class="dtl-last" data-q="{{ instrument.symbol }}">{% px quote.last instrument.asset_class instrument.symbol %}</span>
-                <span class="dtl-chg{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</span>
-            </div>
-            <div class="dtl-who">
-                <span class="dtl-src" data-hero="src" data-q="{{ instrument.symbol }}" data-q-f="words" data-q-title>{% q instrument.symbol "words" %}</span>
-                <span class="dtl-venue" data-hero="venue" data-q="{{ instrument.symbol }}" data-q-f="slot"{% if not hero.venue %} hidden{% endif %}>{% q instrument.symbol "slot" %}</span>
-            </div>
+            {% comment %}A day change measured by another feed than the
+            price's is a dash, its title says whose (2026-10-31).{% endcomment %}
+            <span class="sv-ih-num dtl-chg{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</span>
+            {% if not hero or hero.change_same_feed is not False %}<span class="sv-ih-arrow {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}" aria-hidden="true">{% if quote.change_pct >= 0 %}▲{% else %}▼{% endif %}</span>{% endif %}
+            {% else %}
+            <span class="sv-unknown" title="No price for this instrument yet">&mdash;</span>
             {% endif %}
+        </div>
+        <div class="sv-ih-r2" data-ih-row>
+            <span class="sv-ih-word">Range</span>
+            {% comment %}The day's low to high, from the chart's own candles
+            (the script at the foot of this page): a dash until they load.{% endcomment %}
+            <span class="sv-ih-num" data-ih="range" title="The day's low and high, from the chart's candles">&mdash;</span>
+        </div>
+    </div>
+    {% if p0 %}
+    <div class="sv-ih-g sv-ih-pos">
+        <div class="sv-ih-r1" data-ih-row>
+            {% money_world p0 "compact" %}
+            <span class="sv-ih-side">{% if p0.side == "long" %}▲ Long{% else %}▼ Short{% endif %}</span>
+            <span class="sv-ih-num">{{ p0.qty|qty }}</span>
+            {% if p0.pnl is None %}
+            <span class="sv-unknown" title="{% if p0.mark_title %}{{ p0.mark_title }}{% else %}No quote for this instrument: the P&amp;L is unmeasured, not zero{% endif %}">&mdash;</span>
+            {% else %}
+            <span class="sv-ih-num {% if p0.pnl >= 0 %}up{% else %}down{% endif %}">{% if p0.pnl >= 0 %}+{% endif %}{{ p0.pnl|floatformat:2 }}<span class="sv-ih-arrow" aria-hidden="true">{% if p0.pnl >= 0 %}▲{% else %}▼{% endif %}</span></span>
+            {% endif %}
+            {% if p0.r_now is not None %}<span class="sv-ih-num {% if p0.r_now >= 0 %}up{% else %}down{% endif %}" title="R: the move against the distance from the entry to the stop it opened with">{% if p0.r_now >= 0 %}+{% endif %}{{ p0.r_now|floatformat:2 }}R</span>{% endif %}
+        </div>
+        <div class="sv-ih-r2" data-ih-row>
+            <span>Entry <span class="sv-ih-num">{% px p0.entry instrument.asset_class instrument.symbol %}</span></span>
+            {% if p0.age_s is not None %}<span class="sv-ih-age">· {% if p0.age_s >= 86400 %}{% widthratio p0.age_s 86400 1 %} d{% else %}{% widthratio p0.age_s 3600 1 %} h{% endif %}</span>{% endif %}
+            {% if p0.mark_word and not p0.paper %}<span class="sv-ih-mark" data-mark-source="{{ p0.mark_source }}" title="{{ p0.mark_title }}">· P&amp;L at {{ p0.mark_word }}</span>{% elif p0.pnl_words %}<span title="{{ p0.pnl_title }}">· {{ p0.pnl_words }}</span>{% endif %}
+            {% if n_pos > 1 %}<a class="sv-ih-more" href="#sv-positions">+{{ n_pos|add:"-1" }} more</a>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+    <div class="sv-ih-g sv-ih-feed">
+        <div class="sv-ih-r1" data-ih-row>
+            <span class="sv-ih-dot" aria-hidden="true"></span>
+            {% comment %}Whose price this is and how old (2026-10-31; one
+            price, 2026-11-12): the one painter rewrites the price and these
+            words together, every second. The hero's hooks stay (.dtl-price
+            carries the page's one decimal count, .dtl-last the price the
+            poller repaints when the painter is absent), and
+            data-instrument-live (on the chart card below) keeps
+            sv-instrument-live.js polling, so none of it freezes under a
+            live market.{% endcomment %}
+            {% if quote %}<span class="dtl-price" data-decimals="{{ quote_decimals }}"><span class="dtl-last" data-q="{{ instrument.symbol }}">{% px quote.last instrument.asset_class instrument.symbol %}</span></span>{% endif %}
+            <span class="dtl-src" data-hero="src" data-q="{{ instrument.symbol }}" data-q-f="words" data-q-title>{% q instrument.symbol "words" %}</span>
+        </div>
+        <div class="sv-ih-r2 sv-ih-mkt-row" data-ih-row>
+            <span class="dtl-venue" data-hero="venue" data-q="{{ instrument.symbol }}" data-q-f="slot"{% if not hero.venue %} hidden{% endif %}>{% q instrument.symbol "slot" %}</span>
             {% if market %}
-            {% comment %}Which market this instrument answers to, open or
-            not, and when that flips — IN the price hero, because a price
-            with no market state next to it reads as live whether it is or
-            not, and the first cut of this badge sat a line below in the
-            metadata where nobody's eye lands. Server-rendered truth at
-            first paint; sv-market-status.js re-paints it from
-            /api/exchange-status/ so a tab left open across a close never
-            shows yesterday's answer. "CRYPTO" has no session row in that
-            payload — the JS knows it as always-open.{% endcomment %}
-            <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-closed{% endif %}"
-                  data-market-session="{{ market.session }}">
-                <span class="mk-dot"></span>
+            {% comment %}Which market this instrument answers to, open or not,
+            and when that flips: sv-market-status.js repaints it from
+            /api/exchange-status/ so a tab left open across a close never shows
+            yesterday's answer.{% endcomment %}
+            <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-closed{% endif %}" data-market-session="{{ market.session }}">
+                <span class="mk-dot" aria-hidden="true"></span>
                 <span class="mk-text">{{ market.name }} · {% if market.is_open %}OPEN{% else %}CLOSED{% endif %}{% if market.time_until_change %} · {{ market.next_state }} in {{ market.time_until_change }}{% endif %}</span>
             </span>
             {% endif %}
         </div>
-{% comment %}
-        The metadata rides the title row rather than owning one of its
-        own. It is reference, not a reading: an operator glances at it
-        once to confirm they are on the right instrument and never again,
-        and it was costing a full row above the chart on every visit.
-        {% endcomment %}
-        <div class="detail-meta detail-meta-inline">
-            <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
-            {% if instrument.exchange %}<span>{{ instrument.exchange }}</span>{% endif %}
-            <span class="dtl-name">{{ instrument.name }}</span>
-        </div>
     </div>
-    {% comment %}
-    ONE control where there were five. LONG and SHORT were buttons with
-    no prices on them, and BID / ASK / SPREAD were three loose cells in a
-    strip beside them — so the operator paired a side with its price by
-    eye at the moment of committing money, and the comment sitting here
-    explaining that LONG lifts the ask was doing work the markup should
-    have been doing. The ticket puts each price on the button that trades
-    at it. Same `svTakeTradeAsset` engine as the popups: one manual-trade
-    path everywhere.
-    {% endcomment %}
-    <div class="dtl-actions">
+    <div class="sv-ih-act dtl-actions">
+        {% comment %}The two sides, the price on the button that trades at it:
+        the deal ticket (svTakeTradeAsset, one manual-trade path everywhere),
+        its venue on it (lane_mode) so a REAL order is said before the click.{% endcomment %}
         {% include "_partials/deal_ticket.html" with symbol=instrument.symbol quote=quote asset_class=instrument.asset_class decimals=quote_decimals lane_mode=lane_mode %}
-        {% comment %}And the rest as one segmented group rather than two
-        loose buttons drifting beside a ticket.{% endcomment %}
+        {% comment %}And the rest as one group after the sides (the old header's
+        order: the ticket, then ask): the watchlist and Ask Sauron.{% endcomment %}
         <span class="dtl-aux">
-            <button type="button" class="sr-pop-btn"
+            <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}">{% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="sv-ih-icon wl-star{% if instrument.is_watchlist %} on{% endif %}"
+                        title="{% if instrument.is_watchlist %}Remove from watchlist{% else %}Add to watchlist: bars, quotes and signal scans follow{% endif %}"
+                        aria-pressed="{% if instrument.is_watchlist %}true{% else %}false{% endif %}"
+                        aria-label="Toggle watchlist for {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="{% if instrument.is_watchlist %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z"/></svg></button>
+            </form>
+            <button type="button" class="sv-ih-icon"
                     data-ask-sauron="{{ instrument.symbol }}{% if instrument.name and instrument.name != instrument.symbol %} ({{ instrument.name }}){% endif %}"
-                    data-ask-kind="instrument">▸ ASK SAURON</button>
-            <a href="{% url 'instruments_list' %}" class="sr-pop-btn">← BACK</a>
+                    data-ask-kind="instrument" title="Ask Sauron about {{ instrument.symbol }}" aria-label="Ask Sauron about {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
         </span>
     </div>
-</div>
-<style>
-    .ipos-count { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
-    .ipos-table { width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:12px; }
-    .ipos-table th { text-align:left; font-size:9.5px; letter-spacing:.14em; color:var(--text-muted);
-        font-weight:500; padding:8px 12px; border-bottom:1px solid var(--border); }
-    .ipos-table td { padding:9px 12px; border-bottom:1px solid var(--border); }
-    .ipos-table tr:last-child td { border-bottom:0; }
-    .ipos-table .num { text-align:right; font-variant-numeric:tabular-nums; }
-    .ipos-side { font-weight:600; font-size:11px; letter-spacing:.06em; }
-    .ipos-side--long { color:var(--accent); }
-    .ipos-side--short { color:var(--accent-red); }
-    .ipos-via { color:var(--text-muted); }
-    .ipos-stop { color:var(--accent-red); }
-    .ipos-tp { color:var(--accent); }
-    .ipos-tag { font-size:8.5px; letter-spacing:.1em; padding:1px 4px; margin-left:5px;
-        border:1px solid var(--border); border-radius:2px; color:var(--text-muted); }
-    .ipos-tag--ok { color:var(--accent); border-color:var(--accent); }
-    .ipos-pnl { font-weight:600; }
-    .ipos-pnl.up { color:var(--accent); }
-    .ipos-pnl.down { color:var(--accent-red); }
-    .ipos-pnl small { display:block; font-weight:400; font-size:10px; opacity:.75; }
+</section>
 
-    /* Two rows, not four. The header was title / metadata / actions /
-       book stacked, and every one of those rows pushed the chart —
-       the thing the page exists for — further down the fold. */
-    .detail-header { flex-wrap:wrap; row-gap:10px; }
-    .detail-meta-inline { display:inline-flex; align-items:center; gap:8px;
-        margin:0 0 0 4px; font-size:10.5px; }
-    .detail-meta-inline .dtl-name { color:var(--text-muted);
-        max-width:26ch; overflow:hidden; text-overflow:ellipsis;
-        white-space:nowrap; }
-    /* The ticket owns the right end of the header row; the auxiliary
-       controls sit beside it as one segmented group rather than two
-       loose buttons drifting next to it.
-       `.dtl-quote` and the `.dq-*` cells that used to live here went
-       with the strip they styled — the prices are on the buttons now. */
-    .dtl-actions { display:flex; align-items:center; gap:10px;
-        flex-wrap:wrap; margin-left:auto; }
-    .dtl-aux { display:inline-flex; align-items:stretch; }
-    .dtl-aux > * { border-radius:0; }
-    .dtl-aux > *:first-child { border-top-left-radius:var(--radius-md);
-        border-bottom-left-radius:var(--radius-md); }
-    .dtl-aux > *:last-child { border-top-right-radius:var(--radius-md);
-        border-bottom-right-radius:var(--radius-md); }
-    .dtl-aux > * + * { border-left:0; }
-    @media (max-width:880px) {
-        .dtl-actions { margin-left:0; width:100%; margin-top:10px; }
-    }
-
-    .wl-star { background:none; border:1px solid var(--border); border-radius:6px;
-        cursor:pointer; font-size:18px; line-height:1; padding:4px 9px;
-        color:var(--text-muted); transition:color .15s, border-color .15s; }
-    .wl-star:hover, .wl-star:focus-visible { color:var(--accent-gold); border-color:var(--accent-gold); outline:none; }
-    .wl-star.on { color:var(--accent-gold); border-color:var(--accent-gold); }
-    .dtl-price { display:flex; align-items:baseline; gap:10px; }
-    /* Whose price it is (2026-10-31): a line of its own under the title
-       row (`order` puts it after the market badge, so the badge keeps its
-       place beside the price), small and muted, never louder than the
-       price. The venue's part in the gold the captions under the chart
-       use for the venue's prices. */
-    .dtl-who { order:10; flex-basis:100%; display:flex; flex-wrap:wrap;
-        gap:0 14px; margin-top:-6px;
-        font-family:var(--font-mono); font-size:10px; line-height:1.45;
-        letter-spacing:.02em; color:var(--text-muted); }
-    .dtl-who [hidden] { display:none; }
-    .dtl-venue { color:var(--accent-gold-ink, var(--accent-gold)); }
-    .dtl-chg.dtl-chg--other { color:var(--text-muted); background:transparent;
-        border:1px dashed var(--border); }
-    .dtl-last { font-family:var(--font-display); font-size:26px; font-weight:700;
-        color:var(--text-primary); letter-spacing:0.5px; }
-    .dtl-chg { font-family:var(--font-mono); font-size:13px; font-weight:700;
-        padding:2px 8px; border-radius:4px; }
-    .dtl-chg.up { color:var(--accent); background:rgba(0,232,104,0.10); }
-    .dtl-chg.down { color:var(--accent-red); background:rgba(232,48,48,0.10); }
-    .dtl-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-    .dtl-actions .sr-pop-btn { flex:0 0 auto; }
-    /* Market badge — the same open/closed vocabulary as the topbar's SE
-       dropdown (st-open/st-closed), sized to sit beside the price: a
-       price with no market state next to it reads as live. CLOSED wears
-       the red dot deliberately — "this number is not moving" is the one
-       fact the page must not whisper. */
-    .dtl-mkt { display:inline-flex; align-items:center; gap:7px;
-        font-family:var(--font-mono); font-size:12px; font-weight:700;
-        letter-spacing:0.6px; padding:4px 10px;
-        border:1px solid var(--border); border-radius:5px; }
-    .dtl-mkt .mk-dot { width:8px; height:8px; border-radius:50%;
-        background:var(--text-muted); flex:0 0 auto; }
-    .dtl-mkt.mk-open { color:var(--accent); border-color:var(--accent-dim); }
-    .dtl-mkt.mk-open .mk-dot { background:var(--accent); }
-    .dtl-mkt.mk-closed { color:var(--text-muted); }
-    .dtl-mkt.mk-closed .mk-dot { background:var(--accent-red); }
-    /* Key-value rows: the raw 8-decimal values were unreadable — the
-       label column gets a fixed rhythm and the values a mono face. */
-    .kv-list .value { font-family:var(--font-mono); }
-    .kv-list .value.up { color:var(--accent); }
-    .kv-list .value.down { color:var(--accent-red); }
-    .kv-list .value.dtl-chg--other { color:var(--text-muted); }
-</style>
-
-<!-- TradingView Lightweight Chart (chart widget) -->
-{% comment %}data-instrument-live lives on the ALWAYS-rendered chart
-card, not the quote-gated hero: an instrument with no LiveQuote row yet
-must still poll — the poller is how the hero self-heals the moment the
-feed produces a first price. paintQuote null-guards the hero spans.{% endcomment %}
-<div class="card fade-in-up delay-1" style="margin-bottom:20px;padding:0;overflow:hidden;" data-instrument-live="{{ instrument.symbol }}">
-    {% comment %}The widget reads <chart_id>-positions / -signals when
-    they exist: entries, stops, targets and the signals' suggested
-    entries drawn on the tape. json_script escapes, so a rule name is
-    data, never markup.{% endcomment %}
+{% comment %}THE CHART, at the height of the screen (fill=True: the widget
+measures the room under its own top). data-instrument-live lives on the
+ALWAYS-rendered chart card, not on a quote-gated cell: an instrument with no
+quote yet must still poll, the poller is how the page heals the moment the
+feed produces a first price (sv-instrument-live.js). The widget reads
+<chart_id>-positions / -signals when they exist: entries, stops, targets and
+the signals' suggested entries drawn on the tape; json_script escapes, so a
+rule name is data, never markup.{% endcomment %}
+<section class="sv-chart-card" aria-label="{{ instrument.symbol }} chart" data-instrument-live="{{ instrument.symbol }}">
     {{ chart_positions|json_script:"instrument-main-chart-positions" }}
     {{ chart_signals|json_script:"instrument-main-chart-signals" }}
-    {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" decimals=quote_decimals ticket=True quote=quote asset_class=instrument.asset_class %}
-</div>
+    {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="560" fill=True timeframe="1d" decimals=quote_decimals ticket=True quote=quote asset_class=instrument.asset_class %}
+</section>
 
 {% comment %}
-Open bets on THIS instrument, directly under the tape that draws them.
-Same payload as the chart's price lines (chart_positions), so a row and
-the line above it can never disagree about an entry or a stop — which is
-exactly what a second queryset built for a table would eventually do.
+Open bets on THIS instrument, under the tape that draws them. Same payload as
+the chart's price lines (chart_positions), so a row and the line above it can
+never disagree about an entry or a stop.
 {% endcomment %}
 {% if chart_positions_rows %}
-<div class="card fade-in-up delay-2" style="margin-bottom:20px;">
-    <div class="card-header">
-        <span class="card-title">Open positions — {{ instrument.symbol }}</span>
-        <span class="ipos-count">{{ chart_positions_rows|length }}</span>
+<section class="sv-panel sv-inst-card" id="sv-positions">
+    <div class="sv-panel-head">
+        <h2 class="sv-panel-title">Open positions · {{ instrument.symbol }}</h2>
+        <span class="sv-panel-meta sv-ih-num">{{ chart_positions_rows|length }}</span>
     </div>
-    <div class="table-wrapper">
-        <table class="ipos-table">
+    <div class="sv-inst-scroll">
+        <table class="sv-table sv-inst-table">
             <thead>
                 <tr>
-                    <th>SIDE</th><th>VIA</th><th class="num">QTY</th>
-                    <th class="num">ENTRY</th><th class="num">STOP</th>
-                    <th class="num">TARGET</th><th class="num">P&amp;L</th>
+                    <th>Side</th><th>Via</th><th class="num">Qty</th>
+                    <th class="num">Entry</th><th class="num">Stop</th>
+                    <th class="num">Target</th><th class="num">P&amp;L</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody data-decimals="{{ quote_decimals }}">
             {% for p in chart_positions_rows %}
                 <tr>
-                    <td><span class="ipos-side ipos-side--{{ p.side }}">{{ p.side|upper }}</span></td>
-                    <td class="ipos-via">
-                        {{ p.via|default:"—" }}
-                        {% money_world p %}
-                        {% if p.protected %}<span class="ipos-tag ipos-tag--ok" title="Stop and target rest at the broker — this position survives the platform being down">BRACKET</span>{% endif %}
+                    <td><span class="sv-inst-side">{% if p.side == "long" %}▲ Long{% else %}▼ Short{% endif %}</span></td>
+                    <td class="sv-inst-via">
+                        {% money_world p "compact" %}
+                        <span>{{ p.via|default:"—" }}</span>
+                        {% if p.protected %}<span class="sv-chip" title="Stop and target rest at the broker: this position survives the platform being down">Bracket</span>{% endif %}
                     </td>
-                    <td class="num">{{ p.qty|floatformat:"-4" }}</td>
+                    <td class="num">{{ p.qty|qty }}</td>
                     <td class="num">{% px p.entry instrument.asset_class instrument.symbol %}</td>
-                    <td class="num ipos-stop">{% px p.stop instrument.asset_class instrument.symbol %}</td>
-                    <td class="num ipos-tp">{% px p.tp instrument.asset_class instrument.symbol %}</td>
-                    {% comment %}
-                    A dash, not a zero. A position whose instrument has no
-                    quote has an UNKNOWN P&L, and a 0.00 in that cell reads
-                    as flat when the truth is that nobody measured it.
-                    {% endcomment %}
+                    <td class="num">{% px p.stop instrument.asset_class instrument.symbol %}</td>
+                    <td class="num">{% px p.tp instrument.asset_class instrument.symbol %}</td>
+                    {% comment %}A dash, not a zero: a position whose instrument
+                    has no quote has an UNKNOWN P&L, and a 0.00 reads as flat.{% endcomment %}
                     <td class="num">
                         {% if p.pnl is None %}
                             {% if p.mark_wait %}
                             <span class="sv-unknown" title="{{ p.mark_title }}">&mdash; <small>{{ p.mark_wait }}</small></span>
                             {% else %}
-                            <span class="sv-unknown" title="No quote for this instrument — the P&amp;L on this row is unmeasured, not zero">&mdash;</span>
+                            <span class="sv-unknown" title="No quote for this instrument: the P&amp;L on this row is unmeasured, not zero">&mdash;</span>
                             {% endif %}
                         {% else %}
-                            <span class="ipos-pnl {% if p.pnl >= 0 %}up{% else %}down{% endif %}">
-                                {% if p.pnl >= 0 %}+{% endif %}{{ p.pnl|floatformat:2 }}
-                                {% if p.pnl_pct is not None %}<small>{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%</small>{% endif %}
-                            </span>
-                            {% comment %}Which mark priced it, with its age
-                            when the venue's print is stale — as the
-                            positions page says it (2026-10-15). A real row
-                            only: a paper row's quote is its venue.{% endcomment %}
-                            {% if p.mark_word and not p.paper %}<small class="ipos-mark sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="display:block;font-size:.7em;font-weight:400;letter-spacing:.04em;text-transform:uppercase;">{{ p.mark_word }}</small>{% endif %}
-                            {# Whose P&L (2026-11-06, views._chart_positions): eToro's own on an eToro row its holdings list; the words say when it is an estimate. #}
-                            {% if p.pnl_words %}<small class="ipos-pnl-src sv-muted" title="{{ p.pnl_title }}" style="display:block;font-size:.7em;font-weight:400;">{{ p.pnl_words }}</small>{% endif %}
+                            <span class="{% if p.pnl >= 0 %}up{% else %}down{% endif %}">{% if p.pnl >= 0 %}+{% endif %}{{ p.pnl|floatformat:2 }}{% if p.pnl_pct is not None %} <small>{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%</small>{% endif %}</span>
+                            {% comment %}Which mark priced it, as the positions
+                            page says it; whose P&L it is when not eToro's own.{% endcomment %}
+                            {% if p.mark_word and not p.paper %}<small class="sv-inst-sub" title="{{ p.mark_title }}">{{ p.mark_word }}</small>{% endif %}
+                            {% if p.pnl_words %}<small class="sv-inst-sub" title="{{ p.pnl_title }}">{{ p.pnl_words }}</small>{% endif %}
                         {% endif %}
                     </td>
                 </tr>
@@ -270,107 +182,128 @@ exactly what a second queryset built for a table would eventually do.
             </tbody>
         </table>
     </div>
-</div>
+</section>
 {% endif %}
+{% endwith %}
 
-<div class="grid grid-2" style="margin-bottom:20px;">
-    <!-- Latest Quote -->
-    <div class="card fade-in-up delay-2">
-        <div class="card-header"><span class="card-title">Latest Quote</span></div>
+<div class="sv-inst-grid">
+    <section class="sv-panel sv-inst-card">
+        <div class="sv-panel-head"><h2 class="sv-panel-title">Latest Quote</h2></div>
         {% if quote %}
-        {% comment %}Repainted by sv-instrument-live.js with the hero
-        (2026-10-31, data-lq): rendered once, its LAST disagreed with the
-        hero from the first tick. SOURCE in words, the stand-in said.{% endcomment %}
-        <ul class="kv-list" data-decimals="{{ quote_decimals }}">
-            <li><span class="label">LAST</span><span class="value" data-lq="last" data-q="{{ instrument.symbol }}" style="font-size:18px;font-weight:700;">{% px quote.last instrument.asset_class instrument.symbol %}</span></li>
-            <li><span class="label">CHANGE 24H</span><span class="value{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-lq="change" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</span></li>
-            <li><span class="label">BID / ASK</span><span class="value" data-lq="sides" data-q="{{ instrument.symbol }}" data-q-f="sides"{% if hero.sides_words %} title="Bid and ask from {{ hero.sides_words }}"{% endif %}>{% q instrument.symbol "sides" %}</span></li>
-            <li><span class="label">VOLUME</span><span class="value">{% if quote.volume %}{{ quote.volume|floatformat:0 }}{% else %}—{% endif %}</span></li>
-            <li><span class="label">SOURCE</span><span class="value" data-lq="source" data-q="{{ instrument.symbol }}" data-q-f="who" style="color:var(--accent);">{% q instrument.symbol "who" %}</span></li>
-            <li><span class="label">UPDATED</span><span class="value" data-lq="updated" data-q="{{ instrument.symbol }}" data-q-f="age">{% q instrument.symbol "age" %}</span></li>
-        </ul>
+        {% comment %}Repainted with the price (sv-instrument-live.js, data-lq;
+        the one painter, data-q). SOURCE in words, the stand-in said.{% endcomment %}
+        <dl class="sv-inst-kv" data-decimals="{{ quote_decimals }}">
+            <div><dt>Last</dt><dd class="sv-ih-num" data-lq="last" data-q="{{ instrument.symbol }}">{% px quote.last instrument.asset_class instrument.symbol %}</dd></div>
+            <div><dt>Change 24h</dt><dd class="sv-ih-num{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-lq="change" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</dd></div>
+            <div><dt>Bid / ask</dt><dd class="sv-ih-num" data-lq="sides" data-q="{{ instrument.symbol }}" data-q-f="sides"{% if hero.sides_words %} title="Bid and ask from {{ hero.sides_words }}"{% endif %}>{% q instrument.symbol "sides" %}</dd></div>
+            <div><dt>Volume</dt><dd class="sv-ih-num">{% if quote.volume %}{{ quote.volume|floatformat:0 }}{% else %}—{% endif %}</dd></div>
+            <div><dt>Source</dt><dd data-lq="source" data-q="{{ instrument.symbol }}" data-q-f="who">{% q instrument.symbol "who" %}</dd></div>
+            <div><dt>Updated</dt><dd data-lq="updated" data-q="{{ instrument.symbol }}" data-q-f="age">{% q instrument.symbol "age" %}</dd></div>
+        </dl>
         {% else %}
-        <div class="empty-state" style="padding:30px;"><p>NO QUOTE DATA YET</p></div>
+        <p class="sv-inst-empty">No quote for this instrument yet.</p>
         {% endif %}
-    </div>
+    </section>
 
-    <!-- Technical Indicators -->
-    <div class="card fade-in-up delay-3">
-        <div class="card-header"><span class="card-title">Technical Indicators</span></div>
+    <section class="sv-panel sv-inst-card">
+        <div class="sv-panel-head"><h2 class="sv-panel-title">Technical Indicators</h2></div>
         {% if technicals %}
-        {% comment %}floatformat everywhere: these are 8-decimal Decimals
-        and rendered raw they read as noise, not numbers. RSI additionally
-        gets its zone spelled out — the color alone said nothing.{% endcomment %}
-        <ul class="kv-list">
-            <li><span class="label">RSI (14)</span><span class="value" style="color:{% if technicals.rsi_14 and technicals.rsi_14 < 30 %}var(--accent){% elif technicals.rsi_14 and technicals.rsi_14 > 70 %}var(--accent-red){% else %}var(--text-primary){% endif %}">{{ technicals.rsi_14|default:"—"|floatformat:1 }}{% if technicals.rsi_14 %}{% if technicals.rsi_14 < 30 %} · oversold{% elif technicals.rsi_14 > 70 %} · overbought{% endif %}{% endif %}</span></li>
-            <li><span class="label">MACD / SIGNAL</span><span class="value">{{ technicals.macd_line|default:"—"|floatformat:4 }} / {{ technicals.macd_signal|default:"—"|floatformat:4 }}</span></li>
-            <li><span class="label">SMA 20</span><span class="value">{{ technicals.sma_20|default:"—"|floatformat:4 }}</span></li>
-            <li><span class="label">SMA 50</span><span class="value">{{ technicals.sma_50|default:"—"|floatformat:4 }}</span></li>
-            <li><span class="label">SMA 200</span><span class="value">{{ technicals.sma_200|default:"—"|floatformat:4 }}</span></li>
-            <li><span class="label">ATR (14)</span><span class="value">{{ technicals.atr_14|default:"—"|floatformat:4 }}</span></li>
-            <li><span class="label">BOLLINGER</span><span class="value">{{ technicals.bollinger_lower|default:"—"|floatformat:4 }} → {{ technicals.bollinger_upper|default:"—"|floatformat:4 }}</span></li>
-        </ul>
+        {% comment %}floatformat everywhere: these are 8-decimal Decimals and,
+        raw, they read as noise. RSI says its zone in words.{% endcomment %}
+        <dl class="sv-inst-kv">
+            <div><dt>RSI (14)</dt><dd class="sv-ih-num">{{ technicals.rsi_14|default:"—"|floatformat:1 }}{% if technicals.rsi_14 %}{% if technicals.rsi_14 < 30 %} · oversold{% elif technicals.rsi_14 > 70 %} · overbought{% endif %}{% endif %}</dd></div>
+            <div><dt>MACD / signal</dt><dd class="sv-ih-num">{{ technicals.macd_line|default:"—"|floatformat:4 }} / {{ technicals.macd_signal|default:"—"|floatformat:4 }}</dd></div>
+            <div><dt>SMA 20</dt><dd class="sv-ih-num">{{ technicals.sma_20|default:"—"|floatformat:4 }}</dd></div>
+            <div><dt>SMA 50</dt><dd class="sv-ih-num">{{ technicals.sma_50|default:"—"|floatformat:4 }}</dd></div>
+            <div><dt>SMA 200</dt><dd class="sv-ih-num">{{ technicals.sma_200|default:"—"|floatformat:4 }}</dd></div>
+            <div><dt>ATR (14)</dt><dd class="sv-ih-num">{{ technicals.atr_14|default:"—"|floatformat:4 }}</dd></div>
+            <div><dt>Bollinger</dt><dd class="sv-ih-num">{{ technicals.bollinger_lower|default:"—"|floatformat:4 }} → {{ technicals.bollinger_upper|default:"—"|floatformat:4 }}</dd></div>
+        </dl>
         {% else %}
-        <div class="empty-state" style="padding:30px;"><p>NO INDICATOR DATA</p></div>
+        <p class="sv-inst-empty">No indicator reading yet.</p>
         {% endif %}
-    </div>
+    </section>
 </div>
 
-<!-- Recent Signals -->
-<div class="card fade-in-up delay-4" style="margin-bottom:20px;">
-    <div class="card-header"><span class="card-title">Recent Signals for {{ instrument.symbol }}</span></div>
+<section class="sv-panel sv-inst-card">
+    <div class="sv-panel-head"><h2 class="sv-panel-title">Recent signals · {{ instrument.symbol }}</h2></div>
     {% if signals %}
-    <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Time</th><th>Direction</th><th>Type</th><th>Title</th>
-            <th style="text-align:right;">Entry</th>
-            <th style="text-align:right;">Stop</th>
-            <th style="text-align:right;">Target</th>
-            <th style="text-align:right;">Score</th><th>Status</th></tr></thead>
+    <div class="sv-inst-scroll">
+    <table class="sv-table sv-inst-table">
+        <thead><tr><th>Time</th><th>Side</th><th>Type</th><th>Title</th>
+            <th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th>
+            <th class="num">Score</th><th>State</th></tr></thead>
         <tbody>
         {% for s in signals %}
         <tr>
-            <td style="font-size:11px;color:var(--text-muted);white-space:nowrap;">{{ s.created_at|date:"M d H:i" }}</td>
-            <td><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
+            <td class="num sv-inst-when">{{ s.created_at|date:"M d H:i" }}</td>
+            <td><span class="sv-inst-side">{% if s.direction == "bullish" %}▲ Long{% elif s.direction == "bearish" %}▼ Short{% else %}{{ s.direction|capfirst }}{% endif %}</span></td>
             <td>{{ s.signal_type }}</td>
-            <td>{{ s.title|truncatechars:40 }}</td>
-            <td style="text-align:right;font-family:var(--font-mono);">{% if s.suggested_entry %}{{ s.suggested_entry|floatformat:4 }}{% else %}—{% endif %}</td>
-            <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-red);">{% if s.suggested_stop %}{{ s.suggested_stop|floatformat:4 }}{% else %}—{% endif %}</td>
-            <td style="text-align:right;font-family:var(--font-mono);color:var(--accent);">{% if s.suggested_target %}{{ s.suggested_target|floatformat:4 }}{% else %}—{% endif %}</td>
-            <td style="text-align:right;font-family:var(--font-mono);">{{ s.score|floatformat:2 }}</td>
-            <td>
-                {% if s.is_active %}
-                <span style="color:var(--accent);font-family:var(--font-mono);font-size:10px;">● ACTIVE</span>
-                {% else %}
-                <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:10px;">{{ s.outcome|default:"closed"|upper }}</span>
-                {% endif %}
-            </td>
+            <td class="sv-inst-title">{{ s.title|truncatechars:40 }}</td>
+            <td class="num">{% if s.suggested_entry %}{% px s.suggested_entry instrument.asset_class instrument.symbol %}{% else %}—{% endif %}</td>
+            <td class="num">{% if s.suggested_stop %}{% px s.suggested_stop instrument.asset_class instrument.symbol %}{% else %}—{% endif %}</td>
+            <td class="num">{% if s.suggested_target %}{% px s.suggested_target instrument.asset_class instrument.symbol %}{% else %}—{% endif %}</td>
+            <td class="num">{{ s.score|floatformat:2 }}</td>
+            <td>{% if s.is_active %}<span class="sv-state sv-state--on">Active</span>{% else %}<span class="sv-state sv-state--off">{{ s.outcome|default:"closed"|capfirst }}</span>{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
     {% else %}
-    <div class="empty-state" style="padding:30px;"><p>NO SIGNALS FOR THIS INSTRUMENT</p></div>
+    <p class="sv-inst-empty">No signal on this instrument.</p>
     {% endif %}
-</div>
+</section>
 
-<!-- Related News -->
-<div class="card fade-in-up delay-5">
-    <div class="card-header"><span class="card-title">Related News</span></div>
+<section class="sv-panel sv-inst-card">
+    <div class="sv-panel-head"><h2 class="sv-panel-title">Related News</h2></div>
     {% if news %}
+    <ul class="sv-inst-news">
     {% for a in news %}
-    <div style="padding:8px 0;border-bottom:1px solid rgba(19,48,32,0.3);">
-        <a href="{{ a.url }}" target="_blank" style="color:var(--text-primary);text-decoration:none;font-size:13px;">{{ a.title|truncatechars:80 }}</a>
-        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ a.source }} · {{ a.published_at|timesince }} ago</div>
-    </div>
+        <li>
+            <a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">{{ a.title|truncatechars:80 }}</a>
+            <span>{{ a.source }} · {{ a.published_at|timesince }} ago</span>
+        </li>
     {% endfor %}
+    </ul>
     {% else %}
-    <div class="empty-state" style="padding:30px;"><p>NO RELATED NEWS</p></div>
+    <p class="sv-inst-empty">No news on this instrument.</p>
     {% endif %}
-</div>
+</section>
 
-{% block extra_js %}{% endblock %}
 {% load static %}
+{% comment %}The day's range in the header, from the chart's own candles
+(display only): today's low and high since 00:00 UTC on an intraday frame,
+the last daily candle's on a daily one, read each time the chart draws new
+bars. A dash until then; nothing is fetched for it.{% endcomment %}
+<script>
+(function () {
+    var cell = document.querySelector('[data-ih="range"]');
+    if (!cell) return;
+    var holder = document.querySelector('[data-decimals]');
+    var dp = holder ? parseInt(holder.getAttribute('data-decimals'), 10) : 2;
+    if (!(dp >= 0 && dp <= 10)) dp = 2;
+    var seen = null;
+    function paint() {
+        var h = window.svCharts && window.svCharts['instrument-main-chart'];
+        var bars = h && h.bars ? h.bars() : null;
+        if (!bars || !bars.length || bars === seen) return;
+        seen = bars;
+        var last = bars[bars.length - 1], lo = Infinity, hi = -Infinity;
+        if (typeof last.time === 'number') {
+            var day = Math.floor(last.time / 86400) * 86400;
+            bars.forEach(function (b) {
+                if (typeof b.time === 'number' && b.time >= day && !b.suspect) {
+                    lo = Math.min(lo, b.low); hi = Math.max(hi, b.high);
+                }
+            });
+        } else if (!last.suspect) {
+            lo = last.low; hi = last.high;
+        }
+        if (isFinite(lo) && isFinite(hi)) cell.textContent = lo.toFixed(dp) + '–' + hi.toFixed(dp);
+    }
+    setInterval(paint, 1000);
+})();
+</script>
 <script src="{% static 'js/sv-instrument-live.js' %}" defer></script>
 {% endblock %}

@@ -44,7 +44,9 @@ import math
 import re
 import unittest
 from datetime import datetime, timedelta, timezone as dt_timezone
+from pathlib import Path
 
+from django.conf import settings
 from django.test import SimpleTestCase
 
 from tests.test_chart_levels_language import (
@@ -1881,7 +1883,10 @@ class ThePo3WidgetTests(SimpleTestCase):
         and the words are haloed in the bg (only where the context strokes
         text: a context without strokeText paints the rest unharmed)."""
         out = _po3_run("through")
-        violet, bg = "#a878f0", "#030806"
+        # The desk v2 (B10, 2026-11-13): the plate is the desk's ground
+        # (--sv-bg-0), where the old void was; the operator approved the
+        # board: "amazing work, bravo, I need it fast!!".
+        violet, bg = "#a878f0", "#040B07"
         c = out["chip"]
         self.assertEqual((c["text"], c["stage"]), ("M · SWEEP  1.08288", "m"))
         self.assertNotIn("bare", c)
@@ -1949,7 +1954,10 @@ class ThePo3WiringTests(SimpleTestCase):
         self.assertNotIn("the Asian range (violet box)", levels)
 
     def test_the_phase_css_follows_the_theme(self):
-        css = self.src.split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         rules = [(s.strip(), b) for s, b in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
                  if '[data-role="phase"]' in s]
@@ -1959,7 +1967,10 @@ class ThePo3WiringTests(SimpleTestCase):
 
     def test_a_stage_card_s_head_wraps_rather_than_clipping(self):
         """'Sweep of the A…' on a phone: the stage cards' head rule wraps."""
-        css = self.src.split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         rules = {s.strip(): b for s, b in re.findall(r"([^{}]+)\{([^{}]*)\}", css)}
         rule = rules.get(".sv-sig-head--stage .sv-sig-rule", "")

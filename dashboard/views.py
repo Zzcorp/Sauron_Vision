@@ -4813,6 +4813,7 @@ def _chart_positions(user, instrument):
     or an ISO string would need a second parse in the browser.
     """
     from bot_program.models import AssetBotTrade
+    from dashboard.position_summary import world_of
     from portfolio.models import Position
     from portfolio.risk_gate import _position_books
     from portfolio.services import PNL_ESTIMATE, value_per_unit, venue_pnls
@@ -4897,6 +4898,9 @@ def _chart_positions(user, instrument):
             # Whose prices the lines are (2026-10-31): a book row's venue
             # is not recorded.
             "venue": "",
+            # Whose money (2026-11-13, the desk v2): a book row states no
+            # world, so it wears no world chip.
+            "world": "",
         })
     bot_rows = list(AssetBotTrade.objects.filter(
         config__user=user, symbol=instrument.symbol,
@@ -4974,6 +4978,10 @@ def _chart_positions(user, instrument):
             # skeptic M4): the chart's legend says so when they sit over
             # candles of another feed (dashboard.chart_source).
             "venue": str(meta.get("broker") or ""),
+            # Whose money (2026-11-13, the desk v2): REAL, DEMO or PAPER, as
+            # the row's own stamps say (position_summary.world_of), for the
+            # header's and the chart's world chip. A read; display only.
+            "world": world_of(t),
         })
     return out
 
