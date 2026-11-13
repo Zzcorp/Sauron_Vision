@@ -1973,7 +1973,9 @@ class TheWiringTests(SimpleTestCase):
         for button in re.findall(r"<button[^>]*>", block):
             self.assertIn('aria-pressed="', button)
             self.assertIn('type="button"', button)
-        self.assertIn("Levels (4h):", block)
+        # The board's strip title, "Levels · 4h" (the desk v2's review, F3;
+        # the operator approved the board: "amazing work, bravo, I need it fast!!").
+        self.assertIn('Levels · <span class="sv-lvl-tf">4h</span>', block)
         self.assertIn("activeInds.levels === undefined) activeInds.levels = true", html)
         self.assertIn("var lvlLegendEl = document.getElementById(CHART_ID + '-lvl-legend');",
                       self.src)
@@ -2053,7 +2055,9 @@ class TheWiringTests(SimpleTestCase):
     # C-6
     def test_signal_and_hline_inks(self):
         sig = self._fn("drawSignalLevels")
-        self.assertIn("[['entry', 'Entry', c.ink]", sig)
+        # named by their owner (the desk v2's review, F5: "Signal entry"
+        # against his "Your stop"; the operator approved the board)
+        self.assertIn("[['entry', 'Signal entry', c.ink]", sig)
         self.assertIn("axisLabelColor: c.bg, axisLabelTextColor: lv[2],", sig)
         self.assertIn("LightweightCharts.LineStyle.Dashed", sig)
         self.assertNotIn("c.gold", sig)

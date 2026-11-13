@@ -4898,10 +4898,11 @@ def _chart_positions(user, instrument):
             # Whose prices the lines are (2026-10-31): a book row's venue
             # is not recorded.
             "venue": "",
-            # Whose money (2026-11-13, the desk v2): a book row states no
-            # world, so it wears no world chip.
-            "world": "",
         })
+        # Whose money (the desk v2, its review M5): the book's row reads as
+        # main always read it ({% money_world %} on paper=False: REAL), so
+        # the header, the table and the chart's entry chip say the same.
+        out[-1]["world"] = world_of(out[-1])
     bot_rows = list(AssetBotTrade.objects.filter(
         config__user=user, symbol=instrument.symbol,
         status__in=("OPEN", "CLOSE_PENDING")))
@@ -4964,6 +4965,15 @@ def _chart_positions(user, instrument):
             "mark_source": mk.source, "mark_word": words.get("mark_word", ""),
             "mark_wait": words.get("mark_wait", ""),
             "mark_title": words.get("mark_title", ""),
+            # The side the venue's mark was read at (the desk v2, its
+            # review F10): the row's closing side when the venue's stamp
+            # carries it (venue_mark.resolve), so the header can say "P&L
+            # at the ask"; "" otherwise, and the header names the mark.
+            "mark_side": (("bid" if side == "long" else "ask")
+                          if mk.source == "venue"
+                          and (meta.get("venue_mark") or {}).get(
+                              "bid" if side == "long" else "ask") is not None
+                          else ""),
             "rule": tag, "entry_text": _txt(entry), "stop_text": _txt(stop),
             "tp_text": _txt(tp), "r_now": r_now,
             # whose figure the P&L is, where it is not eToro's own
@@ -5306,6 +5316,12 @@ def _instrument_page(request, instrument, *, deep_link=None):
         # it built from separate reads drift the moment one of them gains
         # a filter the other does not.
         "chart_positions_rows": chart_positions,
+        # The header's one position (the desk v2, its review M5): his REAL
+        # money first, whatever the book lists before it; the table under
+        # the chart has every row. A read; display only.
+        "chart_positions_head": next(
+            (p for p in chart_positions if p.get("world") == "live"),
+            chart_positions[0] if chart_positions else None),
         "chart_signals": chart_signals,
         # A Telegram "Prepare ticket" link's note and ticket (2026-10-24);
         # None on every other visit.

@@ -531,8 +531,10 @@ class PopupsOpenOnClickTests(TestCase):
             self.assertIsNotNone(react.select_one(".sr-pop-btn-pass"))
             explore = [b.get_text(strip=True) for b in
                        foot.select(".sr-pop-actions:not(.sr-pop-actions-react) .sr-pop-btn")]
-            self.assertIn("▸ INSTRUMENT", explore)
-            self.assertIn("▸ ALL SIGNALS", explore)
+            # the board's quiet links, words only (the desk v2's review, F11;
+            # the operator approved the board: "amazing work, bravo, I need it fast!!")
+            self.assertIn("INSTRUMENT", explore)
+            self.assertIn("ALL SIGNALS", explore)
         css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-rail.css"
                ).read_text(encoding="utf-8")
         block = css.split(".sr-pop-foot {", 1)[1].split("}", 1)[0]

@@ -780,6 +780,10 @@
     }
     var title = stateAt(p, at) === 'shut' ? 'closed · ' + head(p, '') : head(p, '');
     var look = lineLook(h, p);
+    /* A chart whose own chip names the line (its nowLook says bare) keeps
+       the title off the pane: one label, its words the chip's, read from
+       the caption the title also feeds (the desk v2's review, F8). */
+    if (look && look.bare) title = '';
     var color = look.color;
     var sig = v + '|' + title + '|' + color + '|' + (look.label || '') + '|' + (look.text || '');
     if (h._svLine && h._svSig === sig) {

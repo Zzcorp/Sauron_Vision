@@ -173,8 +173,11 @@ def seed_desk(user, now=None):
     gold = instrument("XAUUSD")
     _bars(gold, now)
     _quote(gold, now, BID, BID, ASK, chg="-0.32")
+    # The venue's stamp a little older than the poll of the same feed, so the
+    # one price is the poll's and its day change prints (the board's state:
+    # "Day -0.32 % ▼"; the review of B10, F14). Both eToro's.
     trade = _held(user, gold, now, side="SELL", qty=QTY, entry=ENTRY, stop=STOP, target=TARGET,
-                  bid=BID, ask=ASK)
+                  bid=BID, ask=ASK, age_s=30)
     pinned = _signal(gold, now, direction="bearish", score=SIG["score"], rule=SIG["rule"],
                      title=SIG["title"], entry=SIG["entry"], stop=SIG["stop"],
                      target=SIG["target"], age=timedelta(hours=4))

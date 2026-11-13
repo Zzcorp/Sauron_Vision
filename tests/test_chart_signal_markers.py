@@ -380,18 +380,18 @@ class TheInstrumentsDecimalsTests(TestCase):
 class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
 
     def test_the_key_is_rendered_under_the_chart_in_words_and_colours(self):
+        # The board's one-row strip (the desk v2's review, F3): the key is the
+        # strip's Signals switch, its scale in its title; the operator approved
+        # the board: "amazing work, bravo, I need it fast!!"
         html = widget()
         i = html.index('id="t-sig-legend"')
         block = html[i:html.index("</div>", i)]
-        self.assertIn(
-            "Signal strength: weak · medium · strong · very strong",
-            _visible(block))
-        self.assertIn("green buy", _visible(block))
-        self.assertIn("red sell", _visible(block))
-        for n in range(4):
-            self.assertIn('class="sv-sig-sw sv-sig-s%d"' % n, block)
-            self.assertIn('class="sv-sig-sw sv-sig-sw--bear sv-sig-s%d"' % n,
-                          block)
+        self.assertEqual(_visible(block), "Signals")
+        self.assertIn('data-sig-toggle aria-pressed="true"', block)
+        self.assertIn("weak · medium · strong · very strong", block)
+        self.assertIn("▲ a long under its bar, ▼ a short over it", block)
+        self.assertIn('class="sv-sig-sw sv-sig-s2"', block)
+        self.assertIn('class="sv-sig-sw sv-sig-sw--bear sv-sig-s2"', block)
 
     def test_the_key_waits_for_a_dot(self):
         """Hidden until the widget draws a dot: a chart with no signals
@@ -822,8 +822,11 @@ class ThePureHalfUnderNodeTests(SimpleTestCase):
             self.assertIn(escaped, card)
 
     def test_the_card_says_side_score_strength_and_state(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         card = self.out["cardPinned"]
-        self.assertIn('<span class="sv-sig-side">SELL</span>', card)
+        self.assertIn('<span class="sv-sig-side">▼ SHORT</span>', card)
         self.assertIn('class="sv-sig-score sv-sig-s2"', card)
         self.assertIn('style="width:83%"', card)
         self.assertIn('<b class="sv-sig-pct">83%</b>', card)
@@ -849,9 +852,12 @@ class ThePureHalfUnderNodeTests(SimpleTestCase):
             "sv-sig-card sv-sig-card--neutral"])
 
     def test_a_graded_signal_shows_its_outcome(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         self.assertIn("sv-sig-chip--win", self.out["won"])
         self.assertIn("Target reached · +2.00R", self.out["won"])
-        self.assertIn(">BUY<", self.out["won"])
+        self.assertIn(">▲ LONG<", self.out["won"])
         self.assertIn("very strong", self.out["won"])
         self.assertIn("sv-sig-chip--loss", self.out["lost"])
         self.assertIn("Stop loss hit · -1.00R", self.out["lost"])
@@ -1337,10 +1343,13 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     def test_hover_shows_the_card_beside_the_dot(self):
         """On a DAILY bar, whose string date the legend's handler cannot
         format: the harness runs the listeners the way the library does."""
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         hover = self.r["hover"]
         self.assertFalse(hover["hidden"])
         self.assertEqual(hover["cls"], "sv-sig-card sv-sig-card--bull")
-        for text in ("Golden cross", ">BUY<", "82%", "1.08420", "1.08120",
+        for text in ("Golden cross", ">▲ LONG<", "82%", "1.08420", "1.08120",
                      "1.09020", "2.00 : 1", "2026-08-10 15:30 UTC",
                      "Active", "+1 more signal on this bar"):
             self.assertIn(text, hover["html"])
@@ -1349,19 +1358,25 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         self.assertTrue(self.r["away"]["hidden"])
 
     def test_a_click_pins_the_card_and_draws_dashed_levels(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         pinned = self.r["pinned"]
         self.assertIn("is-pinned", pinned["card"]["cls"])
         self.assertIn("data-sv-sig-close", pinned["card"]["html"])
         self.assertEqual(pinned["lines"], [
-            {"title": "Entry", "price": 1.0842, "style": 2},
-            {"title": "Stop", "price": 1.0812, "style": 2},
-            {"title": "Target", "price": 1.0902, "style": 2}])
+            {"title": "Signal entry", "price": 1.0842, "style": 2},
+            {"title": "Signal stop", "price": 1.0812, "style": 2},
+            {"title": "Signal target", "price": 1.0902, "style": 2}])
         # The pointer leaves: the pinned card stays, at its own dot.
         after = self.r["pinnedAfterLeave"]
         self.assertFalse(after["hidden"])
         self.assertEqual((after["left"], after["top"]), ("124px", "141px"))
 
     def test_the_dots_and_the_levels_survive_every_set_data(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         ref = self.r["refreshed"]
         self.assertEqual(ref["fetches"], 2)
         self.assertEqual(ref["setData"], self.r["first"]["setData"] + 1)
@@ -1369,16 +1384,19 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
                          ["sv-sig-11", "sv-sig-12", "sv-sig-14"])
         # Redrawn once, not stacked on the first copy.
         self.assertEqual([l["title"] for l in ref["lines"]],
-                         ["Entry", "Stop", "Target"])
+                         ["Signal entry", "Signal stop", "Signal target"])
         self.assertFalse(ref["card"]["hidden"])
         self.assertIn("is-pinned", ref["card"]["cls"])
 
     def test_another_dot_moves_the_levels_and_the_card(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         other = self.r["other"]
         self.assertEqual([(l["title"], l["price"]) for l in other["lines"]],
-                         [("Entry", 1.09), ("Stop", 1.095), ("Target", 1.08)])
+                         [("Signal entry", 1.09), ("Signal stop", 1.095), ("Signal target", 1.08)])
         self.assertIn("sv-sig-card--bear", other["card"]["cls"])
-        self.assertIn(">SELL<", other["card"]["html"])
+        self.assertIn(">▼ SHORT<", other["card"]["html"])
         self.assertIn("Stop loss hit", other["card"]["html"])
         self.assertIn("RSI &lt;b&gt;reversal&lt;/b&gt;", other["card"]["html"])
         self.assertNotIn("<b>reversal", other["card"]["html"])
@@ -1413,11 +1431,14 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     def test_each_click_on_a_shared_bar_pins_the_next_signal(self):
         """No marker id (a phone's tap): BUY 0.82 first, then SELL 0.62,
         then round again; the hover on that bar shows the pinned one."""
-        buy = [("Entry", 1.0842), ("Stop", 1.0812), ("Target", 1.0902)]
-        sell = [("Entry", 1.0855), ("Stop", 1.0885), ("Target", 1.0795)]
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
+        buy = [("Signal entry", 1.0842), ("Signal stop", 1.0812), ("Signal target", 1.0902)]
+        sell = [("Signal entry", 1.0855), ("Signal stop", 1.0885), ("Signal target", 1.0795)]
         levels = lambda k: [(l["title"], l["price"]) for l in self.r[k]["lines"]]
         self.assertEqual(levels("cycle1"), buy)
-        self.assertIn(">BUY<", self.r["cycle1"]["card"]["html"])
+        self.assertIn(">▲ LONG<", self.r["cycle1"]["card"]["html"])
         self.assertIn("+1 more signal on this bar: click or tap the bar again "
                       "for the next", self.r["cycle1"]["card"]["html"])
         self.assertEqual(levels("cycle2"), sell)
@@ -1436,22 +1457,25 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         bar with a stronger BUY could never be opened, and a click on it
         drew the BUY's levels. Now nothing throws, the legend reads the
         date, and the named dot is the one opened and pinned."""
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         named = self.r["named"]
         self.assertEqual(named["moveErrors"], 0)
         self.assertIn("2026-08-10", named["legend"])
         self.assertIn("2026-08-10", self.r["legend"])
         self.assertFalse(named["card"]["hidden"])
-        self.assertIn(">SELL<", named["card"]["html"])
+        self.assertIn(">▼ SHORT<", named["card"]["html"])
         self.assertIn("RSI reversal 4h", named["card"]["html"])
-        sell = [("Entry", 1.0855), ("Stop", 1.0885), ("Target", 1.0795)]
+        sell = [("Signal entry", 1.0855), ("Signal stop", 1.0885), ("Signal target", 1.0795)]
         levels = lambda k: [(l["title"], l["price"]) for l in self.r[k]["lines"]]
         self.assertEqual(levels("namedPin"), sell)
         self.assertIn("sv-sig-card--bear is-pinned", self.r["namedPin"]["card"]["cls"])
         # Named again: that dot again, never the next one of the bar.
         self.assertEqual(levels("namedAgain"), sell)
         self.assertEqual(levels("namedOther"),
-                         [("Entry", 1.0842), ("Stop", 1.0812), ("Target", 1.0902)])
-        self.assertIn(">BUY<", self.r["namedOther"]["card"]["html"])
+                         [("Signal entry", 1.0842), ("Signal stop", 1.0812), ("Signal target", 1.0902)])
+        self.assertIn(">▲ LONG<", self.r["namedOther"]["card"]["html"])
 
     def test_a_drawing_tool_keeps_its_click(self):
         drawing = self.r["drawing"]
@@ -1464,12 +1488,15 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     def test_a_chart_type_switch_redraws_the_levels_on_the_new_series(self):
         """removeSeries takes a series' price lines with it: the pinned
         levels are drawn again on the series that replaced it, once."""
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         swapped = self.r["swapped"]
         self.assertEqual(swapped["kind"], "line")
         self.assertNotIn("candle", swapped["series"])
         self.assertEqual([(l["title"], l["price"], l["style"]) for l in swapped["lines"]],
-                         [("Entry", 1.0842, 2), ("Stop", 1.0812, 2),
-                          ("Target", 1.0902, 2)])
+                         [("Signal entry", 1.0842, 2), ("Signal stop", 1.0812, 2),
+                          ("Signal target", 1.0902, 2)])
         self.assertIn("is-pinned", swapped["card"]["cls"])
         self.assertFalse(swapped["card"]["hidden"])
 

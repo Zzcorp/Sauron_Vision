@@ -22,7 +22,9 @@
 /* ══ 1. The instrument header ═══════════════════════════════════════════
    The day, his position on the symbol, whose price and how old, then the
    two sides with their prices on them. One row of 52 px, each group two
-   lines that never wrap. */
+   lines that never wrap. Nothing in it is ever cut, nothing runs past the
+   card (the review of B10, F1): whole items fold, narrowest desk first,
+   and never the quote's words and age, nor the market's state. */
 .sv-ih {
     display: flex;
     align-items: center;
@@ -71,30 +73,40 @@
 /* The P&L's arrow in a fixed slot, so the figure's decimal point never
    moves when the sign flips. */
 .sv-ih-arrow { display: inline-block; width: 2ch; text-align: right; font-family: var(--sv-font-mono); }
+/* The day's arrow is drawn from the class the one painter gives the
+   change (up, down), so the two never disagree; a dash, or another feed's
+   change, draws none (the review of B10, M1). */
+.sv-ih-day .dtl-chg.up::after,
+.sv-ih-day .dtl-chg.down::after {
+    display: inline-block; width: 2ch; text-align: right; font-family: var(--sv-font-mono);
+}
+.sv-ih-day .dtl-chg.up::after { content: "▲"; }
+.sv-ih-day .dtl-chg.down::after { content: "▼"; }
+.sv-ih-day .dtl-chg.dtl-chg--other::after { content: none; }
 .sv-ih-pos .sv-world { align-self: center; }
 .sv-ih-feed .sv-ih-r1 { font-size: var(--sv-fs-small); color: var(--sv-ink-2); align-items: center; gap: 6px; }
-/* Whose price and how old is the one group that gives way when a longer
-   figure needs the room: its words are on the chart's "now" chip and in
-   the caption under the chart, and its title keeps them whole. */
-.sv-ih > .sv-ih-feed { flex: 0 1 auto; min-width: 64px; overflow: hidden; }
-.sv-ih-feed .sv-ih-r1, .sv-ih-feed .sv-ih-r2 { overflow: hidden; }
-.sv-ih-feed [data-hero="src"], .sv-ih-feed .mk-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.sv-ih-dot { width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ink-2); flex: none; }
-/* The one price, as the chart's "now" line prints it, before its words. */
-.sv-ih-feed .dtl-price { flex: none; }
-.sv-ih-feed .dtl-last {
-    font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums;
-    font-size: var(--sv-fs-base); font-weight: var(--sv-figure-weight); color: var(--sv-ink-1);
+/* Whose price and how old: whole, always (the price itself is printed on
+   the two sides; its hooks ride hidden beside the words, read with them). */
+.sv-ih-feed [data-hero="src"] { flex: none; }
+.sv-ih .dtl-price {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
 }
-.sv-ih .dtl-mkt { display: inline-flex; align-items: center; gap: 6px; color: var(--sv-ink-3); }
+.sv-ih-feed { position: relative; }
+.sv-ih-dot { width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ink-2); flex: none; }
+.sv-ih .dtl-mkt { display: inline-flex; align-items: center; gap: 6px; color: var(--sv-ink-3); flex: none; }
 .sv-ih .dtl-mkt .mk-dot { width: 6px; height: 6px; border-radius: var(--sv-radius-round); flex: none;
     border: 1px solid var(--sv-ink-3); box-sizing: border-box; }
 .sv-ih .dtl-mkt.mk-open .mk-dot { background: var(--sv-ink-2); border-color: var(--sv-ink-2); }
+.sv-ih .dtl-venue { color: var(--sv-ink-3); }
 .sv-ih-more { color: var(--sv-ink-3); text-decoration: underline; text-underline-offset: 2px; }
 .sv-ih-more:hover { color: var(--sv-ink-1); }
 /* The two sides: the deal ticket (its markup, words and PIN path are the
    ticket's own), laid out as the board draws it: two boxes of 42 px, the
-   side's words over the price, the venue and the spread between them. */
+   side's words over the price, the venue and the spread between them. A
+   box keeps its width while the price ticks and grows for a longer price,
+   never letting it spill (plan §10: a fixed min-width; the review of B10,
+   M2). */
 .sv-ih-act { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .sv-ih .sv-ticket {
     display: flex; align-items: stretch; gap: 8px; height: 42px;
@@ -102,21 +114,26 @@
 }
 .sv-ih .sv-ticket .tk-side {
     display: flex; flex-direction: column; justify-content: center; gap: 1px;
-    width: 116px; min-width: 116px; height: 42px; padding: 0 12px;
+    min-width: 116px; height: 42px; padding: 0 12px;
     border-radius: var(--sv-radius-ctl); background: var(--sv-bg-1); box-sizing: border-box;
 }
 .sv-ih .sv-ticket .tk-short { border: 1.5px solid var(--sv-down); align-items: flex-start; }
 .sv-ih .sv-ticket .tk-long { border: 1.5px solid var(--sv-up); align-items: flex-end; }
+/* The side's own hover, the kit's 14 % wash (plan §3.4), in every
+   ambience (the review of B10, m2). */
+.sv-ih .sv-ticket .tk-long:hover:not([disabled]) { background: var(--sv-up-wash); }
+.sv-ih .sv-ticket .tk-short:hover:not([disabled]) { background: var(--sv-down-wash); }
 /* The ticket's own face stays its own (sauron.css, the deal ticket: the
    side's colour on the side's words and price, the mono face); the header
-   only sizes it to the board's 42 px boxes, nothing under 11 px. */
+   sizes it to the board's 42 px boxes, the price at the board's 17 px
+   (the operator's approved board), nothing under 11 px. */
 .sv-ih .sv-ticket .tk-lbl {
     font-size: var(--sv-fs-micro); font-weight: 600;
     letter-spacing: var(--sv-track-label); text-transform: uppercase; line-height: 14px;
 }
 .sv-ih .sv-ticket .tk-px {
     font-size: 17px; font-weight: var(--sv-figure-weight);
-    line-height: 20px; font-variant-numeric: tabular-nums;
+    line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .sv-ih .sv-ticket .tk-mid {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
@@ -126,52 +143,58 @@
 .sv-ih .sv-ticket .tk-v { font-size: var(--sv-fs-micro); line-height: 14px; color: var(--sv-ink-2); }
 .sv-ih .sv-ticket .tk-venue { font-size: var(--sv-fs-micro); line-height: 14px; padding: 0 4px; border-radius: var(--sv-radius-chip); }
 .sv-ih .sv-ticket.tk-stale .tk-side { border-style: dashed; }
-/* The watchlist and Ask Sauron, one group after the sides. */
-.sv-ih .dtl-aux { display: flex; align-items: center; gap: 4px; }
+/* The watchlist and Ask Sauron: at the right end of the chart's toolbar
+   row (the chart card holds them, before the widget), never in the header
+   row (the review of B10, F1 and m1). */
+.sv-chart-aux {
+    position: absolute; top: 4px; right: 8px; z-index: 9;
+    display: flex; align-items: center; gap: 4px; height: 28px;
+}
+.sv-chart-card:has(> .sv-chart-aux) .sv-chart-toolbar { padding-right: 76px; }
 .sv-ih-icon {
     display: inline-flex; align-items: center; justify-content: center;
     width: 28px; height: 28px; padding: 0; border: 1px solid var(--sv-line-2);
-    border-radius: var(--sv-radius-ctl); background: var(--sv-bg-1); color: var(--sv-ink-2);
+    border-radius: var(--sv-radius-ctl); background: var(--sv-bg-2); color: var(--sv-ink-2);
     cursor: pointer; text-decoration: none;
 }
 .sv-ih-icon:hover { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
-.sv-ih-icon:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+.sv-ih-icon:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
 .sv-ih-icon[aria-pressed="true"] { color: var(--sv-demo); border-color: var(--sv-line-3); }
 .sv-ih-icon svg { width: 15px; height: 15px; display: block; }
-.sv-ih form { margin: 0; display: inline-flex; }
-/* Narrower desks: what the chart already says folds first, so no line is
-   ever cut and nothing leaves the row (the old sidebar and the rail open
-   leave this row 838 px at 1440 and 684 px at 1280). */
+.sv-chart-aux form { margin: 0; display: inline-flex; }
+/* Narrower desks (the old sidebar with the rail open leaves this row 838 px
+   at 1440, 764 at 1366 and 678 at 1280): what another line of the page
+   already says folds first, a whole item at a time, its words kept in its
+   title. Never the quote's words and age, nor the market's state. */
 @container svih (max-width: 1000px) {
-    .sv-ih-mkt-row { display: none; }
-}
-@container svih (max-width: 900px) {
     .sv-ih > .sv-ih-g { margin-right: 14px; }
-}
-@container svih (max-width: 820px) {
-    .sv-ih .dtl-aux { display: none; }
-    .sv-ih-pos .sv-ih-r2 .sv-ih-age { display: none; }
-    /* the price itself is on the two sides and on the chart's line */
-    .sv-ih-feed .dtl-price { display: none; }
     .sv-ih-day .sv-ih-r2 .sv-ih-word { display: none; }
+    .sv-ih .sv-ticket .tk-side { min-width: 108px; padding: 0 10px; }
+}
+@container svih (max-width: 780px) {
     .sv-ih > .sv-ih-g { margin-right: 10px; }
     .sv-ih-r1 { gap: 6px; }
+    .sv-ih-pos .sv-ih-r2 .sv-ih-age { display: none; }
+    .sv-ih-pos .sv-ih-mark { display: none; }
     .sv-ih .sv-ticket { gap: 6px; }
-    .sv-ih .sv-ticket .tk-side { width: 104px; min-width: 104px; padding: 0 10px; }
+    .sv-ih .sv-ticket .tk-side { min-width: 96px; padding: 0 8px; }
+    .sv-ih .sv-ticket .tk-px { font-size: 15px; }
 }
-@container svih (max-width: 760px) {
-    .sv-ih-feed { display: none; }
+@container svih (max-width: 720px) {
+    .sv-ih-pos .sv-ih-r { display: none; }
+    .sv-ih-day .sv-ih-r2 { display: none; }
+}
+/* The narrowest desk (1280 with the rail open): the day folds whole (its
+   change is the headband's and the quote panel's too); his position, whose
+   price it is and the two sides stay. */
+@container svih (max-width: 700px) {
+    .sv-ih > .sv-ih-day { display: none; }
 }
 /* A phone: the row becomes lines (the day, his position, the two sides),
    each whole, rather than one row that runs past the screen. */
 @media (max-width: 640px) {
     .sv-ih { flex-wrap: wrap; height: auto; padding: 8px 10px; row-gap: 8px; }
     .sv-ih-act { margin-left: 0; }
-}
-@container svih (max-width: 700px) {
-    .sv-ih-pos .sv-ih-mark { display: none; }
-    .sv-ih .sv-ticket .tk-side { width: 96px; min-width: 96px; padding: 0 8px; }
-    .sv-ih .sv-ticket .tk-px { font-size: 15px; }
 }
 
 /* ══ 2. The chart card ══════════════════════════════════════════════════
@@ -308,6 +331,18 @@
     .sv-tb .sv-tb-caret { width: 10px; }
     .sv-tb, .sv-chart-toolbar .sv-tf-btn, .sv-chart-toolbar .sv-ctl-btn { padding: 0 5px; gap: 3px; }
 }
+/* Narrower still (1280 with the rail open): the five menus keep their
+   drawn mark and their caret, their word read by a screen reader and
+   named in their title, so the row's last control is never cut (the
+   review of B10, F11). */
+@container svchart (max-width: 800px) {
+    .sv-tb > svg:not(.sv-tb-caret) { display: block; }
+    .sv-tb .sv-tb-name,
+    .sv-tb[data-tb-menu="range"] [data-tb-label] {
+        position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+        overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+    }
+}
 /* A phone: the row's sizes and More keep their line, the other tools wrap
    under them rather than run past the screen (the widget measures the
    toolbar's height before it sizes the pane). */
@@ -361,13 +396,16 @@
 }
 /* A chosen item: a check in its own slot, never a colour alone. */
 .sv-tb-menu button::before {
-    content: ""; width: 12px; flex: none; text-align: center;
-    font-size: var(--sv-fs-micro); color: var(--sv-ink-1);
+    content: ""; width: 12px; height: 12px; flex: none; box-sizing: border-box;
 }
 .sv-tb-menu button.active,
 .sv-tb-menu button[aria-checked="true"] { color: var(--sv-ink-1); background: var(--sv-bg-4); }
+/* the check is drawn (two strokes of the item's ink), not a glyph */
 .sv-tb-menu button.active::before,
-.sv-tb-menu button[aria-checked="true"]::before { content: "✓"; }
+.sv-tb-menu button[aria-checked="true"]::before {
+    width: 5px; height: 9px; margin: 0 4px 2px 3px;
+    border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+}
 /* an indicator item names its line's tone with a swatch, its words stay ink */
 .sv-tb-menu .sv-ind-btn::after {
     content: ""; order: 2; width: 10px; height: 2px; margin-left: 6px; flex: none;
@@ -454,15 +492,23 @@
 .sv-mchip--world { padding: 0; border: 0; background: transparent; height: 18px; }
 .sv-mchip--world .sv-world { height: 18px; }
 
-/* ── The foot: the levels' key, one row, the credit at its right end ── */
-.sv-chart-foot { flex: 0 0 auto; background: var(--sv-bg-1); border-top: 1px solid var(--sv-line-2); }
-/* One row of 28 px: the levels' switches (shown once there are levels),
-   how the money's lines are drawn, the credit at the right end. */
+/* ── The foot: the levels' key, one strip, the credit at its right end ──
+   The board's one strip of 28 px (the review of B10, F3): LEVELS · 4h, the
+   kinds' switches and Signals, how his lines and the signal's are drawn,
+   then the library's credit at the right end. Where the card is too
+   narrow for the credit's notice beside the key, the notice takes the
+   line under it, whole (its licence asks for it on the page, never
+   hidden). Whole items fold, a word is never cut. */
+.sv-chart-foot {
+    flex: 0 0 auto; background: var(--sv-bg-1); border-top: 1px solid var(--sv-line-2);
+    display: flex; flex-wrap: wrap; align-items: center;
+    container-type: inline-size; container-name: svkey;
+}
 .sv-chart-keyrow {
     display: flex; align-items: center; gap: 3px; flex-wrap: nowrap;
+    flex: 1 1 auto; min-width: 0; order: 0;
     height: 28px; padding: 0 10px; box-sizing: border-box;
     font-size: var(--sv-fs-micro); color: var(--sv-ink-2); white-space: nowrap; overflow: hidden;
-    container-type: inline-size; container-name: svkey;
 }
 .sv-lvl-legend {
     display: flex; align-items: center; gap: 3px; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0;
@@ -470,20 +516,35 @@
 }
 .sv-lvl-legend[hidden] { display: none; }
 .sv-lvl-legend[hidden] + .sv-lvl-sep { display: none; }
-/* A narrower card keeps the one row: the money's key goes first, then
-   the count, Show all and the answers (the pane names those levels on
-   their own chips); the switches and the credit stay. */
-@container svkey (max-width: 1240px) {
+/* The strip holds the board's items: the toolbar's Levels menu is the
+   master, the chart's chips and their hover cards name the hunt, the draw
+   and their distance, so those readouts, the count and Show all stay in
+   the key's markup (their switches and the script that reads them) but
+   off the strip. */
+.sv-chart-keyrow .sv-lvl-key--master,
+.sv-chart-keyrow .sv-lvl-key--answer,
+.sv-chart-keyrow .sv-lvl-count,
+.sv-chart-keyrow .sv-lvl-key--all { display: none; }
+.sv-chart-keyrow .sv-sig-legend {
+    display: inline-flex; align-items: center; padding: 0; border: 0; flex: 0 0 auto;
+}
+.sv-chart-keyrow .sv-sig-legend[hidden] { display: none; }
+.sv-sig-key .sv-sig-sw { width: 7px; height: 7px; opacity: 1; }
+.sv-sig-key .sv-sig-sw + .sv-sig-sw { margin-left: -3px; }
+/* A narrower card keeps the one strip: how the lines are drawn folds
+   first (each line's own label names its owner), then the round numbers'
+   switch (their dots name themselves). */
+@container svkey (max-width: 1000px) {
     .sv-chart-keyrow .sv-lvl-money, .sv-chart-keyrow .sv-lvl-sep { display: none; }
 }
-@container svkey (max-width: 1080px) {
-    .sv-chart-keyrow .sv-lvl-legend .sv-lvl-key--answer,
-    .sv-chart-keyrow .sv-lvl-count, .sv-chart-keyrow .sv-lvl-key--all { display: none; }
+@container svkey (max-width: 560px) {
+    .sv-chart-keyrow .sv-lvl-key[data-lvl="round"] { display: none; }
 }
 .sv-lvl-title {
     margin-right: 4px; font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label);
     text-transform: uppercase; color: var(--sv-ink-3);
 }
+.sv-lvl-tf { font-family: var(--sv-font-mono); }
 .sv-lvl-key {
     display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 5px;
     background: none; border: 1px solid transparent; border-radius: var(--sv-radius-chip);
@@ -537,7 +598,8 @@
 /* The library's credit: the foot's last line, its notice whole, its link
    at the card's right edge (the board's "Charts by TradingView"). */
 .sv-chart-credit {
-    padding: 2px 12px 6px; text-align: right;
+    order: 1; flex: 0 0 auto; margin-left: auto;
+    padding: 6px 12px; text-align: right;
     font-size: var(--sv-fs-micro); line-height: 16px; color: var(--sv-ink-3);
 }
 .sv-chart-credit a { color: var(--sv-ink-2); text-decoration: none; }
@@ -546,13 +608,20 @@
    one line each, in the captions' voice, shown only when they say
    something. */
 .sv-src-legend,
-.sv-pos-legend,
-.sv-sig-legend {
+.sv-pos-legend {
+    order: 2; flex: 1 0 100%; box-sizing: border-box;
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
     padding: 4px 10px; border-top: 1px solid var(--sv-line-1);
     font-size: var(--sv-fs-micro); line-height: 16px; color: var(--sv-ink-3);
 }
 .sv-src-legend[hidden], .sv-src-legend [hidden], .sv-pos-legend[hidden], .sv-sig-legend[hidden] { display: none; }
+/* The candles' caption speaks only when it has something to say (the
+   review of B10, F3): another feed's history or a suspect bar, his lines
+   over another feed's candles, or a refusal to weld the live price that
+   is not the standing one (eToro's candle side is unmeasured until M5:
+   said in the now chip's title, not in warn at rest). Its "now" words,
+   the one price's caption, are the now chip's. */
+.sv-src-legend:not(:has(> [data-role="notes"]:not(:empty))):not(:has(> [data-role="positions"]:not([hidden]))):not(:has(> [data-role="tick"]:not([hidden]):not([data-standing]))) { display: none; }
 .sv-src-legend-title, .sv-pos-legend-title, .sv-sig-legend-title {
     font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
 }
@@ -646,7 +715,9 @@
 }
 .sv-chart-error-overlay .sv-chart-status { color: var(--sv-down); }
 .sv-chart-dots { display: flex; gap: 4px; justify-content: center; margin-top: 8px; }
-.sv-chart-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--sv-ink-3); animation: svChartDot 1.4s infinite ease-in-out; }
+/* A few beats while the reply is awaited, then still: the words carry the
+   state (no endless loop, the old-design guard). */
+.sv-chart-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--sv-ink-3); animation: svChartDot 1.4s ease-in-out 8; }
 .sv-chart-dots span:nth-child(2) { animation-delay: .2s; }
 .sv-chart-dots span:nth-child(3) { animation-delay: .4s; }
 @keyframes svChartDot {
@@ -760,7 +831,7 @@
 .sv-sig-s2 .sv-sig-meter > i { opacity: .85; }
 .sv-sig-pct { font-family: var(--sv-font-mono); font-weight: 600; color: var(--sv-ink-1); font-variant-numeric: tabular-nums; }
 .sv-sig-strength {
-    color: var(--sv-sig-tone);
+    color: var(--sv-ink-2);
     font-size: var(--sv-fs-micro);
     letter-spacing: var(--sv-track-label);
     text-transform: uppercase;
@@ -872,40 +943,130 @@
 .sv-ih .dtl-chg--other { color: var(--sv-ink-3); }
 .sv-inst-card .sv-panel-title { margin: 0; }
 
-/* ══ 5. The signal rail's cards ═════════════════════════════════════════
-   The board's rail is calm: a card's score is a figure, its dots never
-   glow (the Eye's light is the brand's, never a figure's). This sheet
-   reaches every page through the rail's filters (templates/_partials/
-   rail_sig_chips.html); the money buttons on a card keep the kit's look
-   (sv-kit.css, plan §10). */
-.sr-signal-wrap .sr-signal .sr-gauge-dot { background: var(--sv-line-3); box-shadow: none; }
-.sr-signal-wrap .sr-signal .sr-gauge-dot.on { background: var(--sv-ink-2); box-shadow: none; }
-/* The pinned card leads with the three prices a decision needs, side by
-   side as the board draws them (its entry, its stop, its target); the
-   other facts follow two to a row. Only the layout moves: every fact, its
-   words and its order in the page stay the card's own. */
+/* ══ 5. The signal rail's filters and cards ═════════════════════════════
+   The board's rail (the review of B10, F2): one row of filters, compact
+   cards, the pinned card docked in the column. This sheet reaches every
+   page through the rail's filters (templates/_partials/rail_sig_chips.html);
+   the money buttons on a card keep their words, forms and the keyboard's
+   order (plan §10), their look the kit's (sv-kit.css). */
+
+/* The filters: one row; a filter's state is its fill, a side's colour is
+   its arrow only; More opens the classes one by one and the other choices
+   under the row. */
+#railSigFacets .rf-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; position: relative; }
+#railSigFacets .rf-chip {
+    display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 5px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-chip); background: transparent;
+    color: var(--sv-ink-2); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: .02em; text-transform: uppercase; white-space: nowrap;
+}
+#railSigFacets .rf-chip b { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-3); }
+#railSigFacets .rf-chip[data-f-key="side"] { color: var(--sv-ink-2); border-color: var(--sv-line-3); }
+#railSigFacets .rf-chip .up { color: var(--sv-up); }
+#railSigFacets .rf-chip .down { color: var(--sv-down); }
+#railSigFacets button.rf-chip[aria-pressed="true"] {
+    background: var(--sv-bg-4); color: var(--sv-ink-1); border-color: var(--sv-ink-3);
+    box-shadow: inset 0 -2px 0 var(--sv-eye);
+}
+#railSigFacets button.rf-chip[aria-pressed="true"] b { color: var(--sv-ink-1); }
+#railSigFacets .rf-more { position: static; flex: none; }
+#railSigFacets summary.rf-more-sum { list-style: none; cursor: pointer; }
+#railSigFacets summary.rf-more-sum::-webkit-details-marker { display: none; }
+#railSigFacets summary.rf-more-sum::after {
+    content: ""; width: 5px; height: 5px; margin: -3px 0 0 2px;
+    border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+}
+#railSigFacets .rf-more[open] summary.rf-more-sum { background: var(--sv-bg-4); color: var(--sv-ink-1); }
+/* More is its caret, its word read out (the row keeps to the rail's width) */
+#railSigFacets summary.rf-more-sum { width: 24px; justify-content: center; padding: 0; }
+#railSigFacets summary.rf-more-sum .rf-more-w {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+#railSigFacets .rf-more-body {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+    display: flex; flex-wrap: wrap; gap: 4px; padding: 8px;
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-3);
+    border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+}
+
+/* The cards: the symbol, the side in words, the score, the age; why and its
+   rule; whose it is. The score is a figure, never a glow. */
+.sr-signal-wrap a.sr-signal, .sr-signal-wrap a.sr-signal:hover { text-decoration: none; }
+.sr-signal-wrap .sr-signal .sr-row1 { display: flex; align-items: baseline; gap: 8px; }
+.sr-signal-wrap .sr-signal .sr-sym { font-family: var(--sv-font-mono); font-weight: 600; color: var(--sv-ink-1); }
+.sr-signal-wrap .sr-signal .sr-side {
+    font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label);
+    text-transform: uppercase; color: var(--sv-ink-2); white-space: nowrap;
+}
+.sr-signal-wrap .sr-side .up, .sr-popup .sr-pop-dir .up { color: var(--sv-up); }
+.sr-signal-wrap .sr-side .down, .sr-popup .sr-pop-dir .down { color: var(--sv-down); }
+.sr-signal-wrap .sr-signal .sr-score-num { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
+.sr-signal-wrap .sr-signal .sr-age { margin-left: auto; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
+.sr-signal-wrap .sr-signal .sr-why {
+    display: block; margin-top: 4px; font-size: var(--sv-fs-small); color: var(--sv-ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sr-signal-wrap .sr-signal .sr-why .sr-rule { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sr-signal-wrap .sr-signal .sr-row3 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sr-signal-wrap .sr-signal .sr-row3:empty { display: none; }
+.sr-signal-wrap .sr-signal .sr-hold { display: inline-flex; align-items: center; gap: 6px; }
+/* the stage in its words, quiet: not a chip */
+.sr-signal-wrap .sr-signal .sr-stage {
+    padding: 0; border: 0; background: transparent; color: var(--sv-ink-3);
+    font-size: var(--sv-fs-micro); font-weight: 500; letter-spacing: 0; text-transform: none;
+}
+/* the collapsed rail's mark: a ring in the side's colour, never a fill */
+.sr-signal .sr-dot { background: transparent; border: 1.5px solid currentColor; box-sizing: border-box; }
+.sr-signal .sr-dot--bullish { color: var(--sv-up); }
+.sr-signal .sr-dot--bearish { color: var(--sv-down); }
+.sr-signal .sr-dot--neutral { color: var(--sv-ink-3); }
+.signals-rail.open .sr-signal .sr-dot { display: none; }
+
+/* The pinned card: docked at the top of the rail's column, not over the
+   chart (the board); its head the side in words, its score and age; then
+   its entry, its stop, its target side by side; the facts a label on the
+   left, its words on the right; PASS on the left and the side's own button
+   on the right (the page's order, so the keyboard's, is the card's own:
+   the side's button first, plan §10). A card only hovered still opens
+   beside the rail. */
+.signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned {
+    position: static !important; inset: auto !important; width: auto !important;
+    max-height: none; margin: 8px 10px 6px; transform: none; overflow-x: hidden;
+}
+.signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned::after { display: none; }
+.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal { display: none; }
+.sr-popup .sr-pop-head .sr-pop-score { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
+.sr-popup .sr-pop-head .sr-pop-age { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+/* the head: one line, as the board draws it (the urgency is the chart dot
+   card's word; here the side, the score and the age) */
+.sr-popup .sr-pop-head { flex-wrap: nowrap; white-space: nowrap; }
+.sr-popup .sr-pop-head .sr-urg { display: none; }
+.sr-popup .sr-pop-head .sv-pop-x { margin-left: auto; }
+.sr-popup .sr-pop-dir { background: transparent; color: var(--sv-ink-2); }
 .sr-popup .sr-pop-title { font-style: normal; color: var(--sv-ink-2); }
-.sr-popup .sr-pop-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0 12px; }
-.sr-popup .sr-pop-grid > div { grid-column: span 3; }
-.sr-popup .sr-pop-grid > div:nth-child(5),
-.sr-popup .sr-pop-grid > div:nth-child(7),
-.sr-popup .sr-pop-grid > div:nth-child(8) {
-    grid-column: span 2; order: -1;
-    flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px;
-    padding: 0 0 10px; margin-bottom: 6px;
+.sr-popup .sr-pop-lead {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+    padding: 0 0 10px; margin: 0 0 6px; border-bottom: 1px solid var(--sv-line-2);
 }
-.sr-popup .sr-pop-grid > div:nth-child(5) .sr-pop-v,
-.sr-popup .sr-pop-grid > div:nth-child(7) .sr-pop-v,
-.sr-popup .sr-pop-grid > div:nth-child(8) .sr-pop-v {
-    flex: none; text-align: left; font-size: var(--sv-fs-base); font-weight: 500;
+.sr-popup .sr-pop-f { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sr-popup .sr-pop-f .sr-pop-k { text-transform: none; letter-spacing: 0; }
+.sr-popup .sr-pop-f .sr-pop-v {
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-base); font-weight: 500; color: var(--sv-ink-1);
+    white-space: nowrap; overflow: hidden; text-overflow: clip;
 }
-.sr-popup .sr-pop-grid > div:nth-child(5) .sr-pop-v { color: var(--sv-ink-1); }
+.sr-popup .sr-pop-f .sr-pop-v.down { color: var(--sv-down); }
+.sr-popup .sr-pop-f .sr-pop-v.up { color: var(--sv-up); }
+.sr-popup .sr-pop-grid { overflow: hidden; }
+.sr-popup .sr-pop-grid > div, .sr-popup .sr-pop-facts > div { min-width: 0; }
 /* The facts: a label on the left, its words on the right. */
 .sr-popup .sr-pop-facts { gap: 4px; }
 .sr-popup .sr-pop-fact { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; text-align: right; }
-.sr-popup .sr-pop-fact .sr-pop-k { flex: none; margin-right: 0; text-align: left; }
-/* PASS on the left, the side's own button on the right, as the board
-   draws them. The page's order, so the keyboard's, is the card's own:
-   the side's button first (plan §10). */
+.sr-popup .sr-pop-fact .sr-pop-k { flex: none; margin-right: 0; text-align: left; text-transform: none; letter-spacing: 0; }
 .sr-popup .sr-pop-actions-react { flex-direction: row-reverse; align-items: center; }
 .sr-popup .sr-pop-actions-react .sr-pop-btn-pass { flex: 0 0 auto; }
+/* The ways on: quiet words, no glyph. */
+.sr-popup .sr-pop-actions:not(.sr-pop-actions-react) .sr-pop-btn {
+    background: transparent; border-color: transparent; color: var(--sv-ink-3); padding: 0 6px;
+}
+.sr-popup .sr-pop-actions:not(.sr-pop-actions-react) .sr-pop-btn:hover { color: var(--sv-ink-1); }
+.sr-empty { padding: 16px; text-align: center; color: var(--sv-ink-3); font-size: var(--sv-fs-micro); }

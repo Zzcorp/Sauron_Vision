@@ -733,3 +733,358 @@ class TheDeskInChromiumTests(TestCase):
         forms = [f for f in self.rest["forms"] if f[0] and "watchlist" in f[0]]
         self.assertEqual(forms, [["/instruments/XAUUSD/watchlist/", "post",
                                   ["csrfmiddlewaretoken:hidden", "next:hidden", ":submit"]]])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Live: the page served with every script (the review of B10)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# The measured class above opens a stripped page as a file: the shell's
+# scripts, the poller and the rail's own state do not run there, and the
+# header's real widths with the rail open (838 px at 1440, 764 at 1366, 678
+# at 1280) were never seen: the review found the one price cut, its words
+# and age folded to nothing, the market's state hidden, the watchlist and
+# Ask Sauron past the card and under the rail (F1, M3, m1), a day arrow
+# that stayed put while the change crossed zero (M1), a long price spilling
+# out of its side (M2), the day's range at the headband's decimals (M4), the
+# hover taking the keyboard (F12, F13), the rail's pin drawing nothing on
+# the chart (F5), the foot four rows deep (F3) and the toolbar's last
+# control cut (F11). Here the page is served as a browser gets it: every
+# request answered by the test client (B0's driver, tests/old_design/
+# measure.py), the chart library from its pinned copy, Google's font sheet
+# empty (the machine's faces draw), every other host refused.
+
+LIVE_SIZES = ((1280, 800, "open"), (1366, 768, "open"), (1440, 900, "open"), (1600, 900, "open"),
+              (1280, 800, "closed"), (1440, 900, "closed"), (1920, 1080, "open"))
+
+LIVE_PROBE = r"""(function () {
+  function box(e) { var r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, r: r.right, b: r.bottom }; }
+  function vis(e) { if (!e || !e.isConnected) return false; var r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+    return r.width > 1 && r.height > 1 && cs.visibility !== 'hidden' && cs.display !== 'none' && !e.closest('[hidden]'); }
+  function hiddenText(e) { return !!e.closest('.dtl-price'); }
+  var ih = document.querySelector('.sv-ih'), ihb = ih.getBoundingClientRect();
+  var card = document.querySelector('.sv-chart-card'), cb = card.getBoundingClientRect();
+  var R = { vw: innerWidth, ih: box(ih), card: box(card), esc: [], cut: [], loose: [] };
+  ih.querySelectorAll('*').forEach(function (e) {
+    if (!vis(e) || hiddenText(e)) return;
+    var r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+    var t = (e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (r.right > ihb.right + 0.5 || r.left < ihb.left - 0.5) R.esc.push([String(e.className), t]);
+    if (e.scrollWidth > e.clientWidth + 1 && cs.display !== 'inline' && e.textContent.trim()) R.cut.push([String(e.className), t, e.scrollWidth, e.clientWidth]);
+  });
+  /* the price printed outside the two sides (a visible text of the header
+     that is not the ticket's) */
+  var walk = document.createTreeWalker(ih, NodeFilter.SHOW_TEXT), n;
+  while ((n = walk.nextNode())) {
+    var el = n.parentElement;
+    if (!el || el.closest('.sv-ticket') || hiddenText(el) || !vis(el)) continue;
+    if (/2648\.12|2647\.72/.test(n.data)) R.loose.push(n.data.trim());
+  }
+  var src = ih.querySelector('.dtl-src');
+  R.src = src ? { vis: vis(src), t: src.textContent.trim(), sw: src.scrollWidth, cw: src.clientWidth, w: src.getBoundingClientRect().width } : null;
+  var mkt = ih.querySelector('.dtl-mkt');
+  R.mkt = mkt ? { vis: vis(mkt), t: mkt.textContent.trim().replace(/\s+/g, ' '), title: mkt.getAttribute('title') || '' } : null;
+  var rail = document.getElementById('signalsRail'), rr = rail ? rail.getBoundingClientRect() : null;
+  R.railLeft = (rail && rail.classList.contains('open') && rr.width > 60) ? rr.left : null;
+  function ctl(sel) { var e = document.querySelector(sel); return e ? { vis: vis(e), b: box(e) } : null; }
+  R.star = ctl('form[action$="/watchlist/"] button[type="submit"]');
+  R.ask = ctl('.sv-chart-aux [data-ask-kind="instrument"][data-ask-sauron^="XAUUSD"]');
+  var tb = document.querySelector('.sv-chart-toolbar');
+  R.tb = { sw: tb.scrollWidth, cw: tb.clientWidth, b: box(tb) };
+  R.tools = Array.prototype.filter.call(tb.querySelectorAll('button'), function (b) { return vis(b) && !b.closest('[role="menu"]'); })
+    .map(function (b) { var o = box(b); o.t = (b.getAttribute('aria-label') || b.textContent).trim().replace(/\s+/g, ' '); return o; });
+  var foot = card.querySelector('.sv-chart-foot');
+  R.foot = { b: box(foot), rows: Array.prototype.filter.call(foot.children, vis).map(function (e) { return [String(e.className), Math.round(e.getBoundingClientRect().height)]; }),
+             text: foot.innerText.replace(/\s+/g, ' '), cut: [] };
+  foot.querySelectorAll('*').forEach(function (e) {
+    if (!vis(e)) return; var cs = getComputedStyle(e);
+    if ((cs.overflow !== 'visible' || cs.overflowX !== 'visible') && e.scrollWidth > e.clientWidth + 1) R.foot.cut.push([String(e.className), e.textContent.trim().slice(0, 50)]);
+  });
+  R.chips = Array.prototype.map.call(document.querySelectorAll('.sv-mchip'), function (c) { return c.textContent.replace(/\s+/g, ' ').trim(); });
+  R.embers = document.body.hasAttribute('data-sv-embers');
+  var h = window.svCharts && svCharts['instrument-main-chart'];
+  R.bars = h && h.bars ? h.bars().length : 0;
+  return JSON.stringify(R);
+})()"""
+
+
+class _LiveDesk:
+    """B0's driver (every request answered here) with the chart library from
+    its pinned copy; one tab per state."""
+
+    def __init__(self, client):
+        from tests.old_design.measure import ORIGIN, _Driver, _Server
+        self.origin = ORIGIN
+        server = _Server(client)
+        lib = LIB.read_bytes()
+
+        def answer(request, rtype):
+            url = request["url"]
+            # the library from its pinned copy, on the page's own origin (the
+            # same bytes, so its SRI hash holds)
+            if url.startswith(ORIGIN + "/__lwc__/") or url.startswith(CDN.rsplit("/", 2)[0]):
+                return 200, {"Content-Type": "application/javascript; charset=utf-8",
+                             "Access-Control-Allow-Origin": "*"}, lib
+            got = server(request, rtype)
+            if got and rtype == "Document" and got[0] == 200:
+                body = got[2].replace(CDN.encode(), (ORIGIN + "/__lwc__/lightweight-charts.js").encode())
+                return got[0], got[1], body
+            return got
+        self.driver = _Driver(CHROME, answer)
+
+    def open(self, width, height, rail="open"):
+        """A tab on the page: B0's held clock (tests/old_design/measure.py
+        INIT: the page's timers fire when the test moves the clock, its
+        sockets answered, Date the real now), the rail as asked, the chart
+        on its one-hour candles."""
+        from tests.old_design.measure import ADVANCE, INIT, LOAD_MS, SETTLE
+        prefs = {"sauron_signals_rail": rail, "sv-chart:%s:XAUUSD" % ID: json.dumps({"tf": "1h"})}
+        init = INIT % {"t": int(time.time() * 1000), "prefs": json.dumps(prefs), "ws": json.dumps("open")}
+        for attempt in range(4):
+            tid, sid = self.driver.tab(width, height, init=init)
+            try:
+                self.driver.go(sid, self.origin + F.PAGE_URL, timeout=30)
+                break
+            except TimeoutError:
+                # A loaded machine can stall a tab's first parse (seen on a
+                # 4-core box running other suites): a fresh tab, at most 4.
+                self.driver.close_tab(tid)
+                if attempt == 3:
+                    raise
+        self.driver.js(sid, ADVANCE % LOAD_MS)
+        for _ in range(150):
+            if self.driver.js(sid, "(function(){var h=window.svCharts&&svCharts['%s'];return h&&h.bars?h.bars().length:0})()" % ID):
+                break
+            self.driver.js(sid, "window.__svClock.sleep(100)")
+        self.driver.js(sid, ADVANCE % 1200)
+        self.driver.quiet(sid, still=0.5, cap=15)
+        self.driver.js(sid, SETTLE % 300)
+        return tid, sid
+
+    def advance(self, sid, ms):
+        from tests.old_design.measure import ADVANCE
+        return self.driver.js(sid, ADVANCE % ms)
+
+    def js(self, sid, expression):
+        return self.driver.js(sid, expression)
+
+    def probe(self, sid):
+        return json.loads(self.js(sid, LIVE_PROBE))
+
+    def close(self):
+        self.driver.close()
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class TheLiveDeskTests(TestCase):
+    """The page with every script, at the desks' widths, the rail open and
+    shut, and the states the review found broken."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.old_design.measure import tour_done
+        user = get_user_model().objects.create_user("desk_v2_live", password="x", is_staff=True, is_superuser=True)
+        tour_done(user)
+        cls.book = F.seed_desk(user)
+        client = Client()
+        client.force_login(user)
+        desk = _LiveDesk(client)
+        cls.got, cls.states = {}, {}
+        try:
+            for w, h, rail in LIVE_SIZES:
+                tid, sid = desk.open(w, h, rail)
+                cls.got[(w, rail)] = desk.probe(sid)
+                if (w, rail) == (1440, "open"):
+                    cls.states["flip"] = desk.js(sid, """JSON.stringify((function () {
+                        var el = document.querySelector('.sv-ih .dtl-chg'); if (!el) return null;
+                        function arrow() { var a = getComputedStyle(el, '::after').content;
+                          var s = el.parentElement.querySelector('.sv-ih-arrow');
+                          return (a && a !== 'none' && a !== 'normal' ? a.replace(/"/g, '') : '') + (s ? s.textContent.trim() : ''); }
+                        /* the one painter's own moves on the cell (sv-venue.js paintCell) */
+                        el.textContent = '+0.21%'; el.classList.remove('dtl-chg--other'); el.classList.add('up'); el.classList.remove('down');
+                        var up = arrow();
+                        el.textContent = '-0.21%'; el.classList.remove('up'); el.classList.add('down');
+                        return { up: up, down: arrow() }; })())""")
+                    cls.states["long"] = desk.js(sid, """JSON.stringify((function () {
+                        var out = [];
+                        document.querySelectorAll('.sv-ih .tk-px').forEach(function (p) { p.textContent = '0.00001234'; });
+                        document.querySelectorAll('.sv-ih .tk-side').forEach(function (b) {
+                          var p = b.querySelector('.tk-px'), r = b.getBoundingClientRect(), q = p.getBoundingClientRect();
+                          out.push({ side: [r.left, r.right], px: [q.left, q.right], bw: parseFloat(getComputedStyle(b).borderLeftWidth) }); });
+                        var mid = document.querySelector('.sv-ih .tk-mid'); var m = mid ? mid.getBoundingClientRect() : null;
+                        return { sides: out, mid: m ? [m.left, m.right] : null }; })())""")
+                    cls.states["range"] = desk.js(sid, """(async function () {
+                        var decoy = document.createElement('span'); decoy.setAttribute('data-decimals', '2');
+                        document.body.insertBefore(decoy, document.body.firstChild);
+                        document.querySelector('.sv-ih .dtl-price').setAttribute('data-decimals', '5');
+                        var h = svCharts['%s'], t = Math.floor(Date.now() / 3600000) * 3600;
+                        var bars = [{ time: t - 3600, open: 1.08401, high: 1.08791, low: 1.08398, close: 1.08512 },
+                                    { time: t, open: 1.08512, high: 1.08655, low: 1.08433, close: 1.08601 }];
+                        h.bars = function () { return bars; };
+                        await window.__svClock.advance(1600);
+                        return document.querySelector('[data-ih="range"]').textContent.trim(); })()""" % ID)
+                    # the pointer over the chart, then the keyboard's order
+                    body = desk.js(sid, "JSON.stringify(document.getElementById('%s').getBoundingClientRect())" % ID)
+                    b = json.loads(body)
+                    desk.driver.mouse(sid, b["left"] + b["width"] * 0.4, b["top"] + b["height"] * 0.4)
+                    time.sleep(0.4)
+                    cls.states["hover"] = desk.js(sid, """JSON.stringify((function () { var a = document.activeElement;
+                        return { tag: a ? a.tagName : '', id: a ? a.id : '', cls: a ? String(a.className) : '' }; })())""")
+                    cls.states["order"] = desk.js(sid, """JSON.stringify((function () {
+                        var c = document.getElementById('%s-container');
+                        var all = Array.prototype.filter.call(c.querySelectorAll('button, [tabindex]'), function (e) {
+                          return e.tabIndex >= 0 && !e.closest('[role="menu"]') && !e.closest('.sv-chart-ticket'); });
+                        return { container: c.tabIndex, order: all.map(function (e) {
+                          return e.closest('.sv-chart-toolbar') ? 'tool' : (e.id === '%s' ? 'plot' : 'other'); }) }; })())""" % (ID, ID))
+                    # the rail's pin on the chart
+                    cls.states["before_pin"] = desk.probe(sid)["chips"]
+                    at = desk.js(sid, """JSON.stringify((function () {
+                        var w = Array.prototype.find.call(document.querySelectorAll('#railSignalsBody .sr-signal-wrap'),
+                          function (e) { return /XAUUSD/.test(e.textContent); });
+                        if (!w) return null; w.scrollIntoView({ block: 'center' });
+                        var r = w.querySelector('.sr-signal').getBoundingClientRect(); return [r.left + r.width / 2, r.top + 12]; })())""")
+                    if at and at != "null":
+                        x, y = json.loads(at)
+                        for kind in ("mousePressed", "mouseReleased"):
+                            desk.driver.call("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": "left",
+                                                                         "buttons": 1 if kind == "mousePressed" else 0,
+                                                                         "clickCount": 1}, session=sid)
+                        desk.advance(sid, 800)
+                        time.sleep(0.6)
+                    cls.states["pin"] = desk.probe(sid)["chips"]
+                    cls.states["pinned"] = desk.js(sid, """JSON.stringify((function () {
+                        var p = document.querySelector('#railSignalsBody .sr-popup.sv-pinned'); if (!p) return null;
+                        var r = p.getBoundingClientRect(), c = document.querySelector('.sv-chart-card').getBoundingClientRect();
+                        return { left: r.left, right: r.right, chartRight: c.right, sw: p.scrollWidth, cw: p.clientWidth,
+                                 lead: Array.prototype.map.call(p.querySelectorAll('.sr-pop-lead .sr-pop-k'), function (k) { return k.textContent.trim(); }),
+                                 money: Array.prototype.map.call(p.querySelectorAll('.sr-pop-btn-act, .sr-pop-btn-pass'), function (b) { return b.className.indexOf('pass') >= 0 ? 'pass' : 'act'; }) }; })())""")
+                desk.driver.close_tab(tid)
+        finally:
+            desk.close()
+
+    def _each(self):
+        return [(w, rail, got) for (w, rail), got in sorted(self.got.items())]
+
+    def test_the_page_was_read(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            self.assertGreater(got["bars"], 20, "the chart drew its candles")
+
+    # F1 ─────────────────────────────────────────────────────────────────
+    def test_the_header_never_cuts_nor_spills_at_the_desks_widths(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            self.assertEqual(got["esc"], [], "nothing runs past the header")
+            self.assertEqual(got["cut"], [], "no word cut short")
+
+    def test_whose_price_and_how_old_is_always_whole(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            src = got["src"]
+            self.assertTrue(src and src["vis"], "the quote's words show")
+            self.assertRegex(src["t"], r"eToro \w+ · \d+ s")
+            self.assertLessEqual(src["sw"], src["cw"] + 1, "its words and age whole")
+            self.assertGreater(src["w"], 60)
+
+    def test_the_price_is_printed_once_on_the_two_sides(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            self.assertEqual(got["loose"], [], "the header prints the price only on its sides")
+
+    # M3 ─────────────────────────────────────────────────────────────────
+    def test_the_market_state_shows_at_every_width(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            mkt = got["mkt"]
+            self.assertTrue(mkt and mkt["vis"], "the market's state beside whose price it is")
+            self.assertRegex(mkt["t"], r"\b(OPEN|CLOSED)\b")
+            self.assertIn("·", mkt["title"], "its name and next change in its title")
+
+    # F1, m1, F13 ────────────────────────────────────────────────────────
+    def test_the_watchlist_and_ask_sauron_stay_in_reach(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            for name in ("star", "ask"):
+                c = got[name]
+                self.assertTrue(c and c["vis"], name)
+                self.assertGreaterEqual(c["b"]["x"], got["card"]["x"] - 0.5, name)
+                self.assertLessEqual(c["b"]["r"], got["card"]["r"] + 0.5, name)
+                if got["railLeft"] is not None:
+                    self.assertLessEqual(c["b"]["r"], got["railLeft"], "%s under the rail" % name)
+
+    # F11 ────────────────────────────────────────────────────────────────
+    def test_the_toolbar_never_cuts_its_last_control(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            self.assertLessEqual(got["tb"]["sw"], got["tb"]["cw"] + 1)
+            for t in got["tools"]:
+                self.assertLessEqual(t["r"], got["card"]["r"] + 0.5, t["t"])
+            self.assertEqual(len({round(t["y"]) for t in got["tools"]}), 1, "one row")
+
+    # F3 ─────────────────────────────────────────────────────────────────
+    def test_the_foot_is_the_key_strip_and_the_credit(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            foot = got["foot"]
+            self.assertEqual(foot["cut"], [], "no word clipped in the foot")
+            self.assertNotIn("Signal strength", foot["text"])
+            self.assertNotIn("green buy", foot["text"])
+            self.assertNotIn("ATR", foot["text"])
+            self.assertNotIn("live quote not drawn", foot["text"], "the standing refusal stays folded at rest")
+            self.assertIn("Signals", foot["text"])
+            self.assertLessEqual(foot["b"]["h"], 60, "one strip, and the credit's line where the strip is too narrow")
+            self.assertEqual([r for r in foot["rows"] if "sv-chart-keyrow" in r[0]][0][1], 28, "the key: one 28 px strip")
+        self.assertIn("signal dashed", self.got[(1920, "open")]["foot"]["text"], "how the lines are drawn, where it has room")
+
+    # F7 ─────────────────────────────────────────────────────────────────
+    def test_the_page_wears_the_embers(self):
+        for w, rail, got in self._each():
+          with self.subTest(width=w, rail=rail):
+            self.assertTrue(got["embers"])
+
+    # M1 ─────────────────────────────────────────────────────────────────
+    def test_the_day_arrow_follows_the_painted_change(self):
+        flip = json.loads(self.states["flip"])
+        self.assertEqual(flip["up"], "▲")
+        self.assertEqual(flip["down"], "▼")
+
+    # M2 ─────────────────────────────────────────────────────────────────
+    def test_a_long_price_stays_inside_its_side(self):
+        got = json.loads(self.states["long"])
+        self.assertEqual(len(got["sides"]), 2)
+        for s in got["sides"]:
+            self.assertGreaterEqual(s["px"][0], s["side"][0] + s["bw"] - 0.5, s)
+            self.assertLessEqual(s["px"][1], s["side"][1] - s["bw"] + 0.5, s)
+        if got["mid"]:
+            short, long_ = got["sides"]
+            self.assertLessEqual(short["side"][1], got["mid"][0] + 0.5)
+            self.assertGreaterEqual(long_["side"][0], got["mid"][1] - 0.5)
+
+    # M4 ─────────────────────────────────────────────────────────────────
+    def test_the_day_range_takes_the_page_s_decimals(self):
+        self.assertEqual(self.states["range"], "1.08398–1.08791")
+
+    # F12, F13 ───────────────────────────────────────────────────────────
+    def test_a_passing_cursor_takes_no_focus(self):
+        hover = json.loads(self.states["hover"])
+        self.assertNotEqual(hover["id"], ID + "-container")
+        self.assertNotEqual(hover["id"], ID)
+
+    def test_the_toolbar_comes_before_the_plot_in_the_keyboard_order(self):
+        got = json.loads(self.states["order"])
+        self.assertLess(got["container"], 0, "the container is no tab stop of its own")
+        order = got["order"]
+        self.assertIn("plot", order)
+        self.assertEqual(order[:order.index("plot")], ["tool"] * order.index("plot"))
+
+    # F5 ─────────────────────────────────────────────────────────────────
+    def test_the_rail_s_pin_draws_on_the_chart(self):
+        before, after = self.states["before_pin"], self.states["pin"]
+        self.assertFalse(any(c.startswith("Signal") for c in before), before)
+        self.assertTrue(any(c.startswith("Signal target") for c in after), after)
+        pinned = json.loads(self.states["pinned"])
+        self.assertIsNotNone(pinned, "the rail's card pinned")
+        self.assertGreaterEqual(pinned["left"], pinned["chartRight"], "docked in the rail, not over the chart")
+        self.assertLessEqual(pinned["sw"], pinned["cw"] + 1, "no sideways scroll")
+        self.assertEqual(pinned["lead"], ["Its entry", "Its stop", "Its target"])
+        self.assertEqual(pinned["money"], ["act", "pass"], "the money's order, the card's own (plan §10)")

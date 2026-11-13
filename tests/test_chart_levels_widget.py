@@ -592,7 +592,7 @@ class TheLevelLayerTests(SimpleTestCase):
     def test_levels_attach_one_layer_and_add_no_price_line(self):
         first = self.main["first"]
         self.assertEqual(first["prims"], [["candle", 1], ["hist", 0]])
-        self.assertEqual(first["others"], ["LONG 1000", "SL", "TP"])
+        self.assertEqual(first["others"], ["▲ LONG 1000", "Your stop", "Your target"])
         self.assertEqual(first["items"], 10, "the 18 rows digested into 10 items")
         self.assertEqual(first["asia"], {"high": 1.08608, "low": 1.08441,
                                          "opened": ASIA_OPENED, "closed": ASIA_CLOSED})
@@ -618,12 +618,14 @@ class TheLevelLayerTests(SimpleTestCase):
         title saying whose money (the desk v2, B10, 2026-11-13: the board
         the operator approved, "amazing work, bravo, I need it fast!!"); SL and TP 2 px SOLID; the
         last price dotted; the volume prints no last value."""
+        # Every level named by its owner (the desk v2's review, F5: "Your
+        # stop" against "Signal stop"; the operator approved the board: "amazing work, bravo, I need it fast!!").
         lines = {l["title"]: l for l in self.main["first"]["lines"]}
-        self.assertEqual((lines["LONG 1000"]["width"], lines["LONG 1000"]["style"],
-                          lines["LONG 1000"]["color"]), (2, 0, "#E6F1EA"))
-        self.assertEqual((lines["SL"]["width"], lines["SL"]["style"], lines["SL"]["axis"]),
+        self.assertEqual((lines["▲ LONG 1000"]["width"], lines["▲ LONG 1000"]["style"],
+                          lines["▲ LONG 1000"]["color"]), (2, 0, "#E6F1EA"))
+        self.assertEqual((lines["Your stop"]["width"], lines["Your stop"]["style"], lines["Your stop"]["axis"]),
                          (2, 0, True))
-        self.assertEqual((lines["TP"]["width"], lines["TP"]["style"], lines["TP"]["axis"]),
+        self.assertEqual((lines["Your target"]["width"], lines["Your target"]["style"], lines["Your target"]["axis"]),
                          (2, 0, True))
         created = self.main["first"]["created"]
         self.assertEqual(created["priceLineStyle"], 1, "the last price is dotted")
@@ -641,8 +643,8 @@ class TheLevelLayerTests(SimpleTestCase):
         """The pinned Entry is ink, never gold (gold is the pools'), and
         its three axis labels are ghosts: the chart's ground, the tone as
         text — an idea, where the position's filled labels are money."""
-        raw = {l["title"]: l for l in self.main["pinned"]["lines"]
-               if l["title"] in ("Entry", "Stop", "Target")}
+        raw = {l["title"][len("Signal "):].capitalize(): l for l in self.main["pinned"]["lines"]
+               if l["title"] in ("Signal entry", "Signal stop", "Signal target")}
         self.assertEqual(sorted(raw), ["Entry", "Stop", "Target"])
         # The desk v2 (B10, 2026-11-13): the desk's tokens (ink-1 on bg-0,
         # the stop in --sv-down, the target in --sv-up); the operator
@@ -655,13 +657,22 @@ class TheLevelLayerTests(SimpleTestCase):
                          ("#040B07", "#24B582"))
         self.assertTrue(all(l["style"] == 2 and l["width"] == 1 for l in raw.values()),
                         "dashed, 1 px: an idea")
-        # The position's own labels are never the idea's ghost: the desk v2
-        # (B10, 2026-11-13) sets them on the chart's raised surface (bg-2),
-        # in their tone, beside the board's chips; the idea's sit on the
-        # ground (bg-0). The operator approved the board: "amazing work, bravo, I need it fast!!".
-        money = [l for l in self.main["pinned"]["lines"] if l["title"] in ("LONG 1000", "SL", "TP")]
+        # The position's own labels are never the idea's ghost (the meaning
+        # this test pins, re-pinned on what carries it in the desk v2, the
+        # review of B10, m5; the operator approved the board: "amazing work, bravo, I need it fast!!"): his are
+        # named by their owner ("Your stop", "Your target", his side and
+        # size), 2 px SOLID, on the raised surface (bg-2); the idea's are
+        # named "Signal ...", 1 px DASHED, on the ground (bg-0). Words, line
+        # and surface each tell his money from a signal's idea.
+        money = [l for l in self.main["pinned"]["lines"] if l["title"] in ("▲ LONG 1000", "Your stop", "Your target")]
         self.assertEqual(len(money), 3)
         self.assertTrue(all(l["labelColor"] == "#0D1B14" for l in money), money)
+        self.assertTrue(all(l["width"] == 2 and l["style"] == 0 for l in money), money)
+        idea = [l for l in self.main["pinned"]["lines"] if l["title"].startswith("Signal ")]
+        self.assertEqual(len(idea), 3)
+        self.assertTrue(all(l["labelColor"] == "#040B07" and l["style"] == 2 and l["width"] == 1 for l in idea), idea)
+        self.assertFalse(any(l["title"].startswith("Signal") for l in money))
+        self.assertFalse(any(l["title"].startswith("Your") for l in idea))
 
     # §6.3 D 2
     def test_a_type_switch_reattaches_on_the_new_series(self):
@@ -675,7 +686,7 @@ class TheLevelLayerTests(SimpleTestCase):
         self.assertLess(removed[0]["order"], attached[0]["order"])
         self.assertEqual(sw["kind"], "line")
         self.assertEqual(sw["prims"], [["hist", 0], ["line", 1]])
-        self.assertEqual(sw["others"], ["LONG 1000", "SL", "TP"])
+        self.assertEqual(sw["others"], ["▲ LONG 1000", "Your stop", "Your target"])
         self.assertEqual(sw["items"], 10)
         self.assertEqual((sw["created"]["priceLineStyle"], sw["created"]["priceFormat"]["precision"]),
                          (1, 5))
@@ -728,7 +739,7 @@ class TheSwitchesTests(SimpleTestCase):
     def test_levels_off_leaves_exactly_the_position_lines(self):
         out = _run("off", prefs={"indicators": {"positions": True, "levels": False}})
         off = out["off"]
-        self.assertEqual(off["others"], ["LONG 1000", "SL", "TP"])
+        self.assertEqual(off["others"], ["▲ LONG 1000", "Your stop", "Your target"])
         self.assertEqual(off["items"], [])
         self.assertIsNone(off["asia"])
         self.assertEqual((off["geom"]["bands"], off["geom"]["chips"], off["geom"]["asia"]),
@@ -807,20 +818,20 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
     def test_without_primitives_asia_falls_back_to_two_lines(self):
         hourly = _run("noPrims", no_prims=True, timeframe="1h")
         self.assertEqual(hourly["prims"], [0, 0])
-        self.assertEqual(hourly["others"], ["LONG 1000", "SL", "TP", "", ""])
+        self.assertEqual(hourly["others"], ["▲ LONG 1000", "Your stop", "Your target", "", ""])
         asia = hourly["lines"][3:]
         self.assertEqual([(l["price"], l["style"], l["title"], l["axis"], l["width"])
                           for l in asia],
                          [(1.08608, 3, "", False, 1), (1.08441, 3, "", False, 1)])
         self.assertEqual(asia[0]["color"], "rgba(168,120,240,0.55)", "the session's violet")
         daily = _run("noPrims", no_prims=True, timeframe="1d")
-        self.assertEqual(daily["others"], ["LONG 1000", "SL", "TP"])
+        self.assertEqual(daily["others"], ["▲ LONG 1000", "Your stop", "Your target"])
 
     # §6.3 D 4
     def test_soft_stop_draws_a_quiet_line_only_when_it_differs(self):
         pos = _payload()["positions"][0]
         apart = _run("lines", payload=_levels_payload(positions=[dict(pos, soft_stop=1.079)]))
-        self.assertEqual(apart["others"], ["LONG 1000", "SL", "TP", ""])
+        self.assertEqual(apart["others"], ["▲ LONG 1000", "Your stop", "Your target", ""])
         soft = apart["lines"][3]
         self.assertEqual((soft["price"], soft["style"], soft["axis"], soft["width"]),
                          (1.079, 4, False, 1))
@@ -829,7 +840,7 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
         # the board: "amazing work, bravo, I need it fast!!".
         self.assertEqual(soft["color"], "rgba(255,107,110,0.7)")
         same = _run("lines", payload=_levels_payload(positions=[dict(pos, soft_stop=1.075)]))
-        self.assertEqual(same["others"], ["LONG 1000", "SL", "TP"])
+        self.assertEqual(same["others"], ["▲ LONG 1000", "Your stop", "Your target"])
 
     # §6.3 D 7
     def test_a_tap_on_a_level_opens_its_card_and_the_next_tap_closes_it(self):
@@ -1003,7 +1014,9 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
         g = _run("keep", payload=_levels_payload(positions=[pos], bars=bars), timeframe="1h")["geom"]
         titles = sorted(g["keep"]["titles"], key=lambda t: t["y0"])
         h = 10 * 17 / 12
-        rows = [(y(1.0866), "TP"), (y(1.08), "LONG 1000"), (y(1.075), "SL")]
+        # the owner's words on each title (the desk v2's review, F5; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!")
+        rows = [(y(1.0866), "Your target"), (y(1.08), "▲ LONG 1000"), (y(1.075), "Your stop")]
         self.assertEqual(len(titles), 3)
         for t, (row, title) in zip(titles, rows):
             self.assertAlmostEqual(t["x0"], 740 - (len(title) * 6.1 + 16) - 1, places=6)
@@ -1053,10 +1066,13 @@ class TheFallbacksAndTheMoneyTests(SimpleTestCase):
 
     def test_a_phone_width_replans_the_entry_title_and_the_key(self):
         out = _run("phone")
-        self.assertEqual(out["desk"]["others"], ["LONG 1000", "SL", "TP"])
+        self.assertEqual(out["desk"]["others"], ["▲ LONG 1000", "Your stop", "Your target"])
         self.assertNotIn("is-phone", out["desk"]["key"]["cls"])
         phone = out["phone"]
-        self.assertEqual(phone["others"], ["LONG", "SL", "TP"], "the size stays in the card")
+        # the owner's words (the desk v2's review, F5; the operator approved
+        # the board: "amazing work, bravo, I need it fast!!")
+        self.assertEqual(phone["others"], ["▲ LONG", "Your stop", "Your target"],
+                         "the size stays in the card")
         self.assertIn("is-phone", phone["key"]["cls"])
         self.assertEqual(phone["key"]["keys"]["below"]["text"], "▼ ① HUNT 1.08226 · 2.05 ATR")
         self.assertLessEqual(len(phone["geom"]["chips"]), 4)
@@ -1133,8 +1149,10 @@ class ThePaintTests(SimpleTestCase):
         # number face (JetBrains Mono, 500); the operator approved the
         # board: "amazing work, bravo, I need it fast!!".
         face = ' "JetBrains Mono", ui-monospace, monospace'
-        for k, font in (("1", "500 10px" + face), ("1.25", "500 12.5px" + face),
-                        ("2", "500 20px" + face)):
+        # At 11 px, the floor (the desk v2's review, F6: the canvas text the
+        # DOM census cannot see; the board's chips are 11 px).
+        for k, font in (("1", "500 11px" + face), ("1.25", "500 13.75px" + face),
+                        ("2", "500 22px" + face)):
             texts = [o for o in out[k]["ops"] if o["op"] == "fillText"]
             self.assertTrue(texts, k)
             self.assertEqual({o["font"] for o in texts}, {font}, k)

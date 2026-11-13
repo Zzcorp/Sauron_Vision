@@ -1660,7 +1660,12 @@ class FiguresMeasuredTests(TestCase):
         self.assertEqual(self.chips, 1)
 
     def test_the_pages_with_embers_are_among_them(self):
-        self.assertEqual(sorted(u for u, g in self.got.items() if g["embers"]), sorted(self.TABS + (POSITIONS,)))
+        # The instrument page joins (the desk v2, B10's review F7): the board
+        # the operator approved ("amazing work, bravo, I need it fast!!")
+        # draws the embers in its gutters; this class proves no figure of it
+        # sits on the void.
+        self.assertEqual(sorted(u for u, g in self.got.items() if g["embers"]),
+                         sorted(self.TABS + (POSITIONS, INSTRUMENT)))
 
     def test_no_figure_is_lit_at_rest(self):
         for url, got in sorted(self.got.items()):

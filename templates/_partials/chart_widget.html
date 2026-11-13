@@ -26,7 +26,7 @@ static/css/sv-chart.css. A <link> in the body is allowed for a stylesheet; the
 browser keeps one copy when the rail's filters link it too.{% endcomment %}
 <link rel="stylesheet" href="{% static 'css/sv-chart.css' %}">
 
-<div class="sv-candle-container" id="{{ chart_id }}-container" style="height: {{ height }}px;" tabindex="0" aria-label="{{ symbol }} price chart">
+<div class="sv-candle-container" id="{{ chart_id }}-container" style="height: {{ height }}px;">
     {% comment %}
     ONE TOOLBAR ROW (2026-11-13, the desk v2, B10). The interval favourites
     5m 15m 1H 4H D W in the row; every other control the two old rows held
@@ -75,7 +75,7 @@ browser keeps one copy when the rail's filters link it too.{% endcomment %}
         <span class="sv-tb-sep" aria-hidden="true"></span>
         {% comment %}Drawn marks rather than glyphs: these are controls, the drawing IS the label (hence aria-label), and a line icon states the series shape exactly where a pictograph only gestured at it.{% endcomment %}
         <span class="sv-tb-menu-wrap sv-chart-type-btns">
-            <button type="button" class="sv-tb" data-tb-menu="candles" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-candles" title="The chart's type"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v18M16 5v14"/><rect x="5.5" y="7" width="5" height="9"/><rect x="13.5" y="9" width="5" height="6"/></svg>Candles<svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button type="button" class="sv-tb" data-tb-menu="candles" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-candles" title="The chart's type"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v18M16 5v14"/><rect x="5.5" y="7" width="5" height="9"/><rect x="13.5" y="9" width="5" height="6"/></svg><span class="sv-tb-name">Candles</span><svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
             <span class="sv-tb-menu" role="menu" id="{{ chart_id }}-menu-candles" aria-label="Chart type" hidden>
                 <button class="sv-type-btn active" data-type="candlestick" title="Candlestick: a rising candle hollow, a falling one solid" aria-label="Candlestick chart" type="button" role="menuitemradio"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2v12"/><rect x="3.2" y="5" width="3.6" height="6"/><path d="M11 4v9"/><rect x="9.2" y="6.5" width="3.6" height="4.5"/></svg>Candles</button>
                 <button class="sv-type-btn" data-type="heikin" title="Heikin-Ashi" aria-label="Heikin-Ashi chart" type="button" role="menuitemradio">{# Smoothed candles: the same two bodies, filled, no wicks poking through — the mark says "averaged" where the candle mark says "raw". #}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3v10"/><rect x="3.2" y="5" width="3.6" height="6" fill="currentColor" fill-opacity="0.35"/><path d="M11 5v8"/><rect x="9.2" y="7" width="3.6" height="4" fill="currentColor" fill-opacity="0.35"/></svg>Heikin-Ashi</button>
@@ -85,7 +85,7 @@ browser keeps one copy when the rail's filters link it too.{% endcomment %}
         </span>
         {% comment %}Each toggle owns one overlay computed in the browser from the bars already loaded — no second request, so a toggle answers instantly and a background refresh recomputes for free. VWAP is intraday-only: a session-anchored average has no meaning across daily candles, so the item hides itself on the daily family.{% endcomment %}
         <span class="sv-tb-menu-wrap sv-chart-ind-btns">
-            <button type="button" class="sv-tb" data-tb-menu="indicators" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-indicators" title="Indicators and the volume"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg>Indicators<svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button type="button" class="sv-tb" data-tb-menu="indicators" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-indicators" title="Indicators and the volume"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg><span class="sv-tb-name">Indicators</span><svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
             <span class="sv-tb-menu" role="menu" id="{{ chart_id }}-menu-indicators" aria-label="Indicators" hidden>
                 <button class="sv-ind-btn" data-ind="sma20" title="Simple moving average, 20 bars" type="button" role="menuitemcheckbox">SMA20<span class="sv-mi-key">moving average</span></button>
                 <button class="sv-ind-btn" data-ind="sma50" title="Simple moving average, 50 bars" type="button" role="menuitemcheckbox">SMA50<span class="sv-mi-key">moving average</span></button>
@@ -99,14 +99,14 @@ browser keeps one copy when the rail's filters link it too.{% endcomment %}
             </span>
         </span>
         <span class="sv-tb-menu-wrap">
-            <button type="button" class="sv-tb" data-tb-menu="levels" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-levels" title="Your positions and the signals on the tape; the levels: pools, swings, sessions, round numbers"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h16"/></svg>Levels<svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button type="button" class="sv-tb" data-tb-menu="levels" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-levels" title="Your positions and the signals on the tape; the levels: pools, swings, sessions, round numbers"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h16"/></svg><span class="sv-tb-name">Levels</span><svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
             <span class="sv-tb-menu" role="menu" id="{{ chart_id }}-menu-levels" aria-label="Levels" hidden>
                 <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape" type="button" role="menuitemcheckbox">Positions and signals</button>
                 <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Power of Three in violet (every day's Asia, London and New York sessions as boxes on 1h and finer charts, as strips along the chart's foot on 2h and 4h; A the Asian box, M the run of one of its sides, D the move back the other way). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears" type="button" role="menuitemcheckbox">Levels<span class="sv-mi-key">pools · swings · sessions</span></button>
             </span>
         </span>
         <span class="sv-tb-menu-wrap sv-chart-drawing-btns">
-            <button type="button" class="sv-tb" data-tb-menu="draw" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-draw" title="Crosshair, H-Line, Trend Line, Measure (↔R), Clear"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg>Draw<svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button type="button" class="sv-tb" data-tb-menu="draw" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ chart_id }}-menu-draw" title="Crosshair, H-Line, Trend Line, Measure (↔R), Clear"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/></svg><span class="sv-tb-name">Draw</span><svg class="sv-tb-caret" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
             <span class="sv-tb-menu" role="menu" id="{{ chart_id }}-menu-draw" aria-label="Drawing tools" hidden>
                 <button class="sv-chart-btn" data-tool="crosshair" title="Crosshair" type="button" role="menuitem">Crosshair</button>
                 <button class="sv-chart-btn" data-tool="hline" title="H-Line" type="button" role="menuitem">H-Line</button>
@@ -143,8 +143,10 @@ browser keeps one copy when the rail's filters link it too.{% endcomment %}
     </div>
     {% endif %}
 
-    <!-- Chart canvas -->
-    <div class="sv-chart-body" id="{{ chart_id }}" style="height: calc({{ height }}px - 36px);"></div>
+    {% comment %}The plot: the keyboard's stop AFTER the toolbar's (the review
+    of B10, F13); the arrow keys move it, + and - zoom, once it has focus
+    (a click or Tab, never a passing cursor: F12).{% endcomment %}
+    <div class="sv-chart-body" id="{{ chart_id }}" style="height: calc({{ height }}px - 36px);" tabindex="0" aria-label="{{ symbol }} price chart: the arrow keys move it, + and - zoom"></div>
 
     <!-- Sub-panes (synchronised time scale), created on demand -->
     <div class="sv-chart-panes" id="{{ chart_id }}-panes"></div>
@@ -185,7 +187,7 @@ them, then how the money lines are drawn. The LEVELS chip mirrors the
 toolbar's Levels item.{% endcomment %}
 <div class="sv-chart-keyrow">
 <div class="sv-lvl-legend" id="{{ chart_id }}-lvl-legend" role="group" aria-label="Chart levels" hidden>
-    <span class="sv-lvl-title">Levels (4h):</span>
+    <span class="sv-lvl-title">Levels · <span class="sv-lvl-tf">4h</span></span>
     <button type="button" class="sv-lvl-key sv-lvl-key--master" data-lvl="levels" aria-pressed="true" title="Show or hide every level (the Levels item of the toolbar)">Levels</button>
     <span class="sv-lvl-offnote">off</span>
     <button type="button" class="sv-lvl-key sv-lvl-key--answer" data-lvl="below" aria-pressed="false" hidden></button>
@@ -197,6 +199,14 @@ toolbar's Levels item.{% endcomment %}
     <button type="button" class="sv-lvl-key" data-lvl="round" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--round" aria-hidden="true"></i>Round numbers <b data-count="round"></b></button>
     <span class="sv-lvl-count" data-role="count"></span>
     <button type="button" class="sv-lvl-key sv-lvl-key--all" data-lvl="all" aria-pressed="false">Show all</button>
+</div>
+{% comment %}The signal dots' key (2026-09-27), the strip's Signals switch
+(the desk v2's board, its review F3): the dots on or off, its title the
+scale they are drawn on, in the platform's words. Hidden until the widget
+draws a dot, so a chart without signals carries no key for nothing.{% endcomment %}
+<div class="sv-sig-legend" id="{{ chart_id }}-sig-legend" hidden>
+    <button type="button" class="sv-lvl-key sv-sig-key" data-sig-toggle aria-pressed="true"
+            title="Signals: one dot per signal, ▲ a long under its bar, ▼ a short over it; its size and its strength by its score: weak · medium · strong · very strong. Hover or tap a dot for its card, click it to draw its levels."><i class="sv-sig-sw sv-sig-s2" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s2" aria-hidden="true"></i>Signals</button>
 </div>
 <span class="sv-lvl-sep" aria-hidden="true"></span>
 <span class="sv-lvl-money"><i class="sv-lvl-sw sv-lvl-sw--money" aria-hidden="true"></i>your SL / TP solid · <i class="sv-lvl-sw sv-lvl-sw--sig" aria-hidden="true"></i>signal dashed · <i class="sv-lvl-sw sv-lvl-sw--bid" aria-hidden="true"></i>the price now</span>
@@ -216,20 +226,6 @@ feed.{% endcomment %}
     <span class="sv-src-positions" data-role="positions" hidden></span>
     <span class="sv-src-tick" data-role="tick" aria-live="polite" hidden></span>
     <span class="sv-src-now" data-role="now" hidden></span>
-</div>
-
-{% comment %}The signal dots' key (2026-09-27). Hidden until the widget
-draws a dot, so a chart without signals carries no key for nothing.{% endcomment %}
-<div class="sv-sig-legend" id="{{ chart_id }}-sig-legend" hidden>
-    <span class="sv-sig-legend-title">Signal strength:</span>
-    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s0" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s0" aria-hidden="true"></i> weak</span>
-    <span class="sv-sig-sep" aria-hidden="true">·</span>
-    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s1" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s1" aria-hidden="true"></i> medium</span>
-    <span class="sv-sig-sep" aria-hidden="true">·</span>
-    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s2" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s2" aria-hidden="true"></i> strong</span>
-    <span class="sv-sig-sep" aria-hidden="true">·</span>
-    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s3" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s3" aria-hidden="true"></i> very strong</span>
-    <span class="sv-sig-legend-dir"><span class="sv-sig-up">▲ green buy</span> · <span class="sv-sig-down">▼ red sell</span> · hover or tap a dot for its details</span>
 </div>
 
 {% comment %}The positioning map's caption (2026-10-03, bot_program/positioning.py):
@@ -292,7 +288,8 @@ or none.{% endcomment %}
         { key: 'strong',      word: 'strong',      min: 0.75, alpha: 0.85, size: 1.25 },
         { key: 'very_strong', word: 'very strong', min: 0.9,  alpha: 1,    size: 1.7 }
     ];
-    var SIDE_WORDS = { bull: 'BUY', bear: 'SELL', neutral: 'NEUTRAL' };
+    /* The platform's side words (the desk v2's board, its review F5). */
+    var SIDE_WORDS = { bull: '▲ LONG', bear: '▼ SHORT', neutral: 'NEUTRAL' };
     var DASH = '—';
 
     /* The score as 0..1, or null when there is none. Clamped: a score is a
@@ -2502,6 +2499,9 @@ or none.{% endcomment %}
        defaults ON so nothing changes for anyone who never touches it —
        `undefined` means "never had the choice", not "chose no". */
     if (activeInds.volume === undefined) activeInds.volume = true;
+    /* The strip's Signals switch (the desk v2): the dots shown unless he
+       switched them off. */
+    if (activeInds.signals === undefined) activeInds.signals = true;
     var currentTf    = INIT_TF;
     var activeTool   = 'crosshair';
     var drawingPts   = [];
@@ -3761,7 +3761,8 @@ or none.{% endcomment %}
                         price: p.entry, color: c.ink, lineWidth: 2,
                         lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true, axisLabelColor: c.bg2, axisLabelTextColor: c.ink,
-                        title: (isLong ? 'LONG' : 'SHORT') + (!lvlPhone && typeof p.qty === 'number' ? ' ' + (+p.qty.toFixed(priceDecimals(0))) : ''),
+                        title: (isLong ? '▲ LONG' : '▼ SHORT') + (!lvlPhone && typeof p.qty === 'number' ? ' ' + (+p.qty.toFixed(priceDecimals(0))) : ''),
+                        lineVisible: false,
                     }));
                 }
                 if (typeof p.stop === 'number') {
@@ -3769,7 +3770,7 @@ or none.{% endcomment %}
                         price: p.stop, color: c.red, lineWidth: 2,
                         lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true, axisLabelColor: c.bg2, axisLabelTextColor: c.red,
-                        title: 'SL',
+                        title: 'Your stop', lineVisible: false,
                     }));
                 }
                 if (typeof p.tp === 'number') {
@@ -3777,7 +3778,7 @@ or none.{% endcomment %}
                         price: p.tp, color: c.accent, lineWidth: 2,
                         lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true, axisLabelColor: c.bg2, axisLabelTextColor: c.accent,
-                        title: 'TP',
+                        title: 'Your target', lineVisible: false,
                     }));
                 }
                 if (typeof p.soft_stop === 'number' && isFinite(p.soft_stop)
@@ -3805,7 +3806,9 @@ or none.{% endcomment %}
                on every paint like everything else here, so they survive
                each setData. */
             sigDots = signalDots(bars, c);
-            sigDots.forEach(function (d) { markers.push(d.marker); });
+            /* the strip's Signals switch: off, the dots are not drawn (the
+               key stays, to switch them back on) */
+            if (activeInds.signals !== false) sigDots.forEach(function (d) { markers.push(d.marker); });
         } else {
             sigDots = [];
         }
@@ -3911,6 +3914,8 @@ or none.{% endcomment %}
         var now = (NOW_V !== null && isFinite(NOW_V)) ? NOW_V
                 : (lastBars.length ? lastBars[lastBars.length - 1].close : null);
         var right = w - laneWidth() - MCHIP_OFF, out = [], edges = { top: [], bottom: [] };
+        /* the foot the pinned chips sit on: above the volume's band */
+        var foot = volumeShown() ? Math.round(h * VOL_TOP) - 6 : h;
         function off(label, cls, price) {
             if (typeof price !== 'number' || !isFinite(price)) return;
             var y = toY(price);
@@ -3941,7 +3946,7 @@ or none.{% endcomment %}
             edges[side].sort(function (a, b) { return a.d - b.d; }).forEach(function (e, k) {
                 var cw = chipWidth(e.text);
                 var y0 = side === 'top' ? MCHIP_EDGE + k * (MCHIP_H + MCHIP_GAP)
-                                        : h - MCHIP_EDGE - MCHIP_H - k * (MCHIP_H + MCHIP_GAP);
+                                        : foot - MCHIP_EDGE - MCHIP_H - k * (MCHIP_H + MCHIP_GAP);
                 out.push({ cls: e.cls, edge: side, html: e.html, x0: right - cw, x1: right, y0: y0, y1: y0 + MCHIP_H });
             });
         });
@@ -4418,12 +4423,12 @@ or none.{% endcomment %}
             try {
                 var cv = document.createElement('canvas');
                 var cx = (cv && typeof cv.getContext === 'function') ? cv.getContext('2d') : null;
-                if (cx) { cx.font = '500 10px "JetBrains Mono", ui-monospace, monospace'; lvlMeasureCtx = cx; }
+                if (cx) { cx.font = '500 11px "JetBrains Mono", ui-monospace, monospace'; lvlMeasureCtx = cx; }
             } catch (e) { lvlMeasureCtx = null; }
         }
         if (lvlMeasureCtx) { try { return lvlMeasureCtx.measureText(s).width; } catch (e) {} }
         var api = lvApi();
-        return s.length * (api ? api.LV.CHAR_W : 6.1);
+        return s.length * (api ? api.LV.CHAR_W : 6.7);
     }
     /* The newest candles, high to low and a bar's slot wide: no chip may
        hide the price action the operator is reading (svLevels.LV.NOW_BARS
@@ -4515,7 +4520,7 @@ or none.{% endcomment %}
         var sb = shownBars(), lastShown = sb.length ? sb[sb.length - 1].close : null;
         /* the money chips first: the level chips keep off them */
         try { paintMoneyChips(moneyChipPlan(toY, w, h)); } catch (e) { mchipBoxes = []; }
-        return api.layout(d.items, {
+        var g = api.layout(d.items, {
             toY: toY, toX: originX, width: w, height: h,
             theme: c.isDark ? 'dark' : 'light', phone: lvlPhone,
             highTf: INTRADAY.indexOf(currentTf) === -1,
@@ -4530,7 +4535,66 @@ or none.{% endcomment %}
             asia: asia, po3: stageEnv(d.po3, d.asia),
             sessions: sessionEnv(d.sessions, aWin, spacing), measure: measureChip
         });
+        if (g) {
+            try { g.money = moneyLines(toY, w, h, c); } catch (e) { g.money = []; }
+            try { g.vol = volumeBand(w, h, c); } catch (e) { g.vol = null; }
+        }
+        return g;
     };
+
+    /* His position's lines from the bar he entered on to the axis (the
+       desk v2's board, its review F4): solid is a fact, his entry in ink,
+       his stop coral, his target jade, 2 px; the engine's own lines keep
+       only their axis labels and titles. Clear of the legend at the top
+       left, and of the candles before he was in. */
+    function moneyLines(toY, w, h, c) {
+        var out = [];
+        if (!activeInds.positions) return out;
+        /* each line ends where its title begins: the title names it at the
+           axis, the line never runs through its words */
+        function end(title) { return title ? Math.max(0, w - measureChip(title) - 14) : w; }
+        var titles = {};
+        posLines.concat(sigLines).forEach(function (pl) {
+            var o = null;
+            try { o = (pl && typeof pl.options === 'function') ? pl.options() : null; } catch (e) { o = null; }
+            if (o && typeof o.price === 'number') titles[o.price.toFixed(10)] = o.title || '';
+        });
+        function titleAt(v) { return titles[v.toFixed(10)] || ''; }
+        POSITIONS.forEach(function (p) {
+            var x0 = (typeof p.opened_at === 'number') ? epochX(p.opened_at) : null;
+            x0 = (x0 === null || !isFinite(x0) || x0 < 0) ? 0 : Math.min(w, x0);
+            [[p.entry, c.ink], [p.stop, c.red], [p.tp, c.accent]].forEach(function (lv) {
+                if (typeof lv[0] !== 'number' || !isFinite(lv[0])) return;
+                var y = toY(lv[0]);
+                if (typeof y !== 'number' || !isFinite(y) || y < 0 || y > h) return;
+                out.push({ x0: x0, x1: Math.max(x0, end(titleAt(lv[0]))), y: y, color: lv[1] });
+            });
+        });
+        /* the pinned signal's idea: 1 px dashes from its own bar */
+        var d = pinnedDot();
+        if (d && d.sig) {
+            var sx = null;
+            try { sx = chart.timeScale().timeToCoordinate(d.time); } catch (e) { sx = null; }
+            sx = (sx === null || !isFinite(sx) || sx < 0) ? 0 : Math.min(w, sx);
+            [[d.sig.entry, c.ink], [d.sig.stop, c.red], [d.sig.target, c.accent]].forEach(function (lv) {
+                if (typeof lv[0] !== 'number' || !isFinite(lv[0])) return;
+                var y = toY(lv[0]);
+                if (typeof y !== 'number' || !isFinite(y) || y < 0 || y > h) return;
+                out.push({ x0: sx, x1: Math.max(sx, end(titleAt(lv[0]))), y: y, color: lv[1], dash: true });
+            });
+        }
+        return out;
+    }
+
+    /* The volume's band at the pane's foot (the board's VOL pane, its
+       review F9): a hairline over it and its name, so the bars read as
+       their own pane; the money's chips pinned to the foot sit above it. */
+    var VOL_TOP = 0.86;
+    function volumeShown() { return !!(volumeSeries && activeInds.volume && volHas); }
+    function volumeBand(w, h, c) {
+        if (!volumeShown()) return null;
+        return { y: Math.round(h * VOL_TOP) - 4, w: w, ink: c.text, line: c.border };
+    }
 
     /* The shapes, under the candles and every price line: the pinned
        signal's washes, round guides, the Asia box, the hunt hatch, pool
@@ -4748,6 +4812,33 @@ or none.{% endcomment %}
        light theme's gold ink stays legible; focus mode alone dims them. */
     LevelLayer.prototype.paintChips = function (target) {
         var g = this.geom;
+        if (g && ((g.money && g.money.length) || g.vol)) {
+            target.useBitmapCoordinateSpace(function (s) {
+                var ctx = s.context, hr = s.horizontalPixelRatio, vr = s.verticalPixelRatio;
+                ctx.save();
+                try {
+                    ctx.setLineDash([]);
+                    ctx.globalAlpha = 1;
+                    if (g.vol) {
+                        var vy = Math.round(g.vol.y * vr) + 0.5;
+                        ctx.strokeStyle = g.vol.line; ctx.lineWidth = Math.max(1, Math.floor(vr));
+                        ctx.beginPath(); ctx.moveTo(0, vy); ctx.lineTo(Math.round(g.vol.w * hr), vy); ctx.stroke();
+                        ctx.font = '600 ' + (11 * hr) + 'px Inter, system-ui, sans-serif';
+                        ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+                        ctx.fillStyle = g.vol.ink;
+                        ctx.fillText('VOL', Math.round(8 * hr), vy + Math.round(4 * vr));
+                    }
+                    (g.money || []).forEach(function (m) {
+                        var lw = Math.max(1, Math.round((m.dash ? 1 : 2) * vr));
+                        var y = Math.round(m.y * vr) + (lw % 2 ? 0.5 : 0);
+                        ctx.setLineDash(m.dash ? [Math.round(4 * hr), Math.round(4 * hr)] : []);
+                        ctx.strokeStyle = m.color; ctx.lineWidth = lw;
+                        ctx.beginPath(); ctx.moveTo(Math.round(m.x0 * hr), y); ctx.lineTo(Math.round(m.x1 * hr), y); ctx.stroke();
+                    });
+                    ctx.setLineDash([]);
+                } finally { ctx.restore(); }
+            });
+        }
         var overs = (g && g.po3) ? g.po3.sweeps.filter(function (s) { return s.over; }) : [];
         var named = (g && g.sessions) ? g.sessions.boxes.filter(function (b) { return b.label; }) : [];
         if (!g || !(g.chips.length || g.edges.length || (g.asia && g.asia.label)
@@ -4785,10 +4876,10 @@ or none.{% endcomment %}
             }
             ctx.save();
             try {
-                /* the widths were measured at 10 px and scaled by hr: the text
-                   takes the same unrounded size (13 px at DPR 1.25 overran
-                   the box by 8.7 bitmap px) */
-                ctx.font = '500 ' + (10 * hr) + 'px "JetBrains Mono", ui-monospace, monospace';
+                /* the widths were measured at 11 px (the floor: the review
+                   of B10, F6) and scaled by hr: the text takes the same
+                   unrounded size (13 px at DPR 1.25 overran the box) */
+                ctx.font = '500 ' + (11 * hr) + 'px "JetBrains Mono", ui-monospace, monospace';
                 ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
                 ctx.setLineDash([]);
                 /* a run's diamond on its wick's end, over its candle and
@@ -4979,15 +5070,15 @@ or none.{% endcomment %}
         clearSignalLevels();
         if (!mainSeries || !sig) return;
         var c = getThemeColors();
-        [['entry', 'Entry', c.ink], ['stop', 'Stop', c.red],
-         ['target', 'Target', c.accent]].forEach(function (lv) {
+        [['entry', 'Signal entry', c.ink], ['stop', 'Signal stop', c.red],
+         ['target', 'Signal target', c.accent]].forEach(function (lv) {
             var p = sig[lv[0]];
             if (typeof p !== 'number' || !isFinite(p)) return;
             try {
                 sigLines.push(mainSeries.createPriceLine({
                     price: p, color: lv[2], lineWidth: 1,
                     lineStyle: LightweightCharts.LineStyle.Dashed,
-                    axisLabelVisible: true, title: lv[1],
+                    axisLabelVisible: true, title: lv[1], lineVisible: false,
                     axisLabelColor: c.bg, axisLabelTextColor: lv[2],
                 }));
             } catch (e) { /* a level this series will not take is not drawn */ }
@@ -5033,7 +5124,9 @@ or none.{% endcomment %}
     function refreshSignalCard() {
         if (sigHover) { showSignalCard(sigHover.hit, sigHover.y); return; }
         var d = pinnedDot(), api = sigApi();
-        if (d && chart && api) {
+        /* a pin the rail made keeps its card in the rail (the board): the
+           chart draws its levels, named, and no second card */
+        if (d && chart && api && !(sigPin && sigPin.rail)) {
             var x = null;
             try { x = chart.timeScale().timeToCoordinate(d.time); } catch (e) { x = null; }
             var w = canvasEl.clientWidth || container.clientWidth;
@@ -5049,6 +5142,7 @@ or none.{% endcomment %}
     function signalHit(param) {
         var api = sigApi();
         if (!api || !chart || !sigDots.length || !param || !param.point) return null;
+        if (activeInds.signals === false) return null;   /* switched off: no dot to hit */
         return api.hitTest(sigDots, param.point.x, chart.timeScale(),
                            param.hoveredObjectId);
     }
@@ -5216,6 +5310,57 @@ or none.{% endcomment %}
         refreshSignalCard();
     }
 
+    /* THE RAIL'S PIN ON THE CHART (the review of B10, F5): a card pinned
+       in the signal rail pins the same signal here, its levels drawn and
+       named by their owner; unpinned there, it lets go here (a pin the
+       chart's own dot made is the chart's). Read from the rail's own
+       state (the pinned card's class), so nothing in the rail changes. */
+    var railPinId = null;
+    function railPinnedId() {
+        var pop = document.querySelector('#railSignalsBody .sr-popup.sv-pinned');
+        var wrap = pop && pop.closest ? pop.closest('[data-signal-id]') : null;
+        return wrap ? String(wrap.getAttribute('data-signal-id')) : null;
+    }
+    function syncRailPin() {
+        var id = railPinnedId();
+        if (id === railPinId) return;
+        var was = railPinId;
+        railPinId = id;
+        try {
+            if (id) {
+                var d = sigDots.filter(function (x) { return String(x.id) === id; })[0];
+                if (!d) return;
+                var py = null;
+                try { py = mainSeries.priceToCoordinate(typeof d.sig.price === 'number' ? d.sig.price : d.sig.entry); }
+                catch (e) { py = null; }
+                sigPin = { id: d.id, y: (typeof py === 'number' && isFinite(py)) ? py : 40, rail: true };
+                sigHover = null;
+                drawSignalLevels(d.sig);
+                refreshSignalCard();
+            } else if (was && sigPin && sigPin.rail && String(sigPin.id) === was) {
+                unpinSignal();
+            }
+        } catch (e) { /* the rail's pin is a convenience here */ }
+    }
+    /* The rail is printed after the page's content: watched once the page
+       has parsed. */
+    function watchRailPin() {
+        var body = document.getElementById('railSignalsBody');
+        if (!body || typeof MutationObserver !== 'function') return;
+        var queued = false;
+        new MutationObserver(function () {
+            if (queued) return;
+            queued = true;
+            (window.requestAnimationFrame || setTimeout)(function () { queued = false; syncRailPin(); });
+        }).observe(body, { subtree: true, attributes: true, attributeFilter: ['class'], childList: true });
+        syncRailPin();
+    }
+    if (document.readyState === 'loading' && typeof document.addEventListener === 'function') {
+        document.addEventListener('DOMContentLoaded', watchRailPin);
+    } else {
+        try { watchRailPin(); } catch (e) { /* a page without the rail */ }
+    }
+
     function onSignalClick(param) {
         if (activeTool !== 'crosshair') return;  /* a drawing tool owns this click */
         try {
@@ -5274,6 +5419,7 @@ or none.{% endcomment %}
        which a refresh may have graded since. */
     function syncSignalFocus() {
         if (sigLegendEl) sigLegendEl.hidden = !sigDots.length;
+        if (!railPinId) { try { syncRailPin(); } catch (e) {} }
         var d = pinnedDot();
         if (sigPin && !d) { sigPin = null; clearSignalLevels(); }
         else if (d) drawSignalLevels(d.sig);
@@ -5291,6 +5437,20 @@ or none.{% endcomment %}
        dot and anywhere else closes the card — on a phone, where the
        pinned card covers most of the canvas, a tap on it IS the tap
        elsewhere. */
+    /* The strip's Signals switch (the review of B10, F3). */
+    if (sigLegendEl && typeof sigLegendEl.querySelector === 'function') {
+        var sigSwitch = sigLegendEl.querySelector('[data-sig-toggle]');
+        if (sigSwitch) {
+            sigSwitch.setAttribute('aria-pressed', activeInds.signals === false ? 'false' : 'true');
+            sigSwitch.addEventListener('click', function () {
+                activeInds.signals = activeInds.signals === false;
+                sigSwitch.setAttribute('aria-pressed', activeInds.signals ? 'true' : 'false');
+                if (!activeInds.signals) unpinSignal();
+                savePrefs();
+                applyPositions(lastBars);
+            });
+        }
+    }
     if (sigCardEl) {
         sigCardEl.addEventListener('click', function (ev) {
             var t = ev.target;
@@ -5347,6 +5507,14 @@ or none.{% endcomment %}
     var TF_WORDS = { '1min': '1m', '5min': '5m', '10min': '10m', '15min': '15m', '30min': '30m',
                      '1h': '1H', '2h': '2H', '4h': '4H', '1d': 'D', '1wk': 'W',
                      '1w': '1W of D', '1mo': '1M of D', '1m': '1M of D', '3m': '3M of D', '1y': '1Y of D' };
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function shortWhen(epoch, utc) {
+        var iso = new Date(epoch * 1000).toISOString();
+        return +iso.slice(8, 10) + ' ' + MONTHS[+iso.slice(5, 7) - 1] + ' ' + iso.slice(11, 16) + (utc ? ' UTC' : '');
+    }
+    function shortDay(ymd) {
+        return +ymd.slice(8, 10) + ' ' + MONTHS[+ymd.slice(5, 7) - 1] + ' ' + ymd.slice(0, 4);
+    }
     function lastBarParam() {
         if (!lastBars.length || !mainSeries) return null;
         var b = lastBars[lastBars.length - 1];
@@ -5397,8 +5565,10 @@ or none.{% endcomment %}
             : (typeof param.time === 'object')
             ? param.time.year + '-' + String(param.time.month).padStart(2,'0') + '-' + String(param.time.day).padStart(2,'0')
             : intraday
-                ? new Date(param.time * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+                ? shortWhen(param.time, true)
                 : new Date(param.time * 1000).toISOString().slice(0, 10);
+        /* "13 Nov 19:00 UTC", "13 Nov 2026" (the board's short form) */
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) d = shortDay(d);
         /* A weekly bar is dated by its Monday: the legend says it is the
            week, not that day (2026-11-01). */
         if (currentTf === WEEKLY_TF && !intraday) d = 'week of ' + d;
@@ -5792,6 +5962,12 @@ or none.{% endcomment %}
                 applyOverlays(bars);
                 nowHandOver();
                 onCrosshair(null);   /* the legend at rest: the last bar */
+                /* Room right of the newest bar (the desk v2's board, its
+                   review F4): the last candle ends about four fifths across,
+                   the margin holds the levels' chips and his lines' labels,
+                   none on the newest bars. In bars, so a zoom keeps it. */
+                try { chart.timeScale().applyOptions({ rightOffset: Math.max(4, Math.round(bars.length * 0.24)) }); }
+                catch (e) { /* an old library: the chart draws as before */ }
                 if (keepRange) {
                     try { chart.timeScale().setVisibleLogicalRange(keepRange); }
                     catch (e) { /* a shrunk series can refuse the old range */ }
@@ -6153,8 +6329,10 @@ or none.{% endcomment %}
        takes focus on hover so the keys work without a click first. */
     /* Focus on a CLICK, not on a passing cursor: stealing focus on
        hover moves the caret out of whatever the operator was typing. */
-    container.addEventListener('pointerdown', function () {
-        try { container.focus({ preventScroll: true }); } catch (e) {}
+    container.addEventListener('pointerdown', function (ev) {
+        /* the toolbar's own buttons keep their focus */
+        if (ev && ev.target && ev.target.closest && ev.target.closest('.sv-chart-toolbar, .sv-chart-ticket')) return;
+        try { canvasEl.focus({ preventScroll: true }); } catch (e) {}
     });
     container.addEventListener('mouseleave', function () {
         /* `document`, not `d`. There is no `d` in this closure — the only
@@ -6164,14 +6342,12 @@ or none.{% endcomment %}
            went on eating ArrowLeft/ArrowRight/+/-, which is why the page
            stopped scrolling with the keyboard once you had touched the
            chart. */
-        if (document.activeElement === container) {
-            try { container.blur(); } catch (e) {}
+        if (document.activeElement === container || document.activeElement === canvasEl) {
+            try { document.activeElement.blur(); } catch (e) {}
         }
     });
-    container.addEventListener('mouseenter', function () {
-        if (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
-        try { container.focus({ preventScroll: true }); } catch (e) {}
-    });
+    /* No focus on a passing cursor (the review of B10, F12): the hover
+       stole the keyboard's place and drew its ring along the chart. */
     container.addEventListener('keydown', function (ev) {
         if (!chart) return;
         /* Esc leaves the tall state. Fullscreen gets its Esc from the
@@ -6319,6 +6495,12 @@ or none.{% endcomment %}
         if (!el) return;
         el.textContent = text || '';
         el.hidden = !text;
+        /* The standing refusal (eToro's candle close side, unmeasured
+           until M5) is marked: the caption keeps it in its words but stays
+           folded at rest for it alone (sv-chart.css; the review of B10,
+           F3); every other refusal opens the caption. */
+        var standing = !!text && !!SOURCE && !SOURCE.close_side && text.indexOf('a side not yet measured') >= 0;
+        if (typeof el.toggleAttribute === 'function') el.toggleAttribute('data-standing', standing);
     }
 
     function resetTick() {
@@ -6408,7 +6590,9 @@ or none.{% endcomment %}
            on the raised surface in ink-1. Read by sv-venue.js lineLook. */
         nowLook: function () {
             var c = levelPalette();
-            return { color: c.neutral, label: c.bg2, text: c.ink };
+            /* bare: the line's title stays off the pane, its words are the
+               chip's (the review of B10, F8: one label, not two) */
+            return { color: c.neutral, label: c.bg2, text: c.ink, bare: true };
         },
         setNow: function (v) {
             var n = (v === null || v === undefined) ? null : Number(v);

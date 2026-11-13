@@ -1,7 +1,14 @@
 {% extends "base.html" %}
-{% load sauron_tags quote_tags %}
+{% load sauron_tags quote_tags static %}
 {% block title %}{{ instrument.symbol }} — Sauron Vision{% endblock %}
 {% block page_title %}{{ instrument.symbol }} — {{ instrument.name }}{% endblock %}
+{% comment %}The Sauron twist on the desk v2 (the board the operator approved,
+"amazing work, bravo, I need it fast!!"): the embers in the gutters and the
+Eye's light reaching the page's void, as on /positions/ and /command/. No
+figure of this page sits on the void (tests/test_magic_layer.py measures it);
+Calm stills them and Off drops them (the review of B10, F7).{% endcomment %}
+{% block sv_embers %} data-sv-embers{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-chart.css' %}">{% endblock %}
 
 {% block content %}
 {% comment %}
@@ -21,24 +28,27 @@ screen, then the rest of the page. The header says, left to right:
     path are the ticket's own (plan §10): this page only lays it out.
 Display only: nothing here reaches an order, a stop, a size or a switch.
 {% endcomment %}
-{% with p0=chart_positions_rows.0 n_pos=chart_positions_rows|length %}
+{% with p0=chart_positions_head n_pos=chart_positions_rows|length %}
 <section class="sv-ih" aria-label="{{ instrument.symbol }}: the day, your position and the two sides">
     <div class="sv-ih-g sv-ih-day">
         <div class="sv-ih-r1" data-ih-row>
             <span class="sv-ih-lbl">Day</span>
             {% if quote %}
             {% comment %}A day change measured by another feed than the
-            price's is a dash, its title says whose (2026-10-31).{% endcomment %}
+            price's is a dash, its title says whose (2026-10-31). Its arrow is
+            drawn from the class the one painter gives the cell (up, down; none
+            on a dash), so the two never disagree when the change crosses zero
+            (the review of B10, M1).{% endcomment %}
             <span class="sv-ih-num dtl-chg{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</span>
-            {% if not hero or hero.change_same_feed is not False %}<span class="sv-ih-arrow {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}" aria-hidden="true">{% if quote.change_pct >= 0 %}▲{% else %}▼{% endif %}</span>{% endif %}
             {% else %}
             <span class="sv-unknown" title="No price for this instrument yet">&mdash;</span>
             {% endif %}
         </div>
         <div class="sv-ih-r2" data-ih-row>
-            <span class="sv-ih-word">Range</span>
+            <span class="sv-ih-word">range</span>
             {% comment %}The day's low to high, from the chart's own candles
-            (the script at the foot of this page): a dash until they load.{% endcomment %}
+            (the script at the foot of this page), in the page's own decimal
+            count: a dash until they load.{% endcomment %}
             <span class="sv-ih-num" data-ih="range" title="The day's low and high, from the chart's candles">&mdash;</span>
         </div>
     </div>
@@ -53,12 +63,12 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
             {% else %}
             <span class="sv-ih-num {% if p0.pnl >= 0 %}up{% else %}down{% endif %}">{% if p0.pnl >= 0 %}+{% endif %}{{ p0.pnl|floatformat:2 }}<span class="sv-ih-arrow" aria-hidden="true">{% if p0.pnl >= 0 %}▲{% else %}▼{% endif %}</span></span>
             {% endif %}
-            {% if p0.r_now is not None %}<span class="sv-ih-num {% if p0.r_now >= 0 %}up{% else %}down{% endif %}" title="R: the move against the distance from the entry to the stop it opened with">{% if p0.r_now >= 0 %}+{% endif %}{{ p0.r_now|floatformat:2 }}R</span>{% endif %}
+            {% if p0.r_now is not None %}<span class="sv-ih-num sv-ih-r {% if p0.r_now >= 0 %}up{% else %}down{% endif %}" title="R: the move against the distance from the entry to the stop it opened with">{% if p0.r_now >= 0 %}+{% endif %}{{ p0.r_now|floatformat:2 }}R</span>{% endif %}
         </div>
         <div class="sv-ih-r2" data-ih-row>
-            <span>Entry <span class="sv-ih-num">{% px p0.entry instrument.asset_class instrument.symbol %}</span></span>
+            <span>entry <span class="sv-ih-num">{% px p0.entry instrument.asset_class instrument.symbol %}</span></span>
             {% if p0.age_s is not None %}<span class="sv-ih-age">· {% if p0.age_s >= 86400 %}{% widthratio p0.age_s 86400 1 %} d{% else %}{% widthratio p0.age_s 3600 1 %} h{% endif %}</span>{% endif %}
-            {% if p0.mark_word and not p0.paper %}<span class="sv-ih-mark" data-mark-source="{{ p0.mark_source }}" title="{{ p0.mark_title }}">· P&amp;L at {{ p0.mark_word }}</span>{% elif p0.pnl_words %}<span title="{{ p0.pnl_title }}">· {{ p0.pnl_words }}</span>{% endif %}
+            {% if p0.mark_word and not p0.paper %}<span class="sv-ih-mark" data-mark-source="{{ p0.mark_source }}" title="{{ p0.mark_title }}">· P&amp;L at {% if p0.mark_side %}the {{ p0.mark_side }}{% else %}{{ p0.mark_word }}{% endif %}</span>{% elif p0.pnl_words %}<span title="{{ p0.pnl_title }}">· {{ p0.pnl_words }}</span>{% endif %}
             {% if n_pos > 1 %}<a class="sv-ih-more" href="#sv-positions">+{{ n_pos|add:"-1" }} more</a>{% endif %}
         </div>
     </div>
@@ -67,13 +77,14 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
         <div class="sv-ih-r1" data-ih-row>
             <span class="sv-ih-dot" aria-hidden="true"></span>
             {% comment %}Whose price this is and how old (2026-10-31; one
-            price, 2026-11-12): the one painter rewrites the price and these
-            words together, every second. The hero's hooks stay (.dtl-price
-            carries the page's one decimal count, .dtl-last the price the
-            poller repaints when the painter is absent), and
-            data-instrument-live (on the chart card below) keeps
-            sv-instrument-live.js polling, so none of it freezes under a
-            live market.{% endcomment %}
+            price, 2026-11-12): the one painter rewrites these words every
+            second, and they are never folded nor cut (the review of B10,
+            F1). The price itself is printed once, on the two sides (the
+            board): the hero's hooks stay for the painter and the poller
+            (.dtl-price carries the page's one decimal count, .dtl-last the
+            price), read by a screen reader with the words, out of the row's
+            width. data-instrument-live (on the chart card below) keeps
+            sv-instrument-live.js polling, so none of it freezes.{% endcomment %}
             {% if quote %}<span class="dtl-price" data-decimals="{{ quote_decimals }}"><span class="dtl-last" data-q="{{ instrument.symbol }}">{% px quote.last instrument.asset_class instrument.symbol %}</span></span>{% endif %}
             <span class="dtl-src" data-hero="src" data-q="{{ instrument.symbol }}" data-q-f="words" data-q-title>{% q instrument.symbol "words" %}</span>
         </div>
@@ -83,10 +94,13 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
             {% comment %}Which market this instrument answers to, open or not,
             and when that flips: sv-market-status.js repaints it from
             /api/exchange-status/ so a tab left open across a close never shows
-            yesterday's answer.{% endcomment %}
-            <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-closed{% endif %}" data-market-session="{{ market.session }}">
+            yesterday's answer. Its dot and its state word at every width (a
+            price with no market state beside it reads as live); its name and
+            its next change in its title, which the repaint keeps (compact,
+            the review of B10, M3).{% endcomment %}
+            <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-closed{% endif %}" data-market-session="{{ market.session }}"{% if market.session != "CRYPTO" %} data-market-compact{% endif %} title="{{ market.name }} · {% if market.is_open %}OPEN{% else %}CLOSED{% endif %}{% if market.time_until_change %} · {{ market.next_state }} in {{ market.time_until_change }}{% endif %}">
                 <span class="mk-dot" aria-hidden="true"></span>
-                <span class="mk-text">{{ market.name }} · {% if market.is_open %}OPEN{% else %}CLOSED{% endif %}{% if market.time_until_change %} · {{ market.next_state }} in {{ market.time_until_change }}{% endif %}</span>
+                <span class="mk-text">{% if market.session == "CRYPTO" %}{{ market.name }} · {% endif %}{% if market.is_open %}OPEN{% else %}CLOSED{% endif %}</span>
             </span>
             {% endif %}
         </div>
@@ -96,20 +110,6 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
         the deal ticket (svTakeTradeAsset, one manual-trade path everywhere),
         its venue on it (lane_mode) so a REAL order is said before the click.{% endcomment %}
         {% include "_partials/deal_ticket.html" with symbol=instrument.symbol quote=quote asset_class=instrument.asset_class decimals=quote_decimals lane_mode=lane_mode %}
-        {% comment %}And the rest as one group after the sides (the old header's
-        order: the ticket, then ask): the watchlist and Ask Sauron.{% endcomment %}
-        <span class="dtl-aux">
-            <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}">{% csrf_token %}
-                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                <button type="submit" class="sv-ih-icon wl-star{% if instrument.is_watchlist %} on{% endif %}"
-                        title="{% if instrument.is_watchlist %}Remove from watchlist{% else %}Add to watchlist: bars, quotes and signal scans follow{% endif %}"
-                        aria-pressed="{% if instrument.is_watchlist %}true{% else %}false{% endif %}"
-                        aria-label="Toggle watchlist for {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="{% if instrument.is_watchlist %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z"/></svg></button>
-            </form>
-            <button type="button" class="sv-ih-icon"
-                    data-ask-sauron="{{ instrument.symbol }}{% if instrument.name and instrument.name != instrument.symbol %} ({{ instrument.name }}){% endif %}"
-                    data-ask-kind="instrument" title="Ask Sauron about {{ instrument.symbol }}" aria-label="Ask Sauron about {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
-        </span>
     </div>
 </section>
 
@@ -122,6 +122,23 @@ feed produces a first price (sv-instrument-live.js). The widget reads
 the signals' suggested entries drawn on the tape; json_script escapes, so a
 rule name is data, never markup.{% endcomment %}
 <section class="sv-chart-card" aria-label="{{ instrument.symbol }} chart" data-instrument-live="{{ instrument.symbol }}">
+    {% comment %}The watchlist and Ask Sauron (the old header's group, after
+    the two sides in the keyboard's order): at the right end of the chart's
+    toolbar row, so the header row holds what the board draws and nothing in
+    it ever runs past the card or under the rail (the review of B10, F1 and
+    m1). The form, its fields and its words are the watchlist's own.{% endcomment %}
+    <span class="dtl-aux sv-chart-aux">
+        <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="sv-ih-icon wl-star{% if instrument.is_watchlist %} on{% endif %}"
+                    title="{% if instrument.is_watchlist %}Remove from watchlist{% else %}Add to watchlist: bars, quotes and signal scans follow{% endif %}"
+                    aria-pressed="{% if instrument.is_watchlist %}true{% else %}false{% endif %}"
+                    aria-label="Toggle watchlist for {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="{% if instrument.is_watchlist %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z"/></svg></button>
+        </form>
+        <button type="button" class="sv-ih-icon"
+                data-ask-sauron="{{ instrument.symbol }}{% if instrument.name and instrument.name != instrument.symbol %} ({{ instrument.name }}){% endif %}"
+                data-ask-kind="instrument" title="Ask Sauron about {{ instrument.symbol }}" aria-label="Ask Sauron about {{ instrument.symbol }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
+    </span>
     {{ chart_positions|json_script:"instrument-main-chart-positions" }}
     {{ chart_signals|json_script:"instrument-main-chart-signals" }}
     {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="560" fill=True timeframe="1d" decimals=quote_decimals ticket=True quote=quote asset_class=instrument.asset_class %}
@@ -186,9 +203,15 @@ never disagree about an entry or a stop.
 {% endif %}
 {% endwith %}
 
+{% comment %}The quote's facts and the indicators, folded (the review of B10,
+F8 and F15): the price is on the two sides and on the chart's line, so this
+panel would print it a third time. Its cells keep the one painter's and the
+poller's hooks (data-q, data-lq), painted while folded, read when opened.{% endcomment %}
+<details class="sv-panel sv-inst-card sv-inst-fold">
+    <summary class="sv-panel-head"><h2 class="sv-panel-title">Quote and indicators</h2><span class="sv-panel-meta">bid, ask, volume, source · RSI, MACD, averages</span></summary>
 <div class="sv-inst-grid">
-    <section class="sv-panel sv-inst-card">
-        <div class="sv-panel-head"><h2 class="sv-panel-title">Latest Quote</h2></div>
+    <section class="sv-inst-half">
+        <h3 class="sv-inst-sub-h">Latest Quote</h3>
         {% if quote %}
         {% comment %}Repainted with the price (sv-instrument-live.js, data-lq;
         the one painter, data-q). SOURCE in words, the stand-in said.{% endcomment %}
@@ -205,8 +228,8 @@ never disagree about an entry or a stop.
         {% endif %}
     </section>
 
-    <section class="sv-panel sv-inst-card">
-        <div class="sv-panel-head"><h2 class="sv-panel-title">Technical Indicators</h2></div>
+    <section class="sv-inst-half">
+        <h3 class="sv-inst-sub-h">Technical Indicators</h3>
         {% if technicals %}
         {% comment %}floatformat everywhere: these are 8-decimal Decimals and,
         raw, they read as noise. RSI says its zone in words.{% endcomment %}
@@ -224,6 +247,7 @@ never disagree about an entry or a stop.
         {% endif %}
     </section>
 </div>
+</details>
 
 <section class="sv-panel sv-inst-card">
     <div class="sv-panel-head"><h2 class="sv-panel-title">Recent signals · {{ instrument.symbol }}</h2></div>
@@ -280,11 +304,15 @@ bars. A dash until then; nothing is fetched for it.{% endcomment %}
 (function () {
     var cell = document.querySelector('[data-ih="range"]');
     if (!cell) return;
-    var holder = document.querySelector('[data-decimals]');
-    var dp = holder ? parseInt(holder.getAttribute('data-decimals'), 10) : 2;
-    if (!(dp >= 0 && dp <= 10)) dp = 2;
+    /* The page's own decimal count (the hero's, as the axis prints it),
+       never the first count in the document: the headband's items carry
+       theirs, and a forex range at two decimals rounds away what was
+       quoted (the review of B10, M4). Unknown keeps the dash. */
     var seen = null;
     function paint() {
+        var holder = document.querySelector('.sv-ih .dtl-price[data-decimals]');
+        var dp = holder ? parseInt(holder.getAttribute('data-decimals'), 10) : NaN;
+        if (!(dp >= 0 && dp <= 10)) return;
         var h = window.svCharts && window.svCharts['instrument-main-chart'];
         var bars = h && h.bars ? h.bars() : null;
         if (!bars || !bars.length || bars === seen) return;
