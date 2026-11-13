@@ -57,7 +57,8 @@
        motion (the wheel and the drag still move it there). While no strip
        runs no frame is asked for; a strip resumes from the same spot (its
        first frame moves 0).
-     * Content, not the magic layer: every Ambience, both themes.
+     * Content, not the magic layer: it reads no mood setting and runs the
+       same in both themes.
 
    Display only: it reads boxes and writes one transform per strip. No
    request, no storage. tests/test_marquee.py measures it in Chromium. */
