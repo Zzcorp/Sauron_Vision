@@ -99,8 +99,9 @@
         }
         s.items = items;
         s.width = s.clip.clientWidth;
-        /* the transform written is in the rect: the untransformed left */
-        s.origin = tr.left - (s.x || 0) - cr.left;
+        /* the transform written and the clip's scroll are in the rect: the
+           track's own left in the clip */
+        s.origin = tr.left - (s.x || 0) - cr.left + s.clip.scrollLeft;
         s.period = halves ? items[n / 2].left - items[0].left : 0;
         s.loop = s.period > 0 && s.width > 0 && s.period >= s.width;
         stats.measures++;

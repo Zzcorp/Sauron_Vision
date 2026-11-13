@@ -309,6 +309,39 @@ window.__mq = (function () {
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, 40)),
              pinned: el.classList.contains('sv-pinned') };
   }
+  /* A card's coming and going take the popup engine's own timers (the
+     hover beat, the crossing's grace): wait for them, up to ms. */
+  function waitCard(sel, ms) {
+    return new Promise(function (resolve) {
+      var t0 = performance.now();
+      (function poll() {
+        var c = card(sel);
+        if (c) return resolve(c);
+        if (performance.now() - t0 > ms) return resolve(null);
+        setTimeout(poll, 15);
+      })();
+    });
+  }
+  /* Armed before the hand moves: the card leaving <body> is seen in the
+     microtask the engine hides it in, and with markIt the next mark is set
+     right there, before any frame: what comes before it is the grace. */
+  function armGone(sel, ms, markIt) {
+    window.__mqGone = new Promise(function (resolve) {
+      var done = false, mo = null;
+      function end(ok) {
+        if (done) return;
+        done = true;
+        if (mo) mo.disconnect();
+        if (markIt) mark();
+        resolve(ok);
+      }
+      if (!card(sel)) return end(true);
+      mo = new MutationObserver(function () { if (!card(sel)) end(true); });
+      mo.observe(document.body, { childList: true });
+      setTimeout(function () { end(!card(sel)); }, ms);
+    });
+    return 0;
+  }
   function away() { return [Math.round(innerWidth * 0.45), Math.round(innerHeight * 0.7)]; }
   /* Where item k starts, from the first item, in px of the track. */
   function at(name, k) {
@@ -326,6 +359,7 @@ window.__mq = (function () {
     return Array.prototype.map.call(document.querySelectorAll(sel), function (e) { return e.textContent.trim(); });
   }
   return { start: start, stop: stop, mark: mark, point: point, inside: inside, card: card,
+           waitCard: waitCard, armGone: armGone,
            away: away, at: at, x: x, items: function (n) { return items(parts(n).t).length; },
            period: function (n) { return period(parts(n).t); }, focusInside: focusInside,
            activeIn: activeIn, text: text, writes: writes,
@@ -597,19 +631,20 @@ def _card(tab, name, sel):
     tab.sample([name])
     tab.wait(0.4)
     at = tab.js("__mq.inside('%s')" % name)
-    tab.mark()                                   # 1: on the item
+    tab.mark()                                   # 1: on the item, until its card opens
     tab.move((at["x"], at["y"]))
-    tab.wait(0.9)
-    opened = tab.js("__mq.card('%s')" % sel)
+    opened = tab.js("__mq.waitCard('%s', 3000)" % sel)
+    tab.wait(0.3)
     tab.mark()                                   # 2: on the card
     if opened:
         tab.move((opened["x"], opened["y"]))
     tab.wait(0.9)
     still_open = tab.js("__mq.card('%s')" % sel)
-    tab.mark()                                   # 3: away
+    tab.mark()                                   # 3: away, the card on its grace
+    tab.js("__mq.armGone('%s', 3000, true)" % sel)   # 4: marked as the card closes
     tab.move(tab.js("__mq.away()"))
-    tab.wait(1.4)
-    closed = tab.js("__mq.card('%s')" % sel) is None
+    closed = tab.js("window.__mqGone")
+    tab.wait(1.0)
     return {"opened": opened, "stillOpen": still_open, "closed": closed,
             "samples": tab.stop()[name]}
 
@@ -624,16 +659,16 @@ def _pinned(tab):
     tab.move((at["x"], at["y"]))
     tab.press((at["x"], at["y"]))
     tab.release((at["x"], at["y"]))
-    tab.wait(0.2)
-    pinned = tab.js("__mq.card('.dh-pop')")
+    pinned = tab.js("__mq.waitCard('.dh-pop', 3000)")
     tab.mark()                                   # 1: hand away, card pinned
     tab.move(tab.js("__mq.away()"))
     tab.wait(1.0)
     held = tab.js("__mq.card('.dh-pop')")
     tab.mark()                                   # 2: Escape
+    tab.js("__mq.armGone('.dh-pop', 3000, false)")
     tab.key("Escape", "Escape", 27)
+    closed = tab.js("window.__mqGone")
     tab.wait(1.0)
-    closed = tab.js("__mq.card('.dh-pop')") is None
     return {"pinned": pinned, "held": held, "closed": closed, "samples": tab.stop()["dh"]}
 
 
@@ -826,8 +861,10 @@ def _steps(samples):
 
 
 def _speed(samples):
-    """px per second, right to left positive."""
-    st = _steps(samples)
+    """px per second, right to left positive. A step longer than the
+    driver's catch-up (0.25 s: the machine stalled the page) is left out:
+    that is the machine's time, not the strip's speed."""
+    st = [s for s in _steps(samples) if s["dt"] <= 0.2]
     total = sum(s["dt"] for s in st)
     return sum(-s["dx"] for s in st) / total if total else 0.0
 
@@ -1108,10 +1145,10 @@ class TheStripsMeasuredTests(TestCase):
                 self.assertStill(_phase(samples, 1, skip=0.1), "on the item")
                 on_card = _phase(samples, 2, skip=0.1)
                 self.assertStill(on_card, "on its card")
-                after = _phase(samples, 3, skip=0.0)
-                # the card closes on its own grace after the hand leaves it
-                moving = [s for s in after if s["t"] - after[0]["t"] > 450]
-                self.assertResumesFrom(on_card, moving, name, "card closed")
+                # the hand gone, the card still open on its grace: still
+                grace = _phase(samples, 3, skip=0.0)
+                self.assertLessEqual(_span(on_card + grace), 0.5, "moved under an open card")
+                self.assertResumesFrom(on_card + grace, _phase(samples, 4, skip=0.0), name, "card closed")
 
     def test_a_pinned_card_holds_it_with_the_hand_away(self):
         got = self.scenario("pinned")
