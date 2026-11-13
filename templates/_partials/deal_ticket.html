@@ -23,7 +23,9 @@ number sits on a button that opens a position.
 THE BOARD (desk v2, approved 2026-11-13): two fixed-width boxes, the
 quote each side trades at named on its label (· BID, · ASK), the price in
 ink in the number face, the world chip and the spread between them. Its
-sheet, static/css/sv-ticket.css, comes with it.
+sheet, static/css/sv-ticket.css, comes with it. The chip names the world
+as the TAKE TRADE dialog it opens does: REAL on an armed lane (the board,
+UI plan §3.5 and §10's ticket row), where it said LIVE.
 {% endcomment %}
 <link rel="stylesheet" href="{% static 'css/sv-ticket.css' %}">
 <div class="sv-ticket {{ klass }}"
@@ -47,7 +49,7 @@ sheet, static/css/sv-ticket.css, comes with it.
         Rendered only when the caller passes `lane_mode`, so every other
         include keeps its exact shape.{% endcomment %}
         {% if lane_mode %}<span class="tk-venue tk-venue--{{ lane_mode }}"
-              title="{% if lane_mode == 'live' %}This ticket places REAL orders — the manual lane for this asset class is armed{% else %}Simulated — the manual lane for this asset class is in paper mode{% endif %}">{% if lane_mode == 'live' %}● LIVE{% else %}◌ paper{% endif %}</span>{% endif %}
+              title="{% if lane_mode == 'live' %}This ticket places REAL orders — the manual lane for this asset class is armed{% else %}Simulated — the manual lane for this asset class is in paper mode{% endif %}">{% if lane_mode == 'live' %}REAL{% else %}◌ paper{% endif %}</span>{% endif %}
         <span class="tk-spread"><span class="tk-k">SPREAD</span>
         <span class="tk-v" data-dq="spread" data-q="{{ symbol }}" data-q-f="spread">{% if quote.bid and quote.ask %}{% q symbol "spread" %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span></span>
     </span>

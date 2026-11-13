@@ -8,18 +8,22 @@
    opens, is the kit's (sv-kit.css): it opens on every page.
 
    Two fixed-width boxes and the middle between them: ▼ SHORT at the bid,
-   ▲ LONG at the ask, the side in its colour on the label and the outline
-   (coral, jade), never a fill; the price in JetBrains Mono 15/500 in ink,
-   the one figure on the button; the world chip (REAL is the only solid
-   red, sauron.css paints it) and the spread in the middle. The width never
-   follows the price, so a tick never moves a button. A stale ticket is
-   dashed and grey, no price in ink: none reads as fresh. Its buttons stay
-   clickable (the ticket prices at execution, not off this label).
+   LONG at the ask ▲ (its arrow on the box's outer edge), the side in its
+   colour on the label and the outline (coral, jade), never a fill; the
+   price in JetBrains Mono 15/500 in ink, the one figure on the button; the
+   world chip (REAL is the only solid red, sauron.css paints it) over one
+   hint line, "spread 0.00008". The width never follows the price, so a
+   tick never moves a button. A stale ticket is dashed and grey and prints
+   no price: a dash in each box, the chip alone between them. Its buttons
+   stay clickable (the ticket prices at execution, not off this label).
 
    Tokens only, nothing under 11 px, no light (the kit's magic gives a side
-   its 1 px ring on hover and focus, inside its box). Colours in the dark
-   theme; light mode keeps today's (frozen, plan §15) but takes the layout.
-   Display only: no word, hook or call of the partial changes. */
+   its 1 px ring on hover and focus, inside its box). A side's focus ring is
+   its own colour: a short is never green. The colours are the tokens in
+   either theme: light mode re-points them to its own frozen palette (plan
+   §15), where the frozen ink-3 is too faint for words on white, so the
+   ticket reads it as ink-2 there. Display only: no word, hook or call of
+   the partial changes. */
 
 .sv-ticket {
     display: inline-grid;
@@ -59,6 +63,11 @@
     text-transform: uppercase;
     white-space: nowrap;
 }
+/* LONG's arrow on the outer edge, as the board mirrors it ("LONG · ASK ▲"
+   opposite "▼ SHORT · BID"): the words keep their order in the markup, and
+   for a reader; only the line runs right to left, which carries its leading
+   glyph to the right end. */
+.sv-ticket .tk-long .tk-lbl { direction: rtl; }
 .sv-ticket .tk-px {
     max-width: 100%;
     font-family: var(--sv-font-mono);
@@ -90,61 +99,86 @@
     line-height: 1;
     white-space: nowrap;
 }
+/* The spread: one hint line under the chip, its figure in the number face
+   ("spread 0.00008"; the board's hint). */
 .sv-ticket .tk-spread {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
     max-width: 100%;
+    line-height: var(--sv-lh-cell);
     white-space: nowrap;
 }
 .sv-ticket .tk-k {
     font-family: var(--sv-font-sans);
     font-size: var(--sv-fs-micro);
-    font-weight: 600;
-    letter-spacing: var(--sv-track-label);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: lowercase;
 }
 .sv-ticket .tk-v {
     font-family: var(--sv-font-mono);
     font-size: var(--sv-fs-micro);
 }
-/* A stale quote: dashed, every word and figure grey, the dash in place of
-   the price (the painters write it). */
-.sv-ticket.tk-stale .tk-side { border-width: 1px; border-style: dashed; }
+/* A stale quote: dashed and grey, and no price at all. The painters keep
+   writing the cells (their hooks are untouched); the ticket shows a dash in
+   each box in their place and leaves the chip alone between them, as the
+   board's stale ticket does: no price shows as fresh when it is not. */
+.sv-ticket.tk-stale .tk-side { border-style: dashed; }
+.sv-ticket.tk-stale .tk-px { font-size: 0; }
+.sv-ticket.tk-stale .tk-px::after {
+    content: "—";
+    font-size: 15px;
+    line-height: var(--sv-lh-figure);
+}
+.sv-ticket.tk-stale .tk-spread { display: none; }
 
 /* The compact one, over the expanded chart: the same ticket, smaller, the
-   quote side left to the button's title. */
+   quote side left to the button's title, the spread under its word. */
 .sv-ticket.sv-ticket--sm { grid-template-columns: 96px 64px 96px; column-gap: 6px; }
 .sv-ticket.sv-ticket--sm .tk-side { width: 96px; gap: 2px; padding: 5px 8px; }
 .sv-ticket.sv-ticket--sm .tk-px { font-size: var(--sv-fs-base); }
+.sv-ticket.sv-ticket--sm.tk-stale .tk-px { font-size: 0; }
+.sv-ticket.sv-ticket--sm.tk-stale .tk-px::after { font-size: var(--sv-fs-base); }
 .sv-ticket.sv-ticket--sm .tk-lbl,
 .sv-ticket.sv-ticket--sm .tk-k,
 .sv-ticket.sv-ticket--sm .tk-v { font-size: var(--sv-fs-micro); }
 .sv-ticket.sv-ticket--sm .tk-at { display: none; }
 .sv-ticket.sv-ticket--sm .tk-mid { gap: 2px; }
+.sv-ticket.sv-ticket--sm .tk-spread { flex-direction: column; align-items: center; gap: 0; }
 
-/* The colours, in the dark theme. */
-body:not(.light-mode) .sv-ticket .tk-side { background: var(--sv-bg-1); }
-body:not(.light-mode) .sv-ticket .tk-short { color: var(--sv-down); border-color: var(--sv-down); }
-body:not(.light-mode) .sv-ticket .tk-long { color: var(--sv-up); border-color: var(--sv-up); }
-body:not(.light-mode) .sv-ticket .tk-short .tk-lbl { color: var(--sv-down); }
-body:not(.light-mode) .sv-ticket .tk-long .tk-lbl { color: var(--sv-up); }
-body:not(.light-mode) .sv-ticket .tk-side .tk-px { color: var(--sv-ink-1); }
-body:not(.light-mode) .sv-ticket .tk-short:hover { background: var(--sv-down-wash); }
-body:not(.light-mode) .sv-ticket .tk-long:hover { background: var(--sv-up-wash); }
-body:not(.light-mode) .sv-ticket .tk-venue--paper {
+/* The colours: the tokens, in either theme. */
+body.light-mode .sv-ticket { --sv-ink-3: var(--sv-ink-2); --sv-paper: var(--sv-ink-2); }
+body .sv-ticket .tk-side { background: var(--sv-bg-1); }
+body .sv-ticket .tk-short { color: var(--sv-down); border-color: var(--sv-down); }
+body .sv-ticket .tk-long { color: var(--sv-up); border-color: var(--sv-up); }
+body .sv-ticket .tk-short .tk-lbl { color: var(--sv-down); }
+body .sv-ticket .tk-long .tk-lbl { color: var(--sv-up); }
+body .sv-ticket .tk-side .tk-px { color: var(--sv-ink-1); }
+body .sv-ticket .tk-short:hover { background: var(--sv-down-wash); }
+body .sv-ticket .tk-long:hover { background: var(--sv-up-wash); }
+/* A side's focus ring: the platform's 2 px at 2 px, in the side's own
+   colour (coral or jade), never the Eye's green on a short (§10). */
+body .sv-ticket .tk-side:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+body .sv-ticket .tk-venue--paper {
     color: var(--sv-paper);
     border: 1px solid var(--sv-paper);
     background: transparent;
 }
-body:not(.light-mode) .sv-ticket .tk-k { color: var(--sv-ink-3); }
-body:not(.light-mode) .sv-ticket .tk-v { color: var(--sv-ink-2); }
-body:not(.light-mode) .sv-ticket.tk-stale .tk-side,
-body:not(.light-mode) .sv-ticket.tk-stale .tk-side:hover {
+body .sv-ticket .tk-k,
+body .sv-ticket .tk-v { color: var(--sv-ink-3); }
+/* The one price painter's marks (sv-venue.css): a shut market's last price,
+   and no price, read muted on the ticket as everywhere else; the ink above
+   is for a price that is there. */
+body .sv-ticket .tk-side .tk-px:is([data-q-state="shut"], [data-q-state="none"]),
+body .sv-ticket .tk-v:is([data-q-state="shut"], [data-q-state="none"]) { color: var(--sv-ink-3); }
+body .sv-ticket.tk-stale .tk-side,
+body .sv-ticket.tk-stale .tk-side:hover {
     color: var(--sv-ink-3);
     border-color: var(--sv-line-3);
     background: var(--sv-bg-2);
 }
-body:not(.light-mode) .sv-ticket.tk-stale .tk-side .tk-lbl,
-body:not(.light-mode) .sv-ticket.tk-stale .tk-side .tk-px,
-body:not(.light-mode) .sv-ticket.tk-stale .tk-v { color: var(--sv-ink-3); }
+body .sv-ticket.tk-stale .tk-side .tk-lbl,
+body .sv-ticket.tk-stale .tk-side .tk-px { color: var(--sv-ink-3); }

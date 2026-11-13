@@ -69,7 +69,11 @@ def rgb_of(hexv):
 UP, DOWN, REAL = rgb_of(PALETTE["--sv-up"]), rgb_of(PALETTE["--sv-down"]), rgb_of(PALETTE["--sv-real"])
 WARN, DEMO = rgb_of(PALETTE["--sv-warn"]), rgb_of(PALETTE["--sv-demo"])
 INK1, INK2, INK3 = (rgb_of(PALETTE[k]) for k in ("--sv-ink-1", "--sv-ink-2", "--sv-ink-3"))
+EYE, BG0 = rgb_of(PALETTE["--sv-eye"]), rgb_of(PALETTE["--sv-bg-0"])
 WHITE = "rgb(255, 255, 255)"
+#: Light mode's own palette, frozen (sv-tokens.css, body.light-mode; plan §15).
+LIGHT = {p: v for prelude, body, ctx in rules(read("static/css/sv-tokens.css"))
+         if prelude.strip() == "body.light-mode" for p, v in decls(body) if v.startswith("#")}
 #: Every colour the token sheet holds (the dark palette): a computed colour
 #: is the token's own, or the token's at an alpha (a wash), or transparent.
 TOKEN_RGB = {tuple(int(v.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
@@ -194,15 +198,25 @@ class DealTicketMarkupTests(SimpleTestCase):
                 self.assertEqual(self.html.count(hook), n)
 
     def test_main_s_words_stay_and_the_board_adds_the_quote_side(self):
-        for words in ("▼ SHORT", "▲ LONG", "● LIVE", "◌ paper", "SPREAD",
+        for words in ("▼ SHORT", "▲ LONG", "◌ paper", "SPREAD",
                       'aria-label="Short {{ symbol }} at the bid"',
                       'aria-label="Long {{ symbol }} at the ask"',
                       'title="SHORT {{ symbol }} — hits the bid"',
-                      'title="LONG {{ symbol }} — lifts the ask"'):
+                      'title="LONG {{ symbol }} — lifts the ask"',
+                      "This ticket places REAL orders — the manual lane for this asset class is armed"):
             with self.subTest(words=words):
                 self.assertIn(words, self.html)
         self.assertIn('▼ SHORT<span class="tk-at"> · BID</span>', self.html)
         self.assertIn('▲ LONG<span class="tk-at"> · ASK</span>', self.html)
+
+    def test_the_world_chip_says_real_as_the_dialog_does(self):
+        """Updated deliberately (review of B6, 2026-11-13): the armed lane's
+        chip read "● LIVE" while the TAKE TRADE dialog it opens says REAL.
+        The board the operator approved ("amazing work, bravo, I need it
+        fast!!"), UI plan §3.5 and §10's ticket row name it the REAL chip:
+        one word for one world. Its title, "places REAL orders", stays."""
+        self.assertIn("{% if lane_mode == 'live' %}REAL{% else %}◌ paper{% endif %}", self.html)
+        self.assertNotIn("● LIVE", self.html)
 
 
 class TakeTradeSourceTests(SimpleTestCase):
@@ -288,17 +302,50 @@ function texts(root) {
   var out = [];
   root.querySelectorAll('*').forEach(function (el) {
     if (!shown(el)) return;
+    var c = getComputedStyle(el);
+    var cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className);
+    /* the words a sheet draws itself (a stale ticket's dash): read as text */
+    ['::before', '::after'].forEach(function (pe) {
+      var p = getComputedStyle(el, pe), m = /^"(.+)"$/.exec(p.content || '');
+      if (m && m[1].trim() && p.display !== 'none') {
+        out.push({ tag: el.tagName + pe, cls: cls, text: m[1], size: parseFloat(p.fontSize), color: p.color,
+                   ground: ground(el), off: !!el.closest('button[disabled]') });
+      }
+    });
+    /* text set at 0 px is not painted: the stale ticket's hidden price */
+    if (parseFloat(c.fontSize) === 0) return;
     var own = Array.prototype.some.call(el.childNodes, function (n) {
       return n.nodeType === 3 && n.data.trim();
     });
     if (!own && !(el.tagName === 'INPUT' && el.value) && !(el.tagName === 'SELECT')) return;
-    var c = getComputedStyle(el);
-    out.push({ tag: el.tagName, cls: String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className),
+    out.push({ tag: el.tagName, cls: cls,
                text: (el.tagName === 'INPUT' ? el.value : el.textContent).trim().slice(0, 40),
                size: parseFloat(c.fontSize), color: c.color, ground: ground(el),
                off: !!el.closest('button[disabled]') });
   });
   return out;
+}
+/* The box of one run of characters in an element's text, as painted. */
+function charBox(el, chars) {
+  if (!el) return null;
+  var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n;
+  while ((n = walker.nextNode())) {
+    var i = n.data.indexOf(chars);
+    if (i < 0) continue;
+    var r = document.createRange();
+    r.setStart(n, i); r.setEnd(n, i + chars.length);
+    var b = r.getBoundingClientRect();
+    return [b.left, b.top, b.width, b.height];
+  }
+  return null;
+}
+/* The painted box of all an element's text (0 wide when none is painted). */
+function inkBox(el) {
+  if (!el) return null;
+  var r = document.createRange();
+  r.selectNodeContents(el);
+  var b = r.getBoundingClientRect();
+  return [b.left, b.top, b.width, b.height];
 }
 function fills(root) {
   var out = [];
@@ -325,7 +372,9 @@ function look(el) {
 """
 
 TICKET_PROBE = PROBE_LIB + r"""
-(function () {
+(async function () {
+  /* the side's background eases (.15 s): each state is read once it has landed */
+  function settle() { return new Promise(function (r) { setTimeout(r, 400); }); }
   var t = document.querySelector('.sv-ticket');
   var out = { order: Array.prototype.map.call(t.children, function (c) { return c.className; }) };
   var s = t.querySelector('.tk-short'), l = t.querySelector('.tk-long'), m = t.querySelector('.tk-mid');
@@ -335,6 +384,13 @@ TICKET_PROBE = PROBE_LIB + r"""
   }
   out.short = side(s); out.long = side(l); out.mid = look(m);
   out.chip = look(m.querySelector('.tk-venue')); out.spread = look(m.querySelector('.tk-v'));
+  var sp = m.querySelector('.tk-spread');
+  out.spreadLine = { text: sp.innerText.replace(/\s+/g, ' ').trim(), box: look(sp),
+                     k: look(sp.querySelector('.tk-k')), v: look(sp.querySelector('.tk-v')) };
+  var sl = s.querySelector('.tk-lbl'), ll = l.querySelector('.tk-lbl');
+  out.arrows = { shortArrow: charBox(sl, '▼'), shortWord: charBox(sl, 'SHORT'),
+                 longArrow: charBox(ll, '▲'), longWord: charBox(ll, 'LONG'), longAsk: charBox(ll, 'ASK'),
+                 longWords: ll.textContent };
   out.texts = texts(t); out.fills = fills(t);
   function boxes() { return [s, m, l].map(function (e) { var r = e.getBoundingClientRect();
                                                       return [r.left, r.top, r.width, r.height]; }); }
@@ -342,12 +398,69 @@ TICKET_PROBE = PROBE_LIB + r"""
   s.querySelector('.tk-px').textContent = '61234.56789';
   l.querySelector('.tk-px').textContent = '1.2';
   out.ticked = { before: before, after: boxes() };
+  /* Stale as it ships: the class alone, as sv-instrument-live.js sets it;
+     the one price painter keeps writing the cells, so they keep a price. */
   t.classList.add('tk-stale');
-  t.querySelectorAll('[data-dq]').forEach(function (c) { c.innerHTML = '<span class="sv-unknown">—</span>'; });
-  out.stale = { short: side(s), long: side(l), texts: texts(t) };
+  await settle();
+  function after(el) {
+    var c = getComputedStyle(el, '::after');
+    return { content: c.content, size: c.fontSize, color: c.color };
+  }
+  out.stale = { short: side(s), long: side(l), texts: texts(t), fills: fills(t),
+                ink: [inkBox(s.querySelector('.tk-px')), inkBox(l.querySelector('.tk-px'))],
+                after: [after(s.querySelector('.tk-px')), after(l.querySelector('.tk-px'))],
+                cells: Array.prototype.map.call(t.querySelectorAll('.tk-px'), function (c) { return c.textContent; }),
+                spreadShown: shown(sp), chipShown: shown(m.querySelector('.tk-venue')), ticked: boxes() };
+  t.classList.remove('tk-stale');
+  await settle();
+  /* The one price painter's own marks on the cells (sv-venue.js sets
+     data-q-state on every cell it paints): a shut market, no price, live. */
+  out.marks = {};
+  for (var si = 0, states = ['shut', 'none', 'live']; si < states.length; si++) {
+    var st = states[si];
+    t.querySelectorAll('[data-q]').forEach(function (c) { c.setAttribute('data-q-state', st); });
+    await settle();
+    out.marks[st] = { short: getComputedStyle(s.querySelector('.tk-px')).color,
+                      long: getComputedStyle(l.querySelector('.tk-px')).color,
+                      spread: getComputedStyle(m.querySelector('.tk-v')).color };
+  }
+  t.querySelectorAll('[data-q]').forEach(function (c) { c.removeAttribute('data-q-state'); });
+  /* Light mode, on its own frozen palette (plan §15). */
+  document.body.classList.add('light-mode');
+  await settle();
+  out.light = { short: side(s), long: side(l), texts: texts(t), fills: fills(t) };
+  document.body.classList.remove('light-mode');
+  await settle();
   return JSON.stringify(out);
 })()
 """
+
+#: A focus ring as the browser draws it once :focus-visible is forced.
+RING = r"""(function (sel) {
+  var e = document.querySelector(sel), c = getComputedStyle(e);
+  return JSON.stringify({ style: c.outlineStyle, width: c.outlineWidth, color: c.outlineColor,
+                          offset: c.outlineOffset, ink: c.color, shadow: c.boxShadow });
+})(%s)"""
+
+
+def _rings(chrome, sid, selectors):
+    """{name: the ring} for each selector with :focus-visible forced (the
+    DevTools' own switch), one at a time."""
+    chrome.call("DOM.enable", session=sid)
+    chrome.call("CSS.enable", session=sid)
+    root = chrome.call("DOM.getDocument", {"depth": 0}, session=sid)["root"]["nodeId"]
+    out = {}
+    for name, sel in selectors.items():
+        nid = chrome.call("DOM.querySelector", {"nodeId": root, "selector": sel}, session=sid)["nodeId"]
+        if not nid:
+            out[name] = None
+            continue
+        chrome.call("CSS.forcePseudoState", {"nodeId": nid, "forcedPseudoClasses": ["focus", "focus-visible"]},
+                    session=sid)
+        out[name] = json.loads(chrome.eval(sid, RING % json.dumps(sel)))
+        chrome.call("CSS.forcePseudoState", {"nodeId": nid, "forcedPseudoClasses": []}, session=sid)
+    return out
+
 
 DIALOG_PROBE = PROBE_LIB + r"""
 (async function (SRC, OVERLAY, SCENARIOS) {
@@ -647,8 +760,22 @@ class DealTicketMeasuredTests(_Desk):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        url = "/instruments/AUDUSD/"
-        cls.got = _open_pages({url: (cls.page(url), TICKET_PROBE)}, None)[url]
+        html = cls.page("/instruments/AUDUSD/")
+        tmp = tempfile.mkdtemp(prefix="sv-b6-")
+        try:
+            path = pathlib.Path(tmp) / "page.html"
+            path.write_text(_offline(html), encoding="utf-8")
+            chrome = _Chrome(CHROME)
+            try:
+                sid = chrome.page(1440, 900, False)
+                chrome.open(sid, path.as_uri())
+                cls.got = json.loads(chrome.eval(sid, TICKET_PROBE))
+                cls.rings = _rings(chrome, sid, {"short": ".sv-ticket .tk-short",
+                                                 "long": ".sv-ticket .tk-long"})
+            finally:
+                chrome.close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_short_mid_long_in_that_order(self):
         self.assertEqual([c.split()[0:2] for c in self.got["order"]],
@@ -696,11 +823,51 @@ class DealTicketMeasuredTests(_Desk):
     def test_the_real_chip_and_the_spread_between_them(self):
         chip = self.got["chip"]
         self.assertEqual((chip["bg"], chip["color"]), (REAL, WHITE))
-        self.assertIn("LIVE", chip["text"])
+        # the board's word, the dialog's word (updated deliberately: it read
+        # "● LIVE"; the operator approved the board's REAL chip)
+        self.assertEqual(chip["text"], "REAL")
         self.assertTrue(self.got["spread"]["family"].startswith('"JetBrains Mono"'))
         mid, chip_box = self.got["mid"]["box"], chip["box"]
         self.assertGreaterEqual(chip_box[0], mid[0] - 0.5)
         self.assertLessEqual(chip_box[0] + chip_box[2], mid[0] + mid[2] + 0.5)
+
+    def test_the_spread_is_one_hint_line_under_the_chip(self):
+        """The board's hint, "spread 0.8 pip": one line, the word in Inter,
+        the figure in the number face, both ink-3, under the chip."""
+        line = self.got["spreadLine"]
+        self.assertEqual(line["text"], "spread 0.00008")
+        self.assertLessEqual(line["box"]["box"][3], float(line["k"]["lh"][:-2]) + 1, line)
+        self.assertAlmostEqual(line["k"]["box"][1] + line["k"]["box"][3],
+                               line["v"]["box"][1] + line["v"]["box"][3], delta=2)
+        self.assertTrue(line["k"]["family"].startswith("Inter"), line["k"]["family"])
+        self.assertTrue(line["v"]["family"].startswith('"JetBrains Mono"'), line["v"]["family"])
+        self.assertEqual((line["k"]["color"], line["v"]["color"]), (INK3, INK3))
+        self.assertEqual(line["k"]["size"], "11px")
+        self.assertGreater(line["box"]["box"][1], self.got["chip"]["box"][1])
+
+    def test_long_carries_its_arrow_on_the_outer_edge(self):
+        """The board mirrors the arrows to the boxes' outer edges: "▼ SHORT ·
+        BID" and "LONG · ASK ▲". The words keep their order (§10)."""
+        a = self.got["arrows"]
+        self.assertEqual(a["longWords"], "▲ LONG · ASK")
+        self.assertLess(a["shortArrow"][0] + a["shortArrow"][2], a["shortWord"][0])
+        self.assertGreater(a["longArrow"][0], a["longAsk"][0] + a["longAsk"][2])
+        self.assertLess(a["longWord"][0], a["longAsk"][0])
+        # the arrow sits at the box's right edge, inside its padding
+        box = self.got["long"]["box"]["box"]
+        self.assertLessEqual(a["longArrow"][0] + a["longArrow"][2], box[0] + box[2] - 10)
+        self.assertGreaterEqual(a["longArrow"][0] + a["longArrow"][2], box[0] + box[2] - 16)
+
+    def test_a_side_s_focus_ring_is_its_own_colour(self):
+        """Keyboard focus rings a side in its own colour, 2 px at 2 px: a
+        short is never green (the board; §10), and never the Eye's ring on a
+        coral box."""
+        for k, hue in (("short", DOWN), ("long", UP)):
+            ring = self.rings[k]
+            with self.subTest(side=k):
+                self.assertEqual((ring["style"], ring["width"], ring["offset"]), ("solid", "2px", "2px"))
+                self.assertEqual(ring["color"], hue)
+                self.assertNotEqual(ring["color"], EYE)
 
     def test_no_text_under_11px_and_every_word_at_4_5_to_1(self):
         for t in self.got["texts"] + self.got["stale"]["texts"]:
@@ -721,13 +888,61 @@ class DealTicketMeasuredTests(_Desk):
                 self.assertEqual((f["tshadow"], f["filter"]), ("none", "none"))
 
     def test_a_stale_ticket_prints_no_price_as_fresh(self):
+        """Stale as it ships: the class alone, as sv-instrument-live.js sets
+        it, while the one price painter keeps writing the last bid and ask
+        into the cells. The ticket paints none of them: a dash in each box,
+        in ink-3, the chip alone between them (the board's stale ticket).
+        Updated deliberately (review of B6, 2026-11-13): this test used to
+        write the dash into the cells itself, which production never does."""
         stale = self.got["stale"]
-        for k in ("short", "long"):
+        self.assertTrue(all(c and c[0].isdigit() for c in stale["cells"]), stale["cells"])
+        for i, k in enumerate(("short", "long")):
             with self.subTest(side=k):
-                self.assertEqual(stale[k]["px"]["text"], "—")
-                self.assertNotEqual(stale[k]["px"]["color"], INK1)
+                self.assertLess(stale["ink"][i][2], 0.5)            # no price painted
+                self.assertEqual(stale["after"][i]["content"], '"—"')
+                self.assertEqual(stale["after"][i]["size"], "15px")
+                self.assertEqual(stale["after"][i]["color"], INK3)
                 self.assertEqual(stale[k]["box"]["bstyle"], "dashed")
                 self.assertNotIn(stale[k]["lbl"]["color"], (UP, DOWN))
+                self.assertNotIn(stale[k]["box"]["border"], (UP, DOWN))
+        self.assertFalse(stale["spreadShown"])
+        self.assertTrue(stale["chipShown"])
+        drawn = [t["text"] for t in stale["texts"]]
+        self.assertEqual(drawn.count("—"), 2, drawn)
+        self.assertFalse([d for d in drawn if re.search(r"\d\.\d", d)], drawn)
+        # a stale ticket keeps its geometry: no box changes size or place
+        # within the ticket when it goes stale (the page's entrance may
+        # still be easing it down, so its own top is not compared)
+        rel = lambda boxes: [[b[0] - boxes[0][0], b[1] - boxes[0][1], b[2], b[3]] for b in boxes]
+        self.assertEqual(rel(stale["ticked"]), rel(self.got["ticked"]["after"]))
+
+    def test_a_shut_market_or_no_price_reads_muted(self):
+        """The one price painter marks a shut market's last price, and no
+        price, data-q-state="shut" / "none"; sv-venue.css mutes them
+        everywhere. The ticket's ink must not override that mark (contract
+        review of B6): a shut market's last bid and ask never read live."""
+        marks = self.got["marks"]
+        for st in ("shut", "none"):
+            with self.subTest(state=st):
+                self.assertEqual((marks[st]["short"], marks[st]["long"], marks[st]["spread"]),
+                                 (INK3, INK3, INK3))
+        self.assertEqual((marks["live"]["short"], marks["live"]["long"]), (INK1, INK1))
+
+    def test_light_mode_draws_the_sides_on_its_own_palette(self):
+        """Light mode keeps its frozen palette (plan §15), and §10's ticket
+        still reads there: the sides outlined in its jade and red (never the
+        dark ink they took), the price in its ink at 4.5:1 or more."""
+        light = self.got["light"]
+        for k, hue in (("short", LIGHT["--sv-down"]), ("long", LIGHT["--sv-up"])):
+            with self.subTest(side=k):
+                self.assertEqual(light[k]["box"]["border"], rgb_of(hue))
+                self.assertEqual(light[k]["lbl"]["color"], rgb_of(hue))
+                self.assertEqual(light[k]["px"]["color"], rgb_of(LIGHT["--sv-ink-1"]))
+                self.assertFalse(is_red_fill(light[k]["box"]["bg"]))
+        for t in light["texts"]:
+            if t["cls"].startswith("tk-px") or t["cls"] in ("tk-k", "tk-v"):
+                with self.subTest(text=t["text"], cls=t["cls"]):
+                    self.assertGreaterEqual(ratio(t["color"], t["ground"]), 4.5)
 
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")

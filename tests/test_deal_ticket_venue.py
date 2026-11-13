@@ -25,6 +25,11 @@ from django.contrib.auth.models import User
 from django.test import Client, SimpleTestCase, TestCase
 
 
+#: The armed lane's chip on the ticket: the real-money class, the word REAL
+#: (desk v2, 2026-11-13; it said "● LIVE").
+REAL_CHIP = r'<span class="tk-venue tk-venue--live"\s+title="This ticket places REAL orders[^"]*">REAL</span>'
+
+
 def _instrument(symbol="GLDM", asset_class="etf"):
     from instruments.models import Instrument
     inst, _ = Instrument.objects.get_or_create(
@@ -57,11 +62,17 @@ class TheTicketNamesItsVenueTests(TestCase):
         return self.client.get(f"/instruments/{symbol}/").content.decode()
 
     def test_an_armed_class_shows_LIVE_on_the_ticket(self):
+        """Updated deliberately (B6, 2026-11-13): the armed lane's chip says
+        REAL, the word the TAKE TRADE dialog it opens uses, as the desk v2
+        board the operator approved ("amazing work, bravo, I need it
+        fast!!") and UI plan §10's ticket row draw it; it said "● LIVE".
+        What it guards is unchanged: an armed class shows its real-money
+        chip on the ticket, before the click."""
         _instrument("GLDM", "etf")
         _lane(self.user, "stock", "live")     # etf executes as stock
         html = self._page("GLDM")
         self.assertIn("tk-venue--live", html)
-        self.assertIn("● LIVE", html)
+        self.assertRegex(html, REAL_CHIP)
 
     def test_a_paper_class_shows_paper(self):
         _instrument("GBPJPY", "forex")
@@ -86,7 +97,7 @@ class TheTicketNamesItsVenueTests(TestCase):
         the badge has to be computed, not assumed."""
         _instrument("SLV", "etf")
         _lane(self.user, "stock", "live")
-        self.assertIn("● LIVE", self._page("SLV"))
+        self.assertRegex(self._page("SLV"), REAL_CHIP)
 
     def test_the_badge_explains_itself_on_hover(self):
         _instrument("GLDM", "etf")
