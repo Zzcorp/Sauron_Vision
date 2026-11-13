@@ -1562,9 +1562,15 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
    proven (sv-moments.js sets .sv-flare; never for an order the broker only
    holds, a quote or a refresh). A close flares at 60 %. Calm: one soft
    glow in place, no ring. Off and reduced motion: none. The circle opens
-   to 1.08 and no further: the mark's centre sits 38 px from the window's
-   edges, so the ring blooms whole and is never cut by the window (review
-   2026-11-12; at 1.9 it read as a sonar ping, cut at the top and left). */
+   to 1.08 and no further, so the ring blooms whole and is never cut
+   (review 2026-11-12; at 1.9 it read as a sonar ping, cut at the top and
+   left). In the full sidebar the mark's centre sits 38 px from the
+   window's top and left edges: the 70 px ring ends 37.8 px from it. In
+   the collapsed sidebar the centre sits 29 px under the window's top and
+   30.5 px from the sidebar's sides (inside its edge and its scrollbar):
+   the window cut the 70 px ring from about 110 ms on, and the sidebar its
+   sides (check, 2026-11-13). There the circle is 50 px, so the ring ends
+   27 px from the centre and Calm's glow 25 px, inside both. */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare::after {
     content: ""; position: absolute; top: 50%; left: 50%; width: 70px; height: 70px;
     box-sizing: border-box; border-radius: 50%; border: 1px solid rgba(0,232,104,.9);
@@ -1573,6 +1579,7 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) 
     transform: translate(-50%, -50%) scale(.6);
     animation: sv-eye-flare var(--sv-dur-moment) var(--sv-ease) 1 both;
 }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar.mini .brand-eye-wrap.sv-flare::after { width: 50px; height: 50px; }
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare--soft::after { animation-name: sv-eye-flare-soft; }
 body:not(.light-mode)[data-sv-ambience="calm"] .brand-eye-wrap.sv-flare::after { border-color: transparent; animation-name: sv-eye-glow; }
 @keyframes sv-eye-flare {

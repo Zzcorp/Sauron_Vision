@@ -792,20 +792,51 @@ class MomentsSheetTests(SimpleTestCase):
                 self.assertLessEqual(props, {"opacity", "background-position"})
 
     def test_the_flare_s_ring_ends_inside_the_window(self):
-        """Review 2026-11-12 (the brief: never a game effect): the mark's
-        centre sits 38 px from the window's top and left edges (its 36 px
-        box at 20 px), and the flare is a 70 px circle; grown to 1.9 its
-        ring was cut by the window at the top and the left from 300 ms on,
-        a sonar ping. It may grow to 2 x 38 / 70 = 1.086 at most: a bloom
-        that stays whole. The burst, the timing and the easing are C6's."""
-        frames = self.frames()
-        rule = block(read(KIT), LIT + " .brand-eye-wrap.sv-flare::after")
+        """Review 2026-11-12 (the brief: never a game effect): in the full
+        sidebar the mark's centre sits 38 px from the window's top and left
+        edges (its 36 px box at 20 px), and the flare is a 70 px circle;
+        grown to 1.9 its ring was cut by the window at the top and the left
+        from 300 ms on, a sonar ping. It may grow to 2 x 38 / 70 = 1.086 at
+        most: a bloom that stays whole. The burst, the timing and the easing
+        are C6's.
+
+        2026-11-13, the check of the collapsed mark: in the collapsed
+        sidebar (68 px, overflow-x hidden) the mark's centre sits 14 + 15 =
+        29 px under the window's top and, inside the sidebar's 1 px edge and
+        its 6 px scrollbar, (68 - 1 - 6) / 2 = 30.5 px from either side. The
+        70 px circle (its ring 31.5 px from the centre at .9, 37.8 at 1.08;
+        Calm's glow 35) was cut there by the window at the top and by the
+        sidebar on both sides: the same sonar ping. There the circle is
+        50 px, so at its largest scale the ring ends 25 x 1.08 = 27 px from
+        the centre and Calm's glow 25 px, a pixel and more inside both
+        (CollapsedMarkMeasuredTests measures it)."""
+        frames, kit, shell = self.frames(), read(KIT), read(SAURON)
+        rule = block(kit, LIT + " .brand-eye-wrap.sv-flare::after")
         self.assertEqual((rule["width"], rule["height"]), ("70px", "70px"))
-        for name in ("sv-eye-flare", "sv-eye-flare-soft"):
+        # The collapsed sidebar's circle: the flare's own, unless a rule of
+        # the collapsed sidebar names its size.
+        mini = dict(rule)
+        for prelude, body, ctx in kit_rules():
+            if prelude == LIT + " .sidebar.mini .brand-eye-wrap.sv-flare::after" and not ctx:
+                mini.update(decls(body))
+        self.assertEqual(mini["width"], mini["height"])
+        # Where the collapsed mark sits (sauron.css).
+        self.assertEqual(block(shell, ".sidebar.mini"), {"width": "68px"})
+        self.assertEqual(block(shell, ".sidebar.mini .brand-eye-wrap,\n        .sidebar.mini .brand-eye"),
+                         {"width": "30px", "height": "30px"})
+        self.assertEqual(block(shell, ".sidebar.mini .sidebar-brand")["padding"], "14px 8px")
+        self.assertIn("::-webkit-scrollbar{width:6px}", shell)
+        self.assertEqual(block(shell, ".sidebar")["border-right"], "1px solid var(--border)")
+        top, side = 14 + 30 / 2, (68 - 1 - 6) / 2
+        for name in ("sv-eye-flare", "sv-eye-flare-soft", "sv-eye-glow"):
             scales = [float(s) for s in re.findall(r"scale\(([\d.]+)\)", frames[name])]
             with self.subTest(keyframes=name):
-                self.assertEqual(scales[:2], [0.6, 0.9])
+                if name != "sv-eye-glow":
+                    self.assertEqual(scales[:2], [0.6, 0.9])
                 self.assertLessEqual(max(scales) * 70 / 2, 38)
+                # collapsed: inside the window's top and the sidebar's sides
+                self.assertLessEqual(max(scales) * float(mini["width"][:-2]) / 2, min(top, side) - 1)
+        self.assertEqual((mini["width"], mini["height"]), ("50px", "50px"))
 
     def test_a_moment_never_targets_a_button_or_a_figure(self):
         used = 0
@@ -2025,13 +2056,15 @@ class LightFromAboveMeasuredTests(TestCase):
 
 
 #: The collapsed sidebar's mark: where it stands, the sidebar's clip (its
-#: padding box, inside its 1 px edge and its scrollbar) and the halo's box.
+#: padding box, inside its 1 px edge and its scrollbar), the halo's box and
+#: the flare's.
 MINI_PROBE = r"""(function () {
   var sb = document.getElementById('mainSidebar'), w = sb.querySelector('.brand-eye-wrap');
   var s = sb.getBoundingClientRect(), r = w.getBoundingClientRect(), h = getComputedStyle(w, '::before');
+  var f = getComputedStyle(w, '::after');
   return { mini: sb.classList.contains('mini'), cx: r.left + r.width / 2, cy: r.top + r.height / 2,
            clipLeft: s.left + sb.clientLeft, clipRight: s.left + sb.clientLeft + sb.clientWidth,
-           halo: [h.width, h.height, h.opacity, h.transform] };
+           halo: [h.width, h.height, h.opacity, h.transform], flare: [f.width, f.height, f.opacity, f.transform] };
 })()"""
 
 
@@ -2046,9 +2079,19 @@ class CollapsedMarkMeasuredTests(TestCase):
     sidebar. Its largest step between neighbouring device pixels is 3
     levels. At ae1a803 the 70 px halo, at the breath's peak, still added
     23 levels on the window's top row, 17 and 21 on the sidebar's first and
-    last columns (15, 10 and 12 under Calm), and stepped by 5."""
+    last columns (15, 10 and 12 under Calm), and stepped by 5.
+
+    The flare there (2026-11-13, the check of b3421f6), held at its frames
+    over the halo: the flare alone (its picture against the same picture
+    with the flare hidden) adds nothing on that top row nor on those two
+    columns either: its ring blooms whole inside the window and the
+    sidebar."""
 
     CLIP = (0, 0, 120, 100)
+    #: The flare's frames (1200 ms): under Magic, sv-eye-flare at its burst
+    #: (144 ms: opacity 1, scale .9) and on its way out to 1.08 (420 and
+    #: 700 ms); under Calm, sv-eye-glow at its brightest (240 ms: .6).
+    FLARES = {"magic": ("sv-eye-flare", (144, 420, 700)), "calm": ("sv-eye-glow", (240,))}
 
     @classmethod
     def setUpTestData(cls):
@@ -2064,7 +2107,7 @@ class CollapsedMarkMeasuredTests(TestCase):
                       " var s = document.createElement('style'); s.textContent ="
                       " '.sidebar-brand > :not(h1), .brand-eye-wrap > *, .brand-text { visibility: hidden !important; }';"
                       " document.head.appendChild(s); return 0; })()")
-            cls.got = {}
+            cls.got, cls.flares = {}, {}
             for mode in ("magic", "calm"):
                 b.js(sid, "(function () { __sv.mode('%s'); return __sv.settle().then(function () {"
                           " document.getAnimations().forEach(function (a) {"
@@ -2080,15 +2123,38 @@ class CollapsedMarkMeasuredTests(TestCase):
                           " return __sv.frame().then(function () { return 0; }); })()")
                 got.update(cls._halo(got, on - off, on.shape[1] / cls.CLIP[2]))
                 cls.got[mode] = got
+                # The flare, as a proven fill sets it (sv-moments.js adds
+                # .sv-flare; this page runs no script, so nothing takes it
+                # off), held at each of its frames.
+                name, frames = cls.FLARES[mode]
+                b.js(sid, "(function () { var w = document.querySelector('.brand-eye-wrap');"
+                          " w.classList.remove('sv-flare'); void w.offsetWidth; w.classList.add('sv-flare');"
+                          " return __sv.frame().then(function () { return 0; }); })()")
+                for at in frames:
+                    held = b.js(sid, "(function () { var n = 0; document.getAnimations().forEach(function (a) {"
+                                     " if (a.animationName === '%s') { a.pause(); a.currentTime = %d; n++; } });"
+                                     " return __sv.frame().then(function () { return n; }); })()" % (name, at))
+                    flare = b.js(sid, MINI_PROBE)
+                    on = np.asarray(b.shot(sid, cls.CLIP), dtype=int)[..., 1]
+                    b.js(sid, "(function () { var s = document.createElement('style'); s.id = 'svProbeNoFlare';"
+                              " s.textContent = '.brand-eye-wrap::after { visibility: hidden !important; }';"
+                              " document.head.appendChild(s); return __sv.frame().then(function () { return 0; }); })()")
+                    off = np.asarray(b.shot(sid, cls.CLIP), dtype=int)[..., 1]
+                    b.js(sid, "(function () { document.getElementById('svProbeNoFlare').remove();"
+                              " return __sv.frame().then(function () { return 0; }); })()")
+                    flare.update(cls._halo(flare, on - off, on.shape[1] / cls.CLIP[2]), held=held)
+                    cls.flares[(mode, at)] = flare
+                b.js(sid, "(function () { document.querySelector('.brand-eye-wrap').classList.remove('sv-flare');"
+                          " return __sv.frame().then(function () { return 0; }); })()")
         finally:
             b.close()
 
     @staticmethod
     def _halo(got, added, scale):
-        """The halo alone (G levels, device px): what it adds on the
-        window's top row and on the first and last columns inside the
-        sidebar's clip, at its brightest and its least, and its largest
-        step between neighbouring device px inside the clip."""
+        """The halo (or the flare) alone (G levels, device px): what it
+        adds on the window's top row and on the first and last columns
+        inside the sidebar's clip, at its brightest and its least, and its
+        largest step between neighbouring device px inside the clip."""
         import numpy as np
         inside = added[:, int(round(got["clipLeft"] * scale)):int(round(got["clipRight"] * scale))]
         step = max(int(np.abs(np.diff(inside, axis=1)).max()), int(np.abs(np.diff(inside, axis=0)).max()))
@@ -2117,6 +2183,27 @@ class CollapsedMarkMeasuredTests(TestCase):
         for mode, got in sorted(self.got.items()):
             with self.subTest(mode=mode):
                 self.assertLessEqual(got["step"], 3, got)
+
+    def test_the_flare_blooms_whole_inside_the_window_and_the_sidebar(self):
+        """At b3421f6 the 70 px flare, its ring 31.5 px from the mark's
+        centre at its burst, was cut by the window at the top and by the
+        sidebar on both sides: at its burst it added 193 levels where the
+        ring met the window's top row, 69 at 420 ms and 20 at 700 ms, and
+        as much on the sidebar's first and last columns; Calm's glow 28 at
+        the top and 18 to 25 at the sides (the check, overlay and classic
+        scrollbars). At 50 px it adds nothing on any of them."""
+        self.assertEqual(sorted(self.flares), [("calm", 240), ("magic", 144), ("magic", 420), ("magic", 700)])
+        for (mode, at), got in sorted(self.flares.items()):
+            with self.subTest(mode=mode, at=at):
+                self.assertTrue(got["mini"])
+                self.assertEqual(got["held"], 1, got)                           # its frame, held
+                self.assertGreaterEqual(got["brightest"], 10, got)              # the flare is there
+                self.assertGreaterEqual(got["least"], -1, got)                  # it only adds
+                self.assertEqual((got["top"], got["left"], got["right"]), (0, 0, 0), got)
+        burst = self.flares[("magic", 144)]["flare"]
+        self.assertEqual(burst[2], "1")                                         # the burst at its brightest
+        self.assertIn("matrix(0.9, 0, 0, 0.9,", burst[3])
+        self.assertEqual(self.flares[("calm", 240)]["flare"][2], "0.6")
 
 
 FACE_PROBE = r"""(function () {
