@@ -276,9 +276,13 @@
             any = true;
             if (s.last) {
                 /* Whole frames at the speed: the same distance every frame,
-                   one rhythm of device pixels. A late frame catches up
-                   DT_MAX at most. */
+                   one rhythm of device pixels. A gap that is not whole
+                   frames (the interval still being learnt, a loaded
+                   machine whose frames come at 16.7 and 33.3 ms in turn)
+                   moves by its own time. A late frame catches up DT_MAX
+                   at most. */
                 var due = now - s.last, n = f ? Math.round(due / f) : 0;
+                if (n && Math.abs(due - n * f) > f / 4) n = 0;
                 var ms = Math.min(n ? n * f : due, DT_MAX * 1000);
                 if (ms > 0) s.pos = wrap(s, s.pos + s.speed * ms / 1000);
             }
