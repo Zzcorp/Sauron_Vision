@@ -197,3 +197,26 @@ class TheRailIsReadableByShapeTests(SimpleTestCase):
             with self.subTest(row=name):
                 self.assertEqual(re.sub(r"<[^>]+>", "", icon).strip(), "",
                                  f"{name} draws text in its icon: {icon!r}")
+
+    def test_the_marks_come_from_the_one_family_every_machine_draws(self):
+        """Was "the glyphs come from blocks the font stack already
+        renders": a glyph from a Unicode block no other row used could be a
+        tofu box on the operator's machine and a shape on mine. Updated
+        deliberately (UI plan §9, redo B2; the desk v2 board, approved
+        2026-11-13: "amazing work, bravo, I need it fast!!"): every mark a
+        row names is a symbol of the one inline family, 24 x 24, stroked in
+        the row's own colour at 1.5 with no fill, so it draws the same on
+        every machine with no font in the way, and its children carry no
+        stroke or fill of their own."""
+        sprite = (Path(settings.BASE_DIR) / "templates" / "_partials" / "sv_icons.html").read_text(encoding="utf-8")
+        symbols = dict(re.findall(r'<symbol id="(svi-[\w-]+)"([^>]*)>', sprite))
+        bodies = dict(re.findall(r'<symbol id="(svi-[\w-]+)"[^>]*>(.*?)</symbol>', sprite, re.S))
+        used = {ref for _name, icon in _rows_with_icons()
+                for ref in re.findall(r'<use href="#(svi-[\w-]+)"', icon)}
+        self.assertTrue(used)
+        for ref in sorted(used):
+            with self.subTest(symbol=ref):
+                attrs = symbols[ref]
+                for want in ('viewBox="0 0 24 24"', 'fill="none"', 'stroke="currentColor"', 'stroke-width="1.5"'):
+                    self.assertIn(want, attrs)
+                self.assertNotRegex(bodies[ref], r'\s(stroke|fill)(-width)?="')
