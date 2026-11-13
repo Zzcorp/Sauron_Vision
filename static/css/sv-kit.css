@@ -874,6 +874,324 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
 }
 
 
+/* ══ §10 TAKE TRADE on the board (desk v2, 2026-11-13) ═══════════════════
+   The operator approved the desk v2 boards on 2026-11-13 ("amazing work,
+   bravo, I need it fast!!"): TAKE TRADE as Ticket2 draws it. Here, in the
+   kit, because the dialog opens on every page (the rail, the bands, the
+   watchlist and the deal ticket call it) and the kit is the sheet every
+   page loads; the deal ticket's own sheet is sv-ticket.css. The head names
+   the trade (its side, the symbol in the number face, the world chip) over
+   the question; the steps and the warnings' summary sit under it and never
+   scroll away; each warning is an amber title, then its words; the numbers
+   wear their units; four figures sit under the size; Cancel is neutral and
+   the confirm wears its side (jade a buy, coral a sell: an outline on an
+   8 % wash, never a fill, never a light) with the order under its words.
+   The words, the fields, the PIN step, the confirm and the focus are
+   base.html's, unchanged (UI plan §10). Nothing under 11 px. Colours in the
+   dark theme; light mode keeps today's (frozen, plan §15). */
+
+@media (min-width: 641px) {
+    .sv-dialog.sz-dialog { width: min(92vw, 580px); }
+}
+.sz-dialog {
+    /* the ⚠ mark of the board, as a mask the token colours (percent-encoded
+       whole: with its quotes and = left raw, Chromium drops it as a mask) */
+    --sz-warn-ic: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%271.5%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%204l9%2015.5H3z%27/%3E%3Cpath%20d%3D%27M12%2010v4%27/%3E%3Cpath%20d%3D%27M12%2016.9v.1%27%20stroke-width%3D%272.2%27/%3E%3C/svg%3E");
+}
+
+/* The head: the trade on its line, the question under it; 56 px. */
+.sz-dialog .sv-dialog-head { min-height: 56px; padding: 6px 12px 6px 16px; box-sizing: border-box; }
+.sz-head { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sz-trade { display: flex; align-items: center; gap: 10px; min-width: 0; line-height: var(--sv-lh-title); }
+.sz-trade .sz-side {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-lead); font-weight: 600;
+    letter-spacing: var(--sv-track-button); white-space: nowrap;
+}
+.sz-trade .sz-sym { font-family: var(--sv-font-mono); font-size: var(--sv-fs-lead); font-weight: 500; white-space: nowrap; }
+.sz-trade .sv-world { flex: none; display: inline-flex; align-items: center; height: 18px; line-height: 1; }
+.sz-q { display: block; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); line-height: var(--sv-lh-cell); }
+.sz-dialog .sz-q .sv-dialog-title {
+    display: inline; flex: none; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small);
+    font-weight: 400; letter-spacing: 0; text-transform: none;
+}
+
+/* The steps: where the order is; nothing leaves before the last. */
+.sz-steps {
+    display: flex; align-items: center; gap: 10px; flex: none;
+    height: 34px; padding: 0 16px; box-sizing: border-box; overflow: hidden;
+    border-bottom: 1px solid var(--pop-border);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); line-height: 1; white-space: nowrap;
+}
+.sz-steps ol { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.sz-step { display: inline-flex; align-items: center; gap: 7px; }
+.sz-step + .sz-step::before { content: ""; display: block; width: 26px; height: 1px; margin-right: 3px; background: var(--sv-line-3); }
+.sz-step-n {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 18px; height: 18px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-round);
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro);
+}
+.sz-steps-note { margin-left: auto; }
+.sz-steps-note .sz-n { font-family: var(--sv-font-mono); }
+
+/* The summary: the count of the warnings, pinned; a click folds the list. */
+.sz-wsum {
+    display: flex; align-items: center; gap: 9px; flex: none;
+    width: 100%; height: 34px; margin: 0; padding: 0 16px; box-sizing: border-box;
+    border: 0; border-bottom: 1px solid var(--pop-border); border-radius: 0; background: none;
+    font-family: var(--sv-font-sans); text-align: left; cursor: pointer;
+}
+.sz-wsum[hidden] { display: none; }
+.sz-dialog .sz-wsum:focus-visible { outline-offset: -2px; }
+.sz-wsum-ic { flex: none; width: 16px; height: 16px; }
+.sz-wsum-t {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--sv-fs-base); font-weight: 600;
+}
+.sz-wsum-act { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--sv-fs-micro); }
+.sz-wsum-act::after {
+    content: ""; width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid;
+}
+.sz-wsum[aria-expanded="false"] .sz-wsum-act::after { border-bottom: 0; border-top: 5px solid; }
+
+/* The body: the warnings first, a band the summary folds. */
+.sz-dialog .sv-dialog-body { padding: 14px 16px 16px; }
+.sz-dialog .sz-warns {
+    display: flex; flex-direction: column; gap: 6px;
+    margin: -14px -16px 14px; padding: 9px 16px 11px;
+    border-bottom: 1px solid var(--pop-border);
+}
+.sz-dialog .sz-warns[hidden],
+.sz-dialog .sz-warns:not(:has(.sz-warn:not([hidden]), .sz-note:not([hidden]))) { display: none; }
+.sz-dialog [data-role="rrwarn"]:empty { display: none; }
+/* One warning: the ⚠ mark, its title in amber capitals, then its words. */
+.sz-dialog .sz-warn {
+    position: relative; margin: 0; padding: 0 0 0 23px;
+    border: 0; border-radius: 0; background: none;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); line-height: var(--sv-lh-text);
+}
+.sz-dialog .sz-warn::before {
+    content: ""; position: absolute; left: 0; top: 2px; width: 14px; height: 14px;
+    background: var(--sv-warn);
+    -webkit-mask: var(--sz-warn-ic) center / 14px 14px no-repeat;
+    mask: var(--sz-warn-ic) center / 14px 14px no-repeat;
+}
+.sz-dialog .sz-warn b {
+    display: inline; margin: 0 6px 0 0;
+    font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button);
+    text-transform: uppercase;
+}
+.sz-dialog .sv-dialog-body > .sz-warn { margin-top: 12px; }
+.sz-dialog .sz-note {
+    margin: 0; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small);
+    line-height: var(--sv-lh-text);
+}
+.sz-dialog .sz-warns .sz-note { padding-left: 23px; }
+.sz-dialog .sz-note b {
+    margin-right: 6px; font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button); text-transform: uppercase;
+}
+.sz-dialog .sv-dialog-msg { margin: 0 0 12px; font-size: var(--sv-fs-small); line-height: var(--sv-lh-text); }
+
+/* The facts: a key and its value on one row each. */
+.sz-dialog .sv-dialog-facts { margin: 0; border-radius: var(--sv-radius-ctl); }
+.sz-dialog .sv-dialog-fact { align-items: baseline; padding: 6px 10px; font-size: var(--sv-fs-small); }
+.sz-dialog .sv-dialog-fact .lbl { flex: none; font-size: var(--sv-fs-micro); }
+.sz-dialog .sv-dialog-fact > span:last-child { min-width: 0; text-align: right; }
+
+/* The blocks: a label, then the fields two by two. */
+.sz-dialog .sz-block { margin: 16px 0 0; padding: 0; border: 0; border-radius: 0; background: none; min-width: 0; }
+.sz-dialog .sz-block > legend {
+    float: left; width: 100%; margin: 0 0 8px; padding: 0;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+}
+.sz-dialog .sz-block > legend + * { clear: both; }
+.sz-dialog .sz-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.sz-dialog .sz-size .sz-fields { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.sz-dialog .sz-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sz-dialog .sz-f > span:first-child {
+    display: block; margin: 0; font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro);
+    font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase;
+}
+/* A number's well: the figure right-aligned in the number face, its unit
+   beside it, outside the field. */
+.sz-dialog .sz-f > .sz-inp {
+    display: flex; align-items: stretch; height: var(--sv-ctl-md); margin: 0; box-sizing: border-box;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 400;
+    letter-spacing: 0; text-transform: none;
+}
+.sz-dialog .sz-inp input {
+    flex: 1 1 auto; width: auto; min-width: 0; height: 100%; margin: 0; padding: 0 10px; box-sizing: border-box;
+    border: 0; border-radius: var(--sv-radius-ctl) 0 0 var(--sv-radius-ctl); background: transparent;
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-base); text-align: right;
+}
+.sz-dialog .sz-inp input:focus,
+.sz-dialog .sz-inp input:focus-visible { outline: none; box-shadow: none; }
+.sz-dialog .sz-f > .sz-inp:focus-within { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+.sz-dialog .sz-u {
+    display: flex; align-items: center; gap: 4px; flex: none; padding: 0 10px;
+    border-left: 1px solid var(--sv-line-2); white-space: nowrap;
+}
+.sz-dialog .sz-u:empty { display: none; }
+.sz-dialog .sz-u-n { font-family: var(--sv-font-mono); }
+.sz-dialog .sz-lev select,
+.sz-dialog .sz-pin input {
+    height: var(--sv-ctl-md); padding: 0 10px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-base);
+}
+.sz-dialog .sz-pin input { width: 150px; letter-spacing: .3em; }
+.sz-dialog .sz-pin input::placeholder { letter-spacing: var(--sv-track-label); }
+.sz-dialog .sz-meter { height: 4px; margin: 10px 0 8px; border-radius: 2px; }
+.sz-dialog .sz-out {
+    gap: 4px 14px; margin-top: 8px; font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro); line-height: var(--sv-lh-text);
+}
+.sz-dialog .sz-out b { font-family: var(--sv-font-mono); font-weight: 600; }
+.sz-dialog .sz-block .sz-note { margin-top: 8px; }
+/* The leverage and the size say their rule under the fields, as a hint. */
+.sz-dialog .sz-lev .sz-note,
+.sz-dialog .sz-size .sz-note { font-size: var(--sv-fs-micro); }
+.sz-dialog .sz-lev > .sz-f { width: calc(50% - 8px); }
+.sz-dialog .sz-reset {
+    height: 24px; margin-top: 8px; padding: 0 8px; border-radius: var(--sv-radius-ctl);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+}
+/* "Close first" (a paper ticket short of capital): neutral ticks, never a
+   loss colour; the proposal stays pre-ticked. */
+.sz-dialog .sz-close { gap: 9px; padding: 6px 0; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); }
+.sz-dialog .sz-close input { accent-color: var(--sv-ink-2); }
+.sz-dialog .sz-close-t i { font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label); }
+.sz-dialog .sz-close-f { font-family: var(--sv-font-mono); }
+
+/* The four figures, under the size: one row, four equal cells. */
+.sz-figs {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 14px 0 0;
+    border: 1px solid var(--sv-line-1); border-radius: var(--sv-radius-ctl);
+}
+.sz-fig { min-width: 0; padding: 9px 10px; border-right: 1px solid var(--sv-line-1); }
+.sz-fig:last-child { border-right: 0; }
+/* A label never cut: where the cell is short (a scrolling body), it wraps. */
+.sz-fig-k {
+    display: block; font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-button); line-height: var(--sv-lh-cell); text-transform: uppercase;
+}
+.sz-fig-v { display: block; margin-top: 4px; font-family: var(--sv-font-mono); font-size: 14px; white-space: nowrap; }
+
+/* The foot: Cancel neutral, the confirm in its side, 42 px both. */
+.sz-dialog .sv-dialog-foot { align-items: center; gap: 10px; padding: 12px 16px; }
+.sz-dialog .sv-dialog-foot .sv-dialog-btn { height: 42px; min-height: 42px; padding: 0 16px; box-sizing: border-box; }
+.sz-dialog .sv-dialog-foot .sv-dialog-btn--go {
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    padding: 0 18px; font-size: var(--sv-fs-small); font-weight: 700; letter-spacing: var(--sv-track-label);
+    line-height: 1.2;
+}
+.sz-go-order { font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button); text-transform: none; }
+
+/* The colours, in the dark theme. */
+body:not(.light-mode) .sz-dialog .sv-dialog-head { border-bottom-color: var(--sv-line-2); }
+body:not(.light-mode) .sz-dialog[data-side="buy"] .sz-trade .sz-side { color: var(--sv-up); }
+body:not(.light-mode) .sz-dialog[data-side="sell"] .sz-trade .sz-side { color: var(--sv-down); }
+body:not(.light-mode) .sz-trade .sz-sym { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sz-q,
+body:not(.light-mode) .sz-dialog .sz-q .sv-dialog-title { color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sv-dialog-x { color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sv-dialog-x:hover { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-steps { color: var(--sv-ink-3); border-bottom-color: var(--sv-line-2); }
+body:not(.light-mode) .sz-step-n { color: var(--sv-ink-2); border-color: var(--sv-line-3); }
+body:not(.light-mode) .sz-step.is-done .sz-step-n { color: var(--sv-ink-1); border-color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-step.is-cur { color: var(--sv-ink-1); font-weight: 600; }
+body:not(.light-mode) .sz-step.is-cur .sz-step-n { color: var(--sv-ink-1); border-color: var(--sv-ink-1); background: var(--sv-bg-4); }
+body:not(.light-mode) .sz-wsum {
+    color: var(--sv-warn);
+    background: color-mix(in srgb, var(--sv-warn) 7%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--sv-warn) 13%, transparent);
+}
+body:not(.light-mode) .sz-wsum:hover { background: color-mix(in srgb, var(--sv-warn) 11%, transparent); }
+body:not(.light-mode) .sz-wsum-act { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sz-warns {
+    background: color-mix(in srgb, var(--sv-warn) 3%, transparent);
+    border-bottom-color: var(--sv-line-2);
+}
+body:not(.light-mode) .sz-dialog .sz-warn { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sz-warn b { color: var(--sv-warn); }
+body:not(.light-mode) .sz-dialog .sz-warn--stop::before { background: var(--sv-down); }
+body:not(.light-mode) .sz-dialog .sz-warn--stop b { color: var(--sv-down); }
+body:not(.light-mode) .sz-dialog .sz-note { color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sz-note b { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sz-lev .sz-note,
+body:not(.light-mode) .sz-dialog .sz-size .sz-note { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sv-dialog-msg { color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sv-dialog-facts { background: var(--sv-bg-1); border-color: var(--sv-line-1); }
+body:not(.light-mode) .sz-dialog .sv-dialog-fact { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sv-dialog-fact + .sv-dialog-fact { border-top-color: var(--sv-line-1); }
+body:not(.light-mode) .sz-dialog .sv-dialog-fact .lbl,
+body:not(.light-mode) .sz-dialog .sz-block > legend,
+body:not(.light-mode) .sz-dialog .sz-f > span:first-child { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sz-f > .sz-inp,
+body:not(.light-mode) .sz-dialog .sz-lev select,
+body:not(.light-mode) .sz-dialog .sz-pin input { background: var(--sv-bg-0); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sz-inp input { color: var(--sv-ink-1); background: transparent; }
+body:not(.light-mode) .sz-dialog .sz-pin input::placeholder { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sz-u { color: var(--sv-ink-3); border-left-color: var(--sv-line-2); }
+body:not(.light-mode) .sz-dialog.is-over .sz-size .sz-f > .sz-inp,
+body:not(.light-mode) .sz-dialog.is-lvl-over .sz-lv .sz-f > .sz-inp { border-color: var(--sv-down); }
+body:not(.light-mode) .sz-dialog .sz-meter { background: var(--sv-bg-3); }
+body:not(.light-mode) .sz-dialog .sz-meter-fill { background: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog.is-over .sz-meter-fill { background: var(--sv-down); }
+body:not(.light-mode) .sz-dialog .sz-meter-cap { background: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sz-out { color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sz-out b { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sz-why { color: var(--sv-down); }
+body:not(.light-mode) .sz-dialog .sz-ok { color: var(--sv-up); }
+body:not(.light-mode) .sz-dialog .sz-reset { color: var(--sv-ink-2); background: transparent; border-color: var(--sv-line-2); }
+body:not(.light-mode) .sz-dialog .sz-reset:hover { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
+body:not(.light-mode) .sz-dialog .sz-reset[disabled],
+body:not(.light-mode) .sz-dialog .sz-reset[disabled]:hover { color: var(--sv-ink-4); border-color: var(--sv-line-1); opacity: 1; }
+body:not(.light-mode) .sz-dialog .sz-close { color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sz-close + .sz-close { border-top-color: var(--sv-line-1); }
+body:not(.light-mode) .sz-dialog .sz-close-t i { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sz-close-f { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-figs { background: var(--sv-bg-1); border-color: var(--sv-line-1); }
+body:not(.light-mode) .sz-fig { border-right-color: var(--sv-line-1); }
+body:not(.light-mode) .sz-fig-k { color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-fig-v { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-fig-v.sz-fig-v--down { color: var(--sv-down); }
+body:not(.light-mode) .sz-fig-v.sz-fig-v--up { color: var(--sv-up); }
+body:not(.light-mode) .sz-dialog .sv-dialog-btn[data-role="cancel"] { color: var(--sv-ink-1); background: var(--sv-bg-1); border-color: var(--sv-line-3); }
+body:not(.light-mode) .sz-dialog .sv-dialog-btn[data-role="cancel"]:hover { background: var(--sv-bg-3); }
+body:not(.light-mode) .sz-dialog[data-side="buy"] .sv-dialog-btn.sv-dialog-btn--go:not([disabled]) {
+    color: var(--sv-up); border: 1.5px solid var(--sv-up);
+    background: color-mix(in srgb, var(--sv-up) 8%, transparent); box-shadow: none;
+}
+body:not(.light-mode) .sz-dialog[data-side="buy"] .sv-dialog-btn.sv-dialog-btn--go:not([disabled]):hover { background: var(--sv-up-wash); }
+body:not(.light-mode) .sz-dialog[data-side="sell"] .sv-dialog-btn.sv-dialog-btn--go:not([disabled]) {
+    color: var(--sv-down); border: 1.5px solid var(--sv-down);
+    background: color-mix(in srgb, var(--sv-down) 8%, transparent); box-shadow: none;
+}
+body:not(.light-mode) .sz-dialog[data-side="sell"] .sv-dialog-btn.sv-dialog-btn--go:not([disabled]):hover { background: var(--sv-down-wash); }
+/* Off until the PIN or a verdict allows it, and it looks it. */
+body:not(.light-mode) .sz-dialog .sv-dialog-btn.sv-dialog-btn--go[disabled] {
+    color: var(--sv-ink-4); border: 1.5px solid var(--sv-line-2); background: var(--sv-bg-2); opacity: 1;
+}
+
+@media (max-width: 640px) {
+    .sz-steps { height: auto; min-height: 34px; flex-wrap: wrap; row-gap: 4px; padding: 7px 16px; }
+    .sz-steps-note { margin-left: 0; }
+    .sz-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sz-fig:nth-child(2) { border-right: 0; }
+    .sz-fig:nth-child(-n+2) { border-bottom: 1px solid var(--sv-line-1); }
+}
+@media (max-width: 768px) {
+    .sz-wsum { min-height: 44px; }
+    .sz-dialog .sv-dialog-foot .sv-dialog-btn { height: auto; min-height: 44px; }
+}
+
+
 /* ══ §7 Chips: five styles instead of ten ════════════════════════════════
    .sv-chip neutral outline; .sv-world whose money (above); .sv-side up or
    down text on a 12 % wash, never filled; .sv-state a dot and a word;

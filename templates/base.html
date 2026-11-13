@@ -3062,11 +3062,13 @@
             '<div class="sz-fields">' +
               '<label class="sz-f"><span>Stop' +
                 (p.stop_widened ? ' (floor-widened)' : '') + '</span>' +
-                '<input type="number" inputmode="decimal" min="0" step="any" ' +
-                'data-role="stop" value="' + esc(lvl(defStop)) + '"></label>' +
+                '<span class="sz-inp"><input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="stop" value="' + esc(lvl(defStop)) + '">' +
+                '<span class="sz-u" data-role="stopunit"></span></span></label>' +
               '<label class="sz-f"><span>Target</span>' +
-                '<input type="number" inputmode="decimal" min="0" step="any" ' +
-                'data-role="target" value="' + esc(lvl(defTarget)) + '"></label>' +
+                '<span class="sz-inp"><input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="target" value="' + esc(lvl(defTarget)) + '">' +
+                '<span class="sz-u" data-role="targetunit"></span></span></label>' +
             '</div>' +
             '<div class="sz-out" data-role="lvlout" aria-live="polite"></div>' +
             '<button type="button" class="sz-reset" data-role="lvlreset">' +
@@ -3079,16 +3081,18 @@
         ? '<fieldset class="sz-block sz-size"><legend>Size</legend>' +
             '<div class="sz-fields">' +
               '<label class="sz-f"><span>Units</span>' +
-                '<input type="number" inputmode="decimal" min="0" step="any" ' +
-                'data-role="qty" value="' + esc(units(def)) + '"></label>' +
+                '<span class="sz-inp"><input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="qty" value="' + esc(units(def)) + '">' +
+                '<span class="sz-u">units</span></span></label>' +
               '<label class="sz-f"><span>Cash committed</span>' +
-                '<input type="number" inputmode="decimal" min="0" step="any" ' +
-                'data-role="cash" value="' + esc((def * cupu).toFixed(2)) + '"></label>' +
+                '<span class="sz-inp"><input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="cash" value="' + esc((def * cupu).toFixed(2)) + '">' +
+                '<span class="sz-u">$</span></span></label>' +
               (levered
                 ? '<label class="sz-f"><span>Notional</span>' +
-                    '<input type="number" inputmode="decimal" min="0" step="any" ' +
+                    '<span class="sz-inp"><input type="number" inputmode="decimal" min="0" step="any" ' +
                     'data-role="notional" value="' + esc((def * npu).toFixed(2)) +
-                    '"></label>'
+                    '"><span class="sz-u">$</span></span></label>'
                 : '') +
             '</div>' +
             '<div class="sz-meter"><span class="sz-meter-fill" data-role="fill"></span>' +
@@ -3131,7 +3135,7 @@
          ticket; its presence is driven by the preview's venue, which the
          server re-derives under the execution lock either way. */
       var pinHtml = live
-        ? '<fieldset class="sz-block sz-pin"><legend>Trading PIN</legend>' +
+        ? '<fieldset class="sz-block sz-pin"><legend>Trading PIN<span class="sz-pin-what"> · places a live order (real money)</span></legend>' +
             '<label class="sz-f"><span>Required — real funds</span>' +
             '<input type="password" inputmode="numeric" autocomplete="off" ' +
               'data-role="pin" placeholder="PIN"></label>' +
@@ -3169,16 +3173,84 @@
           'Size raised above the risk budget — what it risks is at the top.') +
           '</div>';
       }
+
+      /* ── THE BOARD'S DIALOG (desk v2, approved 2026-11-13) ─────────────
+         Display only: the words, the fields, the PIN step, the confirm and
+         the focus order are the ones above, untouched; what follows says
+         them on the board's look and decides nothing (UI plan §10). The
+         head names the trade: its side in the platform's words, the
+         symbol, and the world chip (REAL on a live ticket, which the title
+         and the PIN already say; PAPER on the simulator). The steps say
+         where the order is: nothing leaves before the confirm, the one
+         click that sends. A summary pinned under them counts the warnings
+         and folds their list, because the dialog opens on the size (its
+         focus, unchanged) and a warning above the fold must leave a trace.
+         The figures say what the levels mean at this size: the numbers
+         render() already computes for the lines in the blocks. */
+      var buySide = p.side !== 'SELL';
+      /* eToro's cash check runs on an eToro ticket only ("asked" is false
+         on another carrier), so its cells name the venue. */
+      var atEtoro = !!(live && cg);
+      var marginAtEtoro = atEtoro && Number(cg.margin_per_unit) > 0;
+      var tradeHead = '<span class="sz-trade">' +
+          '<span class="sz-side">' + (buySide ? '▲ LONG' : '▼ SHORT') + '</span>' +
+          '<span class="sz-sym">' + esc(p.symbol) + '</span>' +
+          (live
+            ? '<span class="sv-world sv-world--live" title="Real money: this is an order at the broker">REAL</span>'
+            : '<span class="sv-world sv-world--paper" title="Simulated by the platform: no money moves">PAPER</span>') +
+        '</span>';
+      var stepsHtml = '<div class="sz-steps" data-role="steps"><ol aria-label="Steps">' +
+          '<li class="sz-step" data-step="review"><span class="sz-step-n">1</span>Review</li>' +
+          (live ? '<li class="sz-step" data-step="pin"><span class="sz-step-n">2</span>PIN</li>' : '') +
+          '<li class="sz-step" data-step="confirm"><span class="sz-step-n">' + (live ? 3 : 2) +
+            '</span>Confirm the order</li>' +
+        '</ol><span class="sz-steps-note">nothing is sent before step <span class="sz-n">' +
+          (live ? 3 : 2) + '</span></span></div>';
+      var wsumHtml = '<button type="button" class="sz-wsum" data-role="wsum" aria-expanded="true" ' +
+          'aria-controls="svSizeWarns" hidden>' +
+          '<svg class="sz-wsum-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+            'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 4l9 15.5H3z"/><path d="M12 10v4"/><path d="M12 16.9v.1" stroke-width="2.2"/></svg>' +
+          '<span class="sz-wsum-t" data-role="wsumtext"></span>' +
+          '<span class="sz-wsum-act" data-role="wsumact">hide</span></button>';
+      /* The four figures, under the size: at the stop, at the target, the
+         reward to risk, and the margin eToro locks for it (on another
+         carrier or on paper, the pool's cash the order commits). */
+      if (levelable) {
+        sizeHtml += '<div class="sz-figs" data-role="figs">' +
+          '<div class="sz-fig"><span class="sz-fig-k">At the stop</span>' +
+            '<span class="sz-fig-v sz-fig-v--down" data-role="figstop"></span></div>' +
+          '<div class="sz-fig"><span class="sz-fig-k">At the target</span>' +
+            '<span class="sz-fig-v sz-fig-v--up" data-role="figtarget"></span></div>' +
+          '<div class="sz-fig"><span class="sz-fig-k">Reward : risk</span>' +
+            '<span class="sz-fig-v" data-role="figrr"></span></div>' +
+          '<div class="sz-fig"><span class="sz-fig-k">' +
+            (marginAtEtoro ? 'Margin at eToro' : 'Cash committed') + '</span>' +
+            '<span class="sz-fig-v" data-role="figmargin"></span></div>' +
+        '</div>';
+      }
+
       var host = document.createElement('div');
       host.className = 'sv-dialog sz-dialog' + ((funding || live) ? ' sv-dialog--danger' : '');
       host.setAttribute('data-sv-overlay', 'dialog');
       host.setAttribute('aria-labelledby', 'svSizeTitle');
+      /* The side and the world, for the look alone: the confirm wears its
+         side (jade a buy, coral a sell), never a decision. */
+      host.setAttribute('data-side', buySide ? 'buy' : 'sell');
+      host.setAttribute('data-world', live ? 'live' : 'paper');
       host.innerHTML =
         '<div class="sv-dialog-head">' +
+          '<div class="sz-head">' + tradeHead + '<span class="sz-q">' +
           '<span class="sv-dialog-title" id="svSizeTitle">' + esc(title) + '</span>' +
+          (atEtoro ? '<span class="sz-where"> · live at eToro</span>' : '') + '</span></div>' +
           '<button type="button" class="sv-dialog-x" data-sv-close aria-label="Cancel">&times;</button>' +
         '</div>' +
+        stepsHtml + wsumHtml +
         '<div class="sv-dialog-body">' +
+          /* The warnings and the notes, first: the summary above folds them. */
+          '<div class="sz-warns" id="svSizeWarns" data-role="warns">' + warnHtml +
+          /* Filled by render(): it follows the levels as they move. */
+          '<div data-role="rrwarn" aria-live="polite"></div>' + '</div>' +
           '<p class="sv-dialog-msg">' + esc(
             (live
               ? 'Executes immediately on the LIVE venue — REAL funds move at the broker, with the stop and target sent as a broker-side bracket.'
@@ -3187,9 +3259,6 @@
               : 'Executes immediately on the paper venue.') +
             (p.managed === false ? ''
               : ' The 5-minute tick manages the stop and target from here.')) + '</p>' +
-          warnHtml +
-          /* Filled by render(): it follows the levels as they move. */
-          '<div data-role="rrwarn" aria-live="polite"></div>' +
           /* THE COUNCIL (2026-10-08): a LIVE ticket only, its switch on.
              Filled by SV.council.mount below; it runs nothing until its
              own button is clicked, and okBtn never reads it. */
@@ -3270,6 +3339,110 @@
       var raisedSpan = host.querySelector('[data-role="raisedwords"]');
       var raisedNotice = host.querySelector('[data-role="smallestsizenotice"]');
       var settled = false;
+
+      /* ── The board's pieces, kept true as the ticket moves (desk v2) ───
+         Painted at the end of render(), from what render() just decided:
+         the steps from the PIN and the verdict, the summary from the
+         warnings on show, the units and the figures from the size and the
+         levels. They read the ticket; nothing reads them. */
+      var stepsEl = host.querySelector('[data-role="steps"]');
+      var wsumEl = host.querySelector('[data-role="wsum"]');
+      var wsumText = host.querySelector('[data-role="wsumtext"]');
+      var wsumAct = host.querySelector('[data-role="wsumact"]');
+      var warnsEl = host.querySelector('[data-role="warns"]');
+      var stopUnit = host.querySelector('[data-role="stopunit"]');
+      var targetUnit = host.querySelector('[data-role="targetunit"]');
+      var figStop = host.querySelector('[data-role="figstop"]');
+      var figTarget = host.querySelector('[data-role="figtarget"]');
+      var figRr = host.querySelector('[data-role="figrr"]');
+      var figMargin = host.querySelector('[data-role="figmargin"]');
+      var folded = false, blockedNow = false;
+      var STEP_DONE = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" ' +
+        'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
+        'stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+      /* A forex level's distance in pips, on the platform's own convention
+         (core/price_format.py: a JPY, HUF or KRW quote carries three
+         decimals, every other pair five); any other class in percent, the
+         signed distance the levels line already prints. */
+      var pipSize = 0;
+      if (String(p.asset_class || '').toLowerCase() === 'forex') {
+        var quoteCcy = String(p.symbol || '').slice(-3).toUpperCase();
+        pipSize = (quoteCcy === 'JPY' || quoteCcy === 'HUF' || quoteCcy === 'KRW') ? 0.01 : 0.0001;
+      }
+      function distHtml(v) {
+        if (!(fill > 0) || !(v > 0)) return '';
+        if (pipSize > 0) {
+          var n = (v - fill) / pipSize, whole = Math.round(n);
+          return '<span class="sz-u-n">' + (n > 0 ? '+' : '') +
+                 (Math.abs(n - whole) < 0.05 ? String(whole) : n.toFixed(1)) + '</span> pips';
+        }
+        return '<span class="sz-u-n">' + esc(signedPct((v - fill) / fill)) + '</span>';
+      }
+      function syncSteps() {
+        if (!stepsEl || !stepsEl.querySelectorAll) return;
+        var typed = !!(pinIn && pinIn.value);
+        var atPin = !!(pinIn && document.activeElement === pinIn);
+        /* A verdict on the levels or the size sends the operator back to
+           the review, whatever the PIN holds: the confirm is off. */
+        var state = blockedNow ? { review: 'cur' }
+          : live ? { review: (typed || atPin) ? 'done' : 'cur',
+                     pin: typed ? 'done' : (atPin ? 'cur' : ''),
+                     confirm: typed ? 'cur' : '' }
+          : { review: 'cur' };
+        Array.prototype.forEach.call(stepsEl.querySelectorAll('.sz-step'), function (li, i) {
+          var s = state[li.getAttribute('data-step')] || '';
+          li.classList.toggle('is-done', s === 'done');
+          li.classList.toggle('is-cur', s === 'cur');
+          if (s === 'cur') li.setAttribute('aria-current', 'step');
+          else li.removeAttribute('aria-current');
+          var n = li.querySelector('.sz-step-n');
+          if (n) n.innerHTML = s === 'done' ? STEP_DONE : String(i + 1);
+        });
+      }
+      function syncWarns() {
+        if (!wsumEl || !warnsEl || !warnsEl.querySelectorAll) return;
+        var titles = [];
+        Array.prototype.forEach.call(warnsEl.querySelectorAll('.sz-warn'), function (w) {
+          if (w.hidden) return;
+          var b = w.querySelector('b');
+          titles.push(b ? b.textContent.trim() : '');
+        });
+        var n = titles.length;
+        if (!n) folded = false;
+        wsumEl.hidden = !n;
+        warnsEl.hidden = folded;
+        wsumEl.setAttribute('aria-expanded', folded ? 'false' : 'true');
+        if (wsumText) {
+          wsumText.textContent = n + (n === 1 ? ' warning' : ' warnings') +
+            (folded ? ': ' + titles.filter(Boolean).join(' · ') : '');
+        }
+        if (wsumAct) wsumAct.textContent = folded ? 'show' : 'hide';
+        /* every title, whole, where the folded line runs out of room */
+        wsumEl.title = titles.filter(Boolean).join(' · ');
+      }
+      function paintBoard(q, blocked) {
+        blockedNow = blocked;
+        if (stopUnit) stopUnit.innerHTML = distHtml(stopVal);
+        if (targetUnit) targetUnit.innerHTML = distHtml(targetVal);
+        var r = rpu(), dist = Math.abs(fill - stopVal);
+        if (figStop) figStop.textContent = r > 0 ? '-' + money(q * r) : '—';
+        if (figTarget) figTarget.textContent = '+' + money(q * Math.abs(targetVal - entry) * vpu);
+        if (figRr) figRr.textContent = dist > 0 ? (Math.abs(targetVal - fill) / dist).toFixed(2) : '—';
+        if (figMargin) {
+          figMargin.textContent = marginAtEtoro ? acctMoney(q * Number(cg.margin_per_unit))
+                                                : money(q * cupu);
+        }
+        /* The order under the confirm's words: its side, size and symbol. */
+        if (okBtn.appendChild) {
+          var order = document.createElement('span');
+          order.className = 'sz-go-order';
+          order.textContent = (buySide ? '▲ Long ' : '▼ Short ') +
+            Number(units(q)).toLocaleString(undefined, { maximumFractionDigits: 8 }) + ' ' + p.symbol;
+          okBtn.appendChild(order);
+        }
+        syncSteps();
+        syncWarns();
+      }
 
       /* REWARD:RISK (2026-10-02). What the levels can make against what
          they risk, gross of costs, from the fill — the same arithmetic as
@@ -3412,6 +3585,7 @@
         host.classList.toggle('is-lvl-over', !!lvlWhy);
         if (reset) reset.disabled = !qtyTouched;
         if (lvlReset) lvlReset.disabled = !stopMoved() && !targetMoved();
+        paintBoard(q, !!(lvlWhy || sizeWhy));
       }
 
       function recompute() {
@@ -3467,6 +3641,18 @@
         });
       });
       if (pinIn) pinIn.addEventListener('input', function () { recompute(); });
+      /* The steps follow the PIN field (desk v2): reached, it is step 2. */
+      if (pinIn) {
+        pinIn.addEventListener('focus', syncSteps);
+        pinIn.addEventListener('blur', syncSteps);
+      }
+      /* The summary folds the list and unfolds it; its words follow. */
+      if (wsumEl) {
+        wsumEl.addEventListener('click', function () {
+          folded = !folded;
+          syncWarns();
+        });
+      }
       if (levSel) {
         levSel.addEventListener('change', function () {
           finish({ relever: Number(levSel.value) });

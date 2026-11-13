@@ -37,8 +37,6 @@ for a synthetic signal) and refuses any order. Nothing is ever posted.
 
 Display only. Money direction: none. No network, no broker, no model.
 
-This step builds the deal ticket; TAKE TRADE follows in the next.
-
 Run with:  python manage.py test tests.test_desk_v2_ticket
 """
 import json
@@ -207,6 +205,52 @@ class DealTicketMarkupTests(SimpleTestCase):
         self.assertIn('▲ LONG<span class="tk-at"> · ASK</span>', self.html)
 
 
+class TakeTradeSourceTests(SimpleTestCase):
+    """The dialog's words, PIN step, confirm step and focus, as main wrote
+    them, in base.html's TAKE TRADE script (§10: unchanged)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        src = read(BASE)
+        at = src.index("function sizeDialog(p)")
+        cls.fn = src[at:src.index("function tradeFlow(", at)]
+
+    def test_main_s_words_and_gates_are_there_verbatim(self):
+        for kept in (
+                "'Take a second ' + p.symbol + ' ' + sideWord + (live ? ' with REAL funds?' : '?')",
+                "(held.length ? 'Add to this LIVE position?' : 'Take this trade with REAL funds?')",
+                "(held.length ? 'Add to this position?' : 'Take this trade?')",
+                "? ('CLOSE ' + n + ' + TAKE')",
+                ": (live ? 'TAKE LIVE TRADE'",
+                ": ((held.length && !second) ? 'ADD' : 'TAKE TRADE'))) +",
+                "(rrLow ? ' ANYWAY' : '');",
+                "okBtn.disabled = !!(lvlWhy || sizeWhy) ||\n                         !!(live && pinIn && !pinIn.value);",
+                "'<label class=\"sz-f\"><span>Required — real funds</span>'",
+                "'<input type=\"password\" inputmode=\"numeric\" autocomplete=\"off\" '",
+                "'data-role=\"pin\" placeholder=\"PIN\"></label>'",
+                "data-role=\"cancel\">Cancel</button>",
+                "'<button type=\"button\" class=\"sv-dialog-btn sv-dialog-btn--go' +",
+                "host.setAttribute('data-sv-focus',",
+                "second ? '[data-role=\"dupwarn\"]'",
+                ": cashStop ? '[data-role=\"cashwarn\"]'",
+                ": sizable ? '[data-role=\"qty\"]' : '[data-role=\"cancel\"]');",
+                "pin: pinIn ? pinIn.value : null,",
+                "qty: sendsAuto ? null : qtyVal,",
+                "close_ids: ids,"):
+            with self.subTest(kept=kept[:60]):
+                self.assertIn(kept, self.fn)
+
+    def test_the_pin_step_says_what_it_unlocks(self):
+        self.assertIn("<legend>Trading PIN<span class=\"sz-pin-what\"> · places a live order "
+                      "(real money)</span></legend>", self.fn)
+
+    def test_the_confirm_wears_the_side_and_the_order(self):
+        self.assertIn("host.setAttribute('data-side', buySide ? 'buy' : 'sell');", self.fn)
+        self.assertIn("host.setAttribute('data-world', live ? 'live' : 'paper');", self.fn)
+        self.assertIn("'sz-go-order'", self.fn)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Measured
 # ══════════════════════════════════════════════════════════════════════════
@@ -305,6 +349,183 @@ TICKET_PROBE = PROBE_LIB + r"""
 })()
 """
 
+DIALOG_PROBE = PROBE_LIB + r"""
+(async function (SRC, OVERLAY, SCENARIOS) {
+  await new Promise(function (ok, bad) {
+    var s = document.createElement('script'); s.src = OVERLAY;
+    s.onload = ok; s.onerror = function () { bad(new Error('sv-overlay.js did not load')); };
+    document.head.appendChild(s);
+  });
+  (0, eval)(SRC);
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function opened() {
+    for (var i = 0; i < 80; i++) {
+      var d = document.querySelector('.sz-dialog.is-open');
+      if (d) return d;
+      await sleep(25);
+    }
+    throw new Error('no TAKE TRADE dialog opened');
+  }
+  function role(el) {
+    if (!el) return null;
+    if (el.getAttribute('data-role')) return el.getAttribute('data-role');
+    if (el.classList.contains('sv-dialog-x')) return 'x';
+    return el.tagName.toLowerCase();
+  }
+  function tabs(d) {
+    return Array.prototype.filter.call(
+      d.querySelectorAll('a[href], button, input, select, textarea, [tabindex]'),
+      function (e) { return !e.disabled && e.tabIndex >= 0 && shown(e) && !e.closest('[hidden]'); }
+    ).map(role);
+  }
+  function words(el) {
+    if (!el) return null;
+    return Array.prototype.filter.call(el.childNodes, function (n) { return n.nodeType === 3; })
+      .map(function (n) { return n.data; }).join('').trim();
+  }
+  function measure(d) {
+    var q = function (s) { return d.querySelector(s); };
+    var c = getComputedStyle(d), r = d.getBoundingClientRect();
+    var out = { box: [r.left, r.top, r.width, r.height], top: [c.borderTopWidth, c.borderTopColor],
+                side: d.getAttribute('data-side'), world: d.getAttribute('data-world'),
+                active: role(document.activeElement), tabs: tabs(d),
+                head: look(q('.sv-dialog-head')), title: look(q('#svSizeTitle')),
+                trade: look(q('.sz-trade')), tradeSide: look(q('.sz-trade .sz-side')),
+                tradeSym: look(q('.sz-trade .sz-sym')), chip: look(q('.sz-trade .sv-world')),
+                steps: look(q('.sz-steps')), wsum: look(q('[data-role="wsum"]')),
+                wsumText: look(q('[data-role="wsumtext"]')), go: look(q('[data-role="ok"]')),
+                goWords: words(q('[data-role="ok"]')), goOrder: look(q('[data-role="ok"] .sz-go-order')),
+                cancel: look(q('[data-role="cancel"]')), body: look(q('.sv-dialog-body')),
+                okDisabled: q('[data-role="ok"]').disabled };
+    var steps = d.querySelectorAll('.sz-steps .sz-step');
+    out.stepList = Array.prototype.map.call(steps, function (li) {
+      return { text: li.textContent.trim(), current: li.getAttribute('aria-current'),
+               done: li.classList.contains('is-done') };
+    });
+    out.stepsNote = q('.sz-steps-note') ? q('.sz-steps-note').textContent.trim() : null;
+    var ws = q('[data-role="wsum"]');
+    out.wsumHidden = ws ? ws.hidden : null;
+    out.wsumExpanded = ws ? ws.getAttribute('aria-expanded') : null;
+    var list = q('[data-role="warns"]');
+    out.warnsShown = list ? shown(list) && !list.hidden : null;
+    out.warns = list ? Array.prototype.filter.call(list.querySelectorAll('.sz-warn'), function (w) {
+      return !w.hidden && !w.closest('[hidden]');
+    }).map(function (w) {
+      return { title: look(w.querySelector('b')), box: look(w) };
+    }) : [];
+    out.units = {};
+    ['qty', 'cash', 'notional', 'stop', 'target'].forEach(function (k) {
+      var i = q('[data-role="' + k + '"]');
+      var u = i && i.parentElement && i.parentElement.querySelector('.sz-u');
+      out.units[k] = { input: look(i), unit: u ? u.textContent.trim() : null,
+                       well: look(i && i.parentElement) };
+    });
+    out.figs = Array.prototype.map.call(d.querySelectorAll('.sz-figs .sz-fig'), function (f) {
+      return { k: f.querySelector('.sz-fig-k').textContent.trim(), box: look(f),
+               v: look(f.querySelector('.sz-fig-v')) };
+    });
+    var pin = q('[data-role="pin"]');
+    out.pin = pin ? { type: pin.type, inputmode: pin.getAttribute('inputmode'),
+                      autocomplete: pin.getAttribute('autocomplete'), placeholder: pin.placeholder,
+                      label: pin.closest('fieldset').textContent.replace(/\s+/g, ' ').trim(),
+                      look: look(pin) } : null;
+    out.fields = Array.prototype.map.call(d.querySelectorAll('input, select'), function (i) {
+      return [role(i), i.tagName.toLowerCase(), i.getAttribute('type'), i.getAttribute('inputmode'),
+              i.getAttribute('autocomplete'), i.getAttribute('placeholder')];
+    });
+    out.forms = d.querySelectorAll('form').length;
+    out.texts = texts(d); out.fills = fills(d);
+    out.vh = window.innerHeight;
+    return out;
+  }
+  var all = {};
+  for (var k = 0; k < SCENARIOS.length; k++) {
+    var sc = SCENARIOS[k], posted = [];
+    window.fetch = function (url) {
+      url = String(url);
+      if (url.indexOf('/take-trade/preview/') !== -1) {
+        return Promise.resolve(new Response(JSON.stringify(sc.payload),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      if (/\/take-trade\/$/.test(url)) {
+        posted.push(url);
+        return Promise.reject(new Error('this test never sends an order'));
+      }
+      return Promise.resolve(new Response('{}', { status: 200,
+        headers: { 'Content-Type': 'application/json' } }));
+    };
+    if (sc.signal) window.svTakeTrade(sc.signal);
+    else window.svTakeTradeAsset(sc.payload.symbol, sc.payload.side);
+    var d = await opened();
+    await sleep(300);
+    var got = { open: measure(d) };
+    var ws = d.querySelector('[data-role="wsum"]');
+    if (ws && !ws.hidden) {
+      ws.click(); await sleep(30);
+      got.folded = measure(d);
+      ws.click(); await sleep(30);
+      got.unfolded = measure(d);
+    }
+    var pin = d.querySelector('[data-role="pin"]');
+    if (pin) {
+      pin.focus(); pin.dispatchEvent(new Event('focus')); await sleep(30);
+      got.pinFocused = measure(d);
+      pin.value = '0000'; pin.dispatchEvent(new Event('input', { bubbles: true })); await sleep(30);
+      got.pinTyped = measure(d);
+    }
+    d.querySelector('[data-role="cancel"]').click();
+    for (var i = 0; i < 40 && document.contains(d); i++) await sleep(25);
+    await sleep(50);
+    got.posted = posted;
+    all[sc.name] = got;
+  }
+  return JSON.stringify(all);
+})
+"""
+
+
+#: The live BUY opened again, its body at the top: where each warning's
+#: ⚠ mark is drawn (its ::before, 14 px at the line's left), to be read in
+#: a picture of it.
+MARKS_PROBE = r"""
+(async function (PAYLOAD) {
+  window.fetch = function (url) {
+    if (String(url).indexOf('/take-trade/preview/') !== -1) {
+      return Promise.resolve(new Response(JSON.stringify(PAYLOAD),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/take-trade\/$/.test(String(url))) return Promise.reject(new Error('never sent'));
+    return Promise.resolve(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  };
+  window.svTakeTradeAsset(PAYLOAD.symbol, PAYLOAD.side);
+  var d = null;
+  for (var i = 0; i < 80 && !d; i++) {
+    d = document.querySelector('.sz-dialog.is-open');
+    if (!d) await new Promise(function (r) { setTimeout(r, 25); });
+  }
+  await new Promise(function (r) { setTimeout(r, 300); });
+  d.querySelector('.sv-dialog-body').scrollTop = 0;
+  await new Promise(function (r) { setTimeout(r, 100); });
+  return JSON.stringify(Array.prototype.map.call(
+    d.querySelectorAll('[data-role="warns"] .sz-warn'), function (w) {
+      var r = w.getBoundingClientRect();
+      return [r.left, r.top + 2, 14, 14];
+    }));
+})
+"""
+
+
+def _amber_share(png_b64):
+    """The share of a picture's pixels in the warning amber's family."""
+    import base64
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(base64.b64decode(png_b64))).convert("RGB")
+    px = list(im.getdata())
+    hits = sum(1 for r, g, b in px if r > 170 and 100 < g < 200 and b < 120 and r - b > 90)
+    return hits / float(len(px))
+
+
 def _instrument(symbol, cls, name):
     from instruments.models import Instrument
     inst, _ = Instrument.objects.get_or_create(
@@ -319,6 +540,62 @@ def _two_sided(symbol, cls, name, bid, ask):
         instrument=inst, defaults={"last": (Decimal(bid) + Decimal(ask)) / 2,
                                    "bid": Decimal(bid), "ask": Decimal(ask), "source": "etoro"})
     return inst
+
+
+def _live_payload(side="BUY", warnings=2, target=None):
+    """A synthetic LIVE preview, the board's AUDUSD: 20,000 units at 30x,
+    stop 36 pips away, target 72 (or `target`), eToro's cells read; the two
+    board warnings when asked. Never sent anywhere."""
+    buy = side == "BUY"
+    fill = 0.6542 if buy else 0.65412
+    p = {
+        "symbol": "AUDUSD", "side": side, "qty": 20000.0, "entry": fill,
+        "stop": round(fill - 0.0036 if buy else fill + 0.0036, 5),
+        "target": target if target is not None else round(fill + 0.0072 if buy else fill - 0.0072, 5),
+        "stop_widened": False, "risk_dollars": 72.0, "notional": 13084.0, "capital_use": 436.13,
+        "capital": 10453.61, "committed": 1200.0, "available": 3000.0, "sufficient": True,
+        "deficit": 0.0, "close_proposal": [], "closable": [], "managed": True, "venue": "live",
+        "mark_delayed": False, "requires_pin": True, "asset_class": "forex", "cap_class": "forex",
+        "value_per_unit": 1.0, "qty_step": 1.0, "risk_per_unit": 0.0036,
+        "notional_per_unit": fill, "capital_use_per_unit": fill / 30, "pool_free": 3000.0,
+        "max_qty": 120000.0, "venue_min_qty": None, "venue_min_note": "", "smallest_size": None,
+        "max_risk_dollars": 209.07, "max_notional": 100000.0, "book_single_position": {},
+        "book_limits": [],
+        "levels": {"fill": fill, "min_stop_fraction": 0.0003, "max_stop_fraction": 0.03,
+                   "min_stop_pct_text": "0.030", "max_stop_pct_text": "3.0", "asset_class": "forex",
+                   "cost_fraction": 0.0002, "cost_filter": True, "min_edge_ratio": 3.0,
+                   "min_net_rr": 1.0, "reward_risk_warn": 1.0, "levels_note": ""},
+        "leverage": {"effective": 30, "adjustable": True, "choices": [1, 2, 5, 10, 20, 30],
+                     "chosen": 30, "max": 30, "why": "",
+                     "note": ("30x — eToro locks notional / 30 as margin; the risk is the stop's, "
+                              "whatever the multiplier. Open for this ticket: 1x, 2x, 5x, 10x, 20x, 30x.")},
+        "existing_exposure": [], "concentration": {}, "duplicate": {},
+        "cash_gate": {"asked": True, "ok": True, "reason": "", "cash": 2400.0, "used": 3200.0,
+                      "equity": 10453.61, "currency": "USD", "age_s": 12, "age_words": "12 s",
+                      "equity_age_words": "40 s", "free": 2400.0, "room": 2400.0,
+                      "max_qty": 110000.0, "margin_per_unit": fill / 30, "pnl": 76.26,
+                      "pledged": 0, "refresh": {"asked": False}},
+        "theme": {}, "cost_advisory": {"ok": True}, "rule_advisory": {}, "risk_appetite": {"pct": 0.69},
+        "venue_health": {"ok": True}, "timing_advisory": {"ok": True}, "short_advisory": {"ok": True},
+        "proof_advisory": {"ok": True}, "quote_advisory": {"ok": True}, "setup_memory": {},
+        "positioning": {}, "council_on": False, "book_advisory": {"ok": True},
+        "signal_backing": {"ok": True},
+    }
+    if warnings >= 1:
+        p["book_advisory"] = {"ok": False, "reason": (
+            "With this order the real book stands at 2.44% of eToro equity at the stops; "
+            "the limit is 2.50%.")}
+    if warnings >= 2:
+        p["signal_backing"] = {"ok": False, "reason": (
+            "The rail holds no AUDUSD %s; this order is yours." % ("long" if buy else "short"))}
+    return p
+
+
+def _take_trade_source(html):
+    """The page's own TAKE TRADE script, as the page renders it."""
+    at = html.index("function sizeDialog(p)")
+    start = html.rindex("(function () {", 0, at)
+    return html[start:html.index("})();", html.index("window.svCloseTrade", at)) + len("})();")]
 
 
 def _open_pages(pages, probe):
@@ -451,3 +728,268 @@ class DealTicketMeasuredTests(_Desk):
                 self.assertNotEqual(stale[k]["px"]["color"], INK1)
                 self.assertEqual(stale[k]["box"]["bstyle"], "dashed")
                 self.assertNotIn(stale[k]["lbl"]["color"], (UP, DOWN))
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class TakeTradeMeasuredTests(_Desk):
+    """TAKE TRADE on /instruments/AUDUSD/ at 1440: a live BUY with the
+    board's two warnings, a live SELL, a live BUY under the reward-to-risk
+    floor (synthetic payloads), and a paper ticket on the preview the server
+    returned for a synthetic signal."""
+
+    #: main's fields, by role: (role, tag, type, inputmode, autocomplete, placeholder)
+    LIVE_FIELDS = [["stop", "input", "number", "decimal", None, None],
+                   ["target", "input", "number", "decimal", None, None],
+                   ["lev", "select", None, None, None, None],
+                   ["qty", "input", "number", "decimal", None, None],
+                   ["cash", "input", "number", "decimal", None, None],
+                   ["notional", "input", "number", "decimal", None, None],
+                   ["pin", "input", "password", "numeric", "off", "PIN"]]
+    #: main's Tab order on a live ticket at open (the confirm waits for the PIN)
+    LIVE_TABS = ["x", "stop", "target", "lev", "qty", "cash", "notional", "pin", "cancel"]
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        from tests.test_take_trade import _quote, _signal
+        sig = _signal(_quote("BTCUSD", 60600), entry=60600, stop=59700, target=62400)
+        resp = cls.client_.post("/signals/%d/take-trade/preview/" % sig.id, data="{}",
+                                content_type="application/json", HTTP_HOST=HOST)
+        cls.paper = resp.json()
+        url = "/instruments/AUDUSD/"
+        html = cls.page(url)
+        scenarios = [
+            {"name": "live_buy", "payload": _live_payload("BUY")},
+            {"name": "live_sell", "payload": _live_payload("SELL")},
+            {"name": "live_floor", "payload": _live_payload("BUY", warnings=0, target=0.6560)},
+            {"name": "paper", "payload": cls.paper, "signal": sig.id},
+        ]
+        expr = DIALOG_PROBE + "(%s, %s, %s)" % (
+            json.dumps(_take_trade_source(html)),
+            json.dumps((ROOT / "static/js/sv-overlay.js").as_uri()), json.dumps(scenarios))
+        tmp = tempfile.mkdtemp(prefix="sv-b6-")
+        try:
+            path = pathlib.Path(tmp) / "page.html"
+            path.write_text(_offline(html), encoding="utf-8")
+            chrome = _Chrome(CHROME)
+            try:
+                sid = chrome.page(1440, 900, False)
+                chrome.open(sid, path.as_uri())
+                cls.got = json.loads(chrome.eval(sid, expr))
+                rects = json.loads(chrome.eval(sid, MARKS_PROBE + "(%s)" % json.dumps(_live_payload("BUY"))))
+                cls.marks = [_amber_share(chrome.call("Page.captureScreenshot", {
+                    "format": "png", "clip": {"x": x, "y": y, "width": w, "height": h, "scale": 2}},
+                    session=sid)["data"]) for x, y, w, h in rects]
+            finally:
+                chrome.close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_the_server_s_paper_preview_is_a_paper_buy(self):
+        self.assertNotIn("error", self.paper, self.paper)
+        self.assertEqual((self.paper["venue"], self.paper["side"]), ("paper", "BUY"))
+
+    def test_nothing_was_ever_sent(self):
+        for name, got in self.got.items():
+            with self.subTest(scenario=name):
+                self.assertEqual(got["posted"], [])
+
+    def test_the_header_names_the_trade_with_its_world(self):
+        for name, side, hue, chip, bg in (("live_buy", "▲ LONG", UP, "REAL", REAL),
+                                          ("live_sell", "▼ SHORT", DOWN, "REAL", REAL),
+                                          ("paper", "▲ LONG", UP, "PAPER", None)):
+            o = self.got[name]["open"]
+            with self.subTest(scenario=name):
+                self.assertEqual(o["tradeSide"]["text"], side)
+                self.assertEqual(o["tradeSide"]["color"], hue)
+                self.assertTrue(o["tradeSym"]["family"].startswith('"JetBrains Mono"'))
+                self.assertEqual(o["chip"]["text"], chip)
+                if bg:
+                    self.assertEqual((o["chip"]["bg"], o["chip"]["color"]), (bg, WHITE))
+                else:
+                    self.assertFalse(is_red_fill(o["chip"]["bg"]))
+                # the trade on one line, the question under it, in the 56 px head
+                self.assertAlmostEqual(o["head"]["box"][3], 56, delta=1)
+                self.assertLess(o["trade"]["box"][1], o["title"]["box"][1])
+        self.assertEqual(self.got["live_buy"]["open"]["title"]["text"], "Take this trade with REAL funds?")
+        self.assertEqual(self.got["paper"]["open"]["title"]["text"], "Take this trade?")
+
+    def test_a_live_order_carries_the_real_top_edge_and_paper_does_not(self):
+        for name in ("live_buy", "live_sell", "live_floor"):
+            with self.subTest(scenario=name):
+                self.assertEqual(self.got[name]["open"]["top"], ["3px", REAL])
+        self.assertNotEqual(self.got["paper"]["open"]["top"][1], REAL)
+
+    def test_the_dialog_is_the_board_s_width(self):
+        for name, got in self.got.items():
+            with self.subTest(scenario=name):
+                self.assertAlmostEqual(got["open"]["box"][2], 580, delta=1)
+
+    def test_three_steps_and_nothing_is_sent_before_the_last(self):
+        live = self.got["live_buy"]
+        self.assertEqual([s["text"] for s in live["open"]["stepList"]],
+                         ["1Review", "2PIN", "3Confirm the order"])
+        self.assertEqual(live["open"]["stepsNote"], "nothing is sent before step 3")
+        self.assertAlmostEqual(live["open"]["steps"]["box"][3], 34, delta=1)
+        cur = lambda m: [s["text"][1:] for s in m["stepList"] if s["current"] == "step"]
+        self.assertEqual(cur(live["open"]), ["Review"])
+        self.assertEqual(cur(live["pinFocused"]), ["PIN"])
+        self.assertEqual(cur(live["pinTyped"]), ["Confirm the order"])
+        self.assertEqual([s["done"] for s in live["pinTyped"]["stepList"]], [True, True, False])
+        paper = self.got["paper"]["open"]
+        self.assertEqual([s["text"] for s in paper["stepList"]], ["1Review", "2Confirm the order"])
+        self.assertEqual(paper["stepsNote"], "nothing is sent before step 2")
+
+    def test_the_summary_counts_the_warnings_inside_the_first_view(self):
+        for name in ("live_buy", "live_sell"):
+            o = self.got[name]["open"]
+            with self.subTest(scenario=name):
+                self.assertFalse(o["wsumHidden"])
+                self.assertEqual(len(o["warns"]), 2)
+                self.assertEqual(o["wsumText"]["text"], "2 warnings")
+                self.assertEqual(o["wsumExpanded"], "true")
+                box, dlg = o["wsum"]["box"], o["box"]
+                self.assertAlmostEqual(box[3], 34, delta=1)
+                self.assertGreaterEqual(box[1], dlg[1])
+                self.assertLessEqual(box[1] + box[3], min(dlg[1] + 160, o["vh"]))
+                self.assertEqual(o["wsumText"]["color"], WARN)
+        floor = self.got["live_floor"]["open"]
+        self.assertEqual(len(floor["warns"]), 1)          # YOU RISK MORE THAN YOU CAN WIN
+        self.assertEqual(floor["wsumText"]["text"], "1 warning")
+
+    def test_the_summary_folds_its_list_and_names_what_it_folded(self):
+        got = self.got["live_buy"]
+        self.assertTrue(got["open"]["warnsShown"])
+        self.assertEqual(got["folded"]["wsumExpanded"], "false")
+        self.assertFalse(got["folded"]["warnsShown"])
+        self.assertEqual(got["folded"]["wsumText"]["text"],
+                         "2 warnings: BOOK LIMIT REACHED · NO SAURON SIGNAL BEHIND THIS TRADE")
+        self.assertEqual(got["unfolded"]["wsumExpanded"], "true")
+        self.assertTrue(got["unfolded"]["warnsShown"])
+
+    def test_each_warning_carries_its_mark_as_painted(self):
+        """The ⚠ before each warning is drawn, in the warning amber (a mark
+        that fails to load leaves nothing on the screen: read in a picture)."""
+        self.assertEqual(len(self.marks), 2)
+        for share in self.marks:
+            self.assertGreater(share, 0.05)
+
+    def test_each_warning_is_an_amber_title_never_demo_gold(self):
+        for name in ("live_buy", "live_sell", "live_floor"):
+            for w in self.got[name]["open"]["warns"]:
+                with self.subTest(scenario=name, title=w["title"]["text"]):
+                    self.assertEqual(w["title"]["color"], WARN)
+                    self.assertGreaterEqual(float(w["title"]["size"][:-2]), 11)
+                    for c in (w["box"]["color"], w["box"]["bg"], w["box"]["border"]):
+                        self.assertNotEqual(c, DEMO)
+                        p = parse(c)
+                        self.assertFalse(p and p[3] > 0 and tuple(round(v) for v in p[:3]) == (214, 188, 94), c)
+
+    def test_units_beside_the_numbers(self):
+        u = self.got["live_buy"]["open"]["units"]
+        self.assertEqual(u["qty"]["unit"], "units")
+        self.assertEqual(u["stop"]["unit"], "-36 pips")
+        self.assertEqual(u["target"]["unit"], "+72 pips")
+        s = self.got["live_sell"]["open"]["units"]
+        self.assertEqual((s["stop"]["unit"], s["target"]["unit"]), ("+36 pips", "-72 pips"))
+        for k in ("qty", "stop", "target"):
+            with self.subTest(field=k):
+                self.assertAlmostEqual(u[k]["well"]["box"][3], 32, delta=1)
+                self.assertTrue(u[k]["input"]["family"].startswith('"JetBrains Mono"'))
+        # a paper crypto level is a distance in percent, not pips
+        p = self.got["paper"]["open"]["units"]
+        self.assertRegex(p["stop"]["unit"] or "", r"^-\d+\.\d\d%$")
+
+    def test_the_four_figures(self):
+        figs = self.got["live_buy"]["open"]["figs"]
+        self.assertEqual([f["k"] for f in figs],
+                         ["At the stop", "At the target", "Reward : risk", "Margin at eToro"])
+        self.assertEqual([f["v"]["text"] for f in figs], ["-$72.00", "+$144.00", "2.00", "436.13 USD"])
+        self.assertEqual((figs[0]["v"]["color"], figs[1]["v"]["color"]), (DOWN, UP))
+        tops = {round(f["box"]["box"][1]) for f in figs}
+        widths = [f["box"]["box"][2] for f in figs]
+        self.assertEqual(len(tops), 1)                  # one row
+        self.assertLess(max(widths) - min(widths), 1.5)  # four equal cells
+        for f in figs:
+            self.assertTrue(f["v"]["family"].startswith('"JetBrains Mono"'))
+        paper = [f["k"] for f in self.got["paper"]["open"]["figs"]]
+        self.assertEqual(paper[-1], "Cash committed")
+
+    def test_the_pin_keeps_its_kind_and_says_what_it_unlocks(self):
+        pin = self.got["live_buy"]["open"]["pin"]
+        self.assertEqual((pin["type"], pin["inputmode"], pin["autocomplete"], pin["placeholder"]),
+                         ("password", "numeric", "off", "PIN"))
+        self.assertIn("Trading PIN · places a live order (real money)", pin["label"])
+        self.assertIn("Required — real funds", pin["label"])
+        self.assertIsNone(self.got["paper"]["open"]["pin"])
+
+    def test_the_confirm_takes_the_side_s_colour_and_says_the_order(self):
+        for name, hue, words, order in (
+                ("live_buy", UP, "TAKE LIVE TRADE", "▲ Long 20,000 AUDUSD"),
+                ("live_sell", DOWN, "TAKE LIVE TRADE", "▼ Short 20,000 AUDUSD"),
+                ("live_floor", UP, "TAKE LIVE TRADE ANYWAY", "▲ Long 20,000 AUDUSD")):
+            m = self.got[name]["pinTyped"]
+            with self.subTest(scenario=name):
+                self.assertFalse(m["okDisabled"])
+                self.assertEqual(m["goWords"], words)
+                self.assertEqual(m["goOrder"]["text"], order)
+                self.assertEqual((m["go"]["color"], m["go"]["border"]), (hue, hue))
+                self.assertIn(m["go"]["bw"], ("1px", "1.5px"))   # 1.5 px, snapped at 1x
+                self.assertFalse(is_red_fill(m["go"]["bg"]))
+                self.assertEqual((m["go"]["img"], m["go"]["shadow"]), ("none", "none"))
+                self.assertAlmostEqual(m["go"]["box"][3], 42, delta=1)
+                self.assertAlmostEqual(m["cancel"]["box"][3], 42, delta=1)
+                self.assertEqual(m["cancel"]["color"], INK1)
+                self.assertNotIn(m["cancel"]["border"], (UP, DOWN))
+        paper = self.got["paper"]["open"]
+        self.assertEqual(paper["goWords"], "TAKE TRADE")
+        self.assertEqual(paper["go"]["color"], UP)
+        # before the PIN the live confirm is off, and looks it: no side colour
+        off = self.got["live_buy"]["open"]
+        self.assertTrue(off["okDisabled"])
+        self.assertNotIn(off["go"]["color"], (UP, DOWN))
+
+    def test_main_s_fields_first_focus_and_tab_order(self):
+        o = self.got["live_buy"]["open"]
+        self.assertEqual(o["fields"], self.LIVE_FIELDS)
+        self.assertEqual(o["forms"], 0)
+        self.assertEqual(o["active"], "qty")
+        self.assertEqual([t for t in o["tabs"] if t != "wsum"], self.LIVE_TABS)
+        self.assertEqual(self.got["live_buy"]["pinTyped"]["tabs"][-2:], ["cancel", "ok"])
+        # the one new stop, the summary's fold (§10 asks for it), right
+        # under the head: before every field, after the head's ×
+        self.assertEqual(o["tabs"][:2], ["x", "wsum"])
+        self.assertEqual(o["tabs"].count("wsum"), 1)
+
+    def test_no_text_under_11px_and_every_word_at_4_5_to_1(self):
+        for name, got in self.got.items():
+            for state in ("open", "pinTyped"):
+                if state not in got:
+                    continue
+                for t in got[state]["texts"]:
+                    with self.subTest(scenario=name, state=state, text=t["text"], cls=t["cls"]):
+                        self.assertGreaterEqual(t["size"], 11)
+                        if not t["off"]:     # an inactive control is exempt (WCAG 1.4.3)
+                            self.assertGreaterEqual(ratio(t["color"], t["ground"]), 4.5)
+
+    def test_tokens_only_no_light_and_real_the_only_solid_red(self):
+        for name, got in self.got.items():
+            for f in got["open"]["fills"] + got.get("pinTyped", got["open"])["fills"]:
+                with self.subTest(scenario=name, cls=f["cls"], tag=f["tag"]):
+                    if is_red_fill(f["bg"]):
+                        self.assertIn("sv-world--live", f["cls"])
+                    colours = [f["color"], f["bg"]] + [c for w, c in f["borders"] if float(w[:-2]) > 0]
+                    for c in colours:
+                        p = parse(c)
+                        if p and p[3] > 0:
+                            self.assertIn(tuple(round(v) for v in p[:3]), TOKEN_RGB, c)
+                    self.assertEqual((f["tshadow"], f["filter"]), ("none", "none"))
+                    self.assertNotIn("gradient", f["img"])
+                    # no light: a shadow is a ring with no blur (the focus
+                    # ring of a field) or the dialog's black drop, never a glow
+                    for layer in re.split(r",\s*(?=rgba?\()", f["shadow"]):
+                        if layer == "none":
+                            continue
+                        blur = re.findall(r"(-?[\d.]+)px", layer)[2]
+                        if float(blur) > 0:
+                            self.assertEqual(parse(layer)[:3], (0, 0, 0), layer)
