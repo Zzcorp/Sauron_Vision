@@ -869,6 +869,22 @@ def _speed(samples):
     return sum(-s["dx"] for s in st) / total if total else 0.0
 
 
+def _edge_speed(samples):
+    """px per second the eye sees: the item at the clip's left edge, frame
+    to frame, while it stays the same item. Where the items change under
+    the strip (a refetch, a sweep, the painter, rows in or out), the
+    transform jumps by design to keep that item where it was; this is the
+    speed of what is shown."""
+    moved = total = 0.0
+    for a, b in zip(samples, samples[1:]):
+        dt = (b["t"] - a["t"]) / 1000.0
+        if dt > 0.2 or not a["edge"] or not b["edge"] or a["edge"]["key"] != b["edge"]["key"]:
+            continue
+        moved += a["edge"]["left"] - b["edge"]["left"]
+        total += dt
+    return moved / total if total else 0.0
+
+
 def _span(samples):
     xs = [s["x"] for s in samples]
     return max(xs) - min(xs) if xs else 0.0
@@ -1016,9 +1032,9 @@ class TheStripsMeasuredTests(TestCase):
             self.fail("%s: %s" % (name, got["error"]))
         return got
 
-    def assertSpeed(self, samples, name, tol=0.15, label=""):
+    def assertSpeed(self, samples, name, tol=0.15, label="", edge=False):
         self.assertGreater(len(samples), 10, label or name)
-        v = _speed(samples)
+        v = _edge_speed(samples) if edge else _speed(samples)
         self.assertAlmostEqual(v, SPEED[name], delta=SPEED[name] * tol,
                                msg="%s %s: %.1f px/s" % (label, name, v))
 
@@ -1094,7 +1110,8 @@ class TheStripsMeasuredTests(TestCase):
                 self.assertSpeed(group[8:], "ticker", tol=0.2, label="%d items" % n)
         rows = self.scenario("changes")
         self.assertEqual(rows["removed"], 72)
-        self.assertSpeed(_phase(rows["samples"], 3, skip=0.2), "dh", tol=0.25, label="36 instruments")
+        self.assertSpeed(_phase(rows["samples"], 3, skip=0.2), "dh", tol=0.25, label="36 instruments",
+                         edge=True)
 
     def test_the_figures_stay_crisp_on_device_pixels(self):
         run, two = self.scenario("run"), self.scenario("dpr2")
@@ -1228,7 +1245,7 @@ class TheStripsMeasuredTests(TestCase):
         self.assertEqual(got["present"], [2] * 6, "the refetches did not land")
         samples = got["samples"]
         self.assertEqual(_edge_jumps(samples, SPEED["ticker"]), [])
-        self.assertSpeed(samples[-40:], "ticker", tol=0.25, label="after the refetches")
+        self.assertSpeed(samples[-40:], "ticker", tol=0.25, label="after the refetches", edge=True)
 
     def test_no_jump_across_a_sweep_a_painter_update_or_items_added_or_removed(self):
         got = self.scenario("changes")
@@ -1241,7 +1258,8 @@ class TheStripsMeasuredTests(TestCase):
         self.assertEqual(_edge_jumps(samples, SPEED["dh"]), [])
         for m in range(5):
             with self.subTest(phase=m):
-                self.assertSpeed(_phase(samples, m, skip=0.15), "dh", tol=0.3, label="phase %d" % m)
+                self.assertSpeed(_phase(samples, m, skip=0.15), "dh", tol=0.3, label="phase %d" % m,
+                                 edge=True)
 
     # ── still when nobody can see it, or nobody wants it ─────────────────
 
