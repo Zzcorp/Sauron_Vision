@@ -2635,7 +2635,21 @@ class WordsOnTheVoidMeasuredTests(TestCase):
     would draw behind them: the kit's page head, the field's largest sprite
     stamped along each line at the alpha its own cap gives there (6, 12
     and 18 px above and below the line too), against the brightest pixel
-    within 2 px of the glyphs."""
+    within 2 px of the glyphs.
+
+    The page has entered before its head is brought to the middle of the
+    window, and the pictures hold the words, the void and the ember only:
+    the chrome fixed to the window over the page is hidden for them
+    (2026-11-13). Scrolled while the page's entrance still lifted it
+    (pageEnterUp, 18 px), the head came to rest 0 to 18 px above the
+    middle, by the clock; 10 px or less above it, the first letter of
+    "Positions" stood within 2 px of the sidebar's toggle (fixed at the
+    window's middle, its right edge on the content's left edge), whose
+    border, rgb(29, 53, 40), was then read as the brightest pixel near the
+    glyphs: 4.42:1, whatever the ember did. That chrome is drawn over the
+    page, never behind its words; without it the void and the brightest
+    ember read 5.42 to 5.44:1 for that line wherever the head rests in
+    those 18 px."""
 
     OFFSETS = (0, -6, 6, -12, 12, -18, 18)
 
@@ -2648,15 +2662,21 @@ class WordsOnTheVoidMeasuredTests(TestCase):
         try:
             sid = b.tab()
             b.open(sid, KIT_URL, PROBES)
+            # Settled first, then centred: the head stands where the scroll
+            # put it, not up to 18 px higher once the entrance ends.
             b.js(sid, "(function () { __sv.mode('magic'); document.body.setAttribute('data-sv-embers', '');"
+                      " return __sv.settle().then(function () {"
                       " document.querySelector('.sv-page-head').scrollIntoView({ block: 'center' });"
                       " return new Promise(function (r) { var n = 0, t = setInterval(function () {"
                       "   if ((window.__svEmberStats && __svEmberStats.maps && __svEmberStats.words) || ++n > 100) {"
-                      "     clearInterval(t); document.body.classList.add('sv-scroll-locked'); setTimeout(function () { r(0); }, 120); } }, 50); }); })()")
-            # Settled, the words are read again where they now stand: under
-            # load the map can read them while the page's entrance still
-            # moves them (review 2026-11-12, a run read 4.42:1 that way).
+                      "     clearInterval(t); document.body.classList.add('sv-scroll-locked'); setTimeout(function () { r(0); }, 120); } }, 50); }); }); })()")
+            # Settled again, the words are read again where they now stand.
+            # (The 4.42:1 a run read in the review of 2026-11-12, put down
+            # then to the map reading the words mid-entrance, was the
+            # toggle's border: the class's docstring.)
             b.js(sid, "__sv.settle().then(function () { document.dispatchEvent(new CustomEvent('sv:live-swapped')); return 0; })")
+            cls.head = b.js(sid, "(function () { var r = document.querySelector('.sv-page-head').getBoundingClientRect();"
+                                 " return { mid: r.top + r.height / 2, window: innerHeight / 2 }; })()")
             cls.words = b.js(sid, "Array.prototype.map.call(document.querySelectorAll('.sv-page-head .sv-overline, .sv-page-head .sv-page-head-lead'), function (e) {"
                                   " var r = e.getBoundingClientRect(), c = getComputedStyle(e);"
                                   " return { x: r.left, y: r.top, w: r.width, h: r.height, color: c.color, size: c.fontSize, text: e.textContent.trim().slice(0, 30) }; })")
@@ -2664,6 +2684,16 @@ class WordsOnTheVoidMeasuredTests(TestCase):
                                   " far: __svEmberStats.alphaAt(%f, %f, 0.55) })"
                              % ((cls.words[0]["x"] + 5, cls.words[0]["y"] + 5, cls.words[0]["x"] + 5, cls.words[0]["y"] - 400)
                                 if cls.words else (0, 0, 0, 0)))
+            # The chrome fixed over the page (a z-index above the field's 0:
+            # the bars, the sidebar and its toggle, the rail, the orbs) out
+            # of the pictures; the void's layers and the canvas stay.
+            cls.hidden = b.js(sid, "(function () { var s = document.createElement('style'), n = 0;"
+                                   " s.textContent = '[data-sv-off-picture], [data-sv-off-picture] * { visibility: hidden !important; }';"
+                                   " document.head.appendChild(s);"
+                                   " Array.prototype.forEach.call(document.querySelectorAll('body *'), function (e) {"
+                                   "   var c = getComputedStyle(e);"
+                                   "   if (c.position === 'fixed' && parseInt(c.zIndex, 10) > 0) { e.setAttribute('data-sv-off-picture', ''); n++; } });"
+                                   " return __sv.settle().then(function () { return n; }); })()")
             cls.ratios = {}
             for i, wd in enumerate(cls.words):
                 clip = (max(0, wd["x"] - 30), max(0, wd["y"] - 30), wd["w"] + 60, wd["h"] + 60)
@@ -2702,6 +2732,12 @@ class WordsOnTheVoidMeasuredTests(TestCase):
         self.assertGreaterEqual(self.stats["words"], 1)
         self.assertLessEqual(self.stats["inside"], 0.18 + 1e-6)
         self.assertAlmostEqual(self.stats["far"], 0.55, places=6)
+
+    def test_the_head_is_measured_in_the_middle_of_the_window_without_the_chrome(self):
+        """Wherever the clock let the page's entrance stand when the head
+        was centred: the middle, within the scroll's whole pixel."""
+        self.assertAlmostEqual(self.head["mid"], self.head["window"], delta=1, msg=self.head)
+        self.assertGreater(self.hidden, 0)
 
     def test_every_line_keeps_4_5_to_1_with_the_brightest_ember_behind_it(self):
         self.assertGreaterEqual(len(self.words), 2)

@@ -1774,8 +1774,18 @@ class ShellMeasuredTests(TestCase):
         Updated deliberately (the magic kept, 2026-11-12): under Ambience
         Magic one more may, the Eye's breath on the sidebar's mark (opacity
         and transform on one small layer); Calm and Off keep S1a's two; and
-        under reduced motion nothing loops at all, in any Ambience."""
+        under reduced motion nothing loops at all, in any Ambience.
+        Updated deliberately (2026-11-13, the operator's decision): the
+        price headband and the news ticker scroll again, continuously and
+        still on hover. One script moves them (static/js/sv-marquee.js),
+        never an endless animation: no keyframe marquee may run here, in
+        any Ambience, so the limits above stand; the strips' motion, speed
+        and holds are measured in tests/test_marquee.py."""
         beats = r"^(sv-heartbeat|sv-armed-beat)@"
+        for (url, width), got in sorted(self.got.items()):
+            for mode, names in sorted(got["anims"].items()):
+                with self.subTest(url=url, width=width, ambience=mode, marquee="keyframes"):
+                    self.assertFalse([a for a in names if re.match(r"^(tickerScroll|dhScroll)@", a)], names)
         for (url, width), got in sorted(self.got.items()):
             with self.subTest(url=url, width=width):
                 magic = got["anims"]["magic"]

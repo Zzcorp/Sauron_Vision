@@ -23,7 +23,7 @@ day change from another feed than the price's is a dash.
 <a href="{% url 'instrument_detail' m.symbol %}" class="dh-item" data-symbol="{{ m.symbol }}" data-decimals="{% px_decimals m.last m.asset_class m.symbol %}"
    data-last="{% px m.last m.asset_class m.symbol "" %}" data-pct="{{ m.change_pct|stringformat:".4f" }}"
    data-bid="{% px m.bid m.asset_class m.symbol "" %}" data-ask="{% px m.ask m.asset_class m.symbol "" %}"
-   data-vol="{% if m.volume %}{{ m.volume|stringformat:"d" }}{% endif %}" data-src="{{ m.source|default:"" }}" data-at="{{ m.updated|default:"" }}">
+   data-vol="{% if m.volume %}{{ m.volume|stringformat:"d" }}{% endif %}" data-src="{{ m.source|default:"" }}" data-at="{{ m.updated|default:"" }}"{% if twin %} aria-hidden="true" tabindex="-1"{% endif %}>
   <span class="dh-dot {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}"></span>
   <span class="dh-sym">{{ m.symbol }}</span>
   <span class="dh-val"{% if m.q %} data-q="{{ m.symbol }}" data-q-title title="{{ m.q_title }}"{% endif %}>{% px m.last m.asset_class m.symbol %}</span>
