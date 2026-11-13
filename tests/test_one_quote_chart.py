@@ -136,9 +136,13 @@ const hourS = nowS - nowS % 3600;
     const api = sandbox.svCharts[ID];
     R.lines = candle().lines.map(function (l) { return { title: l.o.title, price: l.o.price }; });
     R.caption = role('now');
+    /* The painter hands its price to the weld when the chart registers
+       (the review's fixes, 2026-11-12): the forming bar already holds it. */
+    R.weldAtLoad = { n: log.updates.length, last: lastUpdate() };
+    const n0 = log.updates.length;
     api.tick(1.2941, { source_family: 'yahoo', side: '', stand_in: '', quote_age_seconds: 20,
                        source_words: 'Yahoo GBPUSD=X' });
-    R.weld = { n: log.updates.length, last: lastUpdate(), lastBar: bars[bars.length - 1].time };
+    R.weld = { n: log.updates.length - n0, last: lastUpdate(), lastBar: bars[bars.length - 1].time };
     process.stdout.write(JSON.stringify(R));
 })().catch(function (e) { process.stderr.write(String((e && e.stack) || e)); process.exit(1); });
 """
@@ -241,3 +245,12 @@ class TheSameFeedWeldTests(SimpleTestCase):
         self.assertEqual(w["n"], 1)
         self.assertEqual(w["last"]["close"], 1.2941)
         self.assertEqual(w["last"]["time"], w["lastBar"])
+
+    def test_the_painter_welds_its_price_when_the_chart_registers(self):
+        """The forming candle holds the price the numbers print from the
+        start, not from the first 15 s poll (the review, 2026-11-12: the
+        candle trailed the "now" line, and a refresh put it back)."""
+        a = self.r["weldAtLoad"]
+        self.assertEqual(a["n"], 1)
+        self.assertEqual(a["last"]["close"], 1.2941)
+        self.assertEqual(a["last"]["time"], self.r["weld"]["lastBar"])

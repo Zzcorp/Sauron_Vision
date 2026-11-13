@@ -258,6 +258,40 @@ def _head(payload: dict, side=None) -> str:
     return who
 
 
+def effective_state(payload: dict, now_ms) -> str:
+    """The payload's state at `now_ms`: a shut market whose reopening
+    (shut.reopens, epoch ms) has come is an open market's last price, live
+    while an outside stream's value is within its bound, else delayed (the
+    review, 2026-11-12: a tab flipped at the reopening only when the next
+    server render reached it, up to a minute apart from the next tab). The
+    browser recounts it every second with the same rule."""
+    p = payload or {}
+    state = p.get("state") or NONE
+    if state != SHUT or now_ms is None:
+        return state
+    reopens = (p.get("shut") or {}).get("reopens")
+    if reopens is None or now_ms < reopens:
+        return state
+    at, ls = p.get("at"), p.get("ls")
+    if ls is not None and at is not None and (now_ms - at) / 1000.0 <= ls:
+        return LIVE
+    return DELAYED
+
+
+def shut_at(payload: dict):
+    """When a shut market's price is from: its reading, or the start of the
+    shut when Sauron read it after the close (the review, 2026-11-12: a
+    gold reading taken at 22:20 printed "eToro bid 22:20" for the 22:00
+    close, and a weekend re-stamp would print Saturday for Friday's
+    price). Epoch ms, or None."""
+    p = payload or {}
+    at = p.get("at")
+    since = (p.get("shut") or {}).get("since")
+    if at is not None and since is not None and at > since:
+        return since
+    return at
+
+
 def words(payload: dict, now_ms: int, side=None) -> str:
     """The words beside a price, from its payload (Shown.payload) at
     `now_ms` (epoch milliseconds), for a cell printing `side` (a
@@ -269,9 +303,13 @@ def words(payload: dict, now_ms: int, side=None) -> str:
       previous close     Yahoo EURUSD=X previous close · Thu 12 Nov
       shut               closed · eToro bid Fri 13 Nov 21:58 · opens Sun 22:00 UTC
       none               awaiting eToro (held) / no price
+
+    A shut market's time is its close when Sauron read it after the close
+    (`shut_at`); past its reopening it reads as an open market's last
+    price (`effective_state`).
     """
     p = payload or {}
-    state = p.get("state") or NONE
+    state = effective_state(p, now_ms)
     if state == NONE or p.get("v") is None:
         return "awaiting eToro" if p.get("auth") == AUTH_ETORO else "no price"
     head = _head(p, side)
@@ -286,8 +324,9 @@ def words(payload: dict, now_ms: int, side=None) -> str:
                 core += f" {day_words(_utc(at))}"
         else:
             core = head
-            if at is not None:
-                core += f" {when_words(_utc(at), now_at)}"
+            t = shut_at(p)
+            if t is not None:
+                core += f" {when_words(_utc(t), now_at)}"
         out = f"closed · {core}"
         if shut.get("opens"):
             out += f" · {shut['opens']}"
@@ -308,16 +347,179 @@ def words(payload: dict, now_ms: int, side=None) -> str:
 
 def slot_words(payload: dict, now_ms: int) -> str:
     """The outside quote beside an eToro price: "Yahoo GC=F, the
-    front-month future 2671.30 · 3 min · +0.87% vs eToro"."""
+    front-month future 2671.30 · 3 min · +0.87% vs eToro"; Yahoo's
+    previous close says so, with its day and no gap: "Yahoo GC=F, the
+    front-month future previous close 2671.30 · Wed 11 Nov"."""
     slot = (payload or {}).get("slot") or None
     if not slot:
         return ""
+    if slot.get("prev"):
+        out = (f"{slot.get('who') or ''} previous close "
+               f"{slot.get('p') or DASH}").strip()
+        if slot.get("at") is not None:
+            out += f" · {day_words(_utc(slot['at']))}"
+        return out
     parts = [f"{slot.get('who') or ''} {slot.get('p') or DASH}".strip()]
     if slot.get("at") is not None:
         parts.append(age_words(max(0.0, (now_ms - slot["at"]) / 1000.0)))
     if slot.get("gap") is not None:
         parts.append(f"{slot['gap']}% vs eToro")
     return " · ".join(parts)
+
+
+def _num(text) -> Optional[float]:
+    try:
+        v = float(text)
+    except (TypeError, ValueError):
+        return None
+    return v if v == v and v not in (float("inf"), float("-inf")) else None
+
+
+def value_text(payload: dict, side=None) -> str:
+    """The px text a cell printing `side` shows (Shown.text from the
+    payload; the browser's valueText)."""
+    p = payload or {}
+    if p.get("v") is None:
+        return DASH
+    s = side or ""
+    if s == "bid" and p.get("b") is not None:
+        return p["b"]
+    if s == "ask" and p.get("a") is not None:
+        return p["a"]
+    if s == "mid" and p.get("b") is not None and p.get("a") is not None:
+        if p.get("side") == "mid":
+            return p.get("p") or DASH
+        return _px((Decimal(p["b"]) + Decimal(p["a"])) / 2, p.get("dp", 2))
+    if s == "last" and p.get("l") is not None:
+        return p["l"]
+    return p.get("p") or DASH
+
+
+def _clock_face(ms) -> str:
+    a = _utc(ms)
+    return f"{a:%H:%M:%S} UTC ·"
+
+
+def fmt2(x: float) -> str:
+    """A figure to two places, rounded half up from its shortest spelling
+    (Django's floatformat:2): the browser's SVVenue.fmt2 rounds the same
+    digits the same way, so the server and the page print one text for
+    one figure ("-0.00" is "0.00")."""
+    from decimal import ROUND_HALF_UP
+    out = str(Decimal(repr(float(x))).quantize(Decimal("0.01"),
+                                                ROUND_HALF_UP))
+    return "0.00" if out == "-0.00" else out
+
+
+def ref_text(value, asset_class="", symbol="") -> str:
+    """A level as a cell carries it for the browser to work a figure out
+    from (data-q-ref, data-q-stop, data-q-target): the instrument's own
+    price digits, more when the level itself has more ("1.08210",
+    "2640.00", "228.2734"); "" for none."""
+    d = _dec(value)
+    if d is None:
+        return ""
+    exp = d.normalize().as_tuple().exponent
+    extra = -exp if isinstance(exp, int) and exp < 0 else 0
+    return _px(d, max(_decimals(d, asset_class, symbol), extra))
+
+
+def field_words(payload: dict, field, now_ms, side=None, attrs=None) -> str:
+    """The text of the cells a price carries beside its number (the
+    review's fixes, 2026-11-12), worked out from the payload exactly as the
+    browser works them out (SVVenue.fieldText; one case table pins both,
+    tests/one_quote_words.json "fields"). `attrs` are the cell's own
+    attributes (data-q-ref, data-q-below, data-q-o, data-q-stop,
+    data-q-target, data-q-max, data-q-title).
+
+      age     "25 s"; a shut market "closed · opens Sun 22:00 UTC"; a
+              previous close "previous close · Thu 12 Nov"
+      asof    "19:13:31 UTC ·" (a shut market's: its close when read after
+              it); a previous close has no clock face ("")
+      since   "+0.22% since entry" (the price at `side` against data-q-ref)
+      away    "0.42% away" / "THROUGH by 0.05%" (to the level data-q-ref,
+              resolved below the price when data-q-below is "1")
+      rr      reward to risk from the price now ("0.83"), the dash when
+              the price is older than data-q-max seconds
+      title   the hover: the words, who read it, a carried spread, a
+              previous close, the outside quote, the cell's own tail
+              (data-q-title)
+    """
+    p = payload or {}
+    a = attrs or {}
+    f = field or "price"
+    state = effective_state(p, now_ms)
+    priced = p.get("v") is not None and state != NONE
+    at = p.get("at")
+    if f == "age":
+        if not priced:
+            return ""
+        if p.get("basis") == BASIS_PREVIOUS_CLOSE:
+            return "previous close" + (
+                f" · {day_words(_utc(at))}" if at is not None else "")
+        if state == SHUT:
+            opens = (p.get("shut") or {}).get("opens") or ""
+            return "closed" + (f" · {opens}" if opens else "")
+        if at is None:
+            return ""
+        return age_words(max(0.0, (now_ms - at) / 1000.0))
+    if f == "asof":
+        if at is None:
+            return DASH
+        if p.get("basis") == BASIS_PREVIOUS_CLOSE:
+            return ""
+        return _clock_face(shut_at(p) if state == SHUT else at)
+    if f in ("since", "away"):
+        v = _num(value_text(p, side)) if priced else None
+        ref = _num(a.get("data-q-ref"))
+        if v is None or ref is None or ref <= 0 or v <= 0:
+            return ""
+        if f == "since":
+            pct = (v - ref) / ref * 100
+            return f"{'+' if pct > 0 else ''}{fmt2(pct)}% since entry"
+        below = str(a.get("data-q-below") or "") in ("1", "true")
+        through = (v <= ref) if below else (v >= ref)
+        pct = fmt2(abs(ref - v) / abs(v) * 100)
+        return f"THROUGH by {pct}%" if through else f"{pct}% away"
+    if f == "rr":
+        order = str(a.get("data-q-o") or "").upper()
+        stop, target = _num(a.get("data-q-stop")), _num(a.get("data-q-target"))
+        bound = _num(a.get("data-q-max"))
+        v = _num(value_text(p, "")) if priced else None
+        if (v is None or at is None or order not in ("BUY", "SELL")
+                or stop is None or target is None):
+            return DASH
+        if bound is not None and (now_ms - at) / 1000.0 > bound:
+            return DASH
+        risk = abs(v - stop)
+        if not (v > 0 and risk > 0):
+            return DASH
+        reward = max((target - v) if order == "BUY" else (v - target), 0.0)
+        return fmt2(reward / risk)
+    if f == "title":
+        parts = [words(p, now_ms, side=side)]
+        via = VIA_WORDS.get(p.get("via") or "", "")
+        if via and p.get("v") is not None:
+            parts.append(via)
+        if p.get("sf") is not None and (side or p.get("side")) in (
+                "bid", "ask", "mid"):
+            parts.append("its bid and ask from the spread measured "
+                         + when_words(_utc(p["sf"]), _utc(now_ms)))
+        if p.get("basis") == BASIS_PREVIOUS_CLOSE:
+            parts.append("Yahoo's previous close, standing in for a "
+                         "market price")
+        slot = slot_words(p, now_ms)
+        if slot:
+            parts.append(f"outside quote: {slot}")
+        tail = a.get("data-q-title")
+        if tail:
+            parts.append(str(tail))
+        return "; ".join(x for x in parts if x)
+    raise ValueError(f"not a payload field: {field!r}")
+
+
+#: The cells whose text field_words works out from the payload.
+PAYLOAD_FIELDS = ("age", "asof", "since", "away", "rr", "title")
 
 
 # ── the answer ───────────────────────────────────────────────────────────
@@ -402,44 +604,36 @@ class Shown:
         return words(self.payload(), _ms(n), side=side)
 
     def age_text(self, now_at=None) -> str:
-        if self.at is None or self.price is None:
-            return ""
+        """The age beside the card's clock face: "25 s"; a shut market
+        "closed · opens Sun 22:00 UTC"; a previous close "previous close ·
+        Thu 12 Nov" (field_words)."""
         n = now_at or _clock()
-        return age_words(max(0.0, (n - self.at).total_seconds()))
+        return field_words(self.payload(), "age", _ms(n))
 
-    def asof_text(self) -> str:
-        """The headband card's "As of": the UTC clock face of `at`."""
-        if self.at is None:
-            return DASH
-        a = self.at.astimezone(dt_tz.utc)
-        return f"{a:%H:%M:%S} UTC ·"
+    def asof_text(self, now_at=None) -> str:
+        """The headband card's "As of": the UTC clock face of when the price
+        is from (a shut market's close when read after it); none for a
+        previous close, whose day the age says (field_words)."""
+        n = now_at or _clock()
+        return field_words(self.payload(), "asof", _ms(n))
 
     def slot_text(self, now_at=None) -> str:
         n = now_at or _clock()
         return slot_words(self.payload(), _ms(n))
 
-    def title(self, now_at=None, side=None) -> str:
+    def title(self, now_at=None, side=None, tail="") -> str:
         """The hover: the words, who read it, a carried spread, the
-        outside quote beside it."""
+        outside quote beside it, and a cell's own `tail` (field_words, the
+        browser's mirror repaints it with the price)."""
         n = now_at or _clock()
-        parts = [self.words(n, side=side)]
-        via = VIA_WORDS.get(self.via, "")
-        if via and self.price is not None:
-            parts.append(via)
-        if self.sides_from is not None and (side or self.side) in (
-                "bid", "ask", "mid"):
-            parts.append("its bid and ask from the spread measured "
-                         + when_words(self.sides_from, n))
-        if self.basis == BASIS_PREVIOUS_CLOSE:
-            parts.append("Yahoo's previous close, standing in for a "
-                         "market price")
-        slot = self.slot_text(n)
-        if slot:
-            parts.append(f"outside quote: {slot}")
-        return "; ".join(p for p in parts if p)
+        return field_words(self.payload(), "title", _ms(n), side=side,
+                           attrs={"data-q-title": tail} if tail else None)
 
-    def field_text(self, field="price", *, side=None, now_at=None) -> str:
-        """One cell's text, by its field (the `data-q-f` grammar)."""
+    def field_text(self, field="price", *, side=None, now_at=None,
+                   attrs=None) -> str:
+        """One cell's text, by its field (the `data-q-f` grammar); `attrs`
+        are the cell's own attributes, for the fields worked out against a
+        level (since, away, rr) and a hover's tail."""
         f = field or "price"
         if f == "price":
             return self.text(side)
@@ -451,14 +645,12 @@ class Shown:
             return self.who or DASH
         if f == "words":
             return self.words(now_at, side=side)
-        if f == "age":
-            return self.age_text(now_at)
-        if f == "asof":
-            return self.asof_text()
         if f == "slot":
             return self.slot_text(now_at)
-        if f == "title":
-            return self.title(now_at, side=side)
+        if f in PAYLOAD_FIELDS:
+            n = now_at or _clock()
+            return field_words(self.payload(), f, _ms(n), side=side,
+                               attrs=attrs)
         raise ValueError(f"not a quote field: {field!r}")
 
     # ── the browser's value ──
@@ -469,9 +661,12 @@ class Shown:
             return None if v is None else _px(v, self.dp)
         shut = None
         if self.shut:
+            # `reopens`: the browser flips the cells at the reopening by
+            # itself (effective_state), on every tab at once.
             shut = {"since": _ms(self.shut.get("since")),
                     "label": self.shut.get("label") or "",
-                    "opens": self.shut.get("opens") or ""}
+                    "opens": self.shut.get("opens") or "",
+                    "reopens": _ms(self.shut.get("reopens"))}
         return {"s": self.symbol, "p": txt(self.price),
                 "v": None if self.price is None else float(self.price),
                 "l": txt(self.last), "b": txt(self.bid), "a": txt(self.ask),
@@ -612,17 +807,47 @@ def _close_days(inst_ids) -> dict:
 
 
 class _Clocks:
-    """market_state and market_clock, memoised per instrument for one
-    answer (both are pure: no query)."""
+    """market_state and market_clock for one instant, memoised per SESSION
+    (both are pure: no query). The clock of an instrument is its class and
+    the session code core.exchange_status.session_code_for reads off its
+    class, venue and symbol (the FX week for every pair, the listing venue
+    for a stock, the cash index's venue for an index, a product session
+    for the few contracts that have one), so every instrument of one
+    session shares one answer. The review, 2026-11-12: keyed by symbol,
+    237 symbols read the clock 565 times (170 ms of every render)."""
 
     def __init__(self, now_at):
         self.now = now_at
         self._state: dict = {}
         self._clock: dict = {}
 
+    @staticmethod
+    def _key(inst):
+        cls = str(getattr(inst, "asset_class", "") or "").strip().lower()
+        exch = getattr(inst, "exchange", "") or ""
+        sym = getattr(inst, "symbol", "") or ""
+        try:
+            from core.exchange_status import session_code_for
+            return cls, session_code_for(cls, exch, sym)
+        except Exception:  # noqa: BLE001 — the instrument's own key
+            return cls, f"{exch}|{sym}"
+
+    def _market_clock(self, inst):
+        key = self._key(inst)
+        if key not in self._clock:
+            try:
+                from core.exchange_status import market_clock
+                self._clock[key] = market_clock(
+                    key[0], getattr(inst, "exchange", "") or "",
+                    symbol=getattr(inst, "symbol", "") or "",
+                    now_utc=self.now)
+            except Exception as e:  # noqa: BLE001
+                logger.info("[one quote] market clock unread: %s", e)
+                self._clock[key] = None
+        return self._clock[key]
+
     def state(self, inst) -> dict:
-        key = (getattr(inst, "asset_class", ""), getattr(inst, "exchange", ""),
-               getattr(inst, "symbol", ""))
+        key = self._key(inst)
         if key not in self._state:
             try:
                 from signals.market_hold import market_state
@@ -637,39 +862,54 @@ class _Clocks:
         (core.exchange_status.market_clock: the cash index's venue for an
         index, CME for a commodity's future, the FX week, the listing
         exchange); None while it is open or unmodelled."""
-        key = (getattr(inst, "asset_class", ""), getattr(inst, "exchange", ""),
-               getattr(inst, "symbol", ""))
-        if key not in self._clock:
-            try:
-                from core.exchange_status import market_clock
-                c = market_clock(key[0], key[1], symbol=key[2],
-                                 now_utc=self.now)
-                self._clock[key] = (None if c.get("is_open", True)
-                                    or not c.get("modelled")
-                                    else c.get("closed"))
-            except Exception as e:  # noqa: BLE001
-                logger.info("[one quote] market clock unread: %s", e)
-                self._clock[key] = None
-        return self._clock[key]
+        c = self._market_clock(inst)
+        if not c or c.get("is_open", True) or not c.get("modelled"):
+            return None
+        return self._last_trade(inst, c.get("closed"))
+
+    def _last_trade(self, inst, closed):
+        """When a shut market's last price is from: the clock's close, but
+        for the FX week the venues' own close. The clock shuts the week at
+        the EARLIER of its two closes (the FOREX row's Friday 21:00 UTC and
+        17:00 New York, core.exchange_status._forex_edges); eToro and OANDA
+        trade until 17:00 New York, which is 22:00 UTC from November to
+        March, so a Friday price read at 21:58 is a price of 21:58, and a
+        weekend re-stamp of it is dated 22:00 (the review, 2026-11-12)."""
+        if closed is None or self._key(inst)[0] != "forex":
+            return closed
+        try:
+            from datetime import time as _time
+
+            import pytz
+            ny = pytz.timezone("America/New_York")
+            day = closed.astimezone(ny).date()
+            venue = ny.localize(datetime.combine(day, _time(17, 0)))
+            venue = venue.astimezone(dt_tz.utc)
+        except Exception:  # noqa: BLE001 — the clock's own close
+            return closed
+        return venue if venue > closed else closed
 
     def shut(self, inst):
-        """{"since", "label", "opens"} while the instrument's market is
-        shut by the signal rail's clock, else None."""
+        """{"since", "label", "opens", "reopens"} while the instrument's
+        market is shut by the signal rail's clock, else None."""
         st = self.state(inst)
         if st.get("state") != "shut":
             return None
-        since = None
-        try:
-            from core.exchange_status import market_clock
-            c = market_clock(getattr(inst, "asset_class", ""),
-                             getattr(inst, "exchange", ""),
-                             symbol=getattr(inst, "symbol", ""),
-                             now_utc=self.now)
-            since = c.get("closed")
-        except Exception:  # noqa: BLE001
-            since = None
-        return {"since": since, "label": st.get("label") or "market shut",
-                "opens": st.get("opens") or ""}
+        c = self._market_clock(inst)
+        since = self._last_trade(inst, c.get("closed") if c else None)
+        if self._key(inst)[0] == "index":
+            # An index is shut once its cash session AND the futures week
+            # are (signals.market_hold._index_clock): its shut began at the
+            # later of the two closes, which the CFD traded up to.
+            fut = self._market_clock(SimpleNamespace(
+                asset_class="commodity", exchange="CME", symbol=""))
+            closed = fut.get("closed") if fut else None
+            if closed is not None and (since is None or closed > since):
+                since = closed
+        return {"since": since,
+                "label": st.get("label") or "market shut",
+                "opens": st.get("opens") or "",
+                "reopens": st.get("reopens")}
 
 
 def _who(tag, inst) -> str:
@@ -735,8 +975,16 @@ def _slot(q, inst, shown_price, now_at, clocks) -> Optional[dict]:
         return None
     cls = getattr(inst, "asset_class", "") or ""
     dp = _decimals(ref.last, cls, getattr(inst, "symbol", ""))
-    at = _outside_at(ref.written_at, inst, clocks)
     gap = None
+    if getattr(q, "_sv_prev", False):
+        # Yahoo's PREVIOUS CLOSE written as a fresh last (F1's harm event):
+        # said so, dated by the close's day, and no gap against eToro's
+        # price now (the review, 2026-11-12: "2671.30 · 39 min · +0.87%
+        # vs eToro" read as a current quote).
+        return {"who": _who(ref.source, inst), "p": _px(ref.last, dp),
+                "at": _ms(getattr(q, "_sv_prev_day", None)), "gap": None,
+                "si": ref.stand_in or "", "src": ref.source, "prev": True}
+    at = _outside_at(ref.written_at, inst, clocks)
     if shown_price is not None and shown_price > 0:
         g = (ref.last / shown_price - 1) * 100
         from dashboard.chart_source import GAP_WORDS_PCT
@@ -903,19 +1151,21 @@ def _outside(symbol, inst, q, now_at, clocks) -> Shown:
         via="", volume=_volume(q), family=_family(tag))
 
 
-def shown_many(symbols, *, user=None, now=None) -> dict:
+def shown_many(symbols, *, user=None, now=None, clocks=None) -> dict:
     """{symbol: Shown} for every symbol asked, at one instant (`now`,
     default the module's clock). `user`: the viewer (a User: their open
     eToro rows decide what they hold), ALL (every user's: the display
     relay) or None (nobody holds anything: an anonymous page). Three
     queries for any number of symbols (one more when a previous close's
-    day is shown). Never raises: a symbol it cannot answer is "no price"."""
+    day is shown). Never raises: a symbol it cannot answer is "no price".
+    `clocks`: the market clocks of that instant, shared by a response's
+    reads (Registry)."""
     asked = [str(s or "") for s in symbols if s]
     if not asked:
         return {}
     now_at = now if now is not None else _clock()
     upper = sorted({s.upper() for s in asked})
-    return _answer(asked, _held_rows(upper, user), now_at)
+    return _answer(asked, _held_rows(upper, user), now_at, clocks=clocks)
 
 
 def _held_of(rows) -> dict:
@@ -950,7 +1200,8 @@ def shown_from(symbols, *, rows=(), quotes=None, instruments=None,
     return _answer(asked, _held_of(rows), now_at, insts=insts, quotes=quotes)
 
 
-def _answer(asked, held, now_at, *, insts=None, quotes=None) -> dict:
+def _answer(asked, held, now_at, *, insts=None, quotes=None,
+            clocks=None) -> dict:
     """The rule for `asked` given the open eToro rows `held` ({SYMBOL:
     rows}): the instruments with their LiveQuote rows (one query, unless
     the caller hands them) and the previous-close events (one query, none
@@ -976,7 +1227,8 @@ def _answer(asked, held, now_at, *, insts=None, quotes=None) -> dict:
     for k, q in prev_rows.items():
         q._sv_prev = True
         q._sv_prev_day = days.get(insts[k].id) if k in insts else None
-    clocks = _Clocks(now_at)
+    if clocks is None or clocks.now != now_at:
+        clocks = _Clocks(now_at)
     out = {}
     for s in asked:
         k = keys[s]
@@ -1017,28 +1269,41 @@ def shown(symbol, *, user=None, now=None) -> Shown:
 
 class Registry:
     """The answers of one response, at one instant, for one viewer: every
-    cell of a symbol on a page prints the same Shown, and the page's JSON
-    block (`json_block`) carries exactly what its cells used."""
+    cell of a symbol on a page prints the same Shown, and the response's
+    JSON blocks (`json_block`) carry exactly what its cells printed.
+
+    PRINTED, NOT ASKED (the review, 2026-11-12). The shell's context
+    (core.context_ui: the headband and the watchlist) asks for its
+    symbols on every render, the region sweeps and the fragments fetched
+    alone included, which print no shell: a fragment's block carried the
+    shell's answers too (78 KB of a 91 KB rail partial at 237 symbols).
+    `many(..., printed=False)` asks without printing; a fragment's block
+    carries what it printed, the shell's own block (`shell=True`, at the
+    end of base.html) everything the page asked."""
 
     def __init__(self, user=None, now_at=None):
         self.user = user
         self.now = now_at or _clock()
         self._got: dict = {}
-        self._used: list = []
+        self._used: list = []          # asked, in order
+        self._printed: list = []
         self._emitted: set = set()
+        self._clocks = _Clocks(self.now)
 
-    def many(self, symbols) -> dict:
+    def many(self, symbols, *, printed=True) -> dict:
         want = [str(s or "") for s in symbols if s]
         missing = [s for s in want if s.upper() not in self._got]
         if missing:
-            for s, v in shown_many(missing, user=self.user,
-                                   now=self.now).items():
+            for s, v in shown_many(missing, user=self.user, now=self.now,
+                                   clocks=self._clocks).items():
                 self._got[s.upper()] = v
         out = {}
         for s in want:
             k = s.upper()
             if k not in self._used:
                 self._used.append(k)
+            if printed and k not in self._printed:
+                self._printed.append(k)
             out[s] = self._got.get(k) or Shown(symbol=k)
         return out
 
@@ -1049,17 +1314,21 @@ class Registry:
     def used(self) -> list:
         return list(self._used)
 
+    def printed(self) -> list:
+        return list(self._printed)
+
     def payloads(self, symbols=None) -> dict:
         syms = self._used if symbols is None else [s.upper() for s in symbols]
         return {k: self._got[k].payload() for k in syms if k in self._got}
 
-    def json_block(self, *, all_used=False) -> str:
+    def json_block(self, *, all_used=False, shell=False) -> str:
         """`<script type="application/json" data-sv-quotes>` with the
-        payloads of the symbols this response used and has not emitted
-        yet (all of them with `all_used`), and the server's clock; "" when
-        there is nothing to say."""
-        syms = [k for k in self._used
-                if all_used or k not in self._emitted]
+        payloads of the symbols this response printed and has not emitted
+        yet (`shell`: every symbol it asked and has not emitted; `all_used`:
+        every symbol it asked), and the server's clock; "" when there is
+        nothing to say."""
+        pool = self._used if (shell or all_used) else self._printed
+        syms = [k for k in pool if all_used or k not in self._emitted]
         if not syms:
             return ""
         self._emitted |= set(syms)

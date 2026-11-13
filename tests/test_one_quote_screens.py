@@ -135,8 +135,11 @@ class _Screens(TestCase):
             sym = c["sym"].upper()
             if sym not in want:
                 continue
+            # The cell's own attributes: a figure worked out against a
+            # level (since, away, rr; the review's fixes, 2026-11-12)
+            # reads its level off the cell, as the browser does.
             exp = want[sym].field_text(c["f"], side=c["side"] or None,
-                                       now_at=T)
+                                       now_at=T, attrs=c["attrs"])
             with self.subTest(url=url, sym=sym, field=c["f"], side=c["side"]):
                 self.assertEqual(c["text"], exp, c["attrs"])
         for b in blocks:

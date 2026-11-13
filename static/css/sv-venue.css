@@ -37,3 +37,9 @@
 
 /* The chart's "now" caption (chart_widget, data-role="now"). */
 .sv-src-now { display: block; color: var(--text-secondary); }
+
+/* The quote socket is down (SVVenue.socket; the feed design 4.6.2): every
+   live chip says so, greyed. The prices on the page are the last ones
+   received, and their ages keep counting. */
+body.sv-quotes-paused [data-sv-live-status] { color: var(--text-muted); }
+body.sv-quotes-paused [data-sv-live-status]::after { content: " · live prices paused"; }

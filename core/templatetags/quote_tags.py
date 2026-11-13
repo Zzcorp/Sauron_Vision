@@ -57,10 +57,13 @@ def q(context, symbol, field="price", side=None):
 
 
 @register.simple_tag(takes_context=True)
-def q_json(context):
+def q_json(context, shell=False):
     """The quote block of every symbol this response printed and has not
-    written yet ("" when there is none)."""
-    return mark_safe(_registry(context).json_block())
+    written yet ("" when there is none). `shell=1` (the shell's own block,
+    _partials/sv_venue.html at the end of base.html): every symbol the
+    response asked, the headband's and the watchlist's included, which the
+    shell printed from its context."""
+    return mark_safe(_registry(context).json_block(shell=bool(shell)))
 
 
 @register.simple_tag(takes_context=True)
@@ -72,13 +75,16 @@ def q_now(context):
 
 
 @register.simple_tag(takes_context=True)
-def q_title(context, symbol, side=None):
+def q_title(context, symbol, side=None, tail=""):
     """The hover of a price cell: its words, who read it, a carried
-    spread, the outside quote beside it."""
+    spread, the outside quote beside it, and the cell's own `tail` (the
+    cell carries the same tail in data-q-title, and the browser's one
+    painter rewrites the hover with the price)."""
     if not symbol:
         return ""
     reg = _registry(context)
-    return reg.get(symbol).title(reg.now, side=_side(side) or None)
+    return reg.get(symbol).title(reg.now, side=_side(side) or None,
+                                 tail=tail or "")
 
 
 @register.filter

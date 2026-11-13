@@ -157,7 +157,7 @@
             </div>
             <div class="inst-card-price">
                 {% if item.last is not None %}
-                    <span class="inst-card-last" data-q="{{ item.symbol }}">{% q item.symbol %}</span>
+                    <span class="inst-card-last" data-q="{{ item.symbol }}" data-q-title title="{% q_title item.symbol %}">{% q item.symbol %}</span>
                     <span class="inst-card-chg{% if item.chg is not None %} {% if item.chg >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ item.symbol }}" data-q-f="chg">{% q item.symbol "chg" %}</span>
                 {% else %}
                     <span style="color:var(--text-muted);font-size:12px;">No data</span>
@@ -252,7 +252,7 @@
                     {% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
                 </td>
                 <td style="font-family:var(--font-mono);font-weight:700;font-size:13px;">
-                    {% if item.last is not None %}<span data-q="{{ item.symbol }}">{% q item.symbol %}</span>{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
+                    {% if item.last is not None %}<span data-q="{{ item.symbol }}" data-q-title title="{% q_title item.symbol %}">{% q item.symbol %}</span>{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
                 </td>
                 {# An em-dash, never 0.00%: an instrument with no LiveQuote row has not reported flat, it has not reported at all — and the mover buckets skip it on the same grounds. #}
                 <td style="font-family:var(--font-mono);font-weight:600;color:{% if item.change_pct is not None %}{% if item.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}{% else %}var(--text-muted){% endif %};">

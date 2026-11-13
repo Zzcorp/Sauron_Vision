@@ -26,7 +26,7 @@ day change from another feed than the price's is a dash.
    data-vol="{% if m.volume %}{{ m.volume|stringformat:"d" }}{% endif %}" data-src="{{ m.source|default:"" }}" data-at="{{ m.updated|default:"" }}">
   <span class="dh-dot {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}"></span>
   <span class="dh-sym">{{ m.symbol }}</span>
-  <span class="dh-val"{% if m.q %} data-q="{{ m.symbol }}"{% endif %}>{% px m.last m.asset_class m.symbol %}</span>
+  <span class="dh-val"{% if m.q %} data-q="{{ m.symbol }}" data-q-title title="{{ m.q_title }}"{% endif %}>{% px m.last m.asset_class m.symbol %}</span>
   <span class="dh-chg{% if m.change_pct is not None %} {% if m.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}"{% if m.q %} data-q="{{ m.symbol }}" data-q-f="chg"{% endif %}>{% if m.q %}{{ m.q_chg }}{% else %}
     {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
   {% endif %}</span>
@@ -37,17 +37,17 @@ day change from another feed than the price's is a dash.
         <div class="dh-pop-name">{{ m.name }}</div>
       </div>
       <div class="dh-pop-badge {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}" data-dh-f="badge">
-        {% if m.change_pct >= 0 %}▲{% else %}▼{% endif %}
+        {% if m.change_pct is None %}—{% elif m.change_pct >= 0 %}▲{% else %}▼{% endif %}
       </div>
     </div>
     <div class="dh-pop-big">
-      <span class="dh-pop-price" data-dh-f="price"{% if m.q %} data-q="{{ m.symbol }}"{% endif %}>{% px m.last m.asset_class m.symbol %}</span>
+      <span class="dh-pop-price" data-dh-f="price"{% if m.q %} data-q="{{ m.symbol }}" data-q-title title="{{ m.q_title }}"{% endif %}>{% px m.last m.asset_class m.symbol %}</span>
       <span class="dh-pop-pct{% if m.change_pct is not None %} {% if m.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}" data-dh-f="pct"{% if m.q %} data-q="{{ m.symbol }}" data-q-f="chg"{% endif %} style="color:{% if m.change_pct is None %}var(--text-muted){% elif m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{% if m.q %}{{ m.q_chg }}{% else %}
         {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
       {% endif %}</span>
     </div>
     {% if m.spark and m.spark|length > 1 %}
-    <div class="pop-spark"{% if m.q %} data-q-spark="{{ m.symbol }}" data-q-fam="{{ m.spark_fam }}"{% endif %}
+    <div class="pop-spark"{% if m.q %} data-q-spark="{{ m.symbol }}" data-q-fam="{{ m.spark_fam }}" data-q-bars="{{ m.spark_bars }}"{% endif %}
          data-points="{% for v in m.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
          data-min="{{ m.spark_min|floatformat:6 }}"
          data-max="{{ m.spark_max|floatformat:6 }}"
@@ -67,7 +67,7 @@ day change from another feed than the price's is a dash.
     keeps true while the page stays open. It was "Updated 4 seconds ago",
     computed at render and still saying so an hour later. No time known, no
     time shown: never the browser's clock.{% endcomment %}
-    <div class="dh-pop-row" title="When Sauron received this quote (UTC), not the venue's own print time"><span class="k">As of</span><span class="v"><span data-dh-f="asof"{% if m.q %} data-q="{{ m.symbol }}" data-q-f="asof"{% endif %}>{% if m.q %}{{ m.q_asof }}{% elif m.updated_utc %}{{ m.updated_utc }} UTC ·{% else %}—{% endif %}</span> <span data-dh-f="age"{% if m.q %} data-q="{{ m.symbol }}" data-q-f="age"{% endif %}{% if m.updated %} data-sv-at="{{ m.updated }}"{% endif %}>{% if m.q %}{{ m.q_age }}{% elif m.updated %}{{ m.updated_human }}{% endif %}</span></span></div>
+    <div class="dh-pop-row" title="When the price is from (UTC), as Sauron knows it: its read time, or its market's close when it was read after the close; never the venue's own print time"><span class="k">As of</span><span class="v"><span data-dh-f="asof"{% if m.q %} data-q="{{ m.symbol }}" data-q-f="asof"{% endif %}>{% if m.q %}{{ m.q_asof }}{% elif m.updated_utc %}{{ m.updated_utc }} UTC ·{% else %}—{% endif %}</span> <span data-dh-f="age"{% if m.q %} data-q="{{ m.symbol }}" data-q-f="age"{% endif %}{% if m.updated %} data-sv-at="{{ m.updated }}"{% endif %}>{% if m.q %}{{ m.q_age }}{% elif m.updated %}{{ m.updated_human }}{% endif %}</span></span></div>
     <div class="dh-pop-bar">
       <div class="dh-pop-bar-fill" data-dh-f="bar"
         style="width:{% if m.change_pct >= 0 %}{% widthratio m.change_pct 1 10 %}%{% else %}0%{% endif %};

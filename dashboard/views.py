@@ -1838,16 +1838,21 @@ def _row_quote(row, mark, quotes):
         text = (format_price(mark, cls, sym) if mark is not None
                 else LIVE_DASH)
         return {"last_text": text, "q_text": "", "q_side": side,
-                "q_words": "", "q_title": "", "q": sh}
+                "q_words": "", "q_title": "", "q_tail": "", "q": sh}
     text = sh.text(side)
-    title = sh.title(side=side)
+    # The hover's tail names the valuation price when it differs; the cell
+    # carries it in data-q-title, so the painter rewrites the hover with
+    # the price and keeps the tail (the review, 2026-11-12).
+    tail = ""
     if mark is not None:
         valued = format_price(mark, cls, sym)
         if valued != text:
-            title += (f"; valued for profit and loss at {valued} (the "
-                      f"position's own venue mark)")
+            tail = (f"valued for profit and loss at {valued} (the "
+                    f"position's own venue mark)")
     return {"last_text": text, "q_text": text, "q_side": side,
-            "q_words": sh.words(side=side), "q_title": title, "q": sh}
+            "q_words": sh.words(side=side),
+            "q_title": sh.title(side=side, tail=tail), "q_tail": tail,
+            "q": sh}
 
 
 def _live_row(row, stops, levs=None, worlds=None, venues=None, quotes=None):
@@ -2599,6 +2604,14 @@ def _pos_num(value):
         return None
 
 
+def _ref_text(value, asset_class="", symbol="") -> str:
+    """A level as the painter works a figure out from it (data-q-ref):
+    the instrument's own price digits, more when the level has more
+    (market_data.one_quote.ref_text); "" for none."""
+    from market_data.one_quote import ref_text
+    return ref_text(value, asset_class, symbol)
+
+
 def _pos_fmt(value, digits=None):
     """A number as the card should print it, or "" for one we do not have.
 
@@ -2868,7 +2881,7 @@ def _position_card_details(user, positions, *, orcs=False, venues=None,
     # up promising an R the ledger never books.
     from bot_program.manual_close import _initial_stop, _risk_dollars
     from bot_program.tax_lot_models import TaxLot
-    from core.context_ui import _recent_closes
+    from core.context_ui import recent_closes, spark_words
     from instruments.models import Instrument
     from signals.models import Signal
 
@@ -2936,20 +2949,24 @@ def _position_card_details(user, positions, *, orcs=False, venues=None,
     symbols = {getattr(p.instrument, "symbol", "") for p in positions
                if getattr(p, "instrument", None)}
     symbols.discard("")
+    # One feed per spark, and whose (2026-11-12): {"spark", "fam", "bars"}.
     sparks, missing = {}, []
     for sym in symbols:
-        hit = cache.get("pos:spark:" + sym)
+        hit = cache.get("pos:spark2:" + sym)
         if hit is None:
             missing.append(sym)
         else:
             sparks[sym] = hit
     if missing:
-        inst_ids = dict(Instrument.objects.filter(symbol__in=missing)
-                        .values_list("symbol", "id"))
+        insts = {i.symbol: i for i in Instrument.objects.filter(
+            symbol__in=missing).only("id", "symbol", "asset_class")}
         for sym in missing:
-            closes = _recent_closes(inst_ids[sym]) if sym in inst_ids else []
-            sparks[sym] = closes
-            cache.set("pos:spark:" + sym, closes, 300)
+            got = (recent_closes(insts[sym].id) if sym in insts
+                   else {"spark": [], "fam": "", "tf": ""})
+            got = {"spark": got["spark"], "fam": got["fam"],
+                   "bars": spark_words(got["fam"], got["tf"], insts.get(sym))}
+            sparks[sym] = got
+            cache.set("pos:spark2:" + sym, got, 300)
 
     # The open book's MARK rung prints the rule's price (2026-11-12): the
     # response's answers when the caller hands them, none for history.
@@ -2970,16 +2987,6 @@ def _position_card_details(user, positions, *, orcs=False, venues=None,
                  else None)
         if venue is not None:
             pnl, pnl_pct = _pos_num(venue["pnl_usd"]), venue["pnl_pct"]
-
-        stop_pct, stop_through = _pos_distance(mark, stop, is_long)
-        target_pct, target_through = _pos_distance(mark, target, not is_long)
-
-        # Where the mark stands between the ENTRY stop and the target. The
-        # formula is direction-agnostic: for a short both differences are
-        # negative and the ratio comes out the same way up.
-        progress = ""
-        if None not in (mark, istop, target) and target != istop:
-            progress = "{:.1f}".format((mark - istop) / (target - istop) * 100)
 
         # What 1R is worth in the config's base currency — the SIZE of the
         # risk, which no column prints. The R MULTIPLE itself is deliberately
@@ -3004,7 +3011,33 @@ def _position_card_details(user, positions, *, orcs=False, venues=None,
         _sh = card_q["q"]
         shown_mark = (float(_sh.value(card_q["q_side"]))
                       if _sh is not None and _sh.price is not None else mark)
-        spark = sparks.get(sym) or []
+        # The card's distances and its bar are worked out from the price
+        # its MARK rung prints (the review, 2026-11-12: "TARGET 0.32% away"
+        # was the valuation mark's, beside the rung's newer price). Display
+        # only: the R and the P&L keep the valuation mark.
+        stop_pct, stop_through = _pos_distance(shown_mark, stop, is_long)
+        target_pct, target_through = _pos_distance(shown_mark, target,
+                                                   not is_long)
+        # Where the mark stands between the ENTRY stop and the target. The
+        # formula is direction-agnostic: for a short both differences are
+        # negative and the ratio comes out the same way up.
+        progress = ""
+        if None not in (shown_mark, istop, target) and target != istop:
+            progress = "{:.1f}".format(
+                (shown_mark - istop) / (target - istop) * 100)
+        _cls = getattr(getattr(p, "instrument", None), "asset_class", "") or ""
+        q_refs = {"q_entry": _ref_text(p.entry_price, _cls, sym),
+                  "q_stop": _ref_text(p.stop_loss, _cls, sym),
+                  "q_target": _ref_text(p.take_profit, _cls, sym)}
+        since = ""
+        if _sh is not None and _sh.price is not None and q_refs["q_entry"]:
+            from market_data.one_quote import field_words, now as _oq_now
+            since = field_words(
+                _sh.payload(), "since",
+                int(round(_oq_now().timestamp() * 1000)),
+                side=card_q["q_side"], attrs={"data-q-ref": q_refs["q_entry"]})
+        sp = sparks.get(sym) or {}
+        spark = sp.get("spark") or []
         paper = getattr(p, "paper", None)
         opened = p.opened_at
 
@@ -3078,6 +3111,11 @@ def _position_card_details(user, positions, *, orcs=False, venues=None,
             # down.
             "mark_pct": (_pos_fmt((shown_mark - entry) / entry * 100, 2)
                          if shown_mark is not None and entry else ""),
+            # The same move in the painter's words ("+0.22% since entry"),
+            # and the exact levels it works the figures out from as the
+            # price moves (sv-venue.js since/away: data-q-ref).
+            "mark_since": since,
+            **q_refs,
             # LEVERAGE, as a fact rather than a control. Nothing on this
             # platform sets it — the broker does — but the platform models
             # it: `manual_trade.CAPITAL_USE_FRACTION` is the fraction of a
@@ -3141,6 +3179,8 @@ def _position_card_details(user, positions, *, orcs=False, venues=None,
             "spark_min": _pos_fmt(min(spark), 8) if spark else "",
             "spark_max": _pos_fmt(max(spark), 8) if spark else "",
             "spark_up": "1" if len(spark) > 1 and spark[-1] >= spark[0] else "",
+            "spark_fam": sp.get("fam", ""),
+            "spark_bars": sp.get("bars", ""),
             # The click destination. Only a bot trade has a timeline; a row
             # from the shared book has no page to open, and the card says so
             # rather than offering a link that 404s.

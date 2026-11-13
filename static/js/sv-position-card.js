@@ -218,32 +218,42 @@
         }
     }
 
-    /* Same path maths as the rail/headband sparks (base.html renderSparks),
-     * reproduced here for one reason: that pass runs once at DOMContentLoaded
-     * over the document as it stood, and this card is built minutes later.
-     * A .pop-spark appended afterwards would carry an empty <path d="">. */
+    /* The card is built minutes after the page, so its spark is drawn
+     * here, by the one price painter (sv-venue.js drawSpark, 2026-11-12):
+     * the same path maths as every other spark, a dot at the price the
+     * MARK rung prints, and a title saying whose bars it draws (the
+     * review: it had no dot, no words, and ended at Yahoo's close beside
+     * eToro's mark). Without the painter, the path alone, as before. */
     function spark(parent, row) {
         var pts = val(row, "spark").split(",").map(parseFloat)
                      .filter(function (v) { return !isNaN(v); });
         if (pts.length < 2) return;
+        var W = 330, H = 34;
+        var box = el(parent, "div", "pop-spark");
+        box.setAttribute("data-up", flag(row, "spark-up") ? "1" : "0");
+        box.setAttribute("data-points", val(row, "spark"));
+        box.setAttribute("data-w", String(W));
+        box.setAttribute("data-h", String(H));
+        if (val(row, "q")) box.setAttribute("data-q-spark", val(row, "q"));
+        if (val(row, "spark-fam")) box.setAttribute("data-q-fam", val(row, "spark-fam"));
+        if (val(row, "spark-bars")) box.setAttribute("data-q-bars", val(row, "spark-bars"));
+        var svg = d.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+        svg.setAttribute("preserveAspectRatio", "none");
+        var path = d.createElementNS("http://www.w3.org/2000/svg", "path");
+        svg.appendChild(path);
+        box.appendChild(svg);
+        if (w.SVVenue && w.SVVenue.drawSpark) { w.SVVenue.drawSpark(box); return; }
         var min = num(row, "spark-min"), max = num(row, "spark-max");
         if (min === null) min = Math.min.apply(null, pts);
         if (max === null) max = Math.max.apply(null, pts);
-        var span = (max - min) || 1, W = 330, H = 34, pad = 1.5, cmds = [];
+        var span = (max - min) || 1, pad = 1.5, cmds = [];
         for (var i = 0; i < pts.length; i++) {
             var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
             var y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
             cmds.push((i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2));
         }
-        var box = el(parent, "div", "pop-spark");
-        box.setAttribute("data-up", flag(row, "spark-up") ? "1" : "0");
-        var svg = d.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-        svg.setAttribute("preserveAspectRatio", "none");
-        var path = d.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", cmds.join(" "));
-        svg.appendChild(path);
-        box.appendChild(svg);
     }
 
     /* The four levels, ordered by PRICE rather than by role. A short's
@@ -321,6 +331,28 @@
             }
             var n = el(line, "span", "rn", note || DASH);
             if (!note) n.className += " sv-unknown";
+            /* The figures beside the MARK move with it (the review,
+               2026-11-12: "TARGET 0.32% away" stayed at the render's price
+               beside a pushed one). The one painter works them out from
+               the price shown and the level as stored: the move since
+               entry on the MARK rung, the distance on the stop and the
+               target. */
+            var q = val(row, "q");
+            var ref = r.role === "mark" ? val(row, "q-entry")
+                    : (r.role === "stop" ? val(row, "q-stop")
+                       : (r.role === "target" ? val(row, "q-target") : ""));
+            if (q && ref && r.price !== null && r.role !== "entry" && note) {
+                n.setAttribute("data-q", q);
+                if (val(row, "q-side")) n.setAttribute("data-q-side", val(row, "q-side"));
+                n.setAttribute("data-q-ref", ref);
+                if (r.role === "mark") {
+                    n.setAttribute("data-q-f", "since");
+                } else {
+                    var isLong = val(row, "side") !== "SHORT";
+                    n.setAttribute("data-q-f", "away");
+                    n.setAttribute("data-q-below", ((r.role === "stop") === isLong) ? "1" : "0");
+                }
+            }
         });
 
         /* Where the mark stands between the entry stop and the target, as

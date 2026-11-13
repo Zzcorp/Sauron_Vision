@@ -391,4 +391,8 @@ class ThePositionsPageInChromiumTests(TestCase):
                 self.assertEqual((s["q"], s["d"], s["dot"], s["text"], s["up"]),
                                  (False, True, True, "", ""), s)
                 self.assertIn("sv-q-dot--other", s["cls"], s)
-                self.assertEqual(s["title"], "dot: eToro bid now", s)
+                # whose bars the line draws, then whose the dot is (the
+                # review's fixes, 2026-11-12: the title said the dot only)
+                self.assertEqual(
+                    s["title"],
+                    "Yahoo EURUSD=X daily closes · dot: eToro bid now", s)

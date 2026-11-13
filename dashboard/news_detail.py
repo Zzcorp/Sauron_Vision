@@ -435,6 +435,14 @@ def news_detail(request, pk: int):
         instrument_rows = _instrument_rows(article, affected)
     except Exception:
         instrument_rows = []
+    # The rows' price cells ({% q %}) asked of the rule in ONE read
+    # (2026-11-12, the review: one read per symbol).
+    try:
+        from market_data.one_quote import for_request
+        for_request(request).many([r["symbol"] for r in instrument_rows
+                                   if r.get("last") is not None])
+    except Exception:  # noqa: BLE001 — the cells ask one by one
+        pass
     try:
         coverage = _coverage(article, affected)
     except Exception:

@@ -320,14 +320,17 @@ class TheSummaryAndTheDigestTests(TestCase):
                             for n in s["notes"]))
 
     def test_the_summary_dates_a_venue_price_by_the_venue(self):
-        from dashboard.position_summary import build_summary, utc_clock
+        from dashboard.position_summary import build_summary
         t = _gold(self.cfg, meta=_stamp("2649.75", age_s=2 * 3600))
         s = build_summary(t)
         price_now = [f for f in s["facts"] if f["label"] == "Price now"][0]
-        at = t.metadata["venue_mark"]["at"]
-        from django.utils.dateparse import parse_datetime
-        self.assertIn(utc_clock(parse_datetime(at)), str(price_now))
-        self.assertIn("venue's own rate", str(price_now))
+        # ONE PRICE EVERYWHERE (2026-11-12, the review's fixes): the line is
+        # the instrument's one price, dated by the venue's own reading in
+        # the words every surface prints (eToro's, 2 h old), never by
+        # Sauron's read of another feed; it read "the venue's own rate, as
+        # of HH:MM:SS UTC".
+        self.assertEqual(price_now["value"], "2649.75")
+        self.assertEqual(price_now["sub"], "eToro last · 2 h")
         self.assertTrue(any("came in 2 hours ago" in n["text"]
                             or "2 hours" in n["text"] for n in s["notes"]),
                         s["notes"])

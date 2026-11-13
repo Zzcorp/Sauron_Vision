@@ -31,7 +31,7 @@ The refresh sentence shows only where the script runs (html.pd-js).
         {% for f in summary.facts %}
         <div class="pd-fact">
             <dt>{{ f.label }}</dt>
-            <dd>{{ f.value }}{% if f.sub %}<span class="pd-fact-sub">{{ f.sub }}</span>{% endif %}</dd>
+            <dd>{% if f.q %}<span data-q="{{ f.q.s }}" data-q-side="{{ f.q.side }}" data-q-title="{{ f.q.tail }}" title="{{ f.q.title }}">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% if f.sub %}<span class="pd-fact-sub"{% if f.q %} data-q="{{ f.q.s }}" data-q-f="words" data-q-side="{{ f.q.side }}"{% endif %}>{{ f.sub }}</span>{% endif %}</dd>
         </div>
         {% endfor %}
     </dl>
@@ -44,4 +44,4 @@ The refresh sentence shows only where the script runs (html.pd-js).
         <p class="pd-why-risk">{{ summary.risk_words }}</p>
     </div>
     <p class="pd-checked">{% if summary.state == "open" %}<span class="pd-refresh-note">Refreshes by itself every {{ summary.refresh_seconds }} seconds. </span>{% endif %}Checked at {{ summary.checked_at }}.</p>
-</section>
+{% if summary.q_block %}{{ summary.q_block|safe }}{% endif %}</section>

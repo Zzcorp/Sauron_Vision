@@ -179,7 +179,17 @@ def relay_held_quotes():
 
     No request to eToro or anyone else; no write but its own cache keys;
     never raises (a push that fails is retried by the next run). F3's
-    stream replaces its source and its cadence; the payload stays."""
+    stream replaces its source and its cadence; the payload stays.
+
+    THE REVIEW (2026-11-12). Two more pushes, from the database alone:
+      * every RELAY_FULL_EVERY-th run (a minute) sends every held symbol
+        whatever the cache says, so a push the channel layer dropped, or
+        a tab whose socket was down, is repaired within a minute;
+      * an instrument NOBODY holds whose LiveQuote row a poller wrote
+        since the last run (Yahoo, Alpha Vantage, CoinGecko...) is pushed
+        too: two tabs showed it a sweep apart (5 s and 12 s after one
+        write, up to a minute). A stream's own rows are left to its ticks,
+        which already reach every page."""
     from django.core.cache import cache
 
     from market_data import one_quote
@@ -188,15 +198,22 @@ def relay_held_quotes():
         now_at = one_quote.now()
         shown = one_quote.shown_held(user=one_quote.ALL, now=now_at)
         out["held"] = len(shown)
-        if not shown:
+        try:
+            run = cache.incr(RELAY_RUN_KEY)
+        except ValueError:
+            cache.set(RELAY_RUN_KEY, 1, RELAY_KEEP_S)
+            run = 1
+        full = run % RELAY_FULL_EVERY == 0
+        outside = _relay_outside(set(shown), now_at, cache)
+        if not shown and not outside:
             return out
         from dashboard.consumers import push_shown
-        for sym, sh in sorted(shown.items()):
+        for sym, sh in sorted(shown.items()) + sorted(outside.items()):
             sig = [sh.at_ms(), sh.text(), sh.state, sh.source, sh.side,
-                   sh.text("bid"), sh.text("ask")]
+                   sh.text("bid"), sh.text("ask"), sh.auth]
             key = RELAY_KEY.format(sym)
             try:
-                if cache.get(key) == sig:
+                if cache.get(key) == sig and not (full and sym in shown):
                     continue
                 if push_shown(sh, t=now_at):
                     cache.set(key, sig, RELAY_KEEP_S)
@@ -206,6 +223,45 @@ def relay_held_quotes():
     except Exception as e:  # noqa: BLE001 — display only, never raises
         logger.warning("[relay] held quotes not relayed: %s", e)
     return out
+
+
+#: The relay's run counter, and every how many runs it sends every held
+#: symbol whatever changed (6 x 10 s: a minute).
+RELAY_RUN_KEY = "oq:relay:run"
+RELAY_FULL_EVERY = 6
+#: When the relay last read the rows nobody holds, and how far back its
+#: first read looks.
+RELAY_SINCE_KEY = "oq:relay:since"
+RELAY_FIRST_LOOK_S = 15
+#: The sources whose rows reach the pages by their own ticks.
+RELAY_STREAMS = ("oanda_stream", "binance_ws", "finnhub_ws")
+
+
+def _relay_outside(held, now_at, cache) -> dict:
+    """{symbol: Shown} for the instruments nobody holds whose LiveQuote row
+    a poller wrote since the relay last looked: one query, plus the rule's
+    three when there is one. Never raises."""
+    from datetime import timedelta
+
+    from market_data import one_quote
+    since = cache.get(RELAY_SINCE_KEY)
+    cache.set(RELAY_SINCE_KEY, now_at, RELAY_KEEP_S)
+    if since is None or since > now_at:
+        since = now_at - timedelta(seconds=RELAY_FIRST_LOOK_S)
+    try:
+        from market_data.models import LiveQuote
+        syms = {str(s or "").upper() for s in (
+            LiveQuote.objects.filter(updated_at__gt=since)
+            .exclude(source__in=RELAY_STREAMS)
+            .values_list("instrument__symbol", flat=True))}
+        syms -= set(held)
+        syms.discard("")
+        if not syms:
+            return {}
+        return one_quote.shown_many(sorted(syms), user=None, now=now_at)
+    except Exception as e:  # noqa: BLE001
+        logger.info("[relay] outside rows unread: %s", e)
+        return {}
 
 
 @shared_task(bind=True, max_retries=3)

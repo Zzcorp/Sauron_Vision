@@ -1386,7 +1386,7 @@
                         {% for w in ui_watchlist %}
                         <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                             <span class="ipr-sym">{{ w.symbol }}</span>
-                            <span class="ipr-qty" data-q="{{ w.symbol }}">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                            <span class="ipr-qty" data-q="{{ w.symbol }}" data-q-title title="{{ w.q_title }}">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                             {% if w.last %}
                             <span class="ipr-pct{% if w.change_pct is not None %} {% if w.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ w.symbol }}" data-q-f="chg">{{ w.q_chg }}</span>
                             {% comment %} No quote, no change: a dash, never 0.00%, which is a different claim. {% endcomment %}
@@ -1581,7 +1581,7 @@
             <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
                 <div class="wl-row1">
                     <span class="wl-sym">{{ w.symbol }}</span>
-                    <span class="wl-last" data-q="{{ w.symbol }}">{% px w.last w.asset_class w.symbol %}</span>
+                    <span class="wl-last" data-q="{{ w.symbol }}" data-q-title title="{{ w.q_title }}">{% px w.last w.asset_class w.symbol %}</span>
                 </div>
                 {% if w.name and w.name != w.symbol %}
                 <div class="wl-rowname">
@@ -1591,7 +1591,7 @@
                 {% endif %}
                 <div class="wl-row2">
                     {% if w.spark and w.spark|length > 1 %}
-                    <span class="wl-spark" data-q-spark="{{ w.symbol }}" data-q-fam="{{ w.spark_fam }}"
+                    <span class="wl-spark" data-q-spark="{{ w.symbol }}" data-q-fam="{{ w.spark_fam }}" data-q-bars="{{ w.spark_bars }}"
                           data-points="{% for v in w.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
                           data-min="{{ w.spark_min|floatformat:6 }}"
                           data-max="{{ w.spark_max|floatformat:6 }}"
@@ -1615,17 +1615,15 @@
                             <div class="dh-pop-name">{{ w.name|default:w.symbol }}</div>
                         </div>
                         <div class="dh-pop-badge {% if w.change_pct > 0 %}up{% elif w.change_pct < 0 %}down{% else %}flat{% endif %}">
-                            {% if w.change_pct >= 0 %}▲{% else %}▼{% endif %}
+                            {% if w.change_pct is None %}—{% elif w.change_pct >= 0 %}▲{% else %}▼{% endif %}
                         </div>
                     </div>
                     <div class="dh-pop-big">
-                        <span class="dh-pop-price" data-q="{{ w.symbol }}">{{ w.q_text }}</span>
-                        <span class="dh-pop-pct" style="color:{% if w.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
-                            {% if w.change_pct >= 0 %}+{% endif %}{{ w.change_pct|floatformat:2 }}%
-                        </span>
+                        <span class="dh-pop-price" data-q="{{ w.symbol }}" data-q-title title="{{ w.q_title }}">{{ w.q_text }}</span>
+                        <span class="dh-pop-pct" data-q="{{ w.symbol }}" data-q-f="chg" style="color:{% if w.change_pct is None %}var(--text-muted){% elif w.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ w.q_chg }}</span>
                     </div>
                     {% if w.spark and w.spark|length > 1 %}
-                    <div class="pop-spark" data-q-spark="{{ w.symbol }}" data-q-fam="{{ w.spark_fam }}"
+                    <div class="pop-spark" data-q-spark="{{ w.symbol }}" data-q-fam="{{ w.spark_fam }}" data-q-bars="{{ w.spark_bars }}"
                          data-points="{% for v in w.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
                          data-min="{{ w.spark_min|floatformat:6 }}"
                          data-max="{{ w.spark_max|floatformat:6 }}"
@@ -4641,11 +4639,11 @@
                 previewEl.innerHTML = `
                     <div class="preview-header">
                         <span class="preview-symbol">${data.symbol}</span>
-                        <span class="preview-price" data-q="${data.symbol}" style="color:${data.change_pct >= 0 ? 'var(--accent)' : 'var(--accent-red)'}">
+                        <span class="preview-price" data-q="${data.symbol}" data-q-title style="color:${data.q && data.q.chg == null ? 'var(--text-primary)' : data.change_pct >= 0 ? 'var(--accent)' : 'var(--accent-red)'}">
                             ${data.price || '—'}
                         </span>
                     </div>
-                    <div class="preview-row"><span class="lbl">CHANGE</span><span class="val" style="color:${data.change_pct >= 0 ? 'var(--accent)' : 'var(--accent-red)'}">${data.change_pct || 0}%</span></div>
+                    <div class="preview-row"><span class="lbl">CHANGE</span><span class="val" data-q="${data.symbol}" data-q-f="chg">${window.SVVenue && data.q ? SVVenue.fieldText(data.q, 'chg') : '—'}</span></div>
                     <div class="preview-row"><span class="lbl">ASSET CLASS</span><span class="val">${data.asset_class || '—'}</span></div>
                     <div class="preview-row"><span class="lbl">EXCHANGE</span><span class="val">${data.exchange || '—'}</span></div>
                     <div class="preview-row"><span class="lbl">SIGNALS</span><span class="val">${data.active_signals || 0} active</span></div>
@@ -5637,7 +5635,7 @@ window.svWheelMarquee = function (frame, track) {
   function connect() {
     if (lockedOut) return;
     try { ws = new WebSocket(url); } catch(e) { scheduleReconnect(); return; }
-    ws.onopen = () => { retries = 0; alive = true;
+    ws.onopen = () => { retries = 0; alive = true; if (window.SVVenue && SVVenue.socket) SVVenue.socket(true);
       console.log('[sauron] live WS connected'); };
     ws.onmessage = (ev) => {
       try {
@@ -5649,7 +5647,7 @@ window.svWheelMarquee = function (frame, track) {
         else if (msg.type === 'watchlist') applyWatchlistCount(msg.data);
       } catch(e) {}
     };
-    ws.onclose = () => { alive = false; scheduleReconnect(); };
+    ws.onclose = () => { alive = false; if (window.SVVenue && SVVenue.socket) SVVenue.socket(false); scheduleReconnect(); };
     ws.onerror = () => { try { ws.close(); } catch(e){} };
   }
 

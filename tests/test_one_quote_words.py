@@ -57,6 +57,21 @@ class TheServerSpeaksTheTableTests(SimpleTestCase):
             with self.subTest(c["name"]):
                 self.assertEqual(slot_words(c["payload"], c["now"]), c["slot"])
 
+    def test_every_field(self):
+        """The other cells beside a price (2026-11-12, the review's fixes):
+        its age and clock face say a shut market and a previous close, the
+        move since entry, the distance to a level, reward to risk now and
+        the hover are worked out from the payload, as the browser does."""
+        from market_data.one_quote import field_words
+        fields = _table()["fields"]
+        self.assertGreaterEqual(len(fields), 20)
+        for c in fields:
+            with self.subTest(c["name"]):
+                self.assertEqual(
+                    field_words(c["payload"], c["field"], c["now"],
+                                side=c.get("side"), attrs=c.get("attrs")),
+                    c["text"])
+
     def test_the_table_covers_every_state_and_the_age_boundaries(self):
         cases = _table()["cases"]
         states = {c["payload"]["state"] for c in cases}
@@ -79,9 +94,12 @@ sandbox.window = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(M.engine, sandbox, { filename: 'sv-venue.js' });
 const V = sandbox.SVVenue;
-const out = { words: [], slots: [] };
+const out = { words: [], slots: [], fields: [] };
 M.table.cases.forEach(function (c) { out.words.push(V.words(c.payload, c.now, c.side || '')); });
 M.table.slots.forEach(function (c) { out.slots.push(V.slotWords(c.payload, c.now)); });
+M.table.fields.forEach(function (c) {
+  out.fields.push(V.fieldText(c.payload, c.field, c.side || '', c.now, c.attrs || {}));
+});
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -121,3 +139,9 @@ class TheBrowserSpeaksTheTableTests(SimpleTestCase):
         for c, got in zip(self.table["slots"], self.r["slots"]):
             with self.subTest(c["name"]):
                 self.assertEqual(got, c["slot"])
+
+    def test_every_field(self):
+        self.assertEqual(len(self.r["fields"]), len(self.table["fields"]))
+        for c, got in zip(self.table["fields"], self.r["fields"]):
+            with self.subTest(c["name"]):
+                self.assertEqual(got, c["text"])

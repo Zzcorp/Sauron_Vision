@@ -197,8 +197,11 @@
       document.querySelectorAll('.sv-ticket').forEach(function (tk) {
         tk.classList.toggle('tk-stale', old);
       });
+      /* The chart's weld takes the ENGINE's value, the one the numbers
+         print (the review, 2026-11-12): this poll's own price may be older
+         than a pushed one, and welding it put the candle behind the line. */
       var c = window.svCharts && window.svCharts['instrument-main-chart'];
-      if (c && c.tick && d.price != null) c.tick(Number(d.price), d);
+      if (c && window.SVVenue.chart) window.SVVenue.chart(c);
       return;
     }
     /* BEFORE the price guard below. A row can carry a bid and an ask with

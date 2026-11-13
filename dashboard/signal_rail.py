@@ -207,6 +207,17 @@ class RailFacts:
     mark_fresh: bool = False
     progress_r: Optional[float] = None
     rr_now: Optional[float] = None
+    #: What the popup's "R:R now" cell is worked out from, for the
+    #: browser's one painter to work it out again as the price moves
+    #: (2026-11-12, the review: sv-venue.js field "rr"): the order's side,
+    #: the stop and the target as stored, the freshness bound in seconds.
+    rr_order: str = ""
+    rr_stop: str = ""
+    rr_target: str = ""
+    rr_max: int = 0
+    #: The cell's text as the server prints it, by the browser's own rule
+    #: (market_data.one_quote.field_words "rr"), so the two never differ.
+    rr_text: str = ""
     affirmed_at: object = None
     leaves_at: object = None
     contra: Optional[dict] = None
@@ -391,7 +402,36 @@ def _shown_mark(ctx, inst, now):
         return None, False
     fresh = bool(sh.at and sh.state != "none"
                  and (now - sh.at).total_seconds() <= MAX_QUOTE_AGE_SECONDS)
-    return float(sh.price), fresh
+    # The number the cell prints (its px text), so the figures beside it
+    # are worked out from exactly what the browser works them out from.
+    return float(sh.text()), fresh
+
+
+def _rr_inputs(s, order, ctx, inst, now) -> dict:
+    """The R:R now cell's inputs as the browser reads them (data-q-o,
+    data-q-stop, data-q-target, data-q-max) and its text by the same rule
+    (field_words "rr"): only for a card whose mark is the one price (ctx
+    quotes), and levels both stored."""
+    sh = (ctx.get("quotes") or {}).get((inst.symbol or "").upper())
+    if sh is None:
+        return {}
+    if not order or s.suggested_stop is None or s.suggested_target is None:
+        return {}
+    from market_data.one_quote import field_words, ref_text
+    from signals.performance import MAX_QUOTE_AGE_SECONDS
+    cls, sym = inst.asset_class or "", inst.symbol or ""
+    out = {"rr_order": order,
+           "rr_stop": ref_text(s.suggested_stop, cls, sym),
+           "rr_target": ref_text(s.suggested_target, cls, sym),
+           "rr_max": int(MAX_QUOTE_AGE_SECONDS)}
+    if not (out["rr_stop"] and out["rr_target"]):
+        return {}
+    out["rr_text"] = field_words(
+        sh.payload(), "rr", int(round(now.timestamp() * 1000)),
+        attrs={"data-q-o": order, "data-q-stop": out["rr_stop"],
+               "data-q-target": out["rr_target"],
+               "data-q-max": str(out["rr_max"])})
+    return out
 
 
 def _levels(s):
@@ -827,6 +867,7 @@ def _facts(s, ctx, now) -> RailFacts:
         leaves_words=leaves,
         held=bool(held), held_venue=held, rule_key=rule_key(s.rule_name),
         mark=mark, mark_fresh=fresh, progress_r=progress, rr_now=rr_now,
+        **_rr_inputs(s, order, ctx, inst, now),
         affirmed_at=aff, leaves_at=aff + timedelta(hours=RAIL_FRESH_HOURS),
         record_words=_record_words(s.rule_name, rf.get("stats")),
         live_words=_live_words(s.rule_name, pool,
