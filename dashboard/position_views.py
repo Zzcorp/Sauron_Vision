@@ -67,6 +67,8 @@ VENUES = ("live", "paper")
 #: The money worlds the desk's tabs filter on (2026-11-13, the desk v2:
 #: All, Real, Demo, Paper), as position_summary.world_of reads a row.
 WORLDS = ("live", "demo", "paper")
+#: A world as the tabs and the "showing" note say it.
+WORLD_WORDS = {"live": "Real", "demo": "Demo", "paper": "Paper"}
 #: A value longer than this is junk, not a symbol.
 MAX_PARAM = 64
 #: What a dropped type or asset must look like to be echoed back: a ticker
@@ -458,8 +460,11 @@ def _build(params, pairs, *, history, limit, keep, base_url):
     # Grouped over every MATCHED row, listing only the shown ones: the cap
     # thins the table, never a group's count or its sums.
     groups = group_pairs(matched, view["group"], history=history, shown=shown)
-    filters = [(label, view[key]) for key, _param_name, label in FILTERS
-               if view[key]]
+    # A world reads as the desk's tab says it (Real, Demo, Paper), never as
+    # its key (the review of 2026-11-13: "world live" under the Real tab).
+    filters = [(label, WORLD_WORDS.get(view[key], view[key]) if key == "world"
+                else view[key])
+               for key, _param_name, label in FILTERS if view[key]]
     keep = sorted((str(k), str(v)) for k, v in (keep or {}).items())
     view.update({
         # The rendered order: grouped rows gathered under their group.
@@ -478,6 +483,11 @@ def _build(params, pairs, *, history, limit, keep, base_url):
         "changed": (bool(filters) or bool(view["group"])
                     or bool(view["dropped"])
                     or view["sort"] != view["default_sort"]),
+        # Order · filter is lit for a pick of its own; the world rides the
+        # desk's tabs, which say it (the review, 2026-11-13).
+        "filter_on": (any(label != "world" for label, _v in filters)
+                      or bool(view["group"]) or bool(view["dropped"])
+                      or view["sort"] != view["default_sort"]),
         "keep": keep,
         "clear_href": base_url + ("?" + urlencode(keep) if keep else ""),
     })

@@ -489,15 +489,21 @@ class CloseInViewMeasuredTests(TestCase):
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class PositionCardsMeasuredTests(TestCase):
-    """/positions/' row of small cards: no card narrower than 300 px while
-    the column is wider than that, and its tables whole without a sideways
-    scroll, at 1280, 1440 and 1920, rail shut and open.
+    """/positions/' row of small cards: no card narrower than the board
+    draws it while the column is wider than that, and its tables whole
+    without a sideways scroll, at 1280, 1440 and 1920, rail shut and open.
 
     The desk v2 (S2.2, the board the operator approved on 2026-11-13:
     "amazing work, bravo, I need it fast!!") replaced the old row
     (direction, asset class, monthly realized P&L) with its lower row:
     closed in 24 h, the REAL exposure by class and by side, closed in 30
-    days by world. The same measures stand, on that row."""
+    days by world. The same measures stand, on that row; the floor is the
+    board's own width for each card (the review of 2026-11-13: S0's 300 px
+    came from the old asset-class card, and the board holds the exposure at
+    248 px and the 30 days' table whole at 274)."""
+
+    #: The board's width for each card of the row (Desk2.dc.html).
+    FLOORS = (300, 248, 274)
 
     VIEWPORTS = ((1280, 800), (1440, 900), (1920, 1080))
 
@@ -575,13 +581,17 @@ class PositionCardsMeasuredTests(TestCase):
                     self.assertTrue(any("exit" in h for h in heads), row)
                     self.assertTrue(any("won" in h for h in heads), row)
 
-    def test_no_card_is_squeezed_under_300_px(self):
+    def test_no_card_is_squeezed_under_the_board_s_width(self):
+        """Updated deliberately (the review of 2026-11-13, the board the
+        operator approved: "amazing work, bravo, I need it fast!!"): each
+        card's floor is the board's width for it, the 24 hours keeping S0's
+        300; the tables stay whole (the test below)."""
         for (url, width), got in sorted(self.got.items()):
             for state, row in sorted(got["states"].items()):
                 with self.subTest(width=width, rail=state):
-                    for card in row["cards"]:
+                    for card, floor in zip(row["cards"], self.FLOORS):
                         self.assertGreaterEqual(
-                            card, min(300, row["grid"]) - 0.5,
+                            card, min(floor, row["grid"]) - 0.5,
                             "at %d px, rail %s: a card %.0f px wide" %
                             (width, state, card))
 

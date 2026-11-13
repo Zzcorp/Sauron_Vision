@@ -13,7 +13,9 @@
  *     CLOSE; Enter on the row (not on a control) opens its detail;
  *   - the live refresh rebuilds the table (templates/_partials/
  *     live_region.html): an open detail and the keys' row are put back
- *     after each swap (sv:live-swapped), by the row's own key.
+ *     after each swap (sv:live-swapped), by the row's own key; so is the
+ *     eToro line the book card opens (#pdEtoro, a popover in the strip's
+ *     region, 2026-11-13), when it was open.
  *
  * Nothing here closes, posts or asks the server anything. A key never
  * presses CLOSE: closing keeps its dialog and its PIN (base.html's
@@ -26,6 +28,7 @@
 
     var open = {};          /* row key -> true: details the operator opened */
     var focusKey = null;    /* the keys' row */
+    var etoroOpen = false;  /* the book card's eToro line, open */
 
     function each(list, fn) { Array.prototype.forEach.call(list || [], fn); }
     function rows() {
@@ -84,7 +87,17 @@
             if (tr) tr.classList.add("is-focus");
             else focusKey = null;
         }
+        /* A swap removes a showing popover without a toggle event: the
+           record says it was open, and it opens again on the new markup. */
+        var pop = etoroOpen && d.getElementById("pdEtoro");
+        if (pop && pop.showPopover && !pop.matches(":popover-open")) {
+            try { pop.showPopover(); } catch (e) { /* not shown: the next swap tries again */ }
+        }
     }
+
+    d.addEventListener("toggle", function (e) {
+        if (e.target && e.target.id === "pdEtoro") etoroOpen = e.newState === "open";
+    }, true);
 
     function busy() {
         return !!d.querySelector(".sv-dialog.is-open, .lvl-dlg");

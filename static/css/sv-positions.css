@@ -21,7 +21,15 @@
    ground, in the number face; colour never alone (a sign and an arrow, a
    word); REAL is the only solid red fill (the chip and a row's 3 px edge,
    kept under hover and focus); the Eye's green only on the live dot, the
-   selected tab and a checked box; nothing glows; nothing under 11 px. */
+   selected tab and a checked box; nothing glows; nothing under 11 px.
+
+   The review of 2026-11-13 (fidelity and contract lenses) is folded in:
+   the figure columns sized in characters of the number face (never pixels
+   a size tier outgrows), the lower row in the board's proportions from a
+   1100 px desk, every tone stated where the cell rule cannot beat it, an
+   estimate in ink, the eToro line on its own ground, focus rings in ink,
+   and the close dialog's restyle scoped to the close flows: TAKE TRADE
+   keeps its own look here. */
 
 .pd-desk {
     display: flex;
@@ -42,8 +50,12 @@
 .pd-desk .pd-title { margin: 0; font-size: 12px; color: var(--sv-ink-2); white-space: nowrap; }
 .pd-desk .pd-note { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
 .pd-desk .pd-note--end { margin-left: auto; }
+/* Words that carry ▲ ▼ ≈ chain the number face after Inter, as the board
+   does: Google's Inter subset lacks them, and B1's JetBrains Mono text=
+   link draws them, never a fallback face (design notes §1.10). */
+.pd-desk { --pd-words: "Inter", "JetBrains Mono", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .pd-desk .pd-lbl {
-    font-family: var(--sv-font-sans);
+    font-family: var(--pd-words);
     font-size: var(--sv-fs-micro);
     font-weight: 600;
     letter-spacing: var(--sv-track-label);
@@ -68,13 +80,25 @@
 .pd-desk .pd-pv.down { color: var(--sv-down); }
 .pd-desk .pd-dg { display: inline-block; width: 2ch; text-align: right; font-family: var(--sv-font-mono); }
 .pd-desk .pd-est { margin-right: .5ch; }
+/* An estimate (≈) in ink, its arrow slot empty: never read as a measured
+   gain (the board; the review, F12). */
+.pd-desk .pd-pv.pd-pv--est { color: var(--sv-ink-1); }
 .pd-desk td.up { color: var(--sv-up); }
 .pd-desk td.down { color: var(--sv-down); }
+/* R (and any figure cell) in its sign's tone, stated as specifically as
+   the tables' own cell rules, which set ink-1 and won (the review, F3); an
+   estimate's R one step down. */
+.pd-desk .pd-table > tbody > tr > td.up, .pd-desk .pd-tc > tbody > tr > td.up,
+.pd-desk .pd-t30 > tbody > tr > td.up { color: var(--sv-up); }
+.pd-desk .pd-table > tbody > tr > td.down, .pd-desk .pd-tc > tbody > tr > td.down,
+.pd-desk .pd-t30 > tbody > tr > td.down { color: var(--sv-down); }
+.pd-desk .pd-table > tbody > tr > td.pd-r--est { color: var(--sv-ink-2); }
 
 /* The world chips at the board's 18 px. */
 .pd-desk .sv-world {
     display: inline-flex; align-items: center; box-sizing: border-box;
     height: 18px; line-height: 1; flex: none; vertical-align: middle;
+    font-family: var(--pd-words);
 }
 
 /* ── 1. The KPI strip ───────────────────────────────────────────────────── */
@@ -92,6 +116,9 @@
 }
 .pd-desk .pd-khead .pd-title { font-size: var(--sv-fs-micro); }
 .pd-kcells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1 1 auto; min-height: 0; }
+/* The book's MARGIN USED says its two figures with their currency (the
+   review, F14): its cell a little wider than its neighbours. */
+.pd-kgrp--book .pd-kcells { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.14fr); }
 .pd-kc {
     display: flex; flex-direction: column; justify-content: center; gap: 3px;
     padding: 0 14px; min-width: 0;
@@ -112,13 +139,33 @@
     font-size: var(--sv-fs-micro); color: var(--sv-ink-3);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
 }
-/* eToro's own used figure and its split, one line under the cards. */
-.pd-etoro {
-    margin: 0; padding: 0 2px;
-    font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-3);
+/* eToro's own used figure and its split: one click from the equity in the
+   book card's head, on its own ground in the top layer (the review, F4: a
+   line on the void between the cards, where the light and the embers
+   pass; the board puts no figure there). */
+.pd-desk .pd-acct-btn {
+    anchor-name: --pd-acct;
+    display: inline-flex; align-items: center; gap: 4px; flex: none;
+    margin: 0 0 0 auto; padding: 0; border: 0; background: transparent; cursor: pointer;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3);
 }
-.pd-etoro .pd-lbl { margin-right: 4px; }
-.pd-etoro .pd-etoro-v { color: var(--sv-ink-1); }
+.pd-desk .pd-acct-btn:hover, .pd-desk .pd-acct-btn[aria-expanded="true"] { color: var(--sv-ink-2); }
+.pd-desk .pd-chev { flex: none; }
+.pd-desk .pd-etoro {
+    position-anchor: --pd-acct;
+    inset: auto; top: anchor(bottom); right: anchor(right); margin: 8px 0 0;
+    width: 460px; max-width: 80vw; box-sizing: border-box; padding: 10px 12px;
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-2);
+}
+@supports not (anchor-name: --pd-acct) {
+    .pd-desk .pd-etoro { inset: 0; margin: auto; height: fit-content; }
+}
+.pd-desk .pd-etoro p { margin: 0; }
+.pd-desk .pd-etoro .pd-etoro-split { margin-top: 6px; color: var(--sv-ink-3); }
+.pd-desk .pd-etoro .pd-lbl { margin-right: 4px; }
+.pd-desk .pd-etoro .pd-etoro-v { color: var(--sv-ink-1); }
 
 /* ── 2. Open positions ──────────────────────────────────────────────────── */
 .pd-chead {
@@ -148,13 +195,19 @@
 .pd-desk .pd-seg-btn:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
 /* The chosen world is selected: bg-4, ink-1 and the Eye's underline. */
 .pd-desk .pd-seg-btn.is-on { color: var(--sv-ink-1); background: var(--sv-bg-4); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+/* The keys: each key with its words a pair that never shrinks; a pair the
+   head has no room for wraps onto a second line the hint's own height
+   hides, so the hint drops a whole pair, never a cut word. */
 .pd-keys {
-    margin-left: auto; display: flex; align-items: center; gap: 5px;
-    font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; min-width: 0; overflow: hidden;
+    margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+    column-gap: 10px; height: 18px; overflow: hidden; min-width: 0;
+    font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap;
 }
+.pd-key { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 18px; }
+.pd-key > * { flex: none; }
 .pd-desk .pd-kbd {
     display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
-    min-width: 16px; height: 16px; padding: 0 4px; margin-left: 4px;
+    min-width: 16px; height: 16px; padding: 0 4px; margin-left: 0;
     border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-chip);
     background: var(--sv-bg-2); color: var(--sv-ink-2);
     font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); font-weight: 500; line-height: 1;
@@ -184,13 +237,13 @@
    over it, and this sheet sets no stacking number). */
 .pd-desk .pd-filter-btn {
     anchor-name: --pd-filter;
-    display: inline-flex; align-items: center; flex: none; height: 24px; padding: 0 9px; margin: 0; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 28px; height: 24px; padding: 0; margin: 0; cursor: pointer;
     box-sizing: border-box;
     border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
     font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button);
     color: var(--sv-ink-2); background: transparent; white-space: nowrap;
 }
-.pd-desk .pd-filter-btn::after { content: "▾"; margin-left: 6px; font-family: var(--sv-font-mono); }
 .pd-desk .pd-filter-btn:hover, .pd-desk .pd-filter-btn.is-on { color: var(--sv-ink-1); background: var(--sv-bg-3); }
 .pd-desk .pd-filter-pop {
     position-anchor: --pd-filter;
@@ -208,7 +261,10 @@
     font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
     letter-spacing: var(--sv-track-label); color: var(--sv-ink-3);
 }
-.pd-desk .pos-filter .pos-filter-field select { font-size: 12px; }
+/* Each select as wide as its longest option (the review, F18: "Closed,
+   newest fi"); the fields wrap when the bar is full. */
+.pd-desk .pos-filter .pos-filter-field { flex: 0 1 auto; max-width: none; }
+.pd-desk .pos-filter .pos-filter-field select { font-size: 12px; width: auto; max-width: 100%; }
 .pd-desk .pos-filter-clear { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2); }
 .pd-desk .pos-view-note {
     font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2);
@@ -216,24 +272,51 @@
 }
 .pd-desk .pos-view-note b { color: var(--sv-ink-1); }
 
-/* The table: one line a position. The board's widths, fixed, so a figure
-   that grows never pushes CLOSE out of the card; under 1440 px the table
-   keeps them and scrolls inside its wrapper with CLOSE pinned (S0). */
+/* The table: one line a position. Every column has its width, so a figure
+   that grows never pushes CLOSE out of the card, and the room the card has
+   past them is shared by all of them (the review, F1: PRICED BY took all
+   of it, 416 px at 1680, and 19 px at 1280). The figure columns are as
+   wide as their widest figure, counted in characters of the number face
+   (dashboard.positions_desk.figure_columns writes pd-chN on each <col>):
+   N ch of JetBrains Mono at the row's own size, so the tiers' 14 and 15 px
+   never cut a figure. Narrower than their sum (1280), the table scrolls
+   inside its wrapper with CLOSE pinned (S0). */
 .pd-desk .pd-pos .table-wrapper { overflow-x: auto; }
 .pd-desk .pd-table {
-    table-layout: fixed; width: 100%; min-width: 960px;
+    table-layout: fixed; width: 100%;
     border-collapse: collapse; margin: 0;
     font-size: var(--sv-fs-base); color: var(--sv-ink-1);
 }
-.pd-table .pd-c-sel { width: 31px; }
-.pd-table .pd-c-sym { width: 120px; }
+.pd-table col { font-family: var(--sv-font-mono); }
+.pd-table col.pd-ch4 { --pd-ch: 4; }
+.pd-table col.pd-ch5 { --pd-ch: 5; }
+.pd-table col.pd-ch6 { --pd-ch: 6; }
+.pd-table col.pd-ch7 { --pd-ch: 7; }
+.pd-table col.pd-ch8 { --pd-ch: 8; }
+.pd-table col.pd-ch9 { --pd-ch: 9; }
+.pd-table col.pd-ch10 { --pd-ch: 10; }
+.pd-table col.pd-ch11 { --pd-ch: 11; }
+.pd-table col.pd-ch12 { --pd-ch: 12; }
+.pd-table col.pd-ch13 { --pd-ch: 13; }
+.pd-table col.pd-ch14 { --pd-ch: 14; }
+.pd-table col.pd-ch15 { --pd-ch: 15; }
+.pd-table col.pd-ch16 { --pd-ch: 16; }
+.pd-table col.pd-ch17 { --pd-ch: 17; }
+.pd-table col.pd-ch18 { --pd-ch: 18; }
+.pd-table col.pd-ch19 { --pd-ch: 19; }
+.pd-table col.pd-ch20 { --pd-ch: 20; }
+.pd-table .pd-c-sel { width: 30px; }
+/* the chevron (24), its gap (4), the cell's pads (2 + 7), the Orc's mark (14 + 7) */
+.pd-table col.pd-c-sym { width: calc(var(--pd-ch, 6) * 1ch + 62px); }
 .pd-table .pd-c-side { width: 76px; }
 .pd-table .pd-c-world { width: 68px; }
-.pd-table .pd-c-qty { width: 64px; }
-.pd-table .pd-c-px { width: 78px; }
-.pd-table .pd-c-lvl { width: 84px; }
-.pd-table .pd-c-pnl { width: 92px; }
-.pd-table .pd-c-r { width: 66px; }
+.pd-table col.pd-c-qty, .pd-table col.pd-c-px,
+.pd-table col.pd-c-pnl, .pd-table col.pd-c-r { width: calc(var(--pd-ch, 8) * 1ch + 14px); }
+/* a level is a button: its dashed frame takes 2 px more */
+.pd-table col.pd-c-lvl { width: calc(var(--pd-ch, 8) * 1ch + 16px); }
+/* PRICED BY: 160 (the board's 150 at its 12 px; the one price's own words
+   are longer), a share of the room past it, never the rest */
+.pd-table .pd-c-src { width: 160px; }
 .pd-table .pd-c-act { width: 86px; }
 .pd-table.pd-table--retry .pd-c-act { width: 116px; }
 .pd-desk .pd-table > thead > tr > th {
@@ -245,6 +328,8 @@
     border-bottom: 1px solid var(--sv-line-2);
 }
 .pd-desk .pd-table > thead > tr > th.num { text-align: right; }
+/* SYMBOL over the symbols, past the chevron (2 + 24 + 4). */
+.pd-desk .pd-table > thead > tr > th.pd-th-sym { padding-left: 30px; }
 .pd-desk .pd-table > tbody > tr { background: transparent; }
 .pd-desk .pd-table > tbody > tr > td {
     height: 36px; padding: 0 7px; box-sizing: border-box;
@@ -306,7 +391,7 @@
 .pd-desk a.pd-sym:hover { text-decoration: underline; text-decoration-color: var(--sv-line-3); text-underline-offset: 3px; }
 .pd-desk .pd-orcm { display: inline-flex; flex: none; color: var(--sv-ink-3); }
 .pd-desk .pd-sd {
-    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    font-family: var(--pd-words); font-size: var(--sv-fs-micro); font-weight: 600;
     letter-spacing: var(--sv-track-label); text-transform: uppercase;
     color: var(--sv-ink-2); white-space: nowrap;
 }
@@ -338,6 +423,11 @@
 .pd-desk .pd-src.sv-age--stale::before, .pd-desk .pd-src.sv-age--dead::before { background: var(--sv-warn); }
 .pd-desk .pd-src[data-q-state="none"]::before, .pd-desk .pd-src--none::before { display: none; }
 .pd-desk .pd-src--none { padding-left: 0; color: var(--sv-ink-3); }
+/* A delayed price's words end with their age ("Yahoo GBPUSD=X · 3 min"): if
+   they must shorten, the source does, never the age (the review, F13). The
+   one price's painter writes the words whole (sv-venue.js), so the cut
+   moves to their start: right to left, the line overflows on the left. */
+.pd-desk .pd-src[data-q-state="delayed"], .pd-desk .pd-src.pd-src--delayed { direction: rtl; text-align: left; }
 /* CLOSE: the neutral outline (.btn-danger, sauron.css), always in view; a
    desk's 28 px, the phone tier's 48 px tap floor under 769 px. */
 .pd-desk .pd-table > tbody > tr > td.pd-act { text-align: right; padding-right: 10px; overflow: visible; text-overflow: clip; }
@@ -379,7 +469,7 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
     background: var(--sv-bg-2); border-bottom: 1px solid var(--sv-line-2);
     white-space: normal; overflow: visible; line-height: 18px; vertical-align: middle;
 }
-.pd-desk .pd-table > tbody > tr.pd-det > td.pd-det-cell { padding-left: 8px; }
+.pd-desk .pd-table > tbody > tr.pd-det > td.pd-det-cell { padding-left: 8px; padding-right: 14px; }
 .pd-detl { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sv-ink-2); }
 .pd-desk .pos-orc-line { font-family: var(--sv-font-sans); font-size: 12px; line-height: 18px; color: var(--sv-ink-2); margin: 0; max-width: none; }
 .pd-desk .pos-orc-line a { color: var(--sv-ink-2); text-decoration: none; }
@@ -427,16 +517,17 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
     display: grid; gap: var(--sv-gutter); align-items: stretch;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-/* The board's three cards (590 : 248 : 274 at 1440) under the S0 floor:
-   no card under 300 px while the row is wider. A desk 1160 px wide or
-   more holds the three on one line (the 24 hours takes the rest, the
-   exposure and the 30 days 300 each); narrower, the 24 hours runs the
-   full width above the other two; on a phone, one card a line. */
+/* The board's three cards, 590 : 248 : 274 in its 1136 px desk (the review
+   of 2026-11-13, F2: the S0 floor of 300 px came from the old asset-class
+   card; the board holds its tables whole at 248 and 274). From a 1100 px
+   desk the three share one line in those proportions, the exposure and
+   the 30 days never under the board's own widths; narrower, the 24 hours
+   runs the full width above the other two; on a phone, one card a line. */
 .pd-desk { container: pd-desk / inline-size; }
 .pd-desk .pd-low { display: flex; flex-direction: column; min-height: 298px; min-width: 0; overflow: hidden; }
 .pd-desk .pd-low--c24 { grid-column: 1 / -1; }
-@container pd-desk (min-width: 1160px) {
-    .pd-lower { grid-template-columns: minmax(0, 1fr) 300px 300px; }
+@container pd-desk (min-width: 1100px) {
+    .pd-lower { grid-template-columns: minmax(0, 590fr) minmax(248px, 248fr) minmax(274px, 274fr); }
     .pd-desk .pd-low--c24 { grid-column: auto; }
 }
 @container pd-desk (max-width: 639px) {
@@ -485,10 +576,22 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
 .pd-desk .pd-tc > tbody > tr > td.num, .pd-desk .pd-t30 > tbody > tr > td.num { text-align: right; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
 .pd-desk .pd-tc > tbody > tr:not(.sv-row--live) > td.pd-f { color: var(--sv-ink-2); }
 .pd-desk .pd-tc .pd-by { color: var(--sv-ink-2); }
+/* Every column its width (272 in the board's 274 px card), so the room past
+   them is shared and R / TRADE stands whole at every tier. */
 .pd-t30 .pd-t30-w { width: 66px; }
 .pd-t30 .pd-t30-n { width: 46px; }
-.pd-t30 .pd-t30-r { width: 66px; }
+.pd-t30 .pd-t30-r { width: 80px; }
 .pd-t30 .pd-t30-k { width: 34px; }
+.pd-t30 .pd-t30-pf { width: 46px; }
+/* The closed book by world (the history tab), on the 30 days' table. */
+.pd-desk .pd-hbook .table-wrapper { overflow-x: auto; }
+.pd-t30.pd-hb .pd-hb-w { width: 70px; }
+.pd-t30.pd-hb .pd-hb-n { width: 64px; }
+.pd-t30.pd-hb .pd-hb-wl { width: 84px; }
+.pd-t30.pd-hb .pd-hb-won { width: 60px; }
+.pd-t30.pd-hb .pd-hb-pnl { width: 116px; }
+.pd-t30.pd-hb .pd-hb-pf { width: 56px; }
+.pd-t30.pd-hb .pd-hb-avg { width: 150px; }
 .pd-desk .pd-t30 > thead > tr > th, .pd-desk .pd-t30 > tbody > tr > td { padding: 0 6px; }
 .pd-desk .pd-t30 > tbody > tr > td { height: 33px; }
 .pd-desk .pd-t30 > tbody > tr:not(:first-child) > td.pd-f { color: var(--sv-ink-2); }
@@ -514,6 +617,7 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
     font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-ink-3);
 }
 .pd-desk .pd-foot--c30 { margin: 10px 12px 12px; }
+.pd-desk .pd-foot--hb { margin: 10px 14px 12px; }
 
 .pd-desk .pd-low .table-wrapper { overflow-x: auto; margin: 0; padding: 0; border: 0; background: transparent; }
 
@@ -532,8 +636,8 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
     border-bottom: 1px solid var(--sv-line-1); white-space: nowrap; vertical-align: middle;
     background: transparent; color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: 12px;
 }
-.pd-desk .pd-broker .bkp-up { color: var(--sv-up); }
-.pd-desk .pd-broker .bkp-down { color: var(--sv-down); }
+.pd-desk .pd-broker .bkp-table > tbody > tr > td.bkp-up { color: var(--sv-up); }
+.pd-desk .pd-broker .bkp-table > tbody > tr > td.bkp-down { color: var(--sv-down); }
 .pd-desk .pd-broker .bkp-claim {
     display: inline-flex; align-items: center; height: 18px; padding: 0 6px; box-sizing: border-box;
     border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-chip);
@@ -636,19 +740,47 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
 .pd-desk .pd-analytics .oc-mini-side, .pd-desk .pd-analytics .oc-mini-meta {
     font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label);
 }
-.pd-desk .pd-analytics .oc-mini-side.bullish { color: var(--sv-up); }
-.pd-desk .pd-analytics .oc-mini-side.bearish { color: var(--sv-down); }
+/* The side as a word with its arrow, in ink (the review, F6): the side
+   colours stay on the controls. */
+.pd-desk .pd-analytics .oc-mini-side { color: var(--sv-ink-2); font-family: var(--pd-words); font-weight: 600; }
 .pd-desk .pd-analytics .oc-mini-meta { color: var(--sv-ink-3); }
 .pd-desk .pd-analytics .oc-mini-sym { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-1); }
 .pd-desk .pd-analytics .oc-mini-pnl { font-family: var(--sv-font-mono); font-weight: 500; }
 .pd-desk .pd-analytics .oc-mini-pnl.up { color: var(--sv-up); }
 .pd-desk .pd-analytics .oc-mini-pnl.down { color: var(--sv-down); }
 .pd-desk .pd-analytics .oc-empty { font-size: 12px; color: var(--sv-ink-3); }
+/* The fragment's own page block, moved here (the review, F6). */
+.pd-desk .pd-analytics .pa-panel .pa-section { margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--sv-line-1); }
+.pd-desk .pd-analytics .pa-panel .pa-col > .pa-section:first-child { margin-top: 0; }
+.pd-desk .pd-analytics .pa-grid { gap: 18px; }
+.pd-desk .pd-analytics .pa-oldest { margin-top: 12px; }
+/* Its data shapes (the review, F6 and contract F3): gains and losses in the
+   data fills at the volume dose, never the Eye's green or a solid red; a
+   bar that is a count or an age in ink by weight; the donuts' tones a
+   neutral ink ramp, never the Eye's green nor DEMO's gold, the legend
+   words saying which is which. */
+.pd-desk .pd-analytics .sv-bar { opacity: 1; }
+.pd-desk .pd-analytics .sv-bar--accent { fill: var(--sv-up-vol); }
+.pd-desk .pd-analytics .sv-bar--red { fill: var(--sv-down-vol); }
+.pd-desk .pd-analytics :is(.sv-bar--blue, .sv-bar--gold, .sv-bar--purple, .sv-bar--muted) { fill: var(--sv-ink-3); }
+.pd-desk .pd-analytics .oc-donut-seg.oc-tone-accent { stroke: var(--sv-ink-1); }
+.pd-desk .pd-analytics .oc-donut-seg.oc-tone-blue { stroke: var(--sv-ink-2); }
+.pd-desk .pd-analytics .oc-donut-seg.oc-tone-gold { stroke: var(--sv-ink-3); }
+.pd-desk .pd-analytics .oc-donut-seg.oc-tone-purple { stroke: var(--sv-line-3); }
+.pd-desk .pd-analytics .oc-donut-seg.oc-tone-red { stroke: var(--sv-ink-4); }
+.pd-desk .pd-analytics .oc-donut-seg.oc-tone-muted { stroke: var(--sv-line-2); }
+.pd-desk .pd-analytics span.oc-tone-accent { background: var(--sv-ink-1); }
+.pd-desk .pd-analytics span.oc-tone-blue { background: var(--sv-ink-2); }
+.pd-desk .pd-analytics span.oc-tone-gold { background: var(--sv-ink-3); }
+.pd-desk .pd-analytics span.oc-tone-purple { background: var(--sv-line-3); }
+.pd-desk .pd-analytics span.oc-tone-red { background: var(--sv-ink-4); }
+.pd-desk .pd-analytics span.oc-tone-muted { background: var(--sv-line-2); }
 
 /* ── The history tab ────────────────────────────────────────────────────── */
 .pd-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sv-gutter); }
 .pd-best-body { padding: 12px 14px; }
 .pd-best-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.pd-desk .pd-best-tags { display: inline-flex; align-items: center; gap: 8px; }
 .pd-desk .pd-best-note { margin-top: 8px; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
 .ph-kv {
     display: flex; justify-content: space-between; padding: 5px 0;
@@ -677,7 +809,7 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
 .ph-trade-r { display: flex; align-items: center; gap: 16px; }
 .pd-desk .ph-via { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
 .pd-desk .ph-when { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
-.ph-expand-icon { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
+.ph-expand-icon { flex: none; color: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
 .ph-trade-card.expanded .ph-expand-icon { transform: rotate(180deg); }
 /* Expandable detail. overflow:hidden is what makes the collapse work, and
    while EXPANDED it was an amputation: content past the cap was cut with no
@@ -719,7 +851,13 @@ body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr.pd-det,
 /* `sign_class` has a third answer: an invisible bar would read as no bar at
    all, which is the one thing an unmeasured value must not look like. */
 .ph-chart-fill.flat { background: var(--sv-ink-3); }
-.ph-chart-marker { position: absolute; right: -4px; top: -5px; font-size: var(--sv-fs-micro); color: var(--sv-ink-1); }
+/* The side, at the bar's end on a ground of its own (the review, F18: ◀ ▶
+   sat on the fills at 2.8:1). */
+.ph-chart-marker {
+    position: absolute; left: calc(100% + 3px); top: 50%; transform: translateY(-50%);
+    padding: 0 2px; border-radius: var(--sv-radius-chip); background: var(--sv-bg-1);
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); line-height: 1.2; color: var(--sv-ink-2);
+}
 /* A close nothing could price gets an honest blank, not a full track. */
 .ph-chart-empty { font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); line-height: 6px; }
 /* A symbol anywhere on this page is the instrument and goes to it. */
@@ -743,29 +881,32 @@ a.ph-sym:hover, a.ph-sym:focus-visible { text-decoration: underline; text-decora
    Their words, steps, PIN and focus are their scripts' (base.html's
    closeFlow, sv-overlay.js, sv-level-edit.js), untouched: only the look.
    Labels at 11 px in Inter, the facts in the number face, the PIN field
-   mono at .3em, a warning in amber with its title. */
-body:not(.light-mode) .sv-dialog-fact { font-size: 12px; color: var(--sv-ink-1); padding: 7px 12px; }
-body:not(.light-mode) .sv-dialog-fact .lbl { font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label); color: var(--sv-ink-3); }
-body:not(.light-mode) .sv-dialog-facts { border-color: var(--sv-line-2); border-radius: var(--sv-radius-card); background: var(--sv-bg-1); }
-body:not(.light-mode) .sv-dialog-fact + .sv-dialog-fact { border-top-color: var(--sv-line-1); }
-body:not(.light-mode) .sv-dialog-msg { color: var(--sv-ink-1); }
-body:not(.light-mode) .sv-dialog-detail { font-size: 12px; color: var(--sv-ink-3); }
-body:not(.light-mode) .sv-dialog-head { border-bottom-color: var(--sv-line-2); }
-body:not(.light-mode) .sv-dialog-foot { border-top-color: var(--sv-line-2); }
-body:not(.light-mode) .sv-dialog-x { color: var(--sv-ink-3); border-radius: var(--sv-radius-ctl); }
-body:not(.light-mode) .sv-dialog-confirm-text { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-2); }
-body:not(.light-mode) .sv-dialog-confirm-text input {
+   mono at .3em, a warning in amber with its title. Scoped to the close
+   flows (a danger confirm that is not TAKE TRADE: the review of
+   2026-11-13 found TAKE TRADE, B6's money control, restyled here when it
+   opened from the rail). */
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-fact { font-size: 12px; color: var(--sv-ink-1); padding: 7px 12px; }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-fact .lbl { font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label); color: var(--sv-ink-3); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-facts { border-color: var(--sv-line-2); border-radius: var(--sv-radius-card); background: var(--sv-bg-1); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-fact + .sv-dialog-fact { border-top-color: var(--sv-line-1); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-msg { color: var(--sv-ink-1); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-detail { font-size: 12px; color: var(--sv-ink-3); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-head { border-bottom-color: var(--sv-line-2); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-foot { border-top-color: var(--sv-line-2); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-x { color: var(--sv-ink-3); border-radius: var(--sv-radius-ctl); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-confirm-text { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-2); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-confirm-text input {
     font-family: var(--sv-font-mono); letter-spacing: .3em; text-transform: none;
     background: var(--sv-bg-0); border-color: var(--sv-line-2); color: var(--sv-ink-1);
     border-radius: var(--sv-radius-ctl);
 }
-body:not(.light-mode) .sv-dialog .sz-warn {
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sz-warn {
     background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
     box-shadow: inset 3px 0 0 var(--sv-warn); color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: 12px;
 }
-body:not(.light-mode) .sv-dialog .sz-warn b { color: var(--sv-warn); }
-body:not(.light-mode) .sv-dialog-btn[disabled] { opacity: 1; background: var(--sv-bg-2); color: var(--sv-ink-4); border-color: var(--sv-line-1); }
-body:not(.light-mode) .sv-dialog-btn.sv-dialog-btn--go[disabled] { background: var(--sv-bg-2); color: var(--sv-ink-3); border-color: var(--sv-line-3); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sz-warn b { color: var(--sv-warn); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-btn[disabled] { opacity: 1; background: var(--sv-bg-2); color: var(--sv-ink-4); border-color: var(--sv-line-1); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-btn.sv-dialog-btn--go[disabled] { background: var(--sv-bg-2); color: var(--sv-ink-3); border-color: var(--sv-line-3); }
 body:not(.light-mode) .lvl-dlg {
     background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card);
     box-shadow: var(--sv-shadow-dialog); padding: 14px; min-width: 260px;
@@ -785,6 +926,7 @@ body:not(.light-mode) .lvl-dlg input {
     color: var(--sv-ink-1); font-family: var(--sv-font-mono); font-size: 13px; text-align: right;
 }
 body:not(.light-mode) .lvl-dlg input[type="password"] { text-align: left; letter-spacing: .3em; }
+body:not(.light-mode) .lvl-dlg input::selection { background: var(--sv-bg-4); color: var(--sv-ink-1); }
 body:not(.light-mode) .lvl-dlg-row button {
     height: 32px; padding: 0 12px; border-radius: var(--sv-radius-ctl);
     font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button);
@@ -799,6 +941,19 @@ body:not(.light-mode) .lvl-warn {
 }
 body:not(.light-mode) .lvl-err { font-size: var(--sv-fs-micro); line-height: 1.45; color: var(--sv-down); }
 
+/* The focus ring on the desk and in its close flows: ink, never the Eye's
+   light (the review of 2026-11-13, F8: CLOSE, the levels and the PIN field
+   drew the Eye's 2 px ring; the board frames the keys' row in ink, and a
+   money control never takes the Eye's green). The kit's rule stands for
+   every other page (B5). */
+.pd-desk :is(a, button, [tabindex], summary, .btn):focus-visible { outline: 2px solid var(--sv-ink-1); outline-offset: 2px; }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) :focus-visible,
+body:not(.light-mode) .lvl-dlg :focus-visible { outline-color: var(--sv-ink-1); }
+body:not(.light-mode) .sv-dialog--danger:not(.sz-dialog) .sv-dialog-confirm-text input:focus,
+body:not(.light-mode) .lvl-dlg input:focus {
+    border-color: var(--sv-line-3); box-shadow: 0 0 0 2px var(--sv-bg-0), 0 0 0 4px var(--sv-ink-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
     .pd-desk .pd-disc svg, .ph-expand-icon { transition: none; }
 }
@@ -806,8 +961,13 @@ body:not(.light-mode) .lvl-err { font-size: var(--sv-fs-micro); line-height: 1.4
 /* Under 1280 px the board's two rows stack: the KPI cards and the lower
    row one under the other, the table scrolling inside its card. */
 @media (max-width: 1279px) {
-    .pd-kpis { grid-template-columns: minmax(0, 1fr); }
     .pd-pair { grid-template-columns: minmax(0, 1fr); }
+}
+/* The two KPI cards share a line while the desk holds their figures whole
+   (the review of 2026-11-13: at 1280 the margin's line was cut), the hint
+   of the keys while the head holds it. */
+@container pd-desk (max-width: 1059px) {
+    .pd-kpis { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 768px) {
     .pd-desk .pd-kgrp { height: auto; }
@@ -830,7 +990,7 @@ body:not(.light-mode) .lvl-err { font-size: var(--sv-fs-micro); line-height: 1.4
 .pos-sym-cell a:focus-visible,
 .ph-sym:focus-visible,
 .pd-desk .pos-row-detail:focus-visible {
-    outline: 2px solid var(--sv-eye); outline-offset: 2px;
+    outline: 2px solid var(--sv-ink-1); outline-offset: 2px;
 }
 .pos-pop .pos-pop-sec-cap {
     display: flex; align-items: center; gap: 8px;

@@ -34,6 +34,7 @@ Run with:  python manage.py test tests.test_positions_desk
 """
 import hashlib
 import json
+from html.parser import HTMLParser
 import pathlib
 import re
 import unittest
@@ -427,7 +428,9 @@ class DeskMarkupTests(TestCase):
         self.assertIn('aria-current="page"', head)
         for key in ("J", "K", "Enter", "Tab"):
             self.assertIn('<kbd class="pd-kbd">%s</kbd>' % key, head)
-        for words in ("move", "the Orc line", "to Close"):
+        # "stop · target · Close": from the keys' row Tab walks the symbol,
+        # the stop, the target, then CLOSE (the review of 2026-11-13, F8).
+        for words in ("move", "the Orc line", "stop · target · Close"):
             self.assertIn(words, head)
         self.assertRegex(head, r'<button type="button" class="btn btn-sm btn-stop" id="svCloseAll"[^>]*>Close all</button>')
 
@@ -754,21 +757,192 @@ window.__pd = (function () {
 """
 
 
-def _file(markup, scripts=()):
+def _file(markup, scripts=(), before=""):
     """The rendered page as a file Chromium opens on its own (the magic
     layer's _file_page: scripts dropped, no network), with the named
-    static scripts put back as they ship."""
+    static scripts put back as they ship; `before` runs ahead of them."""
     from tests.test_magic_layer import _file_page
-    return _file_page(markup, scripts=scripts)
+    return _file_page(markup, scripts=scripts, before=before)
 
 
-def _loaded(client):
+def _loaded(client, url="/positions/"):
     """/positions/ as the operator has it once loaded: the htmx analytics
     panel swapped in where the page asks for it."""
-    page = _get(client, "/positions/")
+    page = _get(client, url)
     body = _get(client, "/htmx/metrics/positions/")
     return re.sub(r'(<div class="sv-metrics-wrapper"[^>]*>)(</div>)',
                   lambda m: m.group(1) + body + m.group(2), page, count=1)
+
+
+def _donut_script(client):
+    """The donut partial's own script, as the htmx panel ships it: the file
+    page drops inline scripts, and without this one the analytics' donuts
+    and their legend swatches are never painted (the review's hole: a red
+    swatch the census could not see)."""
+    body = _get(client, "/htmx/metrics/positions/")
+    m = re.search(r"<script>\s*(\(function \(\) \{\s*if \(!window\.svRenderDonuts\).*?)</script>",
+                  body, re.S)
+    return m.group(1) if m else ""
+
+
+#: The desk's measured scripts, as the page ships them.
+DESK_SCRIPTS = ("sv-overlay.js", "sv-level-edit.js", "sv-close-advice.js",
+                "sv-positions.js")
+
+#: The review's checks at rest (2026-11-13), as one probe: `% names`.
+REVIEW_PROBE = r"""(async function () {
+  var N = %s, out = {};
+  function tok(n) { var s = document.createElement('span'); s.style.color = 'var(' + n + ')';
+    document.body.appendChild(s); var c = getComputedStyle(s).color; s.remove(); return c; }
+  out.ink = { ink1: tok('--sv-ink-1'), ink2: tok('--sv-ink-2'), ink3: tok('--sv-ink-3'), up: tok('--sv-up'),
+              down: tok('--sv-down'), eye: tok('--sv-eye'), demo: tok('--sv-demo') };
+  function dg(pv) { var d = pv && pv.querySelector('.pd-dg'); return d ? d.textContent : null; }
+  /* the open rows: P&L and R in their tones; an estimate in ink, no arrow */
+  out.rows = Array.prototype.map.call(document.querySelectorAll('.pd-table tbody tr[data-sv-position-row]'), function (tr) {
+    var pv = tr.querySelector('td[data-label="P&L"] .pd-pv'), r = tr.querySelector('td[data-label="R"]');
+    return { sym: tr.getAttribute('data-pos-symbol'), est: !!(pv && pv.querySelector('.pd-est')),
+             pnl: pv ? getComputedStyle(pv).color : '', arrow: dg(pv),
+             r: r ? getComputedStyle(r).color : '', rText: r ? r.textContent.trim() : '' };
+  });
+  out.kpi = Array.prototype.map.call(document.querySelectorAll('.pd-kc[data-pd-world]'), function (kc) {
+    var pv = kc.querySelector('.pd-pv');
+    return { world: kc.getAttribute('data-pd-world'), est: !!(pv && pv.querySelector('.pd-est')),
+             color: pv ? getComputedStyle(pv).color : '', arrow: dg(pv) };
+  });
+  out.c24 = Array.prototype.map.call(document.querySelectorAll('.pd-tc tbody tr'), function (tr) {
+    var pv = tr.querySelector('.pd-pv'), r = tr.querySelectorAll('td')[7];
+    return { pnl: pv ? getComputedStyle(pv).color : '', r: r ? getComputedStyle(r).color : '', rText: r ? r.textContent.trim() : '' };
+  });
+  out.c30 = Array.prototype.map.call(document.querySelectorAll('.pd-t30:not(.pd-hb) tbody tr'), function (tr) {
+    var r = tr.querySelectorAll('td')[2]; return { r: getComputedStyle(r).color, rText: r.textContent.trim() };
+  });
+  /* at the broker: the sides and the P&L in their colours, quantities as read */
+  out.broker = Array.prototype.map.call(document.querySelectorAll('.bkp-table tbody tr'), function (tr) {
+    var side = tr.querySelector('[data-label="Side"]'), pnl = tr.querySelector('[data-label="Unreal P&L"]'),
+        qty = tr.querySelector('[data-label="Qty"]');
+    return { side: side.textContent.trim(), sideColor: getComputedStyle(side).color,
+             pnl: pnl.textContent.trim(), pnlColor: getComputedStyle(pnl).color, qty: qty.textContent.trim() };
+  });
+  /* no text on the void: every visible word of the desk on an opaque ground */
+  var desk = document.querySelector('.pd-desk');
+  out.voidText = [];
+  var tw = document.createTreeWalker(desk, NodeFilter.SHOW_TEXT), n;
+  while ((n = tw.nextNode())) {
+    if (!n.nodeValue.trim()) continue;
+    var el = n.parentElement;
+    if (!el || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+    var opaque = false;
+    for (var a = el; a; a = a.parentElement) {
+      var c = __pd.rgba(getComputedStyle(a).backgroundColor);
+      if (c && c.a >= 0.99) { opaque = true; break; }
+      if (a === desk) break;
+    }
+    if (!opaque) out.voidText.push(n.nodeValue.trim().slice(0, 48));
+  }
+  /* the eToro line: inside the book card, opened on its own opaque ground */
+  var pop = document.getElementById('pdEtoro'), btn = document.querySelector('.pd-acct-btn');
+  out.etoro = { inCard: !!(pop && pop.closest('.pd-kgrp')), btn: !!btn };
+  if (pop && btn) {
+    btn.click(); await __pd.frame();
+    out.etoro.open = pop.matches(':popover-open');
+    out.etoro.bg = __pd.rgba(getComputedStyle(pop).backgroundColor);
+    out.etoro.text = pop.textContent.replace(/\s+/g, ' ').trim();
+    out.etoro.census = __pd.census(pop, N);
+    try { pop.hidePopover(); } catch (e) {}
+  }
+  /* the SYMBOL label over the symbols; the symbol plain mono ink-1 */
+  function textLeft(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), t;
+    while ((t = w.nextNode())) { if (t.nodeValue.trim()) { var r = document.createRange(); r.selectNodeContents(t); return r.getBoundingClientRect().left; } }
+    return null;
+  }
+  var symTh = Array.prototype.find.call(document.querySelectorAll('.pd-table thead th'), function (th) { return th.textContent.trim() === 'Symbol'; });
+  var sym = document.querySelector('.pd-table tbody .pos-sym-link, .pd-table tbody .pos-sym-plain');
+  out.symAlign = symTh && sym ? textLeft(symTh) - textLeft(sym) : null;
+  /* the detail row of EURUSD, opened: no chip again, nothing pinned, the Orc line and one line */
+  var eur = document.querySelector('.pd-table tr[data-pos-symbol="EURUSD"]'), disc = eur.querySelector('.pd-disc');
+  disc.click(); await __pd.frame();
+  var det = document.getElementById(disc.getAttribute('aria-controls'));
+  var cells = det.querySelectorAll(':scope > td');
+  out.det = { chips: det.querySelectorAll('.sv-world').length, lastSpan: cells[cells.length - 1].getAttribute('colspan'),
+              sticky: Array.prototype.filter.call(cells, function (td) { return getComputedStyle(td).position === 'sticky'; }).length,
+              line2: det.querySelector('.pd-det2').getBoundingClientRect().height,
+              lh: parseFloat(getComputedStyle(det.querySelector('.pd-det2')).lineHeight) || 16 };
+  disc.click(); await __pd.frame();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  /* the analytics: no Eye green and no DEMO gold on a data shape, the donuts drawn */
+  var bad = [__pd.rgba(out.ink.eye), __pd.rgba(out.ink.demo)];
+  out.shapes = [];
+  Array.prototype.forEach.call(document.querySelectorAll('.pd-analytics svg rect, .pd-analytics svg circle, .pd-analytics svg path, .pd-analytics svg line, .pd-analytics .oc-donut-legend-swatch'), function (el) {
+    var cs = getComputedStyle(el);
+    /* what paints: a shape's fill and stroke, a swatch's ground */
+    var paints = el.closest('svg') ? [['fill', cs.fill], ['stroke', cs.stroke]] : [['background', cs.backgroundColor]];
+    paints.forEach(function (p) {
+      var c = __pd.rgba(p[1]); if (!c || c.a === 0) return;
+      bad.forEach(function (b) { if (Math.abs(c.r - b.r) <= 2 && Math.abs(c.g - b.g) <= 2 && Math.abs(c.b - b.b) <= 2) out.shapes.push(__pd.name(el) + ' ' + p[0] + ' ' + p[1]); });
+    });
+  });
+  out.donuts = document.querySelectorAll('.pd-analytics .oc-donut-seg').length;
+  out.swatches = Array.prototype.map.call(document.querySelectorAll('.pd-analytics .oc-donut-legend-swatch'), function (s) { return getComputedStyle(s).backgroundColor; });
+  out.sides = Array.prototype.map.call(document.querySelectorAll('.pd-analytics .oc-mini-side'), function (s) { return [s.textContent.trim(), getComputedStyle(s).color]; });
+  /* TAKE TRADE (B6's money control) opens on this page too: the page's sheet changes nothing inside it */
+  var host = document.createElement('div');
+  host.className = 'sv-dialog sz-dialog is-open';
+  host.innerHTML = '<div class="sv-dialog-head"><span class="sv-dialog-title">TAKE TRADE</span><button class="sv-dialog-x">x</button></div>'
+    + '<div class="sv-dialog-msg">m</div><div class="sv-dialog-detail">d</div>'
+    + '<div class="sv-dialog-facts"><div class="sv-dialog-fact"><span class="lbl">Size</span><span>1</span></div></div>'
+    + '<div class="sz-warn sz-warn--book"><b>BOOK</b> text</div>'
+    + '<label class="sv-dialog-confirm-text">PIN <input type="password"></label>'
+    + '<div class="sv-dialog-foot"><button class="sv-dialog-btn">Cancel</button><button class="sv-dialog-btn sv-dialog-btn--go" disabled>TAKE TRADE</button></div>';
+  document.body.appendChild(host);
+  function look() { return Array.prototype.map.call(host.querySelectorAll('*'), function (e) { var c = getComputedStyle(e);
+    return [e.className, c.fontSize, c.fontFamily, c.color, c.backgroundColor, c.boxShadow, c.textTransform, c.opacity,
+            c.borderTopColor, c.letterSpacing, c.padding].join('|'); }); }
+  var withSheet = look();
+  var sheet = Array.prototype.find.call(document.styleSheets, function (s) { return s.href && /sv-positions\.css$/.test(s.href); });
+  sheet.disabled = true; var without = look(); sheet.disabled = false; host.remove();
+  out.takeTrade = withSheet.filter(function (v, i) { return v !== without[i]; });
+  return out;
+})()"""
+
+#: The controls whose focus ring the review read (F8): the desk's own and
+#: the money controls on it.
+RING_SELECTORS = (".pd-table .pd-disc", ".pd-table .pos-sym-link", ".pd-table .lvl-edit",
+                  ".pd-table [data-sv-close-trade]", "#svCloseAll", ".pd-seg-btn",
+                  ".pd-filter-btn", ".pd-acct-btn", ".pd-lk")
+
+
+#: The board's lower row at its 1136 px desk (Desk2.dc.html): the 24 hours,
+#: the REAL exposure, the 30 days, and the desk width from which the three
+#: share one line.
+BOARD_LOWER = (590, 248, 274)
+LOWER_ONE_LINE = 1100
+
+
+def _lower_row_checks(test, low, desk, gap):
+    """The lower row against the board, whatever the frame around it."""
+    test.assertEqual(len(low), 3)
+    c24, ex, c30 = low
+    for c in low:
+        test.assertGreaterEqual(c["h"], 298 - 0.5, c)
+    if desk["w"] >= LOWER_ONE_LINE:
+        test.assertTrue(all(abs(c["y"] - c24["y"]) < 0.5 for c in low), low)
+        test.assertGreaterEqual(ex["w"], BOARD_LOWER[1] - 0.5)
+        test.assertGreaterEqual(c30["w"], BOARD_LOWER[2] - 0.5)
+        test.assertGreater(c24["w"], c30["w"])
+        test.assertAlmostEqual(c24["w"] + ex["w"] + c30["w"] + 2 * gap, desk["w"], delta=1)
+        if desk["w"] >= sum(BOARD_LOWER) + 2 * gap:
+            # the board's proportions, at its desk and wider
+            test.assertAlmostEqual(ex["w"] / c30["w"], BOARD_LOWER[1] / BOARD_LOWER[2], delta=0.01)
+            test.assertAlmostEqual(c24["w"] / ex["w"], BOARD_LOWER[0] / BOARD_LOWER[1], delta=0.03)
+    elif desk["w"] >= 640:
+        test.assertAlmostEqual(c24["w"], desk["w"], delta=0.5)
+        test.assertAlmostEqual(ex["y"], c30["y"], delta=0.5)
+        test.assertAlmostEqual(ex["y"], c24["y"] + c24["h"] + gap, delta=0.5)
+        test.assertAlmostEqual(ex["w"], c30["w"], delta=0.5)
+        test.assertAlmostEqual(ex["h"], c30["h"], delta=0.5)
+        test.assertAlmostEqual(c30["x"] - (ex["x"] + ex["w"]), gap, delta=0.5)
 
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
@@ -782,8 +956,7 @@ class DeskMeasuredTests(TestCase):
     def setUpTestData(cls):
         from tests.test_magic_layer import _Browser
         _user, client = desk_client("desk_measured")
-        page = _file(_loaded(client), scripts=("sv-overlay.js", "sv-level-edit.js",
-                                                "sv-close-advice.js", "sv-positions.js"))
+        page = _file(_loaded(client), scripts=DESK_SCRIPTS, before=_donut_script(client))
         names = json.dumps(_token_names())
         b = _Browser({"desk": page}, "sv-desk-")
         try:
@@ -799,6 +972,7 @@ class DeskMeasuredTests(TestCase):
                            " out.chead = __pd.box('.pd-pos .pd-chead');"
                            " out.pos = __pd.box('.pd-pos');"
                            " out.lower = __pd.boxes('.pd-lower > .pd-card');"
+                           " out.lowerGap = parseFloat(getComputedStyle(document.querySelector('.pd-lower')).columnGap);"
                            " var wrap = document.querySelector('.pd-pos .table-wrapper');"
                            " out.fit = wrap ? [wrap.scrollWidth, wrap.clientWidth] : null;"
                            " out.th = __pd.boxes('.pd-table thead th').map(function (b) { return b.h; });"
@@ -811,6 +985,18 @@ class DeskMeasuredTests(TestCase):
                            " out.figures = Array.prototype.filter.call(document.querySelectorAll('.pd-desk .pd-kv, .pd-desk td.num, .pd-desk .pd-pv'), function (e) { return /\\d/.test(e.textContent); }).map(function (e) { return getComputedStyle(e).fontFamily.split(',')[0].replace(/\"/g, ''); });"
                            " out.rest = __pd.census(desk, N);"
                            " return out; })()" % names)
+            # the review's checks at rest (2026-11-13): tones, the void, the
+            # eToro line, the symbol's label, the open detail, the analytics'
+            # data shapes, TAKE TRADE left alone
+            cls.review = b.js(sid, REVIEW_PROBE % names)
+            # every focus ring on the desk: ink, never the Eye's light
+            cls.rings = {}
+            for sel in RING_SELECTORS:
+                n = b.force(sid, sel, ["focus-visible"])
+                cls.rings[sel] = [n, b.js(sid, "(function () { var e = document.querySelector(%s);"
+                                                " if (!e) return null; var c = getComputedStyle(e);"
+                                                " return [c.outlineStyle, c.outlineColor]; })()" % json.dumps(sel))]
+                b.force(sid, sel, [])
             # the REAL edge, hovered and focused
             n = b.force(sid, ".pd-table tr[data-sv-position-row].sv-row--live", ["hover", "focus-within"])
             cls.edge = [n, b.js(sid, "Array.prototype.map.call(document.querySelectorAll('.pd-table tr[data-sv-position-row].sv-row--live > td:first-child'), function (td) { return getComputedStyle(td).boxShadow; })")]
@@ -867,7 +1053,8 @@ class DeskMeasuredTests(TestCase):
                                          " var out = { census: __pd.census(d, N), pin: !!d.querySelector('input[type=password][inputmode=numeric]'),"
                                          "   focus: document.activeElement && document.activeElement.getAttribute('data-role'),"
                                          "   order: Array.prototype.map.call(d.querySelectorAll('button, input'), function (e) { return e.getAttribute('data-role') || e.className; }),"
-                                         "   ok: d.querySelector('[data-role=ok]').textContent };"
+                                         "   ok: d.querySelector('[data-role=ok]').textContent,"
+                                         "   ring: document.activeElement ? getComputedStyle(document.activeElement).boxShadow : '' };"
                                          " SV.overlay.close(d); await new Promise(function (r) { setTimeout(r, 300); });"
                                          " return out; })()"
                                          % (names,
@@ -881,7 +1068,9 @@ class DeskMeasuredTests(TestCase):
                              " btn.click(); await __pd.frame();"
                              " var d = document.querySelector('.lvl-dlg');"
                              " var out = { census: __pd.census(d, N), labels: Array.prototype.map.call(d.querySelectorAll('label'), function (l) { return l.textContent; }),"
-                             "   buttons: Array.prototype.map.call(d.querySelectorAll('button'), function (x) { return x.textContent; }) };"
+                             "   buttons: Array.prototype.map.call(d.querySelectorAll('button'), function (x) { return x.textContent; }),"
+                             "   ring: document.activeElement ? getComputedStyle(document.activeElement).boxShadow : '',"
+                             "   selection: document.activeElement ? getComputedStyle(document.activeElement, '::selection').backgroundColor : '' };"
                              " return out; })()" % names)
         finally:
             b.close()
@@ -924,30 +1113,14 @@ class DeskMeasuredTests(TestCase):
         self.assertIn("btn-stop", cls_)
 
     def test_the_lower_row_is_three_cards_in_the_board_s_proportions(self):
-        """The board's row (590 : 248 : 274) under the S0 floor that no
-        card is narrower than 300 px (tests/test_ui_s0_fixes.py): a desk
-        1160 px wide or more holds the three on one line, the 24 hours the
-        widest; narrower (this frame's desk at 1440), the 24 hours runs the
-        full width above the exposure and the 30 days, side by side."""
-        low = self.got["lower"]
-        self.assertEqual(len(low), 3)
-        c24, ex, c30 = low
-        desk = self.got["desk"]
-        for c in low:
-            self.assertGreaterEqual(c["w"], 299.5, c)
-            self.assertGreaterEqual(c["h"], 298 - 0.5, c)
-        if desk["w"] >= 1160:
-            self.assertTrue(all(abs(c["y"] - c24["y"]) < 0.5 for c in low))
-            self.assertAlmostEqual(ex["w"], 300, delta=0.5)
-            self.assertAlmostEqual(c30["w"], 300, delta=0.5)
-            self.assertGreater(c24["w"], 300)
-        else:
-            self.assertAlmostEqual(c24["w"], desk["w"], delta=0.5)
-            self.assertAlmostEqual(ex["y"], c30["y"], delta=0.5)
-            self.assertAlmostEqual(ex["y"], c24["y"] + c24["h"] + 12, delta=0.5)
-            self.assertAlmostEqual(ex["w"], c30["w"], delta=0.5)
-            self.assertAlmostEqual(ex["h"], c30["h"], delta=0.5)
-            self.assertAlmostEqual(c30["x"] - (ex["x"] + ex["w"]), 12, delta=0.5)
+        """The board's row, 590 : 248 : 274 in its 1136 px desk (updated
+        deliberately after the review of 2026-11-13: S0's 300 px floor came
+        from the old asset-class card, and the board the operator approved,
+        "amazing work, bravo, I need it fast!!", holds its tables whole at
+        248 and 274): a desk 1100 px wide or more holds the three on one
+        line in those proportions; narrower, the 24 hours runs the full
+        width above the exposure and the 30 days, side by side."""
+        _lower_row_checks(self, self.got["lower"], self.got["desk"], self.got["lowerGap"])
 
     def test_titles_in_the_display_face_and_figures_in_the_number_face(self):
         self.assertTrue(self.got["titles"])
@@ -999,3 +1172,507 @@ class DeskMeasuredTests(TestCase):
         self.assertEqual(self.level["buttons"], ["CANCEL", "SAVE"])
         self.assertGreater(self.level["census"]["texts"], 4)
         self._clean(self.level["census"], "level editor")
+
+    # ── The review (2026-11-13): each fix held, measured ─────────────────
+
+    def test_r_takes_the_tone_of_its_row_s_pnl(self):
+        """F3: R was ink-1 on every row, the more specific cell rule beating
+        the tone; the board draws R in up and down."""
+        ink = self.review["ink"]
+        rows = [r for r in self.review["rows"] if not r["est"] and r["rText"] not in ("", "—")]
+        self.assertTrue(rows)
+        for r in rows:
+            with self.subTest(row=r["sym"]):
+                self.assertIn(r["r"], (ink["up"], ink["down"]), r)
+                self.assertEqual(r["r"], r["pnl"], r)
+        for r in self.review["c24"]:
+            with self.subTest(closed=r["rText"]):
+                self.assertEqual(r["r"], r["pnl"], r)
+        for r in self.review["c30"]:
+            if r["rText"].startswith("+"):
+                self.assertEqual(r["r"], ink["up"], r)
+            elif r["rText"].startswith("-"):
+                self.assertEqual(r["r"], ink["down"], r)
+
+    def test_an_estimate_is_drawn_in_ink_with_no_arrow(self):
+        """F12: the board draws an estimate as "≈ +6.60" in ink-1 with an
+        empty arrow slot, so it never reads as a measured gain; its R one
+        step down (ink-2)."""
+        ink = self.review["ink"]
+        est = [r for r in self.review["rows"] if r["est"]]
+        # The two DEMO rows eToro's own list does not carry in this book.
+        self.assertEqual(sorted(r["sym"] for r in est), ["BTCUSD", "NAS100"])
+        for r in est:
+            with self.subTest(row=r["sym"]):
+                self.assertEqual(r["pnl"], ink["ink1"])
+                self.assertEqual(r["arrow"], "")
+                self.assertEqual(r["r"], ink["ink2"])
+        kpi = {k["world"]: k for k in self.review["kpi"]}
+        self.assertTrue(kpi["demo"]["est"])
+        self.assertEqual((kpi["demo"]["color"], kpi["demo"]["arrow"]), (ink["ink1"], ""))
+        self.assertFalse(kpi["live"]["est"])
+        self.assertEqual((kpi["live"]["color"], kpi["live"]["arrow"]), (ink["up"], "▲"))
+
+    def test_at_the_broker_sides_and_pnl_in_their_colours(self):
+        """F19: SIDE and UNREAL P&L were ink-1 (the cell rule again); the
+        quantity read "1.5000"."""
+        ink = self.review["ink"]
+        rows = {r["side"] + r["qty"]: r for r in self.review["broker"]}
+        self.assertEqual(sorted(rows), ["BUY20,000", "BUY4", "SELL1.5"])
+        for r in self.review["broker"]:
+            with self.subTest(row=r):
+                self.assertEqual(r["sideColor"], ink["up"] if r["side"] == "BUY" else ink["down"])
+                self.assertEqual(r["pnlColor"], ink["down"] if r["pnl"].startswith("-") else ink["up"])
+
+    def test_no_word_or_figure_stands_on_the_void(self):
+        """F4: the eToro used line sat between the cards with no ground of
+        its own, where the Eye's light and the embers pass."""
+        self.assertEqual(self.review["voidText"], [])
+
+    def test_the_etoro_line_opens_in_the_book_card_on_its_own_ground(self):
+        e = self.review["etoro"]
+        self.assertTrue(e["inCard"], e)
+        self.assertTrue(e["btn"], e)
+        self.assertTrue(e.get("open"), e)
+        self.assertGreaterEqual(e["bg"]["a"], 0.99)
+        self.assertIn("ETORO USED", e["text"])
+        self.assertIn("6,051.51 available", e["text"])
+        self.assertIn("At that read", e["text"])
+        self._clean(e["census"], "eToro line")
+
+    def test_the_symbol_label_stands_over_the_symbols(self):
+        """F10: SYMBOL sat 32 px left of the symbols, over the chevrons."""
+        self.assertIsNotNone(self.review["symAlign"])
+        self.assertLessEqual(abs(self.review["symAlign"]), 1.0)
+
+    def test_the_open_detail_row_is_the_orc_line_and_one_line(self):
+        """F9: the detail row repeated the REAL MONEY chip, wrapped to three
+        lines and let the pinned CLOSE column's edge run through it."""
+        d = self.review["det"]
+        self.assertEqual(d["chips"], 0)
+        self.assertIsNotNone(d["lastSpan"])
+        self.assertEqual(d["sticky"], 0)
+        self.assertLessEqual(d["line2"], d["lh"] * 1.5)
+
+    def test_the_analytics_draw_data_never_in_the_eye_s_green_or_demo_s_gold(self):
+        """F6 and contract F3: gains were the Eye's green, the donuts took
+        the old order (gold among them) and two legend swatches were solid
+        coral; the census now sees the donuts painted."""
+        self.assertGreater(self.review["donuts"], 0)
+        self.assertEqual(self.review["shapes"], [])
+        for side, colour in self.review["sides"]:
+            with self.subTest(side=side):
+                self.assertRegex(side, r"^[▲▼] (LONG|SHORT)$")
+                self.assertEqual(colour, self.review["ink"]["ink2"])
+
+    def test_take_trade_is_left_to_its_own_look(self):
+        """Contract F2: the close dialog's restyle had no page scope and
+        restyled TAKE TRADE (B6's money control) when it opened here."""
+        self.assertEqual(self.review["takeTrade"], [])
+
+    def test_every_focus_ring_on_the_desk_is_ink(self):
+        """F8: every focused control drew the Eye's 2 px ring, CLOSE and the
+        PIN field among them; the board draws the keys' frame in ink, and
+        money controls never take the Eye's green."""
+        eye = self.review["ink"]["eye"]
+        for sel, (n, ring) in self.rings.items():
+            if not n:
+                continue
+            with self.subTest(control=sel):
+                self.assertEqual(ring[0], "solid", ring)
+                self.assertIn(ring[1], (self.review["ink"]["ink1"], self.review["ink"]["ink2"]), ring)
+        self.assertNotIn(eye.replace("rgb(", "").rstrip(")"), self.dialogs["live"]["ring"])
+        self.assertTrue(self.dialogs["live"]["ring"] and self.dialogs["live"]["ring"] != "none")
+        self.assertNotIn(eye.replace("rgb(", "").rstrip(")"), self.level["ring"])
+        self.assertTrue(self.level["ring"] and self.level["ring"] != "none")
+
+    def test_the_level_editor_selects_in_the_tokens(self):
+        """F16: the pre-selected stop showed the browser's own blue."""
+        self.assertEqual(self.level["selection"], "rgb(27, 44, 35)")   # --sv-bg-4
+
+
+#: The widths the review measured (F1): the frame's tiers raise the cell
+#: text to 14 px at 1680 and 15 px at 2200.
+WIDTHS = ((1280, 800), (1440, 900), (1680, 1050), (1920, 1080), (2560, 1440))
+
+WIDTHS_PROBE = r"""(async function () {
+  document.body.setAttribute('data-sv-ambience', 'magic'); await __pd.settle();
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  var out = { vw: window.innerWidth, desk: __pd.box('.pd-desk') };
+  var wrap = document.querySelector('.pd-pos .table-wrapper');
+  out.fit = wrap ? [wrap.scrollWidth, wrap.clientWidth] : null;
+  function texts(el) {
+    var rects = [], w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), t;
+    while ((t = w.nextNode())) {
+      if (!t.nodeValue.trim()) continue;
+      var p = t.parentElement;
+      if (!p || p.closest('.pd-sr, [hidden]') || !p.checkVisibility()) continue;
+      var r = document.createRange(); r.selectNodeContents(t);
+      Array.prototype.forEach.call(r.getClientRects(), function (q) { if (q.width > 0) rects.push(q); });
+    }
+    return rects;
+  }
+  /* every cell's words inside the cell; PRICED BY may shorten its source,
+     never its end (the age) */
+  out.over = [];
+  Array.prototype.forEach.call(document.querySelectorAll('.pd-desk table td, .pd-desk table th'), function (td) {
+    if (td.closest('tr[hidden], .pd-det') || !td.checkVisibility()) return;
+    var rects = texts(td); if (!rects.length) return;
+    var cs = getComputedStyle(td), b = td.getBoundingClientRect();
+    var left = b.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft) - 0.5;
+    var right = b.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) + 0.5;
+    var lo = Math.min.apply(null, rects.map(function (q) { return q.left; }));
+    var hi = Math.max.apply(null, rects.map(function (q) { return q.right; }));
+    var t = td.closest('table');
+    var name = (t.getAttribute('aria-label') || t.className.split(' ').pop()) + ' / ' + (td.getAttribute('data-label') || td.tagName);
+    var cut = td.classList.contains('pd-srcc') ? hi > right : (lo < left || hi > right);
+    if (cut) out.over.push([name, td.textContent.replace(/\s+/g, ' ').trim().slice(0, 30), Math.round(lo - left), Math.round(hi - right)]);
+  });
+  /* the KPI figures and their lines whole; the heads never overflow */
+  Array.prototype.forEach.call(document.querySelectorAll('.pd-kc .pd-kv, .pd-kc .pd-ks, .pd-desk .pd-khead, .pd-desk .pd-chead'), function (el) {
+    if (!el.checkVisibility()) return;
+    if (el.scrollWidth > el.clientWidth + 0.5) out.over.push(['kpi', el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40), el.clientWidth, el.scrollWidth]);
+  });
+  /* the open book's head: no two items overlap; the keys show whole pairs */
+  var head = document.querySelector('.pd-pos .pd-chead');
+  var items = Array.prototype.filter.call(head.children, function (c) { return c.checkVisibility() && c.getBoundingClientRect().width > 0; })
+    .map(function (c) { return [c.className || c.tagName, c.getBoundingClientRect()]; });
+  for (var i = 1; i < items.length; i++) {
+    if (items[i][1].left < items[i - 1][1].right - 0.5) out.over.push(['head', items[i - 1][0] + ' / ' + items[i][0], 0, 0]);
+  }
+  var keys = document.querySelector('.pd-keys');
+  out.keysShown = [];
+  if (keys && keys.checkVisibility()) {
+    var kb = keys.getBoundingClientRect();
+    Array.prototype.forEach.call(keys.querySelectorAll('.pd-key'), function (k) {
+      var r = k.getBoundingClientRect();
+      if (r.top >= kb.bottom - 0.5) return;
+      out.keysShown.push(k.textContent);
+      if (r.left < kb.left - 0.5 || r.right > kb.right + 0.5) out.over.push(['keys', k.textContent, 0, 0]);
+    });
+  }
+  function dotX(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) { var i = n.nodeValue.indexOf('.'); if (i >= 0) { var r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1); return r.getBoundingClientRect().left; } }
+    return null;
+  }
+  function dots(sel) { return Array.prototype.map.call(document.querySelectorAll(sel), dotX).filter(function (x) { return x !== null; }); }
+  out.dots = dots('.pd-table tbody tr[data-sv-position-row] > td[data-label="P&L"] .pd-pv');
+  out.dots24 = dots('.pd-tc tbody td .pd-pv');
+  out.lower = __pd.boxes('.pd-lower > .pd-card');
+  out.lowerGap = parseFloat(getComputedStyle(document.querySelector('.pd-lower')).columnGap);
+  out.fs = getComputedStyle(document.querySelector('.pd-table tbody td.num')).fontSize;
+  return out;
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class DeskWidthsMeasuredTests(TestCase):
+    """The review's blocker (F1): from 1680 the size tiers raised the cells
+    to 14 and 15 px while the figure columns kept their pixel widths, so
+    quantities, prices and P&L were cut mid-figure and their decimal
+    points drifted; at 1280 PRICED BY was 19 px wide. Measured at every
+    width the frame has a tier for, in this frame."""
+
+    maxDiff = None
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.test_magic_layer import _Browser
+        _user, client = desk_client("desk_widths")
+        page = _file(_loaded(client), scripts=DESK_SCRIPTS)
+        b = _Browser({"desk": page}, "sv-desk-w-")
+        cls.got = {}
+        try:
+            for w, h in WIDTHS:
+                sid = b.tab(w, h)
+                b.open(sid, "desk", PROBE)
+                cls.got[w] = b.js(sid, WIDTHS_PROBE)
+        finally:
+            b.close()
+
+    def test_no_figure_and_no_word_is_cut_at_any_width(self):
+        for w, got in sorted(self.got.items()):
+            with self.subTest(width=w, cells=got["fs"]):
+                self.assertEqual(got["over"], [])
+
+    def test_the_pnl_decimal_points_stand_at_one_x_at_every_width(self):
+        for w, got in sorted(self.got.items()):
+            for key in ("dots", "dots24"):
+                with self.subTest(width=w, table=key):
+                    self.assertGreaterEqual(len(got[key]), 6)
+                    self.assertLess(max(got[key]) - min(got[key]), 0.5, got[key])
+
+    def test_the_keys_hint_is_whole_where_the_desk_is_the_board_s(self):
+        """F8: the longer, truthful hint never overlaps nor cuts a word: at
+        1440 and wider it is whole; narrower it drops whole pairs."""
+        for w, got in sorted(self.got.items()):
+            if w < 1440:
+                continue
+            with self.subTest(width=w):
+                self.assertEqual(got["keysShown"], ["JKmove", "Enterthe Orc line", "Tabstop · target · Close"])
+
+    def test_the_book_fits_its_card_from_1440(self):
+        for w, got in sorted(self.got.items()):
+            if w < 1440:
+                continue
+            with self.subTest(width=w):
+                scroll, client = got["fit"]
+                self.assertLessEqual(scroll, client)
+
+    def test_the_lower_row_at_every_width(self):
+        for w, got in sorted(self.got.items()):
+            with self.subTest(width=w, desk=got["desk"]["w"]):
+                _lower_row_checks(self, got["lower"], got["desk"], got["lowerGap"])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5. The review (2026-11-13), held by the page as rendered
+# ══════════════════════════════════════════════════════════════════════════
+
+_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+              "meta", "param", "source", "track", "wbr"}
+
+
+class _Regions(HTMLParser):
+    """{region name: its inner markup} for every data-sv-live region."""
+
+    def __init__(self, src):
+        super().__init__(convert_charrefs=False)
+        self.src = src
+        self.offsets = [0]
+        for line in src.splitlines(keepends=True):
+            self.offsets.append(self.offsets[-1] + len(line))
+        self.stack = []
+        self.out = {}
+
+    def _pos(self):
+        line, col = self.getpos()
+        return self.offsets[line - 1] + col
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _VOID_TAGS:
+            return
+        region = dict(attrs).get("data-sv-live")
+        self.stack.append([tag, region, self._pos() + len(self.get_starttag_text())])
+
+    def handle_endtag(self, tag):
+        while self.stack:
+            t, region, start = self.stack.pop()
+            if t == tag:
+                if region:
+                    self.out[region] = self.src[start:self._pos()]
+                return
+
+
+def _regions(html):
+    p = _Regions(html)
+    p.feed(html)
+    return p.out
+
+
+def _canon(markup):
+    """A region's markup with what a second moves set aside: the live
+    chip's painted word, ages in words."""
+    s = re.sub(r"\s+", " ", markup)
+    s = re.sub(r"(data-sv-live-status[^>]*>)[^<]*", r"\1", s)
+    s = re.sub(r"\b\d+(?:\.\d+)?\s?(?:s|sec|min|minutes?|h|hours?|days?)\b", "#", s)
+    return s.strip()
+
+
+class DeskReviewTests(TestCase):
+    """The review of 2026-11-13 (the fidelity and contract lenses): each
+    fix that the rendered page can hold, held."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user, cls.client_ = desk_client("desk_review")
+        cls.page = _get(cls.client_, "/positions/")
+        cls.live = _get(cls.client_, "/positions/live/")
+        cls.hist = _get(cls.client_, "/positions/?tab=history")
+        cls.hist_live = _get(cls.client_, "/positions/live/?tab=history")
+
+    def _desk_regions(self, html):
+        return {k: v for k, v in _regions(html).items()
+                if k.startswith("pos-") or k == "cap-card"}
+
+    def test_every_region_renders_alike_on_the_page_and_its_refresh(self):
+        """Contract F1: a region whose two renders differ is swapped by the
+        first sweep; the History link only the full page carried vanished
+        20 to 60 s after load, and nothing linked to the history again."""
+        for full, live in ((self.page, self.live), (self.hist, self.hist_live)):
+            a, b = self._desk_regions(full), self._desk_regions(live)
+            self.assertTrue(a)
+            for name in sorted(a):
+                with self.subTest(region=name):
+                    self.assertIn(name, b)
+                    self.assertEqual(_canon(a[name]), _canon(b[name]))
+        self.assertIn('href="?tab=history"', _regions(self.live)["pos-lower"])
+
+    def test_a_desk_that_cannot_be_read_prints_dashes_never_an_error(self):
+        """Contract F4: the desk's figures ran unguarded on the page the
+        operator closes from; a failure there must cost the figures, never
+        the page and its CLOSE buttons."""
+        from unittest import mock
+        with mock.patch("dashboard.positions_desk.desk", side_effect=RuntimeError("synthetic")):
+            page = _get(self.client_, "/positions/")
+        self.assertEqual(len(_rows(page)), 6)
+        self.assertEqual(page.count('class="btn btn-sm btn-danger" data-sv-close-trade="'), 6)
+        self.assertIn('id="svCloseAll"', page)
+        strip = page[page.index('data-sv-live="pos-strip"'):page.index('data-sv-live="pos-count"')]
+        self.assertEqual(re.findall(r'data-pd-world="(\w+)"', strip), ["live", "demo", "paper"])
+        self.assertIn("—", strip)
+
+    def test_the_closed_book_is_by_world_never_summed(self):
+        """F5: the history strip added REAL, DEMO and PAPER (+140.04, read as
+        real money); each world now stands apart, REAL keeping the keys."""
+        strip = self.hist[self.hist.index('data-sv-live="pos-strip"'):]
+        strip = strip[:strip.index("</section>")]
+        self.assertIn("by world · never summed", strip)
+        self.assertEqual(re.findall(r'data-pd-closed-world="(\w+)"', strip), ["live", "demo", "paper"])
+        keys = dict(re.findall(r'data-sv-live-key="([\w.]+)">([^<]*)<', strip))
+        self.assertEqual(keys["pos.realized"], "+62.85")
+        self.assertEqual(keys["pos.realized.demo"], "+45.00")
+        self.assertEqual(keys["pos.realized.paper"], "+32.19")
+        self.assertEqual((keys["pos.closed"], keys["pos.closed.demo"], keys["pos.closed.paper"]),
+                         ("12", "3", "12"))
+        self.assertEqual(keys["pos.win_rate"], "50%")
+        # Three demo closes are counted, never graded into a rate.
+        self.assertEqual((keys["pos.win_rate.demo"], keys["pos.profit_factor.demo"]), ("—", "—"))
+        for summed in ("+140.04", "27"):
+            self.assertNotIn(">%s<" % summed, strip)
+
+    def test_best_and_worst_name_their_world_in_the_instrument_s_digits(self):
+        """F5 and F18: best and worst picked across worlds with no chip, and
+        a winning EURGBP read "0.86 → 0.86"."""
+        best = self.hist[self.hist.index(">Best Trade<"):self.hist.index(">Worst Trade<")]
+        worst = self.hist[self.hist.index(">Worst Trade<"):self.hist.index('class="pd-card pd-hist"')]
+        self.assertIn('sv-world sv-world--live', best)
+        self.assertIn("0.86000 → 0.86200", best)
+        self.assertIn('sv-world sv-world--paper', worst)
+        self.assertIn("0.58910 → 0.58790", worst)
+
+    def test_the_history_list_uses_the_short_chips_and_the_side_markers(self):
+        """F18: rows wore the long REAL MONEY chip; the bar's markers were
+        ◀ ▶ on the fills at 2.8:1."""
+        hist = self.hist[self.hist.index('class="pd-card pd-hist"'):self.hist.index('aria-label="At the broker"')]
+        self.assertIn("ph-chart-marker", hist)
+        self.assertNotIn(">REAL MONEY<", hist)
+        self.assertNotIn("&#9654;", hist)
+        self.assertNotIn("&#9664;", hist)
+
+    def test_the_30_day_note_keeps_the_fees_caveat(self):
+        """F21: the board's note says fees are not counted yet; for real
+        money that caveat stays."""
+        note = self.page[self.page.index('class="pd-foot pd-foot--c30"'):]
+        note = note[:note.index("</p>")]
+        self.assertIn("Fees are not counted yet", note)
+
+    def test_margin_used_says_its_currency_and_the_stops_their_rule(self):
+        """F14: MARGIN USED's line dropped the $; AT THE STOPS now says how
+        it is measured."""
+        strip = self.page[self.page.index('data-sv-live="pos-strip"'):self.page.index('data-sv-live="pos-count"')]
+        self.assertRegex(strip, r'data-sv-live-key="pos\.margin\.sub"[^>]*>.*?\$4,402\.10.*?\$6,051\.51.*? free', )
+        self.assertRegex(strip, r'title="[^"]*if every stop fills[^"]*entry[^"]*"')
+
+    def test_a_world_tab_says_its_world_and_leaves_the_filter_button_dark(self):
+        """F20: the Real tab's note said "world live" and lit Order · filter."""
+        page = _get(self.client_, "/positions/?world=live")
+        note = re.search(r'<p class="pos-view-note"[^>]*>(.*?)</p>', page, re.S).group(1)
+        self.assertIn("world <b>Real</b>", note)
+        self.assertRegex(page, r'class="pd-filter-btn"\s')
+        page = _get(self.client_, "/positions/?world=live&side=long")
+        self.assertRegex(page, r'class="pd-filter-btn is-on"')
+
+    def test_at_the_broker_reads_as_a_trader_reads(self):
+        """F19: quantities at four decimals and LIVE as an Orbitron word."""
+        panel = self.page[self.page.index('aria-label="At the broker"'):]
+        panel = panel[:panel.index("</section>")]
+        head = panel[:panel.index("</div>")]
+        self.assertNotRegex(head, r"<h2[^>]*>[^<]*·\s*LIVE\s*</h2>")
+        self.assertIn('sv-world sv-world--live', head)
+        self.assertIn('data-label="Qty">1.5<', panel)
+        self.assertNotIn("1.5000", panel)
+
+    def test_the_history_tab_keeps_the_broker_and_the_capital(self):
+        """Contract F5: main showed both on both tabs."""
+        self.assertIn('aria-label="At the broker"', self.hist)
+        self.assertIn('data-sv-live="cap-card"', self.hist)
+
+    def test_the_etoro_line_sits_in_the_book_card(self):
+        """F4: one paragraph between the cards, on the void."""
+        strip = self.page[self.page.index('data-sv-live="pos-strip"'):self.page.index('data-sv-live="pos-count"')]
+        book = strip[strip.index('aria-label="The real book at eToro"'):]
+        book = book[:book.index("</section>")]
+        for key in ("pos.etoro", "pos.etoro.sub", "pos.etoro.split"):
+            self.assertIn('data-sv-live-key="%s"' % key, book)
+        self.assertIn("ETORO USED", book)
+        self.assertIn('popovertarget="pdEtoro"', book)
+        self.assertNotIn('<p class="pd-etoro"', strip)
+
+    def test_an_estimate_is_marked_and_never_drawn_as_a_measured_gain(self):
+        """F12, in the markup: the ≈, ink, an empty arrow slot."""
+        rows = dict((re.search(r'data-pos-symbol="(\w+)"', t).group(1), r) for t, r in _rows(self.page))
+        self.assertRegex(rows["NAS100"], r'class="pd-pv pd-pv--est"><span class="pd-est" aria-label="estimate">≈</span>'
+                                         r'\+61\.50<span class="pd-dg" aria-hidden="true"></span>')
+        self.assertIn('class="num pd-r--est"', rows["NAS100"])
+        self.assertRegex(rows["EURUSD"], r'class="pd-pv up">\+65\.00<span class="pd-dg" aria-hidden="true">▲</span>')
+
+    def test_the_keys_say_where_tab_goes(self):
+        """F8: from the keys' row CLOSE is the fourth Tab stop (the symbol,
+        the stop, the target); the hint says so."""
+        head = self.page[self.page.index('class="pd-card pd-pos"'):]
+        head = head[:head.index("<table")]
+        self.assertIn('<kbd class="pd-kbd">Tab</kbd><span>stop · target · Close</span>', head)
+
+    def test_the_detail_row_repeats_no_chip_and_spans_to_the_end(self):
+        """F9: a second REAL MONEY chip under the row's own, and a last cell
+        the pinned CLOSE column took."""
+        dets = re.findall(r'<tr class="pd-det[^"]*" id="pd-det-[\w-]+"[^>]*hidden>(.*?)</tr>', self.page, re.S)
+        self.assertEqual(len(dets), 6)
+        for det in dets:
+            self.assertNotIn("sv-world", det)
+            tds = re.findall(r"<td\b([^>]*)>", det)
+            self.assertIn("colspan=", tds[-1])
+            spans = sum(int(re.search(r'colspan="(\d+)"', t).group(1)) if "colspan" in t else 1 for t in tds)
+            self.assertEqual(spans, 13)
+
+    def test_the_figure_columns_are_sized_from_their_figures(self):
+        """F1: each figure column as wide as its widest figure in the number
+        face (the instrument's digits, the ≈ and the arrow's slot), never a
+        fixed pixel width the size tiers outgrow."""
+        cols = re.search(r'<colgroup>(<col class="pd-c-sel">.*?)</colgroup>', self.page).group(1)
+        for want in ('class="pd-c-sym pd-ch6"', 'class="pd-c-qty pd-ch6"', 'class="pd-c-px pd-ch8"',
+                     'class="pd-c-pnl pd-ch10"', 'class="pd-c-r pd-ch6"', 'class="pd-c-lvl pd-ch8"'):
+            self.assertIn(want, cols)
+
+
+class DeskSourceReviewTests(SimpleTestCase):
+    """The review's fixes that live in the sources."""
+
+    def _rules(self):
+        css = re.sub(r"/\*.*?\*/", "", read(SHEET), flags=re.S)
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+            yield m.group(1).strip(), m.group(2)
+
+    def test_the_close_dialog_rules_leave_take_trade_alone(self):
+        """Contract F2: every dialog rule of this sheet is scoped to the
+        close flows (a danger confirm that is not TAKE TRADE)."""
+        n = 0
+        for selector, _body in self._rules():
+            for sel in selector.split(","):
+                if re.search(r"\.sv-dialog|\.sz-warn", sel):
+                    n += 1
+                    self.assertIn(".sv-dialog--danger:not(.sz-dialog)", sel, sel)
+        self.assertGreater(n, 5)
+
+    def test_the_analytics_fragment_carries_no_page_style(self):
+        """F6: its own <style> block and inline styles moved to the sheet; the
+        sides are words with their arrows; no caption points at a table the
+        page no longer has."""
+        frag = read("templates/dashboard/_positions_metrics.html")
+        self.assertNotIn("<style", frag)
+        self.assertNotRegex(frag, r'\sstyle="')
+        self.assertIn("▲ LONG", frag)
+        self.assertIn("▼ SHORT", frag)
+        self.assertNotIn("the asset-class table at the top of this page", frag)

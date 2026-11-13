@@ -206,10 +206,6 @@ def etoro_book(user, objects, rows, etoro):
         "margin": pct(margin, 1),
         "margin_used": money(used, ccy),
         "margin_free": money(e.get("available"), ccy),
-        # The same two figures without the currency sign, for the line
-        # under MARGIN USED (the card's head names the account's money).
-        "margin_used_n": e.get("used_t") or DASH,
-        "margin_free_n": e.get("available_t") or DASH,
         "title": e.get("title") or "",
     }
 
@@ -341,6 +337,98 @@ def closed_by_world(pairs, now=None, days=30):
     return out
 
 
+# ── 6. The figure columns, as wide as their figures ────────────────────────
+
+#: The least a figure column holds, in characters of the number face: a
+#: forex quantity, a price at five digits, a P&L with its arrow's slot, an R,
+#: a level. A column grows past it only when a figure on the book needs it.
+COL_FLOOR = {"sym": 6, "qty": 6, "px": 8, "pnl": 9, "r": 6, "lvl": 8}
+#: The sheet sizes columns from 4 to this many characters.
+COL_CEIL = 20
+
+
+def _chars(text):
+    return len(str(text or ""))
+
+
+def figure_columns(rows):
+    """{sym, qty, px, pnl, r, lvl}: each figure column's width in characters
+    of the number face (static/css/sv-positions.css turns them into widths,
+    `ch` of JetBrains Mono at the row's size tier), from the widest figure
+    the book prints in it. The P&L counts its arrow's two-character slot and
+    an estimate's ≈ with its half space. Fixed pixel widths were the review's
+    blocker (2026-11-13): the size tiers raise the cells to 14 and 15 px and
+    the figures were cut mid-number."""
+    from core.price_format import format_price
+    from core.templatetags.sauron_tags import qty as qty_text
+    w = dict(COL_FLOOR)
+    for r in rows:
+        cls, sym = r.get("asset_class") or "", r.get("symbol") or ""
+
+        def px(value):
+            return format_price(value, cls, sym) if value is not None else ""
+        w["sym"] = max(w["sym"], _chars(sym))
+        w["qty"] = max(w["qty"], _chars(qty_text(r.get("quantity"))))
+        w["px"] = max(w["px"], _chars(px(r.get("entry_price"))),
+                      _chars(r.get("last_text")))
+        if r.get("unrealized_pnl") is not None:
+            est = (r.get("pnl_source") or "") == "estimate"
+            w["pnl"] = max(w["pnl"], _chars(r.get("pnl_text")) + 2 + (2 if est else 0))
+        if r.get("r_multiple") is not None:
+            w["r"] = max(w["r"], _chars(r.get("r_text")))
+        w["lvl"] = max(w["lvl"], _chars(px(r.get("stop_loss"))),
+                       _chars(px(r.get("take_profit"))))
+    return {k: min(v, COL_CEIL) for k, v in w.items()}
+
+
+# ── 7. The closed book by world (the history tab) ──────────────────────────
+
+#: The history strip's keys (the refresh's): REAL keeps the names the strip
+#: always had, DEMO and PAPER take theirs with the world's suffix.
+CLOSED_KEYS = ("closed", "closed.sub", "win_rate", "realized", "profit_factor",
+               "avg_wl")
+
+
+def closed_book(pairs):
+    """[{world, keys, closed, won, realized (a _figure), pf, avg_wl, title}]
+    for REAL, DEMO and PAPER apart: every close of the world, its booked
+    P&L, and its rates from MIN_GRADED graded closes (fewer print the count
+    and a dash, as the open tab's 30 days do). Never two worlds added: the
+    review of 2026-11-13 found the history strip summing the three into one
+    "realized P&L" that read as real money."""
+    out = []
+    for world in WORLDS:
+        mine = [p for p, d in pairs if (d or {}).get("world") == world]
+        graded = [_f(getattr(p, "unrealized_pnl", None)) for p in mine]
+        graded = [v for v in graded if v is not None]
+        wins = [v for v in graded if v > 0]
+        losses = [v for v in graded if v < 0]
+        enough = len(graded) >= MIN_GRADED
+        gross_w, gross_l = sum(wins), -sum(losses)
+        won = (len(wins) / len(graded) * 100.0) if enough else None
+        pf = (gross_w / gross_l) if enough and wins and gross_l > 0 else None
+        realized = round(sum(graded), 2) if graded else None
+        avg_w = signed(gross_w / len(wins)) if wins else DASH
+        avg_l = signed(-gross_l / len(losses)) if losses else DASH
+        suffix = "" if world == "live" else "." + world
+        out.append({
+            "world": world,
+            "keys": {k.replace(".", "_"): "pos.%s%s" % (k, suffix)
+                     for k in CLOSED_KEYS},
+            "closed": str(len(mine)),
+            "wl": "%dW / %dL" % (len(wins), len(losses)),
+            "min_graded": MIN_GRADED,
+            "won": pct(won, 0) if won is not None else DASH,
+            "realized": _figure(realized),
+            "pf": "{:.2f}".format(pf) if pf is not None else DASH,
+            "avg_wl": "%s / %s" % (avg_w, avg_l),
+            "title": ("%d closed, %d of them graded; a close nothing could "
+                      "price is held out, never booked as a loss. Rates from "
+                      "%d graded closes." % (len(mine), len(graded), MIN_GRADED)),
+        })
+    return out
+
+
 # ── The whole desk ─────────────────────────────────────────────────────────
 
 def desk(user, objects, rows, closed_pairs, etoro, now=None):
@@ -360,6 +448,34 @@ def desk(user, objects, rows, closed_pairs, etoro, now=None):
         # A RETRY CLOSE on the book: the CLOSE column takes its longer word.
         "retry": any((r.get("status") or "") == "CLOSE_PENDING" for r in rows),
         "words": _shown_words(),
+        "cols": figure_columns(rows),
+    }
+
+
+def empty_desk(rows=()):
+    """The desk when its figures cannot be read (contract review F4,
+    2026-11-13): every figure the em dash, the table's columns at their
+    floor, so the page the operator closes from still renders, CLOSE
+    included. Display only, like the rest."""
+    blank = _figure(None)
+    return {
+        "worlds": [{"world": w, "n": 0, "pnl": blank, "sub": DASH} for w in WORLDS],
+        "book": {"has_account": False, "equity": DASH, "equity_read": "",
+                 "exposure": DASH, "exposure_n": 0, "stops": DASH,
+                 "stops_limit": "", "stops_money": DASH, "stops_over": False,
+                 "margin": DASH, "margin_used": DASH, "margin_free": DASH,
+                 "title": ""},
+        "exposure": None,
+        "closed_24h": {"rows": [], "worlds": [{"world": w, "pnl": blank} for w in WORLDS]},
+        "closed_30d": [{"world": w, "n": DASH, "graded": 0, "enough": False,
+                        "won": DASH, "r": DASH, "r_tone": "", "pf": DASH}
+                       for w in WORLDS],
+        "counts": {w: 0 for w in WORLDS},
+        "n_open": len(rows),
+        "min_graded": MIN_GRADED,
+        "retry": any((r.get("status") or "") == "CLOSE_PENDING" for r in rows),
+        "words": "",
+        "cols": dict(COL_FLOOR),
     }
 
 

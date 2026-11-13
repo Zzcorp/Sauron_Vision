@@ -371,7 +371,12 @@ class TheSurfacesTests(_Case):
         # is not; the words themselves stand in the row's disclosure, live;
         # the strip's REAL figure is marked ≈ too.
         cell = _td(body, f"bot-{self.t.id}.pnl")
-        self.assertEqual(cell, "≈ +12.96 ▲")
+        # Updated deliberately (the review of 2026-11-13, the board the
+        # operator approved: "amazing work, bravo, I need it fast!!"): an
+        # estimate is drawn "≈ +12.96" in ink with its arrow slot empty, so
+        # it never reads as a measured gain; the ≈, its words and the title
+        # still say whose figure it is not.
+        self.assertEqual(cell, "≈ +12.96")
         self.assertRegex(body, r'<span class="pd-est" aria-label="estimate">≈</span>\+12\.96<')
         title = re.search(r'data-sv-live-key="bot-%d\.pnl" title="([^"]*)"'
                           % self.t.id, body)

@@ -340,9 +340,11 @@ class TheStylingShipsWithThisPageTests(SimpleTestCase):
 
     def test_the_keyboard_can_see_where_it_is(self):
         self.assertIn(":focus-visible", self.css)
-        # The kit's focus ring (sv-kit.css), the one light the desk v2
-        # keeps (2026-11-13: "amazing work, bravo, I need it fast!!").
-        self.assertIn("outline: 2px solid var(--sv-eye)", self.css)
+        # Updated deliberately (the review of 2026-11-13): the board the
+        # operator approved ("amazing work, bravo, I need it fast!!")
+        # frames the keyboard's row in ink, and a money control never takes
+        # the Eye's green, so the desk's ring is ink-1, 2 px at 2 px.
+        self.assertIn("outline: 2px solid var(--sv-ink-1)", self.css)
 
     def test_only_a_row_with_a_destination_behaves_like_one(self):
         """data-pos-href is empty on a row from the shared book. A pointer

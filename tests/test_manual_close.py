@@ -627,9 +627,17 @@ class PositionsLayoutTests(TestCase):
         open_tab = src.split(">Open positions<", 1)[1].split(
             "Position Analytics", 1)[0]
         self.assertIn('<div class="table-wrapper">', open_tab)
-        # Numbers and dates keep nowrap; only the identifier column wraps,
-        # which is what stops one long rule name setting the table's floor.
-        self.assertIn('class="sv-ident"', open_tab)
+        # Numbers and dates keep nowrap; one long rule name never sets the
+        # table's floor. Retargeted deliberately (the review of 2026-11-13;
+        # the desk v2 the operator approved: "amazing work, bravo, I need it
+        # fast!!"): the rule's identifier left the one-line row for the
+        # row's detail, a cell that spans the table and wraps, so it can
+        # never widen a column.
+        row = open_tab.split("<tr data-sv-position-row", 1)[1].split("</tr>", 1)[0]
+        detail = open_tab.split('<tr class="pd-det', 1)[1].split("</tr>", 1)[0]
+        self.assertNotIn("sv-ident", row)
+        self.assertIn('class="sv-ident"', detail)
+        self.assertIn('colspan="12" class="pd-det-cell"', detail)
         self.assertIn('<th class="num">Qty</th>', open_tab)
 
     def test_no_multiline_hash_comment_slipped_into_the_touched_templates(self):
