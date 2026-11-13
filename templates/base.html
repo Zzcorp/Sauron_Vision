@@ -842,7 +842,8 @@
   <div class="dh-scroll" id="dhScroll">
     <div class="dh-track" id="dhTrack">
       {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
-      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
+      {% comment %}The loop's copy, for the eye only (2026-11-13): out of the tab order, hidden from screen readers (dh_item.html, `twin`).{% endcomment %}
+      {% with twin=True %}{% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}{% endwith %}
     </div>
   </div>
 </div>
@@ -4432,8 +4433,10 @@ function toggleSidebar() {
    position (SVMarquee.offset / .to, wrapped on the loop), so leaving the
    strip hands the auto-scroll the place the hand chose instead of
    snapping it back. Nothing to reveal (no loop) is the end: the page has
-   the wheel. Without the driver (the file did not load) the rule above
-   still holds. */
+   the wheel. A strip that loops has no end, so over it the wheel moves the
+   strip, whichever way it turns: the operator asked that the hand still
+   move them (2026-11-13). Without the driver (the file did not load) the
+   rule above still holds. */
 window.svWheelMarquee = function (frame, track) {
     if (!frame || !track || frame._svMarquee) return;
     frame._svMarquee = true;
@@ -5225,6 +5228,35 @@ window.svWheelMarquee = function (frame, track) {
   function readingTicker(track) {
     return track.matches(':hover') || !!document.querySelector('.ticker-popup:hover');
   }
+  /* A fresh headline glows when the eye can first see it (2026-11-13, the
+     review). The strip keeps the item at its left edge where it was across
+     a swap (static/js/sv-marquee.js: never a jump), so a newcomer put at
+     the front usually lands out of view and rides in a minute or two
+     later: its 6 s glow (.t-new) used to play out of view. Its id now
+     waits in tickerUnseen until a copy of it is half in view (an
+     IntersectionObserver on the window: the band's own clip counts, a
+     collapsed band is off screen, a hidden tab sees nothing); that copy
+     takes .t-new there and the glow starts. A swap before it is seen
+     keeps it waiting. Without IntersectionObserver it glows at once, as
+     before. */
+  const tickerUnseen = new Set();
+  let tickerSeer = null;
+  function tickerFresh(el) {
+    if (typeof window.IntersectionObserver !== 'function') { el.classList.add('t-new'); return; }
+    if (!tickerSeer) tickerSeer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting || en.intersectionRatio < 0.45) return;
+        const id = en.target.getAttribute('data-news-id');
+        tickerSeer.unobserve(en.target);
+        if (!tickerUnseen.delete(id)) return;      /* its other copy was seen first */
+        en.target.classList.add('t-new');
+        document.querySelectorAll('#tickerTrack .ticker-item[data-news-id="' + id + '"]')
+          .forEach(function (n) { tickerSeer.unobserve(n); });
+      });
+    }, { threshold: [0.5] });
+    tickerUnseen.add(el.dataset.newsId);
+    tickerSeer.observe(el);
+  }
   function swapTicker(track, html, force) {
     /* A 200 that is a whole page — a session that expired between two
        sweeps follows the redirect to the login wall — is not a marquee. */
@@ -5246,9 +5278,14 @@ window.svWheelMarquee = function (frame, track) {
     try {
       track.innerHTML = html;
       tickerLast = key;
+      if (tickerSeer) tickerSeer.disconnect();     /* the old items are gone */
+      const now = new Set();
       track.querySelectorAll('.ticker-item[data-news-id]').forEach(el => {
-        if (!before.has(el.dataset.newsId)) el.classList.add('t-new');
+        const id = el.dataset.newsId;
+        now.add(id);
+        if (!before.has(id) || tickerUnseen.has(id)) tickerFresh(el);
       });
+      tickerUnseen.forEach(id => { if (!now.has(id)) tickerUnseen.delete(id); });
     } finally {
       document.dispatchEvent(new CustomEvent('htmx:afterSwap',
                                              { detail: { svRegion: track } }));
@@ -5935,7 +5972,10 @@ window.svWheelMarquee = function (frame, track) {
     /* The strip to offset v. ONE POSITION (2026-11-13): when
        sv-marquee.js keeps the strip, the arrows and the drag move its
        position and the scroll goes on from there; without it, the old
-       paused transform. */
+       paused transform. No template renders .dh-arrow or .tb-arrow
+       buttons today (the review, 2026-11-13): the arrow crawls below find
+       nothing and are kept for a template that brings them back; dhTo /
+       dhAt and tTo / tAt serve the drag. */
     var dhTo = function(v){
       var m = window.SVMarquee;
       if (m && m.owns(dhTrack)) { dhOffset = m.to(dhTrack, v); return; }
@@ -6260,13 +6300,15 @@ window.svWheelMarquee = function (frame, track) {
      strip still while the button is down (the pointer may leave it
      mid-drag), and a drag that moved the strip is not a click: letting go
      over an item neither follows its link nor pins its card. The primary
-     button only: a context menu would swallow the mouseup. */
+     button only: a context menu would swallow the mouseup. Never from the
+     collapse button (the review, 2026-11-13): a click whose hand moved a
+     few pixels was swallowed as a drag, and the strip did not collapse. */
   function enableDragScroll(container, track, getOffset, setOffset){
     var dragging = false, startX = 0, startOff = 0, moved = 0, swallow = false;
     function held(on){ var m = window.SVMarquee; if (m && m.owns(track)) m.hold(track, 'drag', on); }
     container.addEventListener('mousedown', function(e){
       if(e.button) return;
-      if(e.target.closest('.tb-arrow,.dh-arrow,.ticker-popup,.dh-pop')) return;
+      if(e.target.closest('.tb-arrow,.dh-arrow,.ticker-popup,.dh-pop,.hb-collapse-btn')) return;
       dragging = true; startX = e.clientX; startOff = getOffset(); moved = 0;
       container.style.cursor = 'grabbing';
       track.style.animationPlayState = 'paused';

@@ -13,17 +13,31 @@
 
    ONE DRIVER for every frame that declares data-sv-marquee-speed (px per
    second: base.html, prices 40, news 30). Each strip has ONE position, in
-   px, owned here: the wheel (svWheelMarquee), the drag and the arrow crawl
-   in base.html move it through SVMarquee.offset() / .to(), and the scroll
-   goes on from wherever the hand left it.
+   px, owned here: the wheel (svWheelMarquee) and the drag in base.html
+   move it through SVMarquee.offset() / .to() (so would the arrow crawl,
+   but no template renders arrow buttons today), and the scroll goes on
+   from wherever the hand left it.
 
-     * A constant speed, independent of the content: pos += speed * dt.
+     * A constant speed, independent of the content: each frame moves a
+       strip its speed times the display's frame interval, times the
+       whole frames since the last one (the interval measured while
+       running, snapped to the display's own rate). The same distance
+       every frame, so the device-pixel steps keep one even rhythm: news
+       at 30 px/s on a 60 Hz screen is half a pixel a frame, and the
+       frame clock's jitter (coarsened to 0.1 ms) decided each rounding
+       (the review, 2026-11-13: it stood two frames and stepped two). A
+       frame late by more than DT_MAX catches up DT_MAX only: after a long
+       task the strip goes on from where it froze instead of leaping.
      * A seamless loop: the track holds the same items twice; the period is
        measured (the left of the first item of the second half minus the
        left of the first item) and the position wraps on it, so the picture
-       at pos and at pos - period is the same one. A strip whose one pass
-       fits in its frame (no news yet: "Quiet") has nothing to reveal: it
-       stands at its start and the wheel goes to the page.
+       at pos and at pos - period is the same one. The period is made a
+       whole number of device pixels (the gap between the halves padded by
+       the fraction, the track's width kept): otherwise the copy sits at
+       another sub-pixel phase and every glyph shifts once a loop. A strip
+       whose one pass fits in its frame (two headlines; no news yet:
+       "Quiet") has nothing to reveal: it stands at its start, its copy
+       hidden, and the wheel goes to the page.
      * Never a jump on a refresh: a ResizeObserver (widths: the one-price
        painter, a region sweep, the fonts) and a MutationObserver (items
        added, removed, swapped by a news refetch) measure again, and the
@@ -34,13 +48,15 @@
        written only when its device pixel changes, rounded to device
        pixels so the figures stay crisp. No layout per frame.
      * Still while the pointer is on the strip, while a card opened from it
-       is on the page (data-sv-marquee-pop: hovered, crossing or pinned),
-       while focus is in it (a focused item is shown), while a finger is
-       down and three seconds after it lifts, while the hand drags it,
-       while the tab is hidden or the PIN lock is up, while the strip is
-       collapsed or not displayed, and under reduced motion (the wheel and
-       the drag still move it there). While no strip runs no frame is asked
-       for; a strip resumes from the same spot (its first frame moves 0).
+       is on the page (data-sv-marquee-pop, anchored in this strip: hovered,
+       crossing or pinned), while focus is in it (a focused item is shown,
+       clear of the collapse tab: the item itself, never wrapped to its
+       twin), while a finger is down and three seconds after it lifts,
+       while the hand drags it, while the tab is hidden or the PIN lock is
+       up, while the strip is collapsed or not displayed, and under reduced
+       motion (the wheel and the drag still move it there). While no strip
+       runs no frame is asked for; a strip resumes from the same spot (its
+       first frame moves 0).
      * Content, not the magic layer: every Ambience, both themes.
 
    Display only: it reads boxes and writes one transform per strip. No
@@ -49,13 +65,18 @@
     'use strict';
     if (w.SVMarquee || !d) return;
 
-    var DT_MAX = 0.25;          /* s: a late frame catches up this much at most */
+    var DT_MAX = 0.05;          /* s: a late frame catches up this much at most (2 px at 40 px/s) */
     var TOUCH_MS = 3000;        /* a finger lifted: still this long after */
     var SHOW_PX = 24;           /* a focused item is shown this far inside */
     var TRACK = '.ticker-track, .dh-track';
+    /* The displays' own rates (Hz): a measured interval this close to one
+       of them (1%) is that one exactly, so a frame's distance is the
+       speed's own fraction of a pixel (30 px/s at 60 Hz: exactly 0.5). */
+    var RATES = [30, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 240];
     var reduced = w.matchMedia ? w.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
     var hovers = w.matchMedia ? w.matchMedia('(hover: hover)').matches : true;
     var strips = [], raf = 0, locked = false;
+    var frameMs = 0, gaps = [], lastNow = 0;   /* the display's frame interval, measured */
     var stats = { frames: 0, writes: 0, measures: 0 };
 
     function Strip(frame, track) {
@@ -67,9 +88,12 @@
         this.pos = 0;           /* px of track at the clip's left edge, in [0, period) */
         this.period = 0;
         this.width = 0;         /* the clip's */
+        this.span = 0;          /* the items' extent, px of track */
         this.origin = 0;        /* the track's own left, from the clip's */
         this.loop = false;
         this.items = [];        /* {key, copy, left, w}, px of track, as last measured */
+        this.padded = [];       /* the two items carrying the period's padding */
+        this.hid = [];          /* the copy, hidden while there is no loop */
         this.x = null;          /* the transform written, px */
         this.css = '';
         this.last = 0;          /* the last frame's time, 0: none yet */
@@ -84,7 +108,14 @@
             || el.getAttribute('href') || (el.textContent || '').trim().slice(0, 80);
     }
 
+    /* The period's padding off, so the items are measured as they are. */
+    function unpad(s) {
+        s.padded.forEach(function (el) { el.style.marginRight = ''; });
+        s.padded = [];
+    }
+
     function measure(s) {
+        unpad(s);
         var els = s.track.children, n = els.length;
         var tr = s.track.getBoundingClientRect(), cr = s.clip.getBoundingClientRect();
         var seen = {}, items = [];
@@ -97,13 +128,40 @@
         for (i = 0; halves && i < n / 2; i++) {
             if (items[i].key !== items[i + n / 2].key) halves = false;
         }
-        s.items = items;
         s.width = s.clip.clientWidth;
         /* the transform written and the clip's scroll are in the rect: the
            track's own left in the clip */
         s.origin = tr.left - (s.x || 0) - cr.left + s.clip.scrollLeft;
         s.period = halves ? items[n / 2].left - items[0].left : 0;
         s.loop = s.period > 0 && s.width > 0 && s.period >= s.width;
+        /* One loop a whole number of device pixels (the review, 2026-11-13):
+           a period of 6638.39 px put the copy at another sub-pixel phase than
+           the first half, and at each wrap every glyph in view shifted by the
+           fraction (backwards on the news strip). The gap between the halves
+           takes the fraction (a margin on the first half's last item), and
+           the second half's last item gives it back: the track's width is
+           unchanged, so no ResizeObserver hears of it. */
+        if (s.loop) {
+            var dpr = w.devicePixelRatio || 1;
+            var pad = Math.ceil(s.period * dpr - 1e-3) / dpr - s.period;
+            if (pad > 1e-3) {
+                els[n / 2 - 1].style.marginRight = pad + 'px';
+                els[n - 1].style.marginRight = -pad + 'px';
+                s.padded = [els[n / 2 - 1], els[n - 1]];
+                for (i = n / 2; i < n; i++) items[i].left += pad;
+                s.period += pad;
+            }
+        }
+        /* With nothing to reveal the copy would stand beside the first half
+           (two headlines, twice): hidden while there is no loop. */
+        s.hid.forEach(function (el) { el.style.visibility = ''; });
+        s.hid = [];
+        for (i = n / 2; halves && !s.loop && i < n; i++) {
+            els[i].style.visibility = 'hidden';
+            s.hid.push(els[i]);
+        }
+        s.items = items;
+        s.span = n ? items[n - 1].left + items[n - 1].w : 0;
         stats.measures++;
     }
 
@@ -111,6 +169,13 @@
         if (!s.loop) return 0;
         p = p % s.period;
         return p < 0 ? p + s.period : p;
+    }
+
+    /* Not wrapped: kept where the track still covers the whole clip. A
+       focused item is shown this way, itself and not its twin a loop away
+       (the next frame wraps the position: the same picture). */
+    function within(s, p) {
+        return Math.max(s.origin, Math.min(s.origin + s.span - s.width, p));
     }
 
     /* The item at the clip's left edge and the ones after it in view, each
@@ -178,22 +243,51 @@
         wake();
     }
 
+    /* The display's frame interval (ms), from the gaps between frames while
+       running: the mean of the last ones near their median, snapped to the
+       display's own rate when that close, and kept until it moves by more
+       than 3% (another screen). */
+    function interval(gap) {
+        if (gap > 3 && gap < 60) {
+            gaps.push(gap);
+            if (gaps.length > 40) gaps.shift();
+        }
+        if (gaps.length < 20) return frameMs;
+        var med = gaps.slice().sort(function (a, b) { return a - b; })[gaps.length >> 1];
+        var sum = 0, k = 0;
+        for (var i = 0; i < gaps.length; i++) {
+            if (Math.abs(gaps[i] - med) < med * 0.25) { sum += gaps[i]; k++; }
+        }
+        var mean = sum / k;
+        for (i = 0; i < RATES.length; i++) {
+            if (Math.abs(mean * RATES[i] / 1000 - 1) < 0.01) { mean = 1000 / RATES[i]; break; }
+        }
+        if (!frameMs || Math.abs(mean - frameMs) > frameMs * 0.03) frameMs = mean;
+        return frameMs;
+    }
+
     function tick(now) {
         raf = 0;
-        var any = false;
+        var any = false, f = lastNow ? interval(now - lastNow) : frameMs;
+        lastNow = now;
         for (var i = 0; i < strips.length; i++) {
             var s = strips[i];
             if (!running(s)) { s.last = 0; continue; }
             any = true;
             if (s.last) {
-                var dt = Math.min((now - s.last) / 1000, DT_MAX);
-                if (dt > 0) s.pos = wrap(s, s.pos + s.speed * dt);
+                /* Whole frames at the speed: the same distance every frame,
+                   one rhythm of device pixels. A late frame catches up
+                   DT_MAX at most. */
+                var due = now - s.last, n = f ? Math.round(due / f) : 0;
+                var ms = Math.min(n ? n * f : due, DT_MAX * 1000);
+                if (ms > 0) s.pos = wrap(s, s.pos + s.speed * ms / 1000);
             }
             s.last = now;
             paint(s);
         }
         stats.frames++;
         if (any) raf = w.requestAnimationFrame(tick);
+        else lastNow = 0;
     }
 
     /* Whatever changed: run, or ask for no frame at all. A strip that stops
@@ -206,25 +300,29 @@
         }
         if (any && !raf) raf = w.requestAnimationFrame(tick);
         else if (!any && raf) { w.cancelAnimationFrame(raf); raf = 0; }
+        if (!any) lastNow = 0;
     }
 
     /* A card this strip opened, on <body> and displayed (the popup engine
-       in base.html portals it there while it is open). */
+       in base.html portals it there while it is open, its anchor in
+       _origParent). A card anchored elsewhere that wears the same class
+       (the rail's watchlist cards are .dh-pop too) is not this strip's. */
     function popOpen(s) {
         if (!s.pop || !d.body) return false;
         var kids = d.body.children;
         for (var i = 0; i < kids.length; i++) {
             var n = kids[i];
-            if (n.matches && n.matches(s.pop) && w.getComputedStyle(n).display !== 'none') return true;
+            if (!(n.matches && n.matches(s.pop))) continue;
+            if (n._origParent && !s.frame.contains(n._origParent)) continue;
+            if (w.getComputedStyle(n).display !== 'none') return true;
         }
         return false;
     }
 
-    /* A focused item the strip does not show is brought in, by the strip's
-       own position (the browser cannot scroll an item that sits left of
-       the clip into view). That element itself, not its twin in the other
-       half: the position is not wrapped here but kept where the track still
-       covers the whole clip (the next frame wraps it, the same picture). */
+    /* A focused item the strip does not show wholly is brought in, clear of
+       the collapse tab, by the strip's own position (the browser cannot
+       scroll an item that sits left of the clip into view). That element
+       itself, not its twin in the other half: within(), never wrapped. */
     function show(s, el) {
         if (!s.loop || !el || el === s.track || !s.track.contains(el)) return;
         while (el.parentElement !== s.track) el = el.parentElement;
@@ -235,8 +333,7 @@
         if (r.left < c.left) to = s.pos - (c.left - r.left) - SHOW_PX;
         else if (r.right > right) to = s.pos + (r.right - right) + SHOW_PX;
         else return;
-        var lo = s.origin, hi = s.origin + 2 * s.period - s.width;
-        s.pos = Math.max(lo, Math.min(hi, to));
+        s.pos = within(s, to);
         paint(s);
     }
 
@@ -262,13 +359,21 @@
             hold(s, 'focus', !!(to && f.contains(to)));
         });
         /* The browser scrolls the clip to show a focused item to the right;
-           that move becomes the strip's own position. */
+           that move becomes the strip's own position, NEVER wrapped on the
+           loop (the review, 2026-11-13): a wrap traded the focused item for
+           its twin a loop away and left the focus off screen, the strip
+           jumping at each Shift+Tab. Then the focused item is shown from
+           its own box: the browser's scroll and show() may both have moved
+           the strip for it. */
         s.clip.addEventListener('scroll', function () {
             var by = s.clip.scrollLeft;
             if (!by) return;
             s.clip.scrollLeft = 0;
-            s.pos = wrap(s, s.pos + by);
+            if (!s.loop) return;
+            s.pos = within(s, s.pos + by);
             paint(s);
+            var a = d.activeElement;
+            if (a && s.track.contains(a)) show(s, a);
         }, { passive: true });
         if (w.MutationObserver) {
             new w.MutationObserver(function () { refresh(s); })
@@ -297,6 +402,21 @@
     function find(track) {
         for (var i = 0; i < strips.length; i++) if (strips[i].track === track) return strips[i];
         return null;
+    }
+
+    /* Another device-pixel ratio (a zoom, another screen): the rounding and
+       the period's padding are per device pixel, so measure again. */
+    function watchDpr() {
+        if (!w.matchMedia) return;
+        var mq = w.matchMedia('(resolution: ' + (w.devicePixelRatio || 1) + 'dppx)');
+        function on() {
+            if (mq.removeEventListener) mq.removeEventListener('change', on);
+            else if (mq.removeListener) mq.removeListener(on);
+            strips.forEach(refresh);
+            watchDpr();
+        }
+        if (mq.addEventListener) mq.addEventListener('change', on);
+        else if (mq.addListener) mq.addListener(on);
     }
 
     function init() {
@@ -340,6 +460,7 @@
         }
         if (d.fonts && d.fonts.ready) d.fonts.ready.then(function () { strips.forEach(refresh); });
         w.addEventListener('resize', function () { strips.forEach(paint); });
+        watchDpr();
         w.addEventListener('pointerup', lift, true);
         w.addEventListener('pointercancel', lift, true);
         w.addEventListener('pageshow', function () { strips.forEach(function (s) { s.last = 0; }); wake(); });
@@ -378,7 +499,8 @@
             var s = find(track);
             if (!s) return null;
             return { pos: s.pos, period: s.period, width: s.width, speed: s.speed,
-                     loop: s.loop, running: running(s), holds: Object.keys(s.holds) };
+                     loop: s.loop, running: running(s), holds: Object.keys(s.holds),
+                     frameMs: frameMs };
         },
         stats: stats
     };

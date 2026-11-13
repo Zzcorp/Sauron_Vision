@@ -38,6 +38,17 @@ answering what the test queued). It moves a real pointer, wheel, keyboard
 and finger through the DevTools and samples each track's transform and the
 item at its left edge every frame. On main 349b1ca they fail: nothing moves.
 
+The review of the first build (2026-11-13), each point measured here, red on
+e4e8a2d: Shift+Tab into a strip left the focus off screen (the clip's scroll
+was wrapped on the loop, trading the focused item for its twin); the loop's
+copy took the keyboard and the screen reader a second time, and the last
+stop sat under the collapse tab; one loop was a fraction of a pixel, so the
+seam shifted every glyph once a loop; the steps' rhythm followed the frame
+clock's jitter; a long task made the strip skip up to 10 px; a fresh
+headline glowed out of view; a watchlist card (.dh-pop too) held the
+headband; a short ticker showed its copy; a click on a collapse button that
+moved a few pixels was taken for a drag.
+
 Display only. No order, no broker, no model, no network; every row is
 synthetic. Skipped without Chromium.
 
@@ -68,8 +79,14 @@ WALL = "templates/landing/the_wall.html"
 #: px per second, the frame's own constant.
 SPEED = {"dh": 40, "ticker": 30}
 FRAME = {"dh": "dataHeadband", "ticker": "tickerBar"}
+TRACK_ID = {"dh": "dhTrack", "ticker": "tickerTrack"}
 #: a few seconds after a finger lifts
 TOUCH_RESUME_S = 3.0
+#: the most a late frame catches up (sv-marquee.js DT_MAX): after a longer
+#: stall the strip goes on from where it froze
+CATCH_UP_S = 0.05
+#: Input.dispatchKeyEvent's modifier bit for Shift
+SHIFT = 8
 
 
 def read(rel):
@@ -246,32 +263,37 @@ window.__mq = (function () {
       .observe(parts(n).t, { attributes: true, attributeFilter: ['style'] });
   });
   var marks = [];
-  function snap(name) {
+  /* With `vis`, every item in view too: its key and its left in the clip. */
+  function snap(name, vis) {
     var p = parts(name), c = p.c.getBoundingClientRect(), r = p.t.getBoundingClientRect();
-    var its = items(p.t), seen = {}, edge = null;
+    var its = items(p.t), seen = {}, edge = null, shown = vis ? [] : null;
     for (var i = 0; i < its.length; i++) {
       var k = keyOf(its[i]);
       seen[k] = (seen[k] || 0) + 1;
       var b = its[i].getBoundingClientRect();
-      if (b.right > c.left + 0.5) {
+      if (!edge && b.right > c.left + 0.5) {
         edge = { key: k, copy: seen[k] - 1, left: b.left - c.left, right: b.right - c.left };
-        break;
+        if (!vis) break;
       }
+      if (vis && b.left >= c.right) break;
+      if (vis && b.right > c.left) shown.push([k, b.left - c.left]);
     }
-    return { t: performance.now(), x: tx(p.t), P: period(p.t), n: its.length,
-             gapL: r.left - c.left, gapR: c.right - r.right, edge: edge,
-             scroll: p.c.scrollLeft, w: writes[name], m: marks.length,
-             collapsed: p.f.classList.contains('collapsed') };
+    var out = { t: performance.now(), x: tx(p.t), P: period(p.t), n: its.length,
+                gapL: r.left - c.left, gapR: c.right - r.right, edge: edge,
+                scroll: p.c.scrollLeft, w: writes[name], m: marks.length,
+                collapsed: p.f.classList.contains('collapsed') };
+    if (vis) out.vis = shown;
+    return out;
   }
   var rec = null;
-  function start(names) {
+  function start(names, vis) {
     marks = [];
-    var me = { names: names, out: {} };
+    var me = { names: names, out: {}, vis: !!vis };
     names.forEach(function (n) { me.out[n] = []; });
     rec = me;
     (function loop() {
       if (rec !== me) return;
-      me.names.forEach(function (n) { me.out[n].push(snap(n)); });
+      me.names.forEach(function (n) { me.out[n].push(snap(n, me.vis)); });
       requestAnimationFrame(loop);
     })();
     return names.length;
@@ -349,11 +371,58 @@ window.__mq = (function () {
     return its[k].getBoundingClientRect().left - its[0].getBoundingClientRect().left;
   }
   function x(name) { return tx(parts(name).t); }
+  /* The clip's right edge the eye has: the collapse tab sits over it. */
+  function seeRight(p, c) {
+    var tab = p.f.querySelector('.hb-collapse-btn'), right = c.right;
+    if (tab && tab.offsetWidth) right = Math.min(right, tab.getBoundingClientRect().left);
+    return right;
+  }
+  /* The focused item of a strip: which one (its index, its key, which copy
+     of the loop), whether it is inside the clip, and whether it is clear of
+     the collapse tab too. */
   function activeIn(name) {
     var p = parts(name), a = document.activeElement;
     if (!a || !p.t.contains(a)) return null;
-    var c = p.c.getBoundingClientRect(), b = a.getBoundingClientRect();
-    return { key: keyOf(a), inClip: b.left >= c.left - 0.5 && b.right <= c.right + 0.5 };
+    while (a.parentElement !== p.t) a = a.parentElement;
+    var c = p.c.getBoundingClientRect(), b = a.getBoundingClientRect(), right = seeRight(p, c);
+    var its = items(p.t), k = keyOf(a), copy = 0, index = its.indexOf(a);
+    for (var i = 0; i < index; i++) if (keyOf(its[i]) === k) copy++;
+    return { key: k, index: index, copy: copy,
+             inClip: b.left >= c.left - 0.5 && b.right <= c.right + 0.5,
+             clear: b.left >= c.left - 0.5 && b.right <= right + 0.5,
+             left: Math.round(b.left - c.left), right: Math.round(b.right - c.left), x: tx(p.t) };
+  }
+  /* The items the keyboard stops on, by index. */
+  function stops(name) {
+    return items(parts(name).t).map(function (e, i) {
+      return e.tabIndex >= 0 && getComputedStyle(e).visibility !== 'hidden' ? i : -1;
+    }).filter(function (i) { return i >= 0; });
+  }
+  /* Each copy of a news item: where it is, whether the eye can see it,
+     whether its fresh-headline glow runs and for how long. */
+  function glow(id) {
+    var p = parts('ticker'), c = p.c.getBoundingClientRect(), right = seeRight(p, c);
+    var els = p.t.querySelectorAll('.ticker-item[data-news-id="' + id + '"]');
+    return Array.prototype.map.call(els, function (el, i) {
+      var b = el.getBoundingClientRect();
+      var runs = (el.getAnimations ? el.getAnimations() : []).filter(function (a) {
+        return /tNewGlow/.test(a.animationName || '') && a.playState === 'running';
+      });
+      return { copy: i, left: Math.round(b.left - c.left), right: Math.round(b.right - c.left),
+               any: b.right > c.left + 1 && b.left < right - 1,
+               whole: b.left >= c.left - 0.5 && b.right <= right + 0.5,
+               glowing: runs.length > 0, since: runs.length ? Math.round(runs[0].currentTime) : null,
+               bg: getComputedStyle(el).backgroundColor };
+    });
+  }
+  /* Each item of a strip: its key, which copy, whether it is painted. */
+  function shown(name) {
+    var its = items(parts(name).t), seen = {};
+    return its.map(function (e) {
+      var k = keyOf(e);
+      seen[k] = (seen[k] || 0) + 1;
+      return [k, seen[k] - 1, getComputedStyle(e).visibility !== 'hidden'];
+    });
   }
   function text(sel) {
     return Array.prototype.map.call(document.querySelectorAll(sel), function (e) { return e.textContent.trim(); });
@@ -362,7 +431,7 @@ window.__mq = (function () {
            waitCard: waitCard, armGone: armGone,
            away: away, at: at, x: x, items: function (n) { return items(parts(n).t).length; },
            period: function (n) { return period(parts(n).t); }, focusInside: focusInside,
-           activeIn: activeIn, text: text, writes: writes,
+           activeIn: activeIn, stops: stops, glow: glow, shown: shown, text: text, writes: writes,
            order: function (n) { var its = items(parts(n).t); return its.slice(0, its.length / 2).map(keyOf); } };
 })();
 0
@@ -447,18 +516,19 @@ class _Tab:
         self.call("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": xy[0], "y": xy[1],
                                                "deltaX": dx, "deltaY": dy})
 
-    def key(self, key, code, vk):
+    def key(self, key, code, vk, modifiers=0):
         for kind in ("rawKeyDown", "keyUp"):
             self.call("Input.dispatchKeyEvent", {"type": kind, "key": key, "code": code,
                                                  "windowsVirtualKeyCode": vk,
-                                                 "nativeVirtualKeyCode": vk})
+                                                 "nativeVirtualKeyCode": vk,
+                                                 "modifiers": modifiers})
 
     def touch(self, kind, xy=None):
         pts = [{"x": xy[0], "y": xy[1]}] if xy else []
         self.call("Input.dispatchTouchEvent", {"type": kind, "touchPoints": pts})
 
-    def sample(self, names):
-        self.js("__mq.start(%s)" % json.dumps(list(names)))
+    def sample(self, names, vis=False):
+        self.js("__mq.start(%s, %s)" % (json.dumps(list(names)), "true" if vis else "false"))
 
     def mark(self):
         return self.js("__mq.mark()")
@@ -586,7 +656,7 @@ def _seam(tab, name):
         tab.wheel(xy, 0, (period - 25) - pos)
         tab.wait(0.2)
         before = -tab.js("__mq.x('%s')" % name)
-        tab.sample([name])
+        tab.sample([name], vis=True)
         tab.mark()
         tab.move(tab.js("__mq.away()"))
         tab.wait(1.8)
@@ -839,6 +909,205 @@ def _drag(tab, name):
             pass
 
 
+# ── the review's scenarios (2026-11-13) ──────────────────────────────────
+
+def _rhythm(tab):
+    """Six seconds of both strips, put four times on a whole pixel first, as
+    a strip starts at page load (at 0): the rhythm of their steps."""
+    tab.sample(["dh", "ticker"])
+    for k in range(4):
+        # the mark and the move in one task: the move is the phase's first step
+        tab.js("__mq.mark(); SVMarquee.to(document.getElementById('dhTrack'), -%d);"
+               " SVMarquee.to(document.getElementById('tickerTrack'), -%d); 0" % (1000 + 200 * k, 1000 + 200 * k))
+        tab.wait(1.5)
+    return tab.stop()
+
+
+def _stall(tab):
+    """A long task on the page's main thread (300 ms): the strips freeze
+    with it, then go on from where they froze."""
+    tab.sample(["dh", "ticker"])
+    tab.wait(0.6)
+    tab.mark()
+    tab.js("(function(){ var t = performance.now(); while (performance.now() - t < 300) {} })(); 0")
+    tab.wait(0.6)
+    return tab.stop()
+
+
+def _shift_tab(tab, name):
+    """Shift+Tab from a button right after the strip: three keyboard stops
+    backwards into it."""
+    tab.sample([name])
+    tab.wait(0.3)
+    tab.js("(function(){ var b = document.createElement('button'); b.id = 'mqAfter'; b.type = 'button';"
+           " b.textContent = 'after'; b.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999';"
+           " document.getElementById('%s').after(b); b.focus(); })(); 0" % FRAME[name])
+    tab.wait(0.1)
+    stops = []
+    for _ in range(3):
+        tab.mark()
+        tab.key("Tab", "Tab", 9, modifiers=SHIFT)
+        tab.wait(0.35)
+        stops.append(tab.js("__mq.activeIn('%s')" % name))
+    keys = tab.js("__mq.stops('%s')" % name)
+    tab.mark()                                   # 4: blurred
+    tab.js("document.activeElement && document.activeElement.blur();"
+           " document.getElementById('mqAfter').remove(); 0")
+    tab.wait(0.5)
+    return {"stops": stops, "keys": keys, "items": tab.js("__mq.items('%s')" % name),
+            "samples": tab.stop()[name]}
+
+
+def _tab_end(tab, name):
+    """Tab to the strip's last keyboard stop, from the one before it."""
+    tab.sample([name])
+    tab.wait(0.3)
+    keys = tab.js("__mq.stops('%s')" % name)
+    tab.js("(function(){ var its = Array.prototype.filter.call(document.getElementById('%s').children,"
+           " function (n) { return n.matches('.dh-item, .ticker-item'); }); its[%d].focus(); })(); 0"
+           % (TRACK_ID[name], keys[-2]))
+    tab.wait(0.3)
+    tab.mark()
+    tab.key("Tab", "Tab", 9)
+    tab.wait(0.35)
+    last = tab.js("__mq.activeIn('%s')" % name)
+    tab.js("document.activeElement && document.activeElement.blur(); 0")
+    tab.wait(0.5)
+    return {"keys": keys, "last": last, "samples": tab.stop()[name]}
+
+
+def _watch(tab):
+    """The rail's watchlist card (.dh-pop.wl-pop: the headband's look, not
+    its card): hovered open, then pinned with the hand away."""
+    tab.beat(True)
+    at = tab.js("""(function(){
+      var body = document.getElementById('railWatchBody');
+      if (!body) return null;
+      var it = body.querySelector('.wl-item');
+      if (!it) {
+        body.insertAdjacentHTML('afterbegin', '<a href="#mq-watch" class="wl-item" data-symbol="MQWATCH">'
+          + '<div class="wl-row1"><span class="wl-sym">MQWATCH</span></div>'
+          + '<div class="dh-pop wl-pop"><div class="dh-pop-head"><div><div class="dh-pop-title">MQWATCH</div>'
+          + '</div></div><div class="dh-pop-row"><span class="k">Synthetic</span><span class="v">1</span></div></div></a>');
+        it = body.querySelector('.wl-item');
+      }
+      var b = it.getBoundingClientRect();
+      if (!b.width || !b.height) return null;
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + Math.min(b.height / 2, 9)) };
+    })()""")
+    if not at:
+        return {"error": "no watchlist item to hover"}
+    tab.sample(["dh"])
+    tab.wait(0.4)
+    tab.mark()                                   # 1: on the watchlist item, its card opening
+    tab.move((at["x"], at["y"]))
+    opened = tab.js("__mq.waitCard('.wl-pop', 3000)")
+    tab.wait(1.0)
+    tab.mark()                                   # 2: pinned by a click, the hand away
+    tab.press((at["x"], at["y"]))
+    tab.release((at["x"], at["y"]))
+    tab.move(tab.js("__mq.away()"))
+    tab.wait(0.3)
+    pinned = tab.js("__mq.card('.wl-pop')")
+    tab.wait(0.9)
+    holds = tab.js("SVMarquee.state(document.getElementById('dhTrack')).holds")
+    tab.mark()                                   # 3: Escape
+    tab.js("__mq.armGone('.wl-pop', 3000, false)")
+    tab.key("Escape", "Escape", 27)
+    closed = tab.js("window.__mqGone")
+    tab.wait(0.5)
+    return {"opened": opened, "pinned": pinned, "holds": holds, "closed": closed,
+            "samples": tab.stop()["dh"]}
+
+
+def _fresh(tab, answer, fresh_id):
+    """A fresh headline lands at the front while the strip keeps the item at
+    its left edge where it was: out of view. Then the hand brings it in."""
+    tab.js("window.__mqAnswers = %s; 0" % json.dumps([answer]))
+    tab.js("document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
+    landed = False
+    for _ in range(40):
+        tab.wait(0.1)
+        if tab.js("__mq.glow('%s').length" % fresh_id) == 2:
+            landed = True
+            break
+    tab.wait(1.6)
+    unseen = tab.js("__mq.glow('%s')" % fresh_id)
+    xy = tab.js("__mq.point('ticker')")
+    tab.beat(False)
+    try:
+        tab.move(xy)
+        tab.wait(0.2)
+        # the nearer copy, brought 60 px inside the clip's left edge
+        near = min(tab.js("__mq.glow('%s')" % fresh_id), key=lambda c: abs(c["left"] - 60))
+        tab.wheel(xy, 0, near["left"] - 60)
+        tab.wait(0.4)
+        seen = tab.js("__mq.glow('%s')" % fresh_id)
+        tab.move(tab.js("__mq.away()"))
+    finally:
+        tab.beat(True)
+    return {"landed": landed, "unseen": unseen, "seen": seen}
+
+
+def _short(tab, short):
+    """A ticker with too few headlines to fill its strip (two): it has
+    nothing to reveal. Then the wheel over it, and over the headband, which
+    loops, with the page scrolled."""
+    tab.js("window.__mqAnswers = %s; document.body.style.minHeight = '3200px';"
+           " window.scrollTo(0, 400); 0" % json.dumps([short]))
+    tab.js("document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
+    for _ in range(40):
+        tab.wait(0.1)
+        if tab.js("__mq.items('ticker')") == 4:
+            break
+    tab.wait(0.6)
+    out = {"state": tab.js("SVMarquee.state(document.getElementById('tickerTrack'))"),
+           "shown": tab.js("__mq.shown('ticker')"), "x": tab.js("__mq.x('ticker')")}
+    tab.beat(False)
+    try:
+        xy = tab.js("__mq.point('ticker')")
+        tab.move(xy)
+        tab.wait(0.3)
+        out["y0"], out["x0"] = tab.js("scrollY"), tab.js("__mq.x('ticker')")
+        tab.wheel(xy, 0, 120)
+        tab.wait(0.6)
+        out["y1"], out["x1"] = tab.js("scrollY"), tab.js("__mq.x('ticker')")
+        xy = tab.js("__mq.point('dh')")
+        tab.move(xy)
+        tab.wait(0.3)
+        out["d0"] = tab.js("__mq.x('dh')")
+        tab.wheel(xy, 0, 120)
+        tab.wait(0.6)
+        out["y2"], out["d1"] = tab.js("scrollY"), tab.js("__mq.x('dh')")
+        tab.move(tab.js("__mq.away()"))
+    finally:
+        tab.beat(True)
+    return out
+
+
+def _shaky(tab):
+    """A click on each strip's collapse button whose hand moves 6 px between
+    press and release, as a hand does; then the strip put back."""
+    out = {}
+    for name, kind in (("dh", "data"), ("ticker", "ticker")):
+        r = tab.js("(function(){ var b = document.querySelector('#%s .hb-collapse-btn').getBoundingClientRect();"
+                   " return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()"
+                   % FRAME[name])
+        tab.move((r[0] - 3, r[1]))
+        tab.wait(0.1)
+        tab.press((r[0] - 3, r[1]))
+        tab.move((r[0] + 3, r[1]), buttons=1)
+        tab.release((r[0] + 3, r[1]))
+        tab.wait(0.3)
+        out[name] = tab.js("document.getElementById('%s').classList.contains('collapsed')" % FRAME[name])
+        tab.move(tab.js("__mq.away()"))
+        tab.js("(function(){ var t = document.querySelector('.hb-restore-tab.%s');"
+               " if (document.getElementById('%s').classList.contains('collapsed') && t) t.click(); })(); 0"
+               % (kind, FRAME[name]))
+        tab.wait(0.7)
+    return out
+
+
 # ── reading the samples ──────────────────────────────────────────────────
 
 def _steps(samples):
@@ -862,9 +1131,10 @@ def _steps(samples):
 
 def _speed(samples):
     """px per second, right to left positive. A step longer than the
-    driver's catch-up (0.25 s: the machine stalled the page) is left out:
-    that is the machine's time, not the strip's speed."""
-    st = [s for s in _steps(samples) if s["dt"] <= 0.2]
+    driver's catch-up (CATCH_UP_S: the machine stalled the page, and the
+    strip goes on from where it froze) is left out: that is the machine's
+    time, not the strip's speed."""
+    st = [s for s in _steps(samples) if s["dt"] <= CATCH_UP_S]
     total = sum(s["dt"] for s in st)
     return sum(-s["dx"] for s in st) / total if total else 0.0
 
@@ -878,7 +1148,7 @@ def _edge_speed(samples):
     moved = total = 0.0
     for a, b in zip(samples, samples[1:]):
         dt = (b["t"] - a["t"]) / 1000.0
-        if dt > 0.2 or not a["edge"] or not b["edge"] or a["edge"]["key"] != b["edge"]["key"]:
+        if dt > CATCH_UP_S or not a["edge"] or not b["edge"] or a["edge"]["key"] != b["edge"]["key"]:
             continue
         moved += a["edge"]["left"] - b["edge"]["left"]
         total += dt
@@ -944,6 +1214,49 @@ def _crisp(samples, dpr):
     return [s["x"] for s in samples if abs(s["x"] * dpr - round(s["x"] * dpr)) > 1e-3]
 
 
+def _rhythm_faults(samples, speed, dpr=1):
+    """Windows of two to four frames, between late or early frames, whose
+    device-pixel steps stray a whole pixel from the speed: a strip that
+    stands two frames and then steps two, or steps once too often, the
+    uneven rhythm the eye reads as a hitch. One constant distance a frame,
+    rounded to device pixels, never strays that far: its steps repeat one
+    pattern (news at 30 px/s and 60 Hz: 0,1,0,1; prices at 40: 1,1,0)."""
+    steps = _steps(samples)
+    if len(steps) < 60:
+        return ["too few frames: %d" % len(steps)]
+    frame = sorted(s["dt"] for s in steps)[len(steps) // 2]
+    per = speed * frame * dpr
+    runs, cur, m = [], [], None
+    for s in steps:
+        if s["m"] != m or not 0.8 * frame <= s["dt"] <= 1.25 * frame:
+            runs.append(cur)
+            cur, m = [], s["m"]
+            continue
+        cur.append(-s["dx"] * dpr)
+    runs.append(cur)
+    faults = []
+    for run in runs:
+        for k in (2, 3, 4):
+            for i in range(len(run) - k + 1):
+                moved = sum(run[i:i + k])
+                if abs(moved - k * per) >= 0.95:
+                    faults.append({"frames": k, "moved": round(moved, 2), "due": round(k * per, 2),
+                                   "steps": run[max(0, i - 2):i + k + 2]})
+    return faults
+
+
+def _shift_by_key(a, b):
+    """How far each item in view in both samples moved, matched by key: at
+    the seam the loop's copy gives way to the first half, the same item for
+    the eye."""
+    out = {}
+    for key, la in a:
+        for other, lb in b:
+            if key == other and (key not in out or abs(lb - la) < abs(out[key])):
+                out[key] = lb - la
+    return out
+
+
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class TheStripsMeasuredTests(TestCase):
     """The two strips of the real shell, measured frame by frame."""
@@ -989,6 +1302,10 @@ class TheStripsMeasuredTests(TestCase):
         tick = {"type": "quote_stream", "data": {
             "symbol": "USD_JPY", "last": 100.012, "bid": 100.010, "ask": 100.014,
             "source": "oanda_stream", "ts": (timezone.now() + timedelta(seconds=60)).isoformat()}}
+        # A ticker too short to loop: two headlines left.
+        NewsArticle.objects.exclude(title__in=TITLES[:2]).delete()
+        cache.clear()
+        short = _get(client, "/partials/ticker/")
 
         tmp = tempfile.mkdtemp(prefix="sv-marquee-")
         path = pathlib.Path(tmp) / "page.html"
@@ -1001,18 +1318,24 @@ class TheStripsMeasuredTests(TestCase):
             got["driver"] = tab.js("!!window.SVMarquee")
             got["items"] = {n: tab.js("__mq.items('%s')" % n) for n in ("dh", "ticker")}
             _guard(got, "run", lambda: _run(tab))
+            _guard(got, "rhythm", lambda: _rhythm(tab))
             _guard(got, "ambience", lambda: _ambience(tab))
             _guard(got, "dpr2", lambda: _dpr2(tab))
             _guard(got, "cost", lambda: _cost(tab))
+            _guard(got, "stall", lambda: _stall(tab))
             for name in ("dh", "ticker"):
                 _guard(got, "hover/" + name, lambda: _hover(tab, name))
                 _guard(got, "wheel/" + name, lambda: _wheel(tab, name))
                 _guard(got, "seam/" + name, lambda: _seam(tab, name))
                 _guard(got, "focus/" + name, lambda: _focus(tab, name))
             _guard(got, "tabkey", lambda: _tab_key(tab))
+            for name in ("dh", "ticker"):
+                _guard(got, "shifttab/" + name, lambda: _shift_tab(tab, name))
+                _guard(got, "tabend/" + name, lambda: _tab_end(tab, name))
             _guard(got, "card/dh", lambda: _card(tab, "dh", ".dh-pop"))
             _guard(got, "card/ticker", lambda: _card(tab, "ticker", ".ticker-popup"))
             _guard(got, "pinned", lambda: _pinned(tab))
+            _guard(got, "watch", lambda: _watch(tab))
             _guard(got, "refetch", lambda: _refetch(tab, [first, second], [str(a.id) for a in fresh]))
             _guard(got, "changes", lambda: _changes(tab, sweep, tick))
             _guard(got, "hidden", lambda: _hidden(tab))
@@ -1021,6 +1344,9 @@ class TheStripsMeasuredTests(TestCase):
             _guard(got, "touch", lambda: _touch(_Tab(chrome, uri, touch=True)))
             for name in ("dh", "ticker"):
                 _guard(got, "drag/" + name, lambda: _drag(_Tab(chrome, uri), name))
+            _guard(got, "fresh", lambda: _fresh(_Tab(chrome, uri), first, str(fresh[0].id)))
+            _guard(got, "short", lambda: _short(_Tab(chrome, uri), short))
+            _guard(got, "shaky", lambda: _shaky(_Tab(chrome, uri)))
         finally:
             chrome.close()
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1095,6 +1421,22 @@ class TheStripsMeasuredTests(TestCase):
                 for s in samples:
                     self.assertLessEqual(s["gapL"], 0.5)
                     self.assertLessEqual(s["gapR"], 0.5)
+                # The review (2026-11-13): one loop was a fraction of a pixel
+                # (6638.39 px), so across the seam the copy and the first half
+                # sat at another sub-pixel phase and every glyph shifted by
+                # that fraction, backwards on the news strip. Across the seam
+                # every item in view moves as on any frame: by the same whole
+                # device pixels, never right.
+                seam = [(a, b) for a, b, st in zip(samples, samples[1:], _steps(samples)) if st["wrapped"]]
+                self.assertEqual(len(seam), 1)
+                a, b = seam[0]
+                moved = _shift_by_key(a["vis"], b["vis"])
+                self.assertGreaterEqual(len(moved), 2, (a["vis"], b["vis"]))
+                for key, d in moved.items():
+                    self.assertAlmostEqual(d, round(d), delta=1e-3,
+                                           msg="%s moved %.4f px across the seam" % (key, d))
+                    self.assertLessEqual(d, 0.0, "%s moved right across the seam" % key)
+                self.assertEqual(len({round(d, 3) for d in moved.values()}), 1, moved)
 
     def test_the_speed_does_not_depend_on_how_many_items_the_strip_holds(self):
         """The ticker at 12, 13 and 18 headlines, the headband at 38 and 36
@@ -1297,3 +1639,206 @@ class TheStripsMeasuredTests(TestCase):
         self.assertStill(held, "collapsed")
         self.assertSpeed(_phase(ticker, 1, skip=0.1), "ticker", tol=0.25, label="the other strip")
         self.assertResumesFrom(held, _phase(dh, 2, skip=0.0), "dh", "restored")
+
+    # ── the review of the first build (2026-11-13) ───────────────────────
+
+    def test_one_loop_is_a_whole_number_of_device_pixels(self):
+        """The copy of the items starts a whole number of device pixels
+        after the first half (the driver pads the gap between the halves by
+        the fraction), so the picture at a position and one loop further is
+        the same one, glyph for glyph: at 1x and at 2x."""
+        for dpr, got in ((1, self.scenario("run")), (2, self.scenario("dpr2"))):
+            for name in ("dh", "ticker"):
+                with self.subTest(strip=name, dpr=dpr):
+                    loops = sorted({s["P"] for s in got[name] if s["P"]})
+                    self.assertTrue(loops)
+                    for p in loops:
+                        self.assertAlmostEqual(p * dpr, round(p * dpr), delta=1e-3,
+                                               msg="one loop of %r px at %dx" % (p, dpr))
+
+    def test_its_steps_keep_one_even_rhythm(self):
+        """Each frame moves a strip the same distance (its speed over the
+        display's frame interval, whole frames): the device-pixel steps keep
+        one pattern instead of following the jitter of the frame clock
+        (news at 30 px/s is half a pixel a frame at 60 Hz: on e4e8a2d it
+        stood two frames and stepped two about twice a second)."""
+        got = self.scenario("rhythm")
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                self.assertEqual(_rhythm_faults(got[name], SPEED[name]), [])
+                for m in range(1, 5):
+                    self.assertSpeed(_phase(got[name], m, skip=0.05), name, label="phase %d" % m)
+
+    def test_a_long_task_freezes_it_and_it_goes_on_without_a_skip(self):
+        """A 300 ms task on the main thread freezes a strip moved by script;
+        after it the strip catches up one frame at most (CATCH_UP_S), it
+        does not leap the 12 px the task took (e4e8a2d: up to 10 px)."""
+        got = self.scenario("stall")
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                samples = got[name]
+                st = _steps(samples)
+                at = max(range(len(st)), key=lambda i: st[i]["dt"])
+                self.assertGreaterEqual(st[at]["dt"], 0.25, "no stall seen")
+                # The frame that ends the stall can carry a stale clock, and
+                # the catch-up lands a frame or two after it: the stall's
+                # step and every step in the 60 ms after it.
+                after, spent = [st[at]], 0.0
+                for s in st[at + 1:]:
+                    if spent + s["dt"] > 0.06:
+                        break
+                    after.append(s)
+                    spent += s["dt"]
+                moved = -sum(s["dx"] for s in after)
+                most = SPEED[name] * (CATCH_UP_S + 1 / 60.0 + spent) + 1.01
+                self.assertLessEqual(moved, most, [(round(s["dt"], 3), s["dx"]) for s in after])
+                self.assertGreaterEqual(moved, 0.0, after)
+                self.assertSpeed(samples[at + 6:], name, tol=0.25, label="after the stall")
+
+    def test_shift_tab_into_a_strip_shows_each_stop_clear_of_its_tab(self):
+        """Shift+Tab from the element after a strip enters it from its end:
+        each stop is shown inside the clip and clear of the collapse tab,
+        the strip moving no more than an item between two keys. On e4e8a2d
+        the focus went to the loop's copy, off screen, and each key threw
+        the strip thousands of pixels: the clip's scroll was wrapped."""
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                got = self.scenario("shifttab/" + name)
+                stops = got["stops"]
+                for i, stop in enumerate(stops):
+                    self.assertTrue(stop, "Shift+Tab %d did not land in the strip" % (i + 1))
+                    self.assertTrue(stop["clear"], "stop %d not shown: %r" % (i + 1, stop))
+                    self.assertEqual(stop["copy"], 0, "the keyboard reached the loop's copy: %r" % stop)
+                self.assertEqual([s["index"] for s in stops],
+                                 [got["keys"][-1], got["keys"][-2], got["keys"][-3]])
+                for a, b in zip(stops, stops[1:]):
+                    self.assertLessEqual(abs(b["x"] - a["x"]), 600, stops)
+                held = _phase(got["samples"], 3, skip=0.15)
+                self.assertStill(held, "focus on the third stop")
+
+    def test_the_keyboard_stops_once_on_each_item(self):
+        """The loop's copy is there for the eye: out of the tab order (and
+        hidden from screen readers, below), so the keyboard stops on each
+        item once, never on a twin a loop away."""
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                got = self.scenario("shifttab/" + name)
+                self.assertEqual(got["keys"], list(range(got["items"] // 2)))
+
+    def test_tab_to_a_strip_s_last_stop_shows_it_clear_of_its_tab(self):
+        """The last stop is shown whole, not under the collapse tab (e4e8a2d:
+        38 px of it sat under the tab, the copy's end against the clip's)."""
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                got = self.scenario("tabend/" + name)
+                last = got["last"]
+                self.assertTrue(last, "Tab left the strip")
+                self.assertEqual(last["index"], got["keys"][-1], last)
+                self.assertTrue(last["clear"], last)
+
+    def test_a_watchlist_card_does_not_hold_the_headband(self):
+        """The rail's watchlist cards wear the headband's card class (.dh-pop
+        .wl-pop): open on hover, or pinned with the hand away, they are not
+        a card opened from the headband, which runs on (e4e8a2d: held)."""
+        got = self.scenario("watch")
+        self.assertTrue(got["opened"], "no watchlist card opened")
+        self.assertTrue(got["pinned"] and got["pinned"]["pinned"], got["pinned"])
+        self.assertNotIn("popup", got["holds"])
+        self.assertTrue(got["closed"], "Escape left the watchlist card open")
+        samples = got["samples"]
+        self.assertSpeed(_phase(samples, 1, skip=0.6), "dh", tol=0.25, label="watchlist card open")
+        self.assertSpeed(_phase(samples, 2, skip=0.4), "dh", tol=0.25, label="watchlist card pinned")
+
+    def test_a_fresh_headline_glows_when_the_eye_first_sees_it(self):
+        """A refetch keeps the item at the left edge where it was, so the
+        fresh headline at the front lands out of view: its 6 s glow waits
+        until a copy of it comes into view, and starts there (e4e8a2d: it
+        played out of view and was over when the headline rode in)."""
+        got = self.scenario("fresh")
+        self.assertTrue(got["landed"], "the refetch did not land")
+        self.assertEqual(len(got["unseen"]), 2)
+        for c in got["unseen"]:
+            self.assertFalse(c["any"], "the fresh headline landed in view: %r" % c)
+            self.assertFalse(c["glowing"], "it glowed out of view: %r" % c)
+        # the hand's wheel may wrap the loop: whichever copy came into view
+        seen = [c for c in got["seen"] if c["whole"]]
+        self.assertEqual(len(seen), 1, got["seen"])
+        first = seen[0]
+        self.assertTrue(first["glowing"], "in view, no glow: %r" % first)
+        self.assertLess(first["since"], 1500, first)
+        self.assertNotIn(first["bg"], ("rgba(0, 0, 0, 0)", "transparent"), first)
+        other = [c for c in got["seen"] if not c["whole"]][0]
+        self.assertFalse(other["glowing"], "the copy out of view glowed too: %r" % other)
+
+    def test_a_short_ticker_shows_each_headline_once_and_the_page_has_the_wheel(self):
+        """Two headlines fit in the strip: nothing to reveal, so it stands at
+        its start and shows each headline once (e4e8a2d showed the loop's
+        copy beside them). With nothing to reveal it is an end, and the wheel
+        goes to the page. A strip that loops has no end (2026-11-13, the
+        operator's decision that they scroll continuously): over the
+        headband the wheel moves the strip, as the hand asks."""
+        got = self.scenario("short")
+        self.assertFalse(got["state"]["loop"])
+        self.assertEqual(got["x"], 0)
+        shown = got["shown"]
+        self.assertEqual(len(shown), 4)
+        self.assertEqual(sorted(k for k, copy, painted in shown if painted),
+                         sorted({k for k, copy, painted in shown}), shown)
+        self.assertGreater(got["y1"], got["y0"], "the wheel did not reach the page")
+        self.assertEqual(got["x1"], got["x0"])
+        self.assertEqual(got["y2"], got["y1"], "the wheel over the looping headband moved the page")
+        self.assertAlmostEqual(got["d1"] - got["d0"], -120, delta=1.01)
+
+    def test_a_collapse_click_that_moves_a_few_pixels_still_collapses(self):
+        """The drag takes no press on a collapse button: a click whose hand
+        moved 6 px collapses the strip, as on 349b1ca (e4e8a2d swallowed it
+        as a drag)."""
+        got = self.scenario("shaky")
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                self.assertTrue(got[name], "the collapse button did not collapse the strip")
+
+
+class TheLoopsCopyIsForTheEyeTests(TestCase):
+    """The second copy of each strip's items is what makes the loop seamless:
+    it is there for the eye. Out of the tab order and hidden from screen
+    readers (2026-11-13, the review), so the keyboard and the reader take
+    each item once; the hand still hovers and clicks it."""
+
+    def setUp(self):
+        user = get_user_model().objects.create_user("mq_copy", password="x", is_staff=True)
+        self.client.force_login(user)
+
+    @staticmethod
+    def tags(html, cls):
+        return re.findall(r'<a\b[^>]*\bclass="%s"[^>]*>' % cls, html)
+
+    def assertCopy(self, tags):
+        self.assertGreaterEqual(len(tags), 2)
+        self.assertEqual(len(tags) % 2, 0)
+        half = len(tags) // 2
+        for tag in tags[:half]:
+            self.assertNotIn("aria-hidden", tag)
+            self.assertNotIn("tabindex", tag)
+        for tag in tags[half:]:
+            self.assertIn('aria-hidden="true"', tag)
+            self.assertIn('tabindex="-1"', tag)
+
+    def test_the_ticker_s_copy(self):
+        from django.utils import timezone
+
+        from scraping.models import NewsArticle
+        for i in range(2):
+            NewsArticle.objects.create(title="Synthetic wire: copy %d" % i, source="Synthetic wire",
+                                       url="https://example.test/mq-copy/%d" % i,
+                                       published_at=timezone.now() - timedelta(minutes=i + 1))
+        html = _get(self.client, "/partials/ticker/")
+        tags = self.tags(html, "ticker-item")
+        self.assertEqual(len(tags), 4)
+        self.assertCopy(tags)
+
+    def test_the_headband_s_copy(self):
+        page = _get(self.client, URL)
+        track = page[page.index('id="dhTrack"'):]
+        track = track[:track.index('<!-- Restore tabs')]
+        self.assertCopy(self.tags(track, "dh-item"))
