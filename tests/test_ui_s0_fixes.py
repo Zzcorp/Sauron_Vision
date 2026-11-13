@@ -344,6 +344,13 @@ class CloseInViewMeasuredTests(TestCase):
         row.querySelector(".sv-sel-box").checked = phase === "tick";
         await frame();
         finish();
+        // The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+        // "amazing work, bravo, I need it fast!!") puts each position's
+        // detail in a row of its own under it, the book's even row; since
+        // the review of 2026-11-13 (its F9) that row's one cell runs to the
+        // end, so the row has two cells. A middle cell is read where the
+        // row has one; what the checks compare (the row's ground, its last
+        // cell, a ticked row's middle cell) is read as before.
         function paint(tr) {
             var cells = tr.querySelectorAll(":scope > td");
             function one(el) {
@@ -352,7 +359,7 @@ class CloseInViewMeasuredTests(TestCase):
                          position: c.position };
             }
             return { row: one(tr), last: one(cells[cells.length - 1]),
-                     other: one(cells[2]) };
+                     other: cells.length > 2 ? one(cells[2]) : null };
         }
         var r = row.querySelectorAll(":scope > td")[2].getBoundingClientRect();
         var cells = row.querySelectorAll(":scope > td");
