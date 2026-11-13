@@ -30,6 +30,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from tests.cold_cache import _cold_cache
+
 
 def _instrument(symbol="SPTEST"):
     from instruments.models import Instrument
@@ -399,6 +401,12 @@ class LadderQueryBudgetTests(TestCase):
     # rules · setups · all-time stats · in-stage stats · signal recency ·
     # bot trades · mutations. Nothing in the card loop touches the database.
     LADDER_QUERIES = 7
+
+    def setUp(self):
+        # A presence stamp or headband sparks an earlier test left could run
+        # out between "small" and "large": from cold, the warm-up pays them.
+        _cold_cache()
+        super().setUp()
 
     def _rules(self, n, stage="research", prefix="budget_rule"):
         from signals.models_control import RuleControl

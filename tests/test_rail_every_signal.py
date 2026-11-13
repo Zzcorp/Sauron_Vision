@@ -37,11 +37,14 @@ from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 from django.db import connection
 from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+
+# The query-count tests' shared cold cache; tests/test_rail_market_shut.py
+# imports it from here.
+from tests.cold_cache import _cold_cache
 
 HOST = "127.0.0.1"
 NODE = shutil.which("node")
@@ -51,23 +54,6 @@ ROW_RE = re.compile(r'class="ip-dd-row sv-sig-row"[^>]*?data-signal-id="(\d+)"')
 
 
 # ── fixtures shared with tests/test_rail_lifecycle.py ─────────────────────
-
-def _cold_cache():
-    """A test starts from a cold cache (2026-11-13, CI run 43384272086:
-    test_rail_market_shut's test_9 failed 69 != 75).
-
-    LocMem lives as long as the worker process, while the rows a test
-    writes are rolled back, and SQLite rolls its sequence back too: the
-    next test's user has the same pk. A request on the rail reads two
-    entries an earlier test may have left: the presence throttle
-    (presence:<pk>, 60 s, core.presence) and the headband's sparks
-    (hb:sparks3, 300 s, core.context_ui). Both run out on the wall clock,
-    which _at() does not fix, so one could run out between the two
-    requests a query count compares, and the second request alone paid
-    the presence stamp (or the sparks). From cold, the test's first
-    request pays both, and the requests after it read the same cache."""
-    cache.clear()
-
 
 def _user(name="rail_u"):
     return get_user_model().objects.create_user(name, password="x")
