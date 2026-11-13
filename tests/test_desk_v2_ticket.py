@@ -317,7 +317,9 @@ function texts(root) {
     var own = Array.prototype.some.call(el.childNodes, function (n) {
       return n.nodeType === 3 && n.data.trim();
     });
-    if (!own && !(el.tagName === 'INPUT' && el.value) && !(el.tagName === 'SELECT')) return;
+    /* a tick box's value is never painted */
+    var boxy = el.tagName === 'INPUT' && /^(checkbox|radio|hidden)$/.test(el.type);
+    if (!own && !(el.tagName === 'INPUT' && el.value && !boxy) && !(el.tagName === 'SELECT')) return;
     out.push({ tag: el.tagName, cls: cls,
                text: (el.tagName === 'INPUT' ? el.value : el.textContent).trim().slice(0, 40),
                size: parseFloat(c.fontSize), color: c.color, ground: ground(el),
@@ -349,14 +351,22 @@ function inkBox(el) {
 }
 function fills(root) {
   var out = [];
-  [root].concat(Array.prototype.slice.call(root.querySelectorAll('*'))).forEach(function (el) {
-    if (!shown(el)) return;
-    var c = getComputedStyle(el);
-    out.push({ cls: String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className),
-               tag: el.tagName, bg: c.backgroundColor, img: c.backgroundImage,
+  function one(cls, tag, c) {
+    out.push({ cls: cls, tag: tag, bg: c.backgroundColor, img: c.backgroundImage,
                color: c.color, borders: [[c.borderTopWidth, c.borderTopColor], [c.borderRightWidth, c.borderRightColor],
                                          [c.borderBottomWidth, c.borderBottomColor], [c.borderLeftWidth, c.borderLeftColor]],
                shadow: c.boxShadow, tshadow: c.textShadow, filter: c.filter });
+  }
+  [root].concat(Array.prototype.slice.call(root.querySelectorAll('*'))).forEach(function (el) {
+    if (!shown(el)) return;
+    var cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className);
+    one(cls, el.tagName, getComputedStyle(el));
+    /* a pseudo-element that paints is a fill of its own (B0's census) */
+    ['::before', '::after'].forEach(function (pe) {
+      var p = getComputedStyle(el, pe);
+      if (!p.content || p.content === 'none' || p.content === 'normal' || p.display === 'none') return;
+      one(cls + pe, el.tagName + pe, p);
+    });
   });
   return out;
 }
@@ -463,12 +473,16 @@ def _rings(chrome, sid, selectors):
 
 
 DIALOG_PROBE = PROBE_LIB + r"""
-(async function (SRC, OVERLAY, SCENARIOS) {
-  await new Promise(function (ok, bad) {
-    var s = document.createElement('script'); s.src = OVERLAY;
-    s.onload = ok; s.onerror = function () { bad(new Error('sv-overlay.js did not load')); };
-    document.head.appendChild(s);
-  });
+(async function (SRC, OVERLAY, SCENARIOS, COUNCIL) {
+  function load(src) {
+    return new Promise(function (ok, bad) {
+      var s = document.createElement('script'); s.src = src;
+      s.onload = ok; s.onerror = function () { bad(new Error(src + ' did not load')); };
+      document.head.appendChild(s);
+    });
+  }
+  if (!window.SV || !SV.overlay) await load(OVERLAY);
+  if (COUNCIL && !(window.SV && SV.council)) await load(COUNCIL);
   (0, eval)(SRC);
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   async function opened() {
@@ -547,6 +561,50 @@ DIALOG_PROBE = PROBE_LIB + r"""
               i.getAttribute('autocomplete'), i.getAttribute('placeholder')];
     });
     out.forms = d.querySelectorAll('form').length;
+    var body = q('.sv-dialog-body'), bb = body.getBoundingClientRect();
+    out.scrollTop = body.scrollTop;
+    out.titlesInView = Array.prototype.map.call(
+      d.querySelectorAll('[data-role="warns"] .sz-warn:not([hidden]) > b'), function (t) {
+        var r = t.getBoundingClientRect();
+        return r.height > 0 && r.top >= bb.top - 1 && r.bottom <= bb.bottom + 1;
+      });
+    var wt = q('[data-role="wsumtext"]'), wl = q('.sz-wsum-list');
+    out.wsumList = wl ? { text: wl.textContent, look: look(wl),
+                          clipped: wt.scrollHeight > wt.clientHeight + 1 || wt.scrollWidth > wt.clientWidth + 1 } : null;
+    out.wsumAct = q('[data-role="wsumact"]') ? q('[data-role="wsumact"]').textContent : null;
+    out.wsumChevron = q('.sz-wsum-chev') ? q('.sz-wsum-chev').tagName.toLowerCase() : null;
+    out.wsumTriangle = q('.sz-wsum-act') ? getComputedStyle(q('.sz-wsum-act'), '::after').content : null;
+    var x = q('.sv-dialog-x');
+    out.close = x ? { icon: x.querySelector('svg path') ? x.querySelector('svg path').getAttribute('d') : null,
+                      text: x.textContent.trim(), label: x.getAttribute('aria-label') } : null;
+    var ok = q('[data-role="ok"]'), ord = q('[data-role="ok"] .sz-go-order');
+    out.describedBy = ok.getAttribute('aria-describedby');
+    out.order = ord ? { hidden: ord.getAttribute('aria-hidden'), id: ord.id,
+                        size: look(ord.querySelector('.sz-n')) } : null;
+    out.meter = look(q('.sz-meter-fill'));
+    out.isOver = d.classList.contains('is-over');
+    out.facts = Array.prototype.map.call(d.querySelectorAll('.sv-dialog-fact'), function (f) {
+      var v = f.lastElementChild, l = f.querySelector('.lbl');
+      return { k: l.textContent, lbl: getComputedStyle(l).fontFamily, family: getComputedStyle(v).fontFamily,
+               text: v.textContent,
+               nums: Array.prototype.map.call(v.querySelectorAll('.sz-n'), function (n) {
+                 return [n.textContent, getComputedStyle(n).fontFamily]; }) };
+    });
+    out.closeRows = Array.prototype.map.call(d.querySelectorAll('.sz-close'), function (row) {
+      var box = row.querySelector('input'), cs = getComputedStyle(box), tick = getComputedStyle(box, '::after');
+      var rs = getComputedStyle(row), freed = row.querySelector('.sz-close-f');
+      return { id: box.value, checked: box.checked, bg: cs.backgroundColor, img: cs.backgroundImage,
+               shadow: cs.boxShadow, border: cs.borderTopColor, tick: tick.borderRightColor,
+               opacity: rs.opacity, color: rs.color, ground: ground(row), text: row.textContent.trim(),
+               freed: look(freed), struck: getComputedStyle(freed).textDecorationLine };
+    });
+    out.stops = Array.prototype.map.call(d.querySelectorAll('.sz-warn--stop'), function (w) {
+      return { role: w.getAttribute('data-role'), mark: getComputedStyle(w, '::before').backgroundColor,
+               title: look(w.querySelector('b')) };
+    });
+    var council = q('[data-role="council"]'), factsBox = q('.sv-dialog-facts');
+    out.council = council ? { box: look(council), ask: look(council.querySelector('[data-role="council-ask"]')),
+                              factsTop: factsBox ? factsBox.getBoundingClientRect().top : null } : null;
     out.texts = texts(d); out.fills = fills(d);
     out.vh = window.innerHeight;
     return out;
@@ -574,9 +632,12 @@ DIALOG_PROBE = PROBE_LIB + r"""
     var got = { open: measure(d) };
     var ws = d.querySelector('[data-role="wsum"]');
     if (ws && !ws.hidden) {
-      ws.click(); await sleep(30);
+      /* "show" brings the list into view; "hide" folds it; "show" again */
+      ws.click(); await sleep(80);
+      got.shown = measure(d);
+      ws.click(); await sleep(80);
       got.folded = measure(d);
-      ws.click(); await sleep(30);
+      ws.click(); await sleep(80);
       got.unfolded = measure(d);
     }
     var pin = d.querySelector('[data-role="pin"]');
@@ -585,6 +646,12 @@ DIALOG_PROBE = PROBE_LIB + r"""
       got.pinFocused = measure(d);
       pin.value = '0000'; pin.dispatchEvent(new Event('input', { bubbles: true })); await sleep(30);
       got.pinTyped = measure(d);
+    }
+    if (sc.over) {
+      /* a size over the pool: the meter's verdict state */
+      var qi = d.querySelector('[data-role="qty"]');
+      qi.value = '900000'; qi.dispatchEvent(new Event('input', { bubbles: true })); await sleep(600);
+      got.over = measure(d);
     }
     d.querySelector('[data-role="cancel"]').click();
     for (var i = 0; i < 40 && document.contains(d); i++) await sleep(25);
@@ -626,6 +693,50 @@ MARKS_PROBE = r"""
     }));
 })
 """
+
+
+#: One live ticket opened and left open with its PIN typed (any dialog the
+#: probes before left open is cancelled first), for the accessibility tree
+#: and the forced focus ring, which are read over CDP from Python.
+OPEN_PROBE = r"""
+(async function (PAYLOAD) {
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  var old = document.querySelector('.sz-dialog.is-open [data-role="cancel"]');
+  if (old) { old.click(); await sleep(400); }
+  window.fetch = function (url) {
+    if (String(url).indexOf('/take-trade/preview/') !== -1) {
+      return Promise.resolve(new Response(JSON.stringify(PAYLOAD),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/take-trade\/$/.test(String(url))) return Promise.reject(new Error('never sent'));
+    return Promise.resolve(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  };
+  window.svTakeTradeAsset(PAYLOAD.symbol, PAYLOAD.side);
+  var d = null;
+  for (var i = 0; i < 80 && !d; i++) {
+    d = document.querySelector('.sz-dialog.is-open');
+    if (!d) await sleep(25);
+  }
+  await sleep(300);
+  var pin = d.querySelector('[data-role="pin"]');
+  pin.value = '0000'; pin.dispatchEvent(new Event('input', { bubbles: true }));
+  await sleep(60);
+  var ok = d.querySelector('[data-role="ok"]');
+  return JSON.stringify({ disabled: ok.disabled, text: ok.textContent });
+})
+"""
+
+
+def _ax(chrome, sid, selector):
+    """The accessible name and description Chromium computes for a node."""
+    chrome.call("DOM.enable", session=sid)
+    chrome.call("Accessibility.enable", session=sid)
+    root = chrome.call("DOM.getDocument", {"depth": 0}, session=sid)["root"]["nodeId"]
+    nid = chrome.call("DOM.querySelector", {"nodeId": root, "selector": selector}, session=sid)["nodeId"]
+    node = chrome.call("Accessibility.getPartialAXTree", {"nodeId": nid, "fetchRelatives": False},
+                       session=sid)["nodes"][0]
+    return {"name": (node.get("name") or {}).get("value"),
+            "description": (node.get("description") or {}).get("value")}
 
 
 def _amber_share(png_b64):
@@ -973,15 +1084,33 @@ class TakeTradeMeasuredTests(_Desk):
         cls.paper = resp.json()
         url = "/instruments/AUDUSD/"
         html = cls.page(url)
+        # A paper ticket short of capital: "Close first", the proposal
+        # pre-ticked (#11), another position offered unticked (#12).
+        funding = dict(cls.paper, sufficient=False, deficit=120.0, closable=[
+            {"trade_id": 11, "symbol": "EURUSD", "side": "SELL", "qty": 8000, "freed": 150.0,
+             "proposed": True},
+            {"trade_id": 12, "symbol": "GBPUSD", "side": "BUY", "qty": 5000, "freed": 90.0,
+             "proposed": False}])
+        # A live ticket eToro's cash check would refuse outright (no room).
+        refused = _live_payload("BUY", warnings=0)
+        refused["cash_gate"] = dict(refused["cash_gate"], ok=False, max_qty=None, reason=(
+            "eToro's free cash is 0.00 USD; this order needs 436.13 USD of margin."))
+        # A live ticket with the Council's switch on.
+        council = dict(_live_payload("BUY", warnings=0), council_on=True)
         scenarios = [
-            {"name": "live_buy", "payload": _live_payload("BUY")},
+            {"name": "live_buy", "payload": _live_payload("BUY"), "over": True},
             {"name": "live_sell", "payload": _live_payload("SELL")},
             {"name": "live_floor", "payload": _live_payload("BUY", warnings=0, target=0.6560)},
             {"name": "paper", "payload": cls.paper, "signal": sig.id},
+            {"name": "paper_funding", "payload": funding, "signal": sig.id},
+            {"name": "live_refused", "payload": refused},
+            {"name": "live_council", "payload": council},
         ]
-        expr = DIALOG_PROBE + "(%s, %s, %s)" % (
-            json.dumps(_take_trade_source(html)),
-            json.dumps((ROOT / "static/js/sv-overlay.js").as_uri()), json.dumps(scenarios))
+        src = json.dumps(_take_trade_source(html))
+        overlay = json.dumps((ROOT / "static/js/sv-overlay.js").as_uri())
+        council_js = json.dumps((ROOT / "static/js/sv-council.js").as_uri())
+        expr = DIALOG_PROBE + "(%s, %s, %s, %s)" % (src, overlay, json.dumps(scenarios), council_js)
+        light = DIALOG_PROBE + "(%s, %s, %s, %s)" % (src, overlay, json.dumps(scenarios[:2]), council_js)
         tmp = tempfile.mkdtemp(prefix="sv-b6-")
         try:
             path = pathlib.Path(tmp) / "page.html"
@@ -995,6 +1124,20 @@ class TakeTradeMeasuredTests(_Desk):
                 cls.marks = [_amber_share(chrome.call("Page.captureScreenshot", {
                     "format": "png", "clip": {"x": x, "y": y, "width": w, "height": h, "scale": 2}},
                     session=sid)["data"]) for x, y, w, h in rects]
+                # The confirm, PIN typed, a BUY then a SELL: what a reader
+                # hears (its accessible name and description) and its
+                # keyboard focus ring, forced.
+                cls.ax, cls.goRings = {}, {}
+                for side in ("BUY", "SELL"):
+                    cls.opened = json.loads(chrome.eval(sid, OPEN_PROBE + "(%s)" % json.dumps(_live_payload(side))))
+                    cls.ax[side] = _ax(chrome, sid, '.sz-dialog.is-open [data-role="ok"]')
+                    cls.goRings[side] = _rings(chrome, sid, {"go": '.sz-dialog.is-open [data-role="ok"]'})["go"]
+                chrome.eval(sid, "(function () { var c = document.querySelector('.sz-dialog.is-open [data-role=\"cancel\"]');"
+                                 " if (c) c.click(); return new Promise(function (r) { setTimeout(r, 400); }); })()")
+                # Light mode, on its own frozen palette (§10's checks hold there).
+                chrome.eval(sid, "document.body.classList.add('light-mode');"
+                                 " new Promise(function (r) { setTimeout(r, 500); })")
+                cls.light = json.loads(chrome.eval(sid, light))
             finally:
                 chrome.close()
         finally:
@@ -1056,31 +1199,74 @@ class TakeTradeMeasuredTests(_Desk):
         self.assertEqual(paper["stepsNote"], "nothing is sent before step 2")
 
     def test_the_summary_counts_the_warnings_inside_the_first_view(self):
+        """Updated deliberately (review of B6, 2026-11-13): the dialog opens
+        on the size, its body scrolled past the list, so at open the pinned
+        summary names every title ("⚠ 2 warnings: BOOK LIMIT REACHED · NO
+        SAURON SIGNAL…", §10's own words) where it used to say only "2
+        warnings · hide" with both warnings out of sight."""
         for name in ("live_buy", "live_sell"):
             o = self.got[name]["open"]
             with self.subTest(scenario=name):
                 self.assertFalse(o["wsumHidden"])
                 self.assertEqual(len(o["warns"]), 2)
-                self.assertEqual(o["wsumText"]["text"], "2 warnings")
+                self.assertGreater(o["scrollTop"], 100)              # it opens on the size
+                self.assertEqual(o["titlesInView"], [False, False])
+                self.assertEqual(o["wsumText"]["text"], "2 warnings: " + "BOOK LIMIT REACHED · NO SAURON SIGNAL BEHIND THIS TRADE")
+                self.assertFalse(o["wsumList"]["clipped"])
+                self.assertEqual(o["wsumAct"], "show")
                 self.assertEqual(o["wsumExpanded"], "true")
                 box, dlg = o["wsum"]["box"], o["box"]
-                self.assertAlmostEqual(box[3], 34, delta=1)
+                self.assertGreaterEqual(box[3], 33)
                 self.assertGreaterEqual(box[1], dlg[1])
-                self.assertLessEqual(box[1] + box[3], min(dlg[1] + 160, o["vh"]))
+                self.assertLessEqual(box[1] + box[3], min(dlg[1] + 170, o["vh"]))
                 self.assertEqual(o["wsumText"]["color"], WARN)
+                self.assertEqual((o["wsumList"]["look"]["size"], o["wsumList"]["look"]["color"]), ("11px", WARN))
         floor = self.got["live_floor"]["open"]
         self.assertEqual(len(floor["warns"]), 1)          # YOU RISK MORE THAN YOU CAN WIN
-        self.assertEqual(floor["wsumText"]["text"], "1 warning")
+        self.assertTrue(floor["wsumText"]["text"].startswith("1 warning"), floor["wsumText"]["text"])
 
-    def test_the_summary_folds_its_list_and_names_what_it_folded(self):
-        got = self.got["live_buy"]
-        self.assertTrue(got["open"]["warnsShown"])
-        self.assertEqual(got["folded"]["wsumExpanded"], "false")
-        self.assertFalse(got["folded"]["warnsShown"])
-        self.assertEqual(got["folded"]["wsumText"]["text"],
-                         "2 warnings: BOOK LIMIT REACHED · NO SAURON SIGNAL BEHIND THIS TRADE")
-        self.assertEqual(got["unfolded"]["wsumExpanded"], "true")
-        self.assertTrue(got["unfolded"]["warnsShown"])
+    def test_at_open_every_warning_title_can_be_read(self):
+        """No warning above the fold without a trace (§10): at open each
+        title is either inside the body's visible box or written, whole, in
+        the pinned summary."""
+        for name, got in self.got.items():
+            o = got["open"]
+            if o["wsumHidden"] is not False:
+                continue
+            with self.subTest(scenario=name):
+                titles = [w["title"]["text"] for w in o["warns"]]
+                said = (o["wsumList"] or {}).get("text", "")
+                for title, seen in zip(titles, o["titlesInView"]):
+                    self.assertTrue(seen or (title in said and not o["wsumList"]["clipped"]), (title, said))
+
+    def test_show_brings_the_list_into_view_and_hide_folds_it(self):
+        """The summary's action does what it says: "show" scrolls the body
+        to the list (both titles in view, the count alone, "hide"); "hide"
+        folds it (the titles named in the summary, "show"); "show" unfolds
+        it into view again."""
+        for name in ("live_buy", "live_sell"):
+            got = self.got[name]
+            with self.subTest(scenario=name):
+                shown, folded, again = got["shown"], got["folded"], got["unfolded"]
+                self.assertTrue(shown["warnsShown"])
+                self.assertEqual(shown["titlesInView"], [True, True])
+                self.assertEqual(shown["scrollTop"], 0)
+                self.assertEqual((shown["wsumText"]["text"], shown["wsumAct"]), ("2 warnings", "hide"))
+                self.assertAlmostEqual(shown["wsum"]["box"][3], 34, delta=1)
+                self.assertEqual(folded["wsumExpanded"], "false")
+                self.assertFalse(folded["warnsShown"])
+                self.assertEqual((folded["wsumText"]["text"], folded["wsumAct"]), ("2 warnings: " + "BOOK LIMIT REACHED · NO SAURON SIGNAL BEHIND THIS TRADE", "show"))
+                self.assertEqual(again["wsumExpanded"], "true")
+                self.assertTrue(again["warnsShown"])
+                self.assertEqual(again["titlesInView"], [True, True])
+                self.assertEqual(again["wsumAct"], "hide")
+
+    def test_the_summary_and_the_close_wear_the_board_s_stroke_icons(self):
+        o = self.got["live_buy"]["open"]
+        self.assertEqual(o["wsumChevron"], "svg")
+        self.assertIn(o["wsumTriangle"], ("none", "normal"))     # no CSS triangle
+        self.assertEqual(o["close"], {"icon": "M6.5 6.5l11 11M17.5 6.5l-11 11", "text": "",
+                                      "label": "Cancel"})
 
     def test_each_warning_carries_its_mark_as_painted(self):
         """The ⚠ before each warning is drawn, in the warning amber (a mark
@@ -1119,7 +1305,9 @@ class TakeTradeMeasuredTests(_Desk):
         figs = self.got["live_buy"]["open"]["figs"]
         self.assertEqual([f["k"] for f in figs],
                          ["At the stop", "At the target", "Reward : risk", "Margin at eToro"])
-        self.assertEqual([f["v"]["text"] for f in figs], ["-$72.00", "+$144.00", "2.00", "436.13 USD"])
+        # one notation (§4.4): the account's dollar as a prefix; updated
+        # deliberately on review, where the margin read "436.13 USD"
+        self.assertEqual([f["v"]["text"] for f in figs], ["-$72.00", "+$144.00", "2.00", "$436.13"])
         self.assertEqual((figs[0]["v"]["color"], figs[1]["v"]["color"]), (DOWN, UP))
         tops = {round(f["box"]["box"][1]) for f in figs}
         widths = [f["box"]["box"][2] for f in figs]
@@ -1164,6 +1352,119 @@ class TakeTradeMeasuredTests(_Desk):
         self.assertTrue(off["okDisabled"])
         self.assertNotIn(off["go"]["color"], (UP, DOWN))
 
+    def test_the_confirm_keeps_its_name_and_describes_the_order(self):
+        """§10 keeps the confirm's words: a reader hears "TAKE LIVE TRADE"
+        (its name) and the order as its description; the order line under
+        the words is hidden from the name, its size in the number face."""
+        for side, order in (("BUY", "▲ Long 20,000 AUDUSD"), ("SELL", "▼ Short 20,000 AUDUSD")):
+            with self.subTest(side=side):
+                self.assertEqual(self.ax[side]["name"], "TAKE LIVE TRADE")
+                self.assertEqual(self.ax[side]["description"], order)
+        m = self.got["live_buy"]["pinTyped"]
+        self.assertEqual(m["describedBy"], "svSizeOrder")
+        self.assertEqual((m["order"]["hidden"], m["order"]["id"]), ("true", "svSizeOrder"))
+        self.assertEqual(m["order"]["size"]["text"], "20,000")
+        self.assertTrue(m["order"]["size"]["family"].startswith('"JetBrains Mono"'))
+
+    def test_the_confirm_s_focus_ring_is_its_side(self):
+        """Keyboard focus rings the confirm in its own side's colour, 2 px
+        at 2 px: never the Eye's green around a SELL (§10)."""
+        for side, hue in (("BUY", UP), ("SELL", DOWN)):
+            ring = self.goRings[side]
+            with self.subTest(side=side):
+                self.assertEqual((ring["style"], ring["width"], ring["offset"]), ("solid", "2px", "2px"))
+                self.assertEqual((ring["color"], ring["ink"]), (hue, hue))
+                self.assertNotEqual(ring["color"], EYE)
+                self.assertEqual(ring["shadow"], "none")
+
+    def test_a_size_over_the_pool_fills_the_meter_amber_never_red(self):
+        """Over the pool the meter is the warning's amber (its verdict says
+        why in words): never a solid red fill, which is REAL's alone."""
+        over = self.got["live_buy"]["over"]
+        self.assertTrue(over["isOver"])
+        self.assertEqual(over["meter"]["bg"], WARN)
+        self.assertGreater(over["meter"]["box"][2], 100)
+        for f in over["fills"]:
+            if is_red_fill(f["bg"]):
+                with self.subTest(cls=f["cls"]):
+                    self.assertIn("sv-world--live", f["cls"])
+
+    def test_close_first_ticks_are_neutral_and_a_kept_row_reads(self):
+        """A paper ticket short of capital (the critic's #109, B6's): the
+        proposal pre-ticked and sent as close_ids, as main has it; a tick
+        is neutral, ink-2 with a bg-0 mark, no gradient, no glow, never the
+        Eye's green or a loss colour; an unticked row (a position kept) is
+        ink-3, struck through, at 4.5:1 or more, never faded to half."""
+        rows = self.got["paper_funding"]["open"]["closeRows"]
+        self.assertEqual([(r["id"], r["checked"]) for r in rows], [("11", True), ("12", False)])
+        ticked, kept = rows
+        self.assertEqual((ticked["bg"], ticked["img"], ticked["shadow"]), (INK2, "none", "none"))
+        self.assertEqual((ticked["border"], ticked["tick"]), (INK2, BG0))
+        self.assertEqual(kept["img"], "none")
+        self.assertEqual(kept["shadow"], "none")
+        self.assertNotIn(kept["border"], (EYE, UP, DOWN))
+        self.assertEqual((kept["opacity"], kept["color"]), ("1", INK3))
+        self.assertEqual(kept["freed"]["color"], INK3)
+        self.assertEqual(kept["struck"], "line-through")
+        self.assertGreaterEqual(ratio(kept["color"], kept["ground"]), 4.5)
+        self.assertEqual(ticked["opacity"], "1")
+
+    def test_a_refusal_carries_the_warning_s_amber_mark_and_its_words_in_coral(self):
+        """eToro's cash check refusing the ticket: its ⚠ is the warning's
+        amber, as every warning on the board (a coral mark was a solid red
+        box by B0's census); the refusal's title says it in coral words."""
+        stops = self.got["live_refused"]["open"]["stops"]
+        self.assertEqual([s["role"] for s in stops], ["cashwarn", "cashnotice"])
+        for st in stops:
+            with self.subTest(role=st["role"]):
+                self.assertEqual(st["mark"], WARN)
+        self.assertEqual(stops[0]["title"]["color"], DOWN)
+        self.assertEqual(self.got["live_refused"]["open"]["active"], "cashwarn")
+
+    def test_the_council_keeps_the_facts_gap(self):
+        """With the Council's switch on, its button and hint sit 12 px above
+        the facts, as the blocks around them do (it sat flush on them)."""
+        c = self.got["live_council"]["open"]["council"]
+        self.assertEqual(c["ask"]["text"], "Ask the council")
+        gap = c["factsTop"] - (c["box"]["box"][1] + c["box"]["box"][3])
+        self.assertAlmostEqual(gap, 12, delta=1)
+
+    def test_a_sentence_in_the_facts_is_in_the_word_face_its_figures_in_the_number_face(self):
+        """The old marker (inventory #19): sentences set in the number face.
+        A fact that is a sentence reads in Inter, its figures in JetBrains
+        Mono; a bare figure or the trade line stays in the number face. The
+        words themselves are main's (§10)."""
+        facts = {f["k"]: f for f in self.got["live_buy"]["open"]["facts"]}
+        cash = facts["eToro cash"]
+        self.assertTrue(cash["family"].startswith("Inter"), cash["family"])
+        self.assertTrue(cash["text"].startswith("2,400.00 USD free · 2,400.00 USD available"), cash["text"])
+        self.assertGreaterEqual(len(cash["nums"]), 5)
+        for text, family in cash["nums"]:
+            with self.subTest(figure=text):
+                self.assertTrue(family.startswith('"JetBrains Mono"'), family)
+        self.assertTrue(facts["Entry ~"]["family"].startswith('"JetBrains Mono"'))
+        self.assertTrue(facts["Trade"]["family"].startswith('"JetBrains Mono"'))
+        for f in facts.values():
+            with self.subTest(label=f["k"]):
+                self.assertTrue(f["lbl"].startswith("Inter"), f["lbl"])
+
+    def test_light_mode_reads_on_its_own_palette(self):
+        """Light mode keeps its frozen palette (plan §15) and §10's checks
+        (the critic's correction): every word of the dialog at 4.5:1 or
+        more on the light ground. The one exception is the REAL chip,
+        white on the frozen palette's red (4.29:1), which is that palette's
+        own (the critic's B24a row), not this dialog's."""
+        for name in ("live_buy", "live_sell"):
+            for state in ("open", "pinTyped"):
+                for t in self.light[name][state]["texts"]:
+                    if t["off"] or "sv-world--live" in t["cls"]:
+                        continue
+                    with self.subTest(scenario=name, state=state, text=t["text"], cls=t["cls"]):
+                        self.assertGreaterEqual(ratio(t["color"], t["ground"]), 4.5)
+        o = self.light["live_buy"]["open"]
+        self.assertGreater(len(o["texts"]), 40)
+        self.assertEqual(o["chip"]["text"], "REAL")
+
     def test_main_s_fields_first_focus_and_tab_order(self):
         o = self.got["live_buy"]["open"]
         self.assertEqual(o["fields"], self.LIVE_FIELDS)
@@ -1189,7 +1490,8 @@ class TakeTradeMeasuredTests(_Desk):
 
     def test_tokens_only_no_light_and_real_the_only_solid_red(self):
         for name, got in self.got.items():
-            for f in got["open"]["fills"] + got.get("pinTyped", got["open"])["fills"]:
+            for f in got["open"]["fills"] + got.get("pinTyped", got["open"])["fills"] + \
+                    got.get("over", got["open"])["fills"]:
                 with self.subTest(scenario=name, cls=f["cls"], tag=f["tag"]):
                     if is_red_fill(f["bg"]):
                         self.assertIn("sv-world--live", f["cls"])

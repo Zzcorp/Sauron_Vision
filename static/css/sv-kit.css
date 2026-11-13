@@ -910,6 +910,8 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
 .sz-trade .sz-sym { font-family: var(--sv-font-mono); font-size: var(--sv-fs-lead); font-weight: 500; white-space: nowrap; }
 .sz-trade .sv-world { flex: none; display: inline-flex; align-items: center; height: 18px; line-height: 1; }
 .sz-q { display: block; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); line-height: var(--sv-lh-cell); }
+.sz-dialog .sv-dialog-x { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; }
+.sz-dialog .sv-dialog-x svg { display: block; }
 .sz-dialog .sz-q .sv-dialog-title {
     display: inline; flex: none; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small);
     font-weight: 400; letter-spacing: 0; text-transform: none;
@@ -934,10 +936,12 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
 .sz-steps-note { margin-left: auto; }
 .sz-steps-note .sz-n { font-family: var(--sv-font-mono); }
 
-/* The summary: the count of the warnings, pinned; a click folds the list. */
+/* The summary, pinned: the count of the warnings, and every title while
+   the list is out of view; its action brings the list into view or folds
+   it (base.html's TAKE TRADE script keeps its words true). */
 .sz-wsum {
     display: flex; align-items: center; gap: 9px; flex: none;
-    width: 100%; height: 34px; margin: 0; padding: 0 16px; box-sizing: border-box;
+    width: 100%; min-height: 34px; margin: 0; padding: 6px 16px; box-sizing: border-box;
     border: 0; border-bottom: 1px solid var(--pop-border); border-radius: 0; background: none;
     font-family: var(--sv-font-sans); text-align: left; cursor: pointer;
 }
@@ -945,15 +949,16 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
 .sz-dialog .sz-wsum:focus-visible { outline-offset: -2px; }
 .sz-wsum-ic { flex: none; width: 16px; height: 16px; }
 .sz-wsum-t {
-    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: var(--sv-fs-base); font-weight: 600;
+    flex: 1 1 auto; min-width: 0; font-size: var(--sv-fs-base); font-weight: 600; line-height: var(--sv-lh-cell);
 }
-.sz-wsum-act { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--sv-fs-micro); }
-.sz-wsum-act::after {
-    content: ""; width: 0; height: 0;
-    border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid;
-}
-.sz-wsum[aria-expanded="false"] .sz-wsum-act::after { border-bottom: 0; border-top: 5px solid; }
+.sz-wsum-n { white-space: nowrap; }
+.sz-wsum-t .sz-n { font-family: var(--sv-font-mono); }
+/* Every title, whole, while the list is out of view: its caps at 11 px,
+   wrapping to a second line where they run long (two warnings fit). */
+.sz-wsum-list { font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-button); text-transform: uppercase; }
+.sz-wsum-act { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--sv-fs-micro); font-weight: 400; }
+.sz-wsum-chev { flex: none; display: block; }
+.sz-wsum[data-act="show"] .sz-wsum-chev { transform: rotate(180deg); }
 
 /* The body: the warnings first, a band the summary folds. */
 .sz-dialog .sv-dialog-body { padding: 14px 16px 16px; }
@@ -997,8 +1002,15 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
 /* The facts: a key and its value on one row each. */
 .sz-dialog .sv-dialog-facts { margin: 0; border-radius: var(--sv-radius-ctl); }
 .sz-dialog .sv-dialog-fact { align-items: baseline; padding: 6px 10px; font-size: var(--sv-fs-small); }
-.sz-dialog .sv-dialog-fact .lbl { flex: none; font-size: var(--sv-fs-micro); }
+.sz-dialog .sv-dialog-fact .lbl {
+    flex: none; font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+}
 .sz-dialog .sv-dialog-fact > span:last-child { min-width: 0; text-align: right; }
+.sz-dialog .sv-dialog-fact > .sz-fact-w { font-family: var(--sv-font-sans); }
+.sz-dialog .sv-dialog-fact .sz-n { font-family: var(--sv-font-mono); }
+/* The Council's region, when it holds its button: the facts' own gap. */
+.sz-dialog [data-role="council"]:not(:empty) { margin-bottom: 12px; }
 
 /* The blocks: a label, then the fields two by two. */
 .sz-dialog .sz-block { margin: 16px 0 0; padding: 0; border: 0; border-radius: 0; background: none; min-width: 0; }
@@ -1065,6 +1077,15 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
    loss colour; the proposal stays pre-ticked. */
 .sz-dialog .sz-close { gap: 9px; padding: 6px 0; font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); }
 .sz-dialog .sz-close input { accent-color: var(--sv-ink-2); }
+/* The tick is the shell's drawn checkbox (sauron.css: the Eye's gradient
+   and a 12 px glow when ticked): here it is neutral, ink-2 with a bg-0
+   tick, and takes the platform's focus ring. An unticked row is a position
+   kept: in ink-3 and struck through, never faded under 4.5:1. */
+.sz-dialog .sz-close input[type="checkbox"],
+.sz-dialog .sz-close input[type="checkbox"]:hover,
+.sz-dialog .sz-close input[type="checkbox"]:checked { box-shadow: none; }
+.sz-dialog .sz-close input[type="checkbox"]:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; box-shadow: none; }
+.sz-dialog .sz-close:has(input:not(:checked)) { opacity: 1; }
 .sz-dialog .sz-close-t i { font-size: var(--sv-fs-micro); letter-spacing: var(--sv-track-label); }
 .sz-dialog .sz-close-f { font-family: var(--sv-font-mono); }
 
@@ -1091,6 +1112,10 @@ body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
     line-height: 1.2;
 }
 .sz-go-order { font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-button); text-transform: none; }
+.sz-go-order .sz-n { font-family: var(--sv-font-mono); font-weight: 500; letter-spacing: 0; }
+/* Keyboard focus rings the confirm in its own side's colour, 2 px at
+   2 px: never the Eye's green around a SELL (§10). */
+.sz-dialog .sv-dialog-foot .sv-dialog-btn--go:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 
 /* The colours, in the dark theme. */
 body:not(.light-mode) .sz-dialog .sv-dialog-head { border-bottom-color: var(--sv-line-2); }
@@ -1119,7 +1144,6 @@ body:not(.light-mode) .sz-dialog .sz-warns {
 }
 body:not(.light-mode) .sz-dialog .sz-warn { color: var(--sv-ink-1); }
 body:not(.light-mode) .sz-dialog .sz-warn b { color: var(--sv-warn); }
-body:not(.light-mode) .sz-dialog .sz-warn--stop::before { background: var(--sv-down); }
 body:not(.light-mode) .sz-dialog .sz-warn--stop b { color: var(--sv-down); }
 body:not(.light-mode) .sz-dialog .sz-note { color: var(--sv-ink-2); }
 body:not(.light-mode) .sz-dialog .sz-note b { color: var(--sv-ink-3); }
@@ -1142,7 +1166,9 @@ body:not(.light-mode) .sz-dialog.is-over .sz-size .sz-f > .sz-inp,
 body:not(.light-mode) .sz-dialog.is-lvl-over .sz-lv .sz-f > .sz-inp { border-color: var(--sv-down); }
 body:not(.light-mode) .sz-dialog .sz-meter { background: var(--sv-bg-3); }
 body:not(.light-mode) .sz-dialog .sz-meter-fill { background: var(--sv-ink-2); }
-body:not(.light-mode) .sz-dialog.is-over .sz-meter-fill { background: var(--sv-down); }
+/* Over the pool: amber, a warning's colour (the verdict under it says
+   why in words); never a red fill, which is REAL's alone. */
+body:not(.light-mode) .sz-dialog.is-over .sz-meter-fill { background: var(--sv-warn); }
 body:not(.light-mode) .sz-dialog .sz-meter-cap { background: var(--sv-ink-1); }
 body:not(.light-mode) .sz-dialog .sz-out { color: var(--sv-ink-2); }
 body:not(.light-mode) .sz-dialog .sz-out b { color: var(--sv-ink-1); }
@@ -1156,6 +1182,13 @@ body:not(.light-mode) .sz-dialog .sz-close { color: var(--sv-ink-2); }
 body:not(.light-mode) .sz-dialog .sz-close + .sz-close { border-top-color: var(--sv-line-1); }
 body:not(.light-mode) .sz-dialog .sz-close-t i { color: var(--sv-ink-3); }
 body:not(.light-mode) .sz-dialog .sz-close-f { color: var(--sv-ink-1); }
+body:not(.light-mode) .sz-dialog .sz-close input[type="checkbox"] { background: var(--sv-bg-0); border-color: var(--sv-line-3); }
+body:not(.light-mode) .sz-dialog .sz-close input[type="checkbox"]:hover { border-color: var(--sv-ink-3); }
+body:not(.light-mode) .sz-dialog .sz-close input[type="checkbox"]:checked { background: var(--sv-ink-2); border-color: var(--sv-ink-2); }
+body:not(.light-mode) .sz-dialog .sz-close input[type="checkbox"]:checked::after { border-color: var(--sv-bg-0); }
+body:not(.light-mode) .sz-dialog .sz-close:has(input:not(:checked)),
+body:not(.light-mode) .sz-dialog .sz-close:has(input:not(:checked)) .sz-close-t i,
+body:not(.light-mode) .sz-dialog .sz-close:has(input:not(:checked)) .sz-close-f { color: var(--sv-ink-3); }
 body:not(.light-mode) .sz-figs { background: var(--sv-bg-1); border-color: var(--sv-line-1); }
 body:not(.light-mode) .sz-fig { border-right-color: var(--sv-line-1); }
 body:not(.light-mode) .sz-fig-k { color: var(--sv-ink-3); }
@@ -1178,6 +1211,23 @@ body:not(.light-mode) .sz-dialog[data-side="sell"] .sv-dialog-btn.sv-dialog-btn-
 body:not(.light-mode) .sz-dialog .sv-dialog-btn.sv-dialog-btn--go[disabled] {
     color: var(--sv-ink-4); border: 1.5px solid var(--sv-line-2); background: var(--sv-bg-2); opacity: 1;
 }
+
+/* Light mode, its palette frozen (plan §15): the dialog stood on the dark
+   ground light mode inherited (--pop-bg), its words in light mode's dark
+   ink, 1.19:1 (review of B6). It takes the light palette's own ground and
+   ink, and its frozen ink-3 (2.5:1 on white) reads as ink-2 inside it; the
+   question in ink-2, as in the dark theme. The words are §10's: they read
+   in either theme. */
+body.light-mode .sz-dialog {
+    --pop-bg: var(--sv-bg-1);
+    --pop-bg-2: var(--sv-bg-2);
+    --pop-border: var(--sv-line-2);
+    --sv-ink-3: var(--sv-ink-2);
+    --text-muted: var(--sv-ink-2);
+    color: var(--sv-ink-1);
+}
+body.light-mode .sz-dialog .sz-q,
+body.light-mode .sz-dialog .sz-q .sv-dialog-title { color: var(--sv-ink-2); }
 
 @media (max-width: 640px) {
     .sz-steps { height: auto; min-height: 34px; flex-wrap: wrap; row-gap: 4px; padding: 7px 16px; }

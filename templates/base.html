@@ -2703,10 +2703,15 @@
       if (p.managed === false) {
         facts.push(['⚠ UNMANAGED', 'The bot tick is OFF — the stop and target will NOT be enforced until Multi-Asset Bots is enabled']);
       }
+      /* A fact that is a sentence is set in the word face, its figures in
+         the number face (desk v2, 2026-11-13): the same words, marked up. */
       var factsHtml = facts.map(function (f) {
+        var said = !f[2] && /[a-z]{2}/.test(String(f[1]));
         return '<div class="sv-dialog-fact"><span class="lbl">' + esc(f[0]) +
-               '</span><span' + (f[2] ? ' data-role="' + f[2] + '"' : '') + '>' +
-               esc(f[1]) + '</span></div>';
+               '</span><span' + (f[2] ? ' data-role="' + f[2] + '"' : '') +
+               (said ? ' class="sz-fact-w"' : '') + '>' +
+               (said ? esc(f[1]).replace(/(\d(?:[\d,.]*\d)?)/g, '<span class="sz-n">$1</span>')
+                     : esc(f[1])) + '</span></div>';
       }).join('');
 
       var warnHtml = '';
@@ -3206,13 +3211,20 @@
             '</span>Confirm the order</li>' +
         '</ol><span class="sz-steps-note">nothing is sent before step <span class="sz-n">' +
           (live ? 3 : 2) + '</span></span></div>';
+      /* The summary: the count, then every title whenever the list is out
+         of the body's view (it always is at open: the body opens on the
+         size), and the action, which brings the list into view or folds
+         it. The icons are the board's strokes. */
       var wsumHtml = '<button type="button" class="sz-wsum" data-role="wsum" aria-expanded="true" ' +
           'aria-controls="svSizeWarns" hidden>' +
           '<svg class="sz-wsum-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
             'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
             '<path d="M12 4l9 15.5H3z"/><path d="M12 10v4"/><path d="M12 16.9v.1" stroke-width="2.2"/></svg>' +
           '<span class="sz-wsum-t" data-role="wsumtext"></span>' +
-          '<span class="sz-wsum-act" data-role="wsumact">hide</span></button>';
+          '<span class="sz-wsum-act"><span data-role="wsumact">hide</span>' +
+            '<svg class="sz-wsum-chev" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" ' +
+              'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<path d="M7 14l5-5 5 5"/></svg></span></button>';
       /* The four figures, under the size: at the stop, at the target, the
          reward to risk, and the margin eToro locks for it (on another
          carrier or on paper, the pool's cash the order commits). */
@@ -3243,7 +3255,10 @@
           '<div class="sz-head">' + tradeHead + '<span class="sz-q">' +
           '<span class="sv-dialog-title" id="svSizeTitle">' + esc(title) + '</span>' +
           (atEtoro ? '<span class="sz-where"> · live at eToro</span>' : '') + '</span></div>' +
-          '<button type="button" class="sv-dialog-x" data-sv-close aria-label="Cancel">&times;</button>' +
+          '<button type="button" class="sv-dialog-x" data-sv-close aria-label="Cancel">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" ' +
+              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>' +
         '</div>' +
         stepsHtml + wsumHtml +
         '<div class="sv-dialog-body">' +
@@ -3350,6 +3365,7 @@
       var wsumText = host.querySelector('[data-role="wsumtext"]');
       var wsumAct = host.querySelector('[data-role="wsumact"]');
       var warnsEl = host.querySelector('[data-role="warns"]');
+      var bodyEl = host.querySelector('.sv-dialog-body');
       var stopUnit = host.querySelector('[data-role="stopunit"]');
       var targetUnit = host.querySelector('[data-role="targetunit"]');
       var figStop = host.querySelector('[data-role="figstop"]');
@@ -3399,6 +3415,32 @@
           if (n) n.innerHTML = s === 'done' ? STEP_DONE : String(i + 1);
         });
       }
+      /* Whether every warning's title can be read where the list sits:
+         the list unfolded and each title inside the body's visible box.
+         At open it never is (the body opens on the size), so the summary
+         names them itself: no warning sits above the fold without a
+         trace (UI plan §10). */
+      function listInView() {
+        /* Never measured before the dialog is open: a layout read while it
+           is still hidden would give its opening a transition to run, and
+           the focus the overlay moves onto the size would miss it. */
+        if (folded || !bodyEl || !warnsEl || !host.classList.contains('is-open')) return false;
+        var box = bodyEl.getBoundingClientRect();
+        if (!(box.height > 0)) return false;
+        var heads = warnsEl.querySelectorAll('.sz-warn:not([hidden]) > b');
+        if (!heads.length) return false;
+        for (var i = 0; i < heads.length; i++) {
+          var r = heads[i].getBoundingClientRect();
+          if (!(r.height > 0) || r.top < box.top - 1 || r.bottom > box.bottom + 1) return false;
+        }
+        return true;
+      }
+      /* The list's top against the body's: 0 when it is scrolled to. */
+      function listOffset() {
+        return (bodyEl && warnsEl)
+          ? warnsEl.getBoundingClientRect().top - bodyEl.getBoundingClientRect().top : 0;
+      }
+      var wsumKey = '';
       function syncWarns() {
         if (!wsumEl || !warnsEl || !warnsEl.querySelectorAll) return;
         var titles = [];
@@ -3407,18 +3449,32 @@
           var b = w.querySelector('b');
           titles.push(b ? b.textContent.trim() : '');
         });
-        var n = titles.length;
+        var n = titles.length, named = titles.filter(Boolean);
         if (!n) folded = false;
         wsumEl.hidden = !n;
         warnsEl.hidden = folded;
+        var seen = listInView();
+        /* "show" brings the list into view (unfolding it); "hide" folds it */
+        var act = (folded || !seen) ? 'show' : 'hide';
+        var key = [n, folded, seen, named.join('|')].join('/');
+        if (key === wsumKey) return;
+        wsumKey = key;
         wsumEl.setAttribute('aria-expanded', folded ? 'false' : 'true');
+        wsumEl.setAttribute('data-act', act);
         if (wsumText) {
-          wsumText.textContent = n + (n === 1 ? ' warning' : ' warnings') +
-            (folded ? ': ' + titles.filter(Boolean).join(' · ') : '');
+          wsumText.innerHTML = '<span class="sz-wsum-n"><span class="sz-n">' + n + '</span>' +
+            (n === 1 ? ' warning' : ' warnings') + '</span>' +
+            ((!seen && named.length)
+              ? '<span class="sz-wsum-list">' + esc(': ' + named.join(' · ')) + '</span>' : '');
         }
-        if (wsumAct) wsumAct.textContent = folded ? 'show' : 'hide';
-        /* every title, whole, where the folded line runs out of room */
-        wsumEl.title = titles.filter(Boolean).join(' · ');
+        if (wsumAct) wsumAct.textContent = act;
+        wsumEl.title = named.join(' · ');
+      }
+      /* eToro's margin in the account's currency: its symbol when it is the
+         platform's dollar, its code after the figure otherwise (§4.4). */
+      function acctFigure(v) {
+        var ccy = cg && cg.currency ? String(cg.currency).toUpperCase() : 'USD';
+        return ccy === 'USD' ? money(v) : acctMoney(v);
       }
       function paintBoard(q, blocked) {
         blockedNow = blocked;
@@ -3429,16 +3485,22 @@
         if (figTarget) figTarget.textContent = '+' + money(q * Math.abs(targetVal - entry) * vpu);
         if (figRr) figRr.textContent = dist > 0 ? (Math.abs(targetVal - fill) / dist).toFixed(2) : '—';
         if (figMargin) {
-          figMargin.textContent = marginAtEtoro ? acctMoney(q * Number(cg.margin_per_unit))
+          figMargin.textContent = marginAtEtoro ? acctFigure(q * Number(cg.margin_per_unit))
                                                 : money(q * cupu);
         }
-        /* The order under the confirm's words: its side, size and symbol. */
+        /* The order under the confirm's words: its side, size (in the
+           number face) and symbol. Shown, and given to a reader as the
+           button's description: its name stays its words (§10). */
         if (okBtn.appendChild) {
           var order = document.createElement('span');
           order.className = 'sz-go-order';
-          order.textContent = (buySide ? '▲ Long ' : '▼ Short ') +
-            Number(units(q)).toLocaleString(undefined, { maximumFractionDigits: 8 }) + ' ' + p.symbol;
+          order.id = 'svSizeOrder';
+          order.setAttribute('aria-hidden', 'true');
+          order.innerHTML = (buySide ? '▲ Long ' : '▼ Short ') + '<span class="sz-n">' +
+            esc(Number(units(q)).toLocaleString(undefined, { maximumFractionDigits: 8 })) +
+            '</span> ' + esc(p.symbol);
           okBtn.appendChild(order);
+          okBtn.setAttribute('aria-describedby', 'svSizeOrder');
         }
         syncSteps();
         syncWarns();
@@ -3646,13 +3708,30 @@
         pinIn.addEventListener('focus', syncSteps);
         pinIn.addEventListener('blur', syncSteps);
       }
-      /* The summary folds the list and unfolds it; its words follow. */
+      /* The summary: "show" unfolds the list and scrolls the body to it,
+         "hide" folds it; its words follow, and follow the body's scroll
+         (one reading a frame) and the dialog's opening on the size. */
       if (wsumEl) {
         wsumEl.addEventListener('click', function () {
-          folded = !folded;
+          if (!folded && (listInView() || Math.abs(listOffset()) < 2)) {
+            folded = true;
+            syncWarns();
+            return;
+          }
+          folded = false;
+          syncWarns();
+          if (bodyEl) bodyEl.scrollTop = Math.max(0, bodyEl.scrollTop + listOffset());
           syncWarns();
         });
       }
+      if (bodyEl) {
+        var wsumFrame = 0;
+        bodyEl.addEventListener('scroll', function () {
+          if (wsumFrame) return;
+          wsumFrame = requestAnimationFrame(function () { wsumFrame = 0; syncWarns(); });
+        }, { passive: true });
+      }
+      host.addEventListener('sv:open', function () { syncWarns(); });
       if (levSel) {
         levSel.addEventListener('change', function () {
           finish({ relever: Number(levSel.value) });
