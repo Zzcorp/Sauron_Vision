@@ -1003,139 +1003,171 @@ FILE_OWNER = {
     "core/templatetags/sauron_tags.py": "B5", "core/templatetags/quote_tags.py": "B3",
 }
 
-#: The stretches of the shared files (first, last, batch[, marker]).
-STRETCHES = {
+#: The two big shared files, cut where their own sections begin. A stretch
+#: starts on the first line, after the previous stretch's start, that holds
+#: its anchor, and runs to the next one (the first from line 1, the last to
+#: the end of the file). Anchored on the files' own section notes, so lines
+#: added above move nothing; a batch that rewrites a section re-anchors its
+#: stretch in the same change (a lost anchor fails a test below).
+ANCHORED = {
     "templates/base.html": [
-        (1, 134, "B1"),            # head: the faces, the sheets
-        (135, 415, "B24"),         # the hidden ambient layers (#103): deleted
-        (416, 459, "B2"),          # the brand block
-        (460, 610, "B2"),          # the nav, its 62 marks, the footer
-        (611, 638, "B1"),          # the topbar row (#7)
-        (628, 631, "B2"),          # the theme toggle's ☀ ☾
-        (639, 657, "B3"),          # the sessions menu (#40)
-        (658, 662, "B1"),          # REAL ARMED (#41)
-        (663, 684, "B3"),          # the live-status pill and list (#39)
-        (685, 725, "B3"),          # the bell (#40)
-        (726, 737, "B2"),          # lock now (#113)
-        (738, 816, "B3"),          # the user menu (#40)
-        (817, 856, "B1"),          # the two strips and their restore tabs (#1, #10)
-        (857, 985, "B1"),          # the bottom strip (#1, #11)
-        (986, 1352, "B3"),         # its dropdowns (#38)
-        (1353, 1503, "B1"),
-        (1504, 1510, "B3"),        # a Telegram button's note (#112)
-        (1511, 1519, "B1"),        # the rail's toggle
-        (1520, 1530, "B2"),        # the phone's bottom nav
-        (1531, 1599, "B1"),        # the rail's frame (#6)
-        (1600, 1696, "B3"),        # the watchlist and its quote card (#35, #37)
-        (1697, 1705, "B1"),
-        (1706, 2185, "B3"),        # sparks, the rail card, pass and star (#36)
-        (2186, 3992, "B6"),        # TAKE TRADE and its outcome (#25, #109)
-        (3993, 4158, "B7"),        # CLOSE POSITION (#30)
-        (4159, 4277, "B3"),        # a Telegram button's page (#112)
-        (4278, 4313, "B1"),        # the edge toggle, the embers, the clock
-        (4314, 4380, "B3"),        # the instrument preview (#39)
-        (4381, 4397, "B2"),        # the sidebar's collapse
-        (4398, 4596, "B1"),        # the strips' wheel (the marquee's)
-        (4597, 5391, "B3"),        # live ticks and the price flash's fallback (#13)
-        (5392, 5497, "B3"),        # the live-status list (#39)
-        (5498, 6252, "B3"),        # the headband popups (#39)
-        (6253, 6508, "B4"),        # the "?" sheet, the shortcut toast (#88)
-        (6509, 6530, "B22"),       # the phone's sidebar
-        (6531, 6584, "B15"),       # the pop-out (#96)
-        (6585, 6638, "B1"),        # Gollum's button (#2)
-        (6639, 6651, "B4"),        # Gollum's dialog (#74)
-        (6652, 6720, "B1"),        # Ask Sauron's Eye (#3)
-        (6721, 7931, "B4"),        # Ask Sauron's panel (#73)
-        (7932, 8009, "B1"),
-        (8010, 8069, "B15"),       # the idle lock (#69)
-        (8070, 8511, "B3"),        # the trading-event banners (#75)
-        (1, 8511, "B2", "glyph_icon"),   # every glyph icon of the shell: the sprite (B2)
+        (None, "B1"),                                                   # the head: the faces, the sheets
+        ("<!-- Animated grid background -->", "B24"),                   # the hidden ambient layers (#103)
+        ('<div id="navMiniTip"', "B2"),                                 # the brand, the nav, its 62 marks
+        ("<!-- Mobile sidebar overlay -->", "B1"),                      # the topbar row (#7)
+        ('class="theme-toggle-btn"', "B2"),                             # the theme toggle's ☀ ☾
+        ('<span id="clock"', "B1"),
+        ('<div class="exchange-indicator">', "B3"),                     # the sessions menu (#40)
+        ('class="sv-armed-pill"', "B1"),                                # REAL ARMED (#41)
+        ("<!-- UPGRADE-8: Live status pill -->", "B3"),                 # the live-status list, the bell (#39, #40)
+        ("{# Lock now, rather than waiting out the idle window", "B2"),  # lock now (#113)
+        ('<div class="user-menu" id="userMenu">', "B3"),                # the user menu (#40)
+        ("<!-- Ticker Bar (fixed, always visible) -->", "B1"),          # the strips, restore tabs, the bottom strip (#1, #10, #11)
+        ('<div class="ip-dropdown">', "B3"),                            # the bottom strip's dropdowns (#38)
+        ("{# A Telegram button's page (2026-10-24): what the link opens. #}", "B3"),  # (#112)
+        ("<!-- UPGRADE-6: Top-level rail toggle", "B1"),
+        ("{# THE PHONE'S BOTTOM NAV", "B2"),
+        ("<!-- Signals Rail (right sidebar)", "B1"),                    # the rail's frame (#6)
+        ('id="railWatchPanel"', "B3"),                                  # the watchlist, its quote card (#35, #37)
+        ("{# The activity drawer (2026-09-29)", "B1"),
+        ("/* Phase 62 — render sparkline paths", "B3"),                 # sparks, the rail card, pass and star (#36)
+        ("/* ── TAKE TRADE — a signal proposes", "B6"),                  # TAKE TRADE and its outcome (#25, #109)
+        ("/* ── CLOSE POSITION — the way out", "B7"),                    # the close (#30)
+        ("/* ── A TELEGRAM BUTTON'S PAGE (2026-10-24)", "B3"),           # (#112)
+        ("<!-- UPGRADE-9: Sidebar edge toggle", "B1"),                  # the edge toggle, the embers, the clock
+        ("// Instrument preview on hover", "B3"),                       # the instrument preview (#39)
+        ("function toggleSidebar()", "B2"),                             # the sidebar's collapse
+        ("// Ticker mouse wheel scroll", "B1"),                         # the strips' wheel (the marquee's)
+        ("/* UPGRADE-3: WebSocket live ticks.", "B3"),                  # live ticks, the flash's fallback, the popups (#13, #39)
+        ("<!-- ── Keyboard Shortcuts Modal", "B4"),                     # the "?" sheet, the toast (#88)
+        ("<!-- ── Mobile Sidebar Toggle", "B22"),
+        ("<!-- ── Pop-Out Panel System", "B15"),                        # the pop-out (#96)
+        ("<!-- ── PWA: Service Worker Registration", "B1"),             # Gollum's button (#2)
+        ('<div class="gollum-dialog" id="gollumDialog"', "B4"),         # Gollum's dialog (#74)
+        ('<button type="button" class="se-eye-fab" id="seEyeFab"', "B1"),  # Ask Sauron's Eye (#3)
+        ('<div class="se-chat-panel" id="seChatPanel"', "B4"),          # Ask Sauron's panel (#73)
+        ("/* ── Resume scroll position across navigation", "B1"),
+        ("{# Idle PIN lock gate.", "B15"),                              # the idle lock (#69)
+        ("/* Live event banners.", "B3"),                               # the trading-event banners (#75)
     ],
     "static/css/sauron.css": [
-        (1, 59, "B24"),            # the old token names, re-pointed: dropped once nothing reads them
-        (60, 106, "B5"),           # the base: form controls, body, links
-        (107, 197, "B24"),         # the ambient layers' keyframes (#103)
-        (198, 217, "B1"),          # the embers' layer
-        (218, 310, "B2"),          # the sidebar, the brand, the logout
-        (311, 331, "B1"),          # the main frame
-        (332, 350, "B5"),          # the cards' base (#14)
-        (351, 450, "B22"),         # the grids' reflow, phone 29, the hamburger
-        (451, 516, "B5"),          # stat-box, signal-item, notes under forms (#14, #45)
-        (517, 597, "B13"),         # the account cards (/brokers/, /setup/)
-        (598, 680, "B5"),          # empty-state notes, page notes, the entry motion (#15, #83)
-        (681, 683, "B1"),          # the page's scrollbar (#113)
-        (684, 700, "B5"),          # section dividers
-        (701, 781, "B24a"),        # light mode (#100, #116)
-        (782, 816, "B1"),          # the theme toggle
-        (817, 873, "B4"),          # the "?" sheet, the shortcut toast (#88)
-        (874, 958, "B2"),          # the collapsed sidebar and its tooltip (#8)
-        (959, 997, "B3"),          # the sessions menu (#40)
-        (998, 1036, "B24"),        # the old buttons, folded into the kit (#16)
-        (1037, 1060, "B3"),        # the instrument preview (#39)
-        (1061, 1090, "B20"),       # the admin user popup
-        (1091, 1115, "B22"),       # mobile
-        (1116, 1137, "B5"),        # form labels (#45)
-        (1138, 1431, "B1"),        # the strips, the bottom strip and its cells (#1, #11)
-        (1432, 1557, "B3"),        # the bell (#40, #113)
-        (1558, 1569, "B3"),
-        (1570, 1583, "B2"),        # the sidebar's expand arrow
-        (1584, 1619, "B1"),        # the rail's frame (#6)
-        (1620, 1683, "B3"),        # the rail's rows
-        (1684, 1866, "B3"),        # the rail card (#36)
-        (1867, 2028, "B1"),        # rail toggles, the bands' hide and restore tabs (#5, #10)
-        (2029, 2091, "B24"),       # the second .btn (#16)
-        (2092, 2109, "B5"),        # metric labels (#45)
-        (2110, 2230, "B3"),        # the rail's split, the watchlist (#37)
-        (2231, 2285, "B1"),        # the price band (#1)
-        (2286, 2446, "B3"),        # the quote card, news dwell, the position card (#35, #39)
-        (2447, 2540, "B5"),        # the world chips' convention (#21)
-        (2541, 2557, "B1"),        # the armed pill (#41)
-        (2558, 2829, "B3"),        # the position card's insides, the rail's arrivals (#39)
-        (2830, 2845, "B1"),        # the marquee's fresh headline
-        (2846, 2926, "B3"),        # the news popup, the live-status pill (#39)
-        (2927, 2979, "B5"),        # the unified card recipe (#14)
-        (2980, 3094, "B3"),        # the user menu (#40)
-        (3095, 3293, "B5"),        # forms, checkbox, radio, range, file (#77)
-        (3294, 3339, "B24"),       # .sv-switch (#104)
-        (3340, 3519, "B5"),        # form.as_p, search, the KPI strip (#44)
-        (3520, 3830, "B1"),        # Ask Sauron's floating Eye (#3)
-        (3831, 3955, "B4"),        # Ask Sauron's send orb (the critic's hole 5)
-        (3956, 4048, "B24"),       # the circuits overlay (#103)
-        (4049, 4370, "B4"),        # Ask Sauron's panel (#73)
-        (4371, 4487, "B5"),        # the refinement layer: numbers, the strip, cards (#14, #44)
-        (4488, 4835, "B17"),       # the strategy ladder (#90)
-        (4836, 4940, "B5"),        # tables, empty states, keyboard, motion (#83, #114)
-        (4941, 5018, "B24"),       # token aliases
-        (5019, 5076, "B5"),        # the lead metric (#44)
-        (5077, 5165, "B3"),        # ticker popups (#39)
-        (5166, 5344, "B3"),        # event banners (#75)
-        (5345, 5503, "B24a"),      # light mode's shell overrides
-        (5504, 5570, "B22"),       # overflow honesty, laptop shims
-        (5571, 6015, "B15"),       # the idle lock (#69)
-        (6016, 6138, "B5"),        # card containment, identifiers (#82)
-        (6139, 6262, "B22"),       # stacked tables
-        (6263, 6284, "B7"),        # the closed-trade cards
-        (6285, 6388, "B3"),        # a signal already acted on
-        (6389, 6565, "B6"),        # TAKE TRADE (#25, #109)
-        (6566, 6693, "B9"),        # chart surfaces (#49)
-        (6694, 6978, "B4"),        # Ask Sauron's answer (#73)
-        (6979, 7033, "B13"),       # the IB connection card
-        (7034, 7049, "B9"),        # the signal symbol cell (#47)
-        (7050, 7077, "B2"),        # the lock-now button (#113)
-        (7078, 7090, "B7"),        # the capital card
-        (7091, 7094, "B3"),        # a dropdown's note
-        (7095, 7108, "B2"),        # the unseen-section dot (#113)
-        (7109, 7129, "B15"),       # the lock's choreography
-        (7130, 7194, "B19"),       # the briefing's clothes
-        (7195, 7267, "B1"),        # Gollum's button (#2)
-        (7268, 7345, "B4"),        # Gollum's dialog (#74)
-        (7346, 7503, "B15"),       # the second gate (#69)
-        (7504, 7521, "B16"),       # the news cell
-        (7522, 7554, "B7"),        # the level editor (#32)
-        (7555, 7652, "B6"),        # the deal ticket (#26)
-        (7653, 7695, "B9"),        # the broker's own reading (#110)
-        (7696, 7716, "B3"),        # a Telegram button's page (#112)
+        (None, "B24"),                                   # the old token names, re-pointed (dropped once unread)
+        ("/* The browser's own parts follow the theme", "B5"),   # form controls, body, links
+        ("/* ── Globe-Eye: static eye, rotating globe", "B24"),  # the ambient keyframes (#103)
+        ("/* The embers (the magic kept, 2026-11-12)", "B1"),
+        ("/* ── Sidebar ──", "B2"),                       # the sidebar, the brand, the logout
+        ("/* ── Main ──", "B1"),                          # the main frame
+        ("/* ── Cards (base — overridden", "B5"),          # the cards' base (#14)
+        ("Smart 2-row reflow when BOTH rails are open", "B22"),  # reflow, phone 29, the hamburger
+        ("/* stat-box — handled by unified card system", "B5"),  # stat-box, signal-item (#14, #45)
+        ("/* ── Account cards ──", "B13"),                # the account cards
+        ("/* The line under an empty state that says WHY", "B5"),  # notes, the entry motion (#15, #83)
+        ("::-webkit-scrollbar{width:6px}", "B1"),        # the page's scrollbar (#113)
+        (".detail-header { display: flex;", "B5"),       # details, section dividers (#45)
+        ("/* ── Light Mode ──", "B24a"),                  # light mode (#100, #116)
+        ("/* ── Theme Toggle ──", "B1"),
+        ("/* ── Keyboard Shortcuts Modal ──", "B4"),      # (#88)
+        ("/* ── Sidebar Collapse ──", "B2"),              # the collapsed sidebar, its tooltip (#8)
+        ("/* ── Exchange Dropdown (fixed) ──", "B3"),     # the sessions menu (#40)
+        ("/* ── Buttons ──", "B24"),                      # the old buttons, folded into the kit (#16)
+        ("/* ── Instrument Preview Popup ──", "B3"),      # (#39)
+        ("/* ── Admin User Popup ──", "B20"),
+        ("/* ── Mobile Responsive ──", "B22"),
+        ("/* ── Form Styles (global) ──", "B5"),          # form labels (#45)
+        ("/* ── Headband collapse system: dynamic offsets ── */", "B1"),  # strips, bottom strip, cells (#1, #11)
+        ("/* ── Notification Bell ──", "B3"),             # the bell (#40, #113)
+        ("/* ── Sidebar expand arrow (when mini) ──", "B2"),
+        ("/* ── Signals Sidebar (right) ──", "B1"),        # the rail's frame (#6)
+        ("/* Rich row layout */", "B3"),                  # the rail's rows
+        ("/* ── Hover popup for each signal ──", "B3"),   # the rail card (#36)
+        ("/* Adjust main content when signals rail is visible */", "B1"),  # toggles, hide/restore tabs (#5, #10)
+        ("UPGRADE-2: Design system — buttons, inputs, metrics", "B24"),    # the second .btn (#16)
+        (".input-label { font-family: var(--font-mono); font-size: 10px;", "B5"),  # labels (#45)
+        ("UPGRADE-2: Signals rail split (Signals + Watchlist)", "B3"),     # the watchlist (#37)
+        ("UPGRADE-9: Data headband (escape-clip popups + RTL scroll)", "B1"),  # the price band (#1)
+        ("/* Popup — fixed position, anchored by JS to escape the scroll container */", "B3"),  # cards (#35, #39)
+        ("/* ── THE VENUE CONVENTION, NAMED ONCE", "B5"),  # the world chips' convention (#21)
+        ("/* THE ARMED PILL: on every page", "B1"),       # (#41)
+        ("/* Gold, and therefore --accent-gold-ink", "B3"),  # the position card's insides (#39)
+        ("/* Fresh headline in the marquee", "B1"),
+        ("/* Push page content down for headbands", "B3"),   # the news popup, the live-status pill
+        ("UNIFIED PREMIUM CARD SYSTEM", "B5"),             # the card recipe (#14)
+        ("/* ── Top-right user menu (clickable username dropdown) ── */", "B3"),  # (#40)
+        ("/* ── Enhanced Form Styles ──", "B5"),           # forms, checkbox, radio, range, file (#77)
+        ("/* ── Switch (toggle) — for any element with class .sv-switch", "B24"),  # (#104)
+        ("/* Django form.as_p styling */", "B5"),          # form.as_p, search, the KPI strip (#44)
+        ("/* ── Layout-aware anchoring ──", "B1"),         # Ask Sauron's floating Eye (#3)
+        ("/* ── In-panel SEND button — circular palantír-mini", "B4"),  # the send orb (hole 5)
+        ("/* Background circuits overlay", "B24"),         # the circuits (#103)
+        ("/* (FAB no longer uses the old SVG pupil-look", "B4"),  # Ask Sauron's panel (#73)
+        ("REFINEMENT LAYER", "B5"),                       # numbers, the strip, cards (#14, #44)
+        ("/* ── 3c. Strategy ladder cards", "B17"),        # (#90)
+        ("/* ── 4. Tables ──", "B5"),                     # tables, empty states (#83, #114)
+        ("TOKEN ALIASES", "B24"),
+        ("/* ── The lead metric ──", "B5"),               # (#44)
+        ("TICKER POPUPS", "B3"),                         # (#39)
+        ("EVENT BANNERS", "B3"),                         # (#75)
+        ("LIGHT MODE — remove the dark inset shadows", "B24a"),
+        ("OVERFLOW HONESTY (2026-08-19)", "B22"),
+        ("IDLE PIN LOCK (il-)", "B15"),                  # (#69)
+        ("CARD CONTAINMENT (2026-08-19)", "B5"),         # identifiers (#82)
+        ("STACKED TABLES (.sv-stack)", "B22"),
+        ("/* ── Positions: the closed-trade cards", "B7"),
+        ("SIGNAL ALREADY ACTED ON (sr-acted / sr-taken)", "B3"),
+        ("TAKE TRADE — the pre-trade control panel (sz-)", "B6"),  # (#25, #109)
+        ("CHART SURFACES", "B9"),                        # (#49)
+        ("ASK SAURON — THE ANSWER", "B4"),               # (#73)
+        ("INTERACTIVE BROKERS CONNECTION CARD", "B13"),
+        ("/* ── Signal symbol cell ──", "B9"),            # (#47)
+        ("/* ── Lock-now button ──", "B2"),               # (#113)
+        ("/* ── Capital truth (pools/used/free card", "B7"),
+        ("/* The oversubscribed note inside a dropdown body", "B3"),
+        ("/* Sidebar unseen-activity dot", "B2"),        # (#113)
+        ("/* ── Lock engage/release choreography", "B15"),
+        ("/* ── Briefing depth — the strategist's report", "B19"),
+        ("/* ── Gollum — the guide at the bottom-left", "B1"),   # his button and bubble (#2)
+        ("/* The dialog — above the stone, in the card idiom. */", "B4"),  # his dialog (#74)
+        ("/* ── The second gate — shared by /locked/ and the idle overlay", "B15"),
+        ("/* ── News cell: a day of sentiment above the headlines", "B16"),
+        ("/* -- Editing a stop where it is read", "B7"),   # the level editor (#32)
+        ("/* ── DEAL TICKET ──", "B6"),                   # (#26)
+        ("/* ── BROKER TRUTH ──", "B9"),                  # (#110)
+        ("/* ── A Telegram button's page (2026-10-24)", "B3"),  # (#112)
     ],
+}
+
+_ANCHOR_CACHE = {}
+
+
+def anchored_stretches(rel):
+    """[(first, last, batch)] of an anchored file, end to end, and the
+    anchors not found (in order)."""
+    st = (ROOT / rel).stat()
+    key = (rel, st.st_mtime_ns, st.st_size)
+    if key not in _ANCHOR_CACHE:
+        lines = (ROOT / rel).read_text(encoding="utf-8").splitlines()
+        starts, lost, at = [], [], 0
+        for anchor, batch in ANCHORED[rel]:
+            if anchor is None:
+                starts.append((1, batch))
+                continue
+            for i in range(at, len(lines)):
+                if anchor in lines[i]:
+                    starts.append((i + 1, batch))
+                    at = i + 1
+                    break
+            else:
+                lost.append(anchor)
+        out = [(first, (starts[k + 1][0] - 1) if k + 1 < len(starts) else max(len(lines), first), batch)
+               for k, (first, batch) in enumerate(starts)]
+        _ANCHOR_CACHE[key] = (out, lost)
+    return _ANCHOR_CACHE[key]
+
+
+#: The other shared files, cut by line (first, last, batch[, marker]): a
+#: marker named on a stretch is that batch's on those lines.
+STRETCHES = {
+    "templates/base.html": [(1, 10 ** 6, "B2", "glyph_icon")],   # every glyph icon of the shell: the sprite
     "static/css/sv-overlay.css": [
         (448, 476, "B3"),          # the bottom strip's dropdowns (#38)
         (854, 977, "B1"),          # Ask Sauron's floating Eye (#3)
@@ -1157,14 +1189,16 @@ STRETCHES = {
 
 def owner(path, line, marker=None):
     """The batch that empties `path` at `line` (of `marker`), or None."""
-    stretches = STRETCHES.get(path, ())
+    stretches = list(STRETCHES.get(path, ()))
     for first, last, batch, *only in stretches:
         if only and only[0] == marker and first <= line <= last:
             return batch
+    if path in ANCHORED:
+        stretches += anchored_stretches(path)[0]
     found = None
     for first, last, batch, *only in stretches:
         if not only and first <= line <= last:
-            found = batch          # the last (narrowest) stretch named for the line wins
+            found = batch
     return found or FILE_OWNER.get(path)
 
 
@@ -1339,18 +1373,23 @@ class SourceCensusTests(SimpleTestCase):
             if rel in (TOKENS_SHEET,) or rel.endswith("__init__.py"):
                 continue
             with self.subTest(file=rel):
-                self.assertTrue(rel in FILE_OWNER or rel in STRETCHES, "%s has no batch in OWNERS" % rel)
+                self.assertTrue(rel in FILE_OWNER or rel in STRETCHES or rel in ANCHORED,
+                                "%s has no batch in OWNERS" % rel)
 
     def test_the_shared_files_are_cut_without_a_gap(self):
-        """base.html and sauron.css are cut into stretches end to end: every
-        line of them has a batch, the critic's 2,845 unowned lines of
-        sauron.css included."""
-        for rel in ("templates/base.html", "static/css/sauron.css"):
+        """base.html and sauron.css are cut end to end on their own section
+        notes: every anchor is found, in order, and every line has a batch,
+        the critic's 2,845 unowned lines of sauron.css included."""
+        for rel in ANCHORED:
+            stretches, lost = anchored_stretches(rel)
             n = len((ROOT / rel).read_text(encoding="utf-8").splitlines())
             with self.subTest(file=rel):
-                gaps = [line for line in range(1, n + 1) if owner(rel, line) is None
-                        or (owner(rel, line) == FILE_OWNER.get(rel) and rel not in FILE_OWNER)]
-                self.assertEqual(gaps[:20], [])
+                self.assertEqual(lost, [], "anchors no longer in %s: re-anchor their stretches" % rel)
+                self.assertEqual(stretches[0][0], 1)
+                self.assertEqual(stretches[-1][1], n)
+                for (a, b, _x), (c, _d, _y) in zip(stretches, stretches[1:]):
+                    self.assertEqual(b + 1, c)
+                self.assertTrue(all(owner(rel, line) for line in range(1, n + 1)))
 
     def test_the_kit_and_the_tokens_flag_nothing(self):
         """No rule flags a kit component (the plan: a rule that does is a
