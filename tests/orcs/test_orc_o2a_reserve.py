@@ -54,6 +54,31 @@ NOT_PG = "two concurrent claims need PostgreSQL's row locks"
 
 class _Reserve(QueueFixture):
 
+    #: The hour the class's clock starts at, on the real UTC day.
+    CLOCK_HOUR = 12
+
+    def setUp(self):
+        # NOON, TODAY (2026-11-13). A wall-timed call's watchdog runs at its
+        # started_at + WALL_S, minutes ahead of the clock, and the late
+        # settle after it runs on the clock itself. Within WALL_S of 00:00
+        # UTC the watchdog books the unbilled HIGH under tomorrow, and the
+        # settle, still today, sees another day and resets the day
+        # counters: CI ran this class at 23:5x UTC on 2026-11-12 and
+        # test_a_late_settle_with_no_bill_keeps_the_orphan_hold read 0.0
+        # for 0.0594. Production's clock only moves forward; here the class
+        # runs from noon of the real UTC day, its clock still moving (the
+        # date and the weekday stay the real ones), set before the fixture
+        # writes its rows, so no scenario crosses midnight.
+        real_now = timezone.now
+        start = real_now()
+        base = start.replace(hour=self.CLOCK_HOUR, minute=0, second=0,
+                             microsecond=0)
+        clock = patch("django.utils.timezone.now",
+                      side_effect=lambda: base + (real_now() - start))
+        clock.start()
+        self.addCleanup(clock.stop)
+        super().setUp()
+
     def line(self, usd):
         """The Orcs line at `usd` for the rest of the test."""
         self.enterContext(override_settings(AI_CONFIG={
