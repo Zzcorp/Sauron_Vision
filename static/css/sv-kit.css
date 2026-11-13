@@ -1,0 +1,1669 @@
+/* Sauron Vision: the kit (UI plan §7, S1a, 2026-11-06).
+
+   The components on the tokens of sv-tokens.css. Loaded by base.html after
+   every shell sheet it restyles by class (sauron.css, the overlay, the
+   tour, motion, the activity drawer, the Horde, the Council band, and the
+   signal rail's sheet since main's railfilters merged in, 2026-11-07) and
+   before the phone tier, so a rule here meets the rule it replaces at the
+   same weight and wins by order. It changes how things look, never what
+   they are: no word, no step, no hook a script reads (tests/
+   test_live_hooks_inventory.py), and no money control changes meaning
+   (tests/test_money_controls_look.py). Nothing here is under 11 px.
+
+   The last block (the magic kept, 2026-11-12) brings Sauron's own theme
+   back in the frame: the display face on titles, light on what lives, the
+   void, the Eye's breath, moments for proven events. Never on a figure.
+
+   /design/kit/ (staff only) shows every component on synthetic content. */
+
+
+/* ══ §8 Motion: nothing moves on a work page unless a value moved ════════
+   ══ or the operator acted ══════════════════════════════════════════════
+
+   Two loops are allowed, both meaningful: the live heartbeat dot (.sv-live
+   -dot, a value's source alive) and the armed pill's beat (real money is
+   armed, sauron.css). Both stop under reduced motion. (A third under
+   Ambience Magic only, the Eye's breath: the last block.) Every other infinite
+   animation of the shell stops here: the brand eye's float and glow, the
+   news and quote marquees (the wheel over them still moves them, and every
+   quote is in the watchlist and the rail too), the idle Eye's ripples and
+   clouds, Gollum's idle face, the unseen-section dot, the restore tab, the
+   loading dots, the alarm pulses (their state keeps its colour and its
+   words). The Eye still works visibly while Sauron answers (.working):
+   the operator asked. The lock's atmosphere is the lock's. */
+
+@keyframes sv-heartbeat {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .55; }
+}
+.sv-live-dot {
+    display: inline-block; flex: none;
+    width: 6px; height: 6px; border-radius: var(--sv-radius-round);
+    background: var(--sv-eye);
+    animation: sv-heartbeat 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .sv-live-dot { animation: none; }
+}
+
+/* The sidebar's mark: still, and no halo behind it. */
+.brand-eye-wrap::before { animation: none; opacity: 0; }
+.sidebar-brand .brand-eye { animation: none; filter: none; }
+
+/* The marquees stand still; the wheel driver (svWheelMarquee) still moves
+   a strip while the pointer is on it. */
+.ticker-track, .dh-track { animation: none; }
+
+/* The idle Eye (Ask Sauron) and its send button: still until asked. An
+   unread answer keeps its ring, settled once, without the breathing. */
+.se-eye-fab:not(.working),
+.se-eye-fab:not(.working) .se-fab-eye *,
+.se-chat-send .se-send-ripple-1,
+.se-chat-send .se-send-ripple-2,
+.se-chat-send .se-send-play,
+.se-eye-fab.answered-settled .se-fab-unread-ring { animation: none; }
+.se-fab-unread-ring { animation: seUnreadSettle .7s cubic-bezier(.2, .7, .3, 1) backwards; }
+
+/* Gollum's idle face is still; his one-off fidget, when something changed
+   while the operator looked away, stays (.is-fidget). */
+.gollum-fab, .gollum-fab .gl-pupils, .gollum-fab .gl-lids,
+.gollum-fab:hover .gl-ring, .gollum-fab.has-unseen .gl-ring,
+.gollum-dialog .gl-dot { animation: none; }
+
+/* State without a pulse: the colour and the words carry it. */
+.nav-dot,
+.badge-critical,
+.ip-cat .hb-state--red,
+.hb-restore-tab,
+.sv-activity-dot.live,
+.cb-dot.live,
+.hd-light--alarm .hd-light-glyph,
+.sv-loading::after { animation: none; }
+/* The chart's loading dots are inline styles; the words say it loads. */
+.sv-chart-loading-overlay span { animation: none !important; }
+
+
+/* ══ §3.5 Whose money: the world markers ═════════════════════════════════
+   REAL is the only solid red fill on the platform (white on --sv-real,
+   4.94:1, sauron.css paints it), DEMO a gold outline, PAPER a grey one.
+   One chip: Inter 11 px 600, uppercase, .06em, 2 px corners. */
+
+.sv-world {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    line-height: 16px;
+    padding: 0 6px;
+    border-radius: var(--sv-radius-chip);
+}
+.sv-world--demo { color: var(--sv-demo); border-color: var(--sv-demo); }
+.sv-world--paper { color: var(--sv-paper); border-color: var(--sv-paper); }
+
+/* The LIVE label in dense cells is the REAL chip in small. Light mode keeps
+   today's red word (frozen, plan §15; 2026-11-07). */
+.sv-venue--live {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: var(--sv-radius-chip);
+    line-height: 1.35;
+}
+:where(body.light-mode) .sv-venue--live { color: var(--accent-red); background: transparent; }
+.ip-cat .ip-pnl .sv-venue {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+
+/* The armed pill: the REAL chip's face; its beat stays (sauron.css). */
+.sv-armed-pill {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+
+/* The ticket's REAL chip (UI plan §10): the chip, at 11 px. */
+.tk-venue {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+    padding: 0 5px;
+}
+
+
+/* ══ §4 Type in the shell: nothing under 11 px ═══════════════════════════
+   Every shell rule that set a size under 11 px (sidebar, topbar and its
+   exchange list, the ticker, the quote band and its cards, the bottom band
+   and its dropdowns, the notifications, the rail, the live-status pill,
+   the user menu, Ask Sauron's panel, Gollum, the banners, the idle lock,
+   the Horde, the Council band, the activity drawer, the tour, the overlay
+   anatomy) meets the micro size here, at its own selector, so it wins by
+   order and keeps the rest of its rule. 39-56 % of the text at 1280 px
+   was under 11 px. A page's own rules are S2's, the ticket and its dialog
+   S2.1's, the close dialog S2.2's, the charts S4's. */
+
+/* the shell sheet: sidebar, topbar, bands, info panel and its dropdowns, rail, popovers, chat, Gollum, banners, idle lock (sauron.css): 112 rules */
+.sidebar-brand .subtitle,
+.nav-section,
+thead th,
+.badge,
+.theme-toggle-btn:hover::after,
+.kbd-section-title,
+.exchange-dropdown-header,
+.ex-flag,
+.ex-state,
+.ex-until,
+.ticker-item .t-badge,
+.ip-restore-pill,
+.ip-cat .ip-label,
+.ip-cat .ip-sub,
+.ip-cat .ip-pnl,
+.ip-cat .ip-pnl-apart,
+.ip-cat .ip-pnl .ip-pnl-note,
+.ip-dd-head,
+.ip-dd-cell,
+.ip-dd-cell .dk,
+.ip-dd-empty,
+.ip-dd-head .sv-live-chip,
+.notif-badge,
+.notif-header,
+.nh-link,
+.nh-link--accent,
+.notif-item .ni-kind,
+.notif-item .ni-time,
+.notif-foot,
+.signals-rail-toggle .sr-label,
+.signals-rail-toggle .sr-count,
+.sr-signal .sr-badge,
+.sr-signal .sr-age,
+.sr-signal .sr-score-num,
+.sr-signal .sr-urg,
+.sr-signal .sr-row3,
+.sr-signal .sr-dir,
+.sr-signal .sr-score,
+.sr-pop-dir,
+.sr-pop-k,
+.sr-pop-btn,
+.dh-pop-cta,
+.tnp-source,
+.tnp-time,
+.tnp-sent,
+.tnp-urgency,
+.tnp-implication,
+.tnp-section,
+.tnp-chip,
+.tnp-keyword,
+.tnp-cta,
+.rail-head .rh-label,
+.rail-head .rh-count,
+.rail-head .rh-chev,
+.wl-spark-empty,
+.wl-chg,
+.wl-name,
+.wl-class,
+.signals-rail:not(.open) .wl-sym,
+.nf-pop-meta,
+.nf-pop-fact,
+.nf-pop-cta,
+.nf-pop-item .nfi-detail,
+.pos-pop-sub,
+.pos-pop-r-cap,
+.pos-pop-money-cap,
+.pos-pop-ledger-cap,
+.pos-pop-mrow .ml,
+.pos-pop-mrow .mn,
+.pos-pop-rung .rl,
+.pos-pop-rung .rn,
+.pos-pop-track-legend,
+.pos-pop-kv .k,
+.pos-pop-why-cap,
+.ticker-news-meta,
+.ticker-news-sent,
+.lsp-head,
+.lsp-age,
+.lsp-empty code,
+.user-menu-trigger .um-caret,
+.um-head .um-role,
+.se-eye-fab::before,
+.se-chat-header,
+.se-chat-header-btn,
+.se-suggest,
+.sv-perf-table thead th,
+.tp-chip,
+.tp-level .lbl,
+.tp-cta,
+.sv-banner-kind,
+.sv-banner-btn,
+.il-standby,
+.il-sub,
+.il-disconnect,
+.il-forgot,
+.sr-taken,
+.sr-pop-taken,
+.sr-pop-taken-head,
+.se-answer .se-md-h2,
+.se-answer .se-md-h3,
+.se-answer .se-md-ul > .se-md-li::before,
+.se-answer .se-md-ol > .se-md-li::before,
+.se-answer .se-md-lang,
+.se-answer .se-md-table th,
+.nf-pop-chip,
+.gollum-count,
+.gollum-dialog .gl-sub,
+.gollum-dialog .gl-whisper,
+.gollum-dialog .gl-kind,
+.gollum-dialog .gl-foot,
+.hb-news-sent-k,
+.hb-news-sent-v small { font-size: var(--sv-fs-micro); }
+
+/* the overlay anatomy: popover rows, chips, ages, info-panel rows, dialog facts (sv-overlay.css): 14 rules */
+.sv-pop-row .lbl,
+.sv-pop-level .lbl,
+.sv-chip,
+.sv-age,
+.ipr-side,
+.ip-dropdown .ip-pos .ipr-pct,
+.ip-dropdown .ip-pos .ipr-qty,
+.ip-dropdown .ip-pos-close,
+.ipr-kind,
+.ip-dd-note,
+.se-bubble-tool,
+.sv-dialog-fact .lbl,
+.se-ctx-k,
+.ask-sauron { font-size: var(--sv-fs-micro); }
+
+/* the tour (sv-tour.css): 2 rules */
+.sv-tour-step,
+.sv-tour-skip { font-size: var(--sv-fs-micro); }
+
+/* the activity drawer (sv-activity.css): 7 rules */
+.sv-activity-tab,
+.sv-activity-badge,
+.sv-activity-title,
+.sv-activity-stamp,
+.sv-activity-chip,
+.sv-act-meta,
+.sv-act-detail { font-size: var(--sv-fs-micro); }
+
+/* the Horde (sv-horde.css): 30 rules */
+.sv-horde-tab,
+.hd-sub,
+.hd-count,
+.hd-lens-btn,
+.hd-chip-btn,
+.hd-stamp,
+.hd-link,
+.hd-sum,
+.hd-sum-btn,
+.hd-cell,
+.hd-chip,
+.hd-failed,
+.hd-note,
+.hd-class-note,
+.hd-captain,
+.hd-expander,
+.hd-today,
+.hd-line,
+.hd-bet,
+.hd-seat,
+.hd-inst-chip,
+.hd-light-glyph,
+.hd-no-venue,
+.hd-straggler,
+.hd-unseated,
+.hd-dossier,
+.hd-dos-sec h4,
+.hd-cmd-cap,
+.hd-btn,
+.hd-phone-cmds .hd-copy { font-size: var(--sv-fs-micro); }
+
+/* the Council band (sv-council-band.css): 25 rules */
+.sv-council-band-tab,
+.sv-council-band-badge,
+.cb-chip,
+.cb-stamp,
+.cb-back,
+.cb-link,
+.cb-tabbtn,
+.cb-label,
+.cb-inline,
+.cb-sub,
+.cb-mono,
+.cb-ring,
+.cb-triad-title,
+.cb-triad-sub,
+.cb-token,
+.cb-voice-meta,
+.cb-card-title,
+.cb-card-line,
+.cb-matrix th,
+.cb-table .cb-seat-mono,
+.cb-table .cb-chair-word,
+.cb-filter,
+.cb-sitting-head,
+.cb-reasons summary,
+.cb-wtable { font-size: var(--sv-fs-micro); }
+
+/* the signal rail's filters, LEFT THE RAIL, the card's facts and the bottom
+   band's lists (sv-rail.css, railfilters #90, merged 2026-11-07): 22 rules.
+   .ip-dropdown .ip-dd-note outweighs the overlay list's .ip-dd-note above,
+   so it is named at its own weight. */
+.rail-head .rh-held,
+.rf-chip,
+.sr-stage,
+.sr-contra,
+.sr-pop-facts,
+.sr-pop-one,
+.sr-rail-note,
+.sr-gone-head,
+.sr-gone-tags,
+.sr-gone-l1 .sr-badge,
+.sr-gone-tag,
+.sr-gone-at,
+.sr-gone-words,
+.sr-gone-pos,
+.sr-gone-btn,
+.sr-gone-empty,
+.sv-grp,
+.rf-status,
+.rf-k,
+.rf-opt,
+.rf-rule,
+.rf-none,
+.sv-list-note,
+.ip-dropdown .ip-dd-note { font-size: var(--sv-fs-micro); }
+
+/* MARKET SHUT (sv-rail.css; main's #99, #100 and #101, merged 2026-11-12):
+   the badge on a card whose market is shut and the hour beside it, the
+   line under its headband row, a waiting row's rule, and on /signals/ the
+   hour and the line for a held announcement: 6 rules, from 7.5 to 10 px. */
+.sr-shut,
+.sr-shut-tag,
+.ipr-shut,
+.sr-wait-rule,
+.sig-shut-opens,
+.sig-hold { font-size: var(--sv-fs-micro); }
+
+/* A few shell spans carry their size inline in base.html's markup (a
+   strategy's status in the bottom band's list, the news list, the empty
+   watchlist, the instrument preview's "Loading..."). Only !important
+   reaches an inline style; the markup itself is S1b's to clean. */
+:is(.sidebar, .topbar, .data-headband, .ticker-bar, .info-panel-wrap, .ip-dropdown,
+    .signals-rail, .instrument-preview, .notif-dropdown, .user-menu-dropdown)
+    :is([style*="font-size:8px"], [style*="font-size:8.5px"], [style*="font-size:9px"],
+        [style*="font-size:9.5px"], [style*="font-size:10px"], [style*="font-size:10.5px"],
+        [style*="font-size: 8px"], [style*="font-size: 9px"], [style*="font-size: 10px"]) {
+    font-size: var(--sv-fs-micro) !important;
+}
+
+
+
+/* ══ The shell, calm and opaque (§3.1, §7 Shell) ═════════════════════════
+   The sidebar, the bars and the rail on opaque surfaces with hairlines: no
+   gradient, no blur, no glow behind a number. Words in Inter, numbers in
+   JetBrains Mono; labels in Inter 600 capitals at .06em in ink-3; values
+   in ink-1 (the Eye is never a number). Colours apply in the dark theme;
+   light mode keeps today's (plan §15), and takes the sizes and faces. */
+
+body:not(.light-mode) .sidebar { background: var(--sv-bg-1); border-right-color: var(--sv-line-1); }
+body:not(.light-mode) .sidebar-brand { border-bottom-color: var(--sv-line-1); }
+body:not(.light-mode) .sidebar-brand h1 { text-shadow: none; }
+/* The nav's faces are the frame's (the magic kept, 2026-11-12): the rows
+   and the brand's subtitle in Rajdhani 600, which at the base size + 2
+   takes Inter's width at the base size within 1.5 px on the longest
+   labels, so nothing reflows; the section heads join the display face
+   (the last block). The 2 px edge stays. The subtitle is spaced .15em,
+   so it ends under the wordmark (at .3em it ran 34 px past it; review
+   2026-11-12, his decision). */
+.sidebar-brand .subtitle { font-family: var(--sv-font-frame); font-weight: 600; font-size: 12px; letter-spacing: .15em; }
+.nav-link { font-family: var(--sv-font-frame); font-weight: 600; font-size: var(--sv-fs-nav); letter-spacing: .02em; border-left-width: 2px; }
+body:not(.light-mode) .nav-link { color: var(--sv-ink-2); }
+body:not(.light-mode) .nav-link:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-line-3); }
+body:not(.light-mode) .nav-link.active { color: var(--sv-ink-1); background: var(--sv-bg-3); border-left-color: var(--sv-eye); }
+/* The unseen-section dot (nav-activity): amber, still. */
+body:not(.light-mode) .nav-dot { background: var(--sv-warn); }
+
+body:not(.light-mode) .topbar {
+    background: var(--sv-bg-1);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    border-bottom-color: var(--sv-line-1);
+}
+body:not(.light-mode) .data-headband {
+    background: var(--sv-bg-1);
+    border-top-color: var(--sv-line-1); border-bottom-color: var(--sv-line-2);
+    box-shadow: none;
+}
+body:not(.light-mode) .ticker-bar {
+    background: var(--sv-bg-1);
+    border-top-color: var(--sv-line-1); border-bottom-color: var(--sv-line-2);
+    box-shadow: none;
+}
+body:not(.light-mode) .info-panel-wrap { background: var(--sv-bg-2); border-top-color: var(--sv-line-2); }
+body:not(.light-mode) .signals-rail { background: var(--sv-bg-1); border-left-color: var(--sv-line-1); }
+body:not(.light-mode) .signals-rail-toggle { background: var(--sv-bg-1); }
+
+/* The quote band: the symbol in Inter 12/600 ink-2, the price in mono ink-1,
+   the change in mono with its sign, up or down. */
+.dh-sym { font-family: var(--sv-font-sans); letter-spacing: .02em; text-shadow: none; }
+body:not(.light-mode) .dh-sym { color: var(--sv-ink-2); }
+.dh-val { font-family: var(--sv-font-mono); font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.dh-chg { font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+body:not(.light-mode) .dh-dot.up,
+body:not(.light-mode) .dh-dot.down { box-shadow: none; }
+body:not(.light-mode) .dh-item { border-right-color: var(--sv-line-1); }
+body:not(.light-mode) a.dh-item:hover { background: var(--sv-bg-3); }
+
+/* The news ticker: words in Inter, the figures in mono, white is ink-1. */
+.ticker-item { font-family: var(--sv-font-sans); }
+.ticker-item .t-price, .ticker-item .t-change { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+body:not(.light-mode) .ticker-item,
+body:not(.light-mode) .ticker-item .t-sym,
+body:not(.light-mode) .ticker-item .t-price { color: var(--sv-ink-1); }
+body:not(.light-mode) .ticker-item { border-right-width: 1px; border-right-color: var(--sv-line-1); }
+.ticker-item .t-badge { font-family: var(--sv-font-sans); border-radius: var(--sv-radius-chip); letter-spacing: var(--sv-track-label); font-weight: 600; }
+/* A kind of item is a neutral chip: blue is no longer a status (§3.6). */
+body:not(.light-mode) .ticker-item .t-badge { background: transparent; color: var(--sv-ink-2); border: 1px solid var(--sv-line-3); }
+
+/* The bottom band: label, value, sub-text (§7 status cell). */
+.ip-cat .ip-label {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+}
+body:not(.light-mode) .ip-cat .ip-label { color: var(--sv-ink-3); }
+/* The band keeps its 60 px: the cell's lines sit tight at 11 px (S1b turns
+   it into the 32 px status bar of single-line cells). At the 11 px floor
+   its cells grew by a third and hid two of them behind the arrow at
+   1920 px (review, 2026-11-07): a sub-line is words, so Inter (rule 5;
+   the mono's 0.6 em is wider), and a cell's sides take the spacing
+   scale's 8, as the shared table's cells do. Measured with the faces:
+   1920 shows all 14 cells again, and 1280 and 1440 hide no more than
+   main did. */
+.ip-cat { gap: 1px; padding-top: 2px; padding-bottom: 2px; padding-left: var(--sv-sp-3); padding-right: var(--sv-sp-3); }
+.ip-cat .ip-sub { font-family: var(--sv-font-sans); }
+.ip-cat .ip-label, .ip-cat .ip-sub, .ip-cat .ip-pnl, .ip-cat .ip-pnl .sv-venue { line-height: 1.15; }
+body:not(.light-mode) .ip-cat .ip-sub { color: var(--sv-ink-3); }
+body:not(.light-mode) .ip-cat { border-right-color: var(--sv-line-1); }
+body:not(.light-mode) .ip-cat:hover { background: var(--sv-bg-3); }
+/* PORTFOLIO's apart groups (paper, demo) at full strength: dimmed to 85 %
+   the PAPER label fell to 4.35:1 on a hovered cell (2026-11-07). */
+body:not(.light-mode) .ip-cat .ip-pnl-apart { opacity: 1; }
+.ip-dd-cell .dk { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+.ip-dd-cell .dv { font-family: var(--sv-font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+body:not(.light-mode) .ip-dd-cell .dk { color: var(--sv-ink-3); }
+/* A value is ink-1, never the Eye; at a class's weight (:where), so the
+   states keep theirs: a gain jade, a loss coral, an alarm its red class
+   (OFF, overdue, HALTED, a negative free pool, the drawdown), a count its
+   gold. At (0,3,1) this outweighed them all and printed every one of them
+   white (review, 2026-11-07). */
+:where(body:not(.light-mode)) .ip-dd-cell .dv { color: var(--sv-ink-1); }
+.ip-dd-head { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+body:not(.light-mode) .ip-dd-head { color: var(--sv-ink-3); border-bottom-color: var(--sv-line-1); }
+
+/* The rail: heads as labels, counts as bubbles. */
+.rail-head .rh-label { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+body:not(.light-mode) .rail-head .rh-label { color: var(--sv-ink-3); }
+body:not(.light-mode) .rail-head .rh-count { background: var(--sv-bg-3); color: var(--sv-ink-1); }
+.wl-sym { font-family: var(--sv-font-mono); font-weight: 500; letter-spacing: 0; }
+body:not(.light-mode) .wl-item { border-bottom-color: var(--sv-line-1); }
+body:not(.light-mode) .wl-item:hover { background: var(--sv-bg-3); transform: none; }
+.sr-signal .sr-sym, .sr-pop-sym { font-family: var(--sv-font-mono); font-weight: 600; letter-spacing: 0; }
+body:not(.light-mode) .sr-signal .sr-sym, body:not(.light-mode) .sr-pop-sym { color: var(--sv-ink-1); }
+/* The quote card's symbol: mono ink-1, not the Eye (a symbol is not live). */
+.dh-pop-title { font-family: var(--sv-font-mono); font-weight: 600; text-shadow: none; }
+body:not(.light-mode) .dh-pop-title { color: var(--sv-ink-1); }
+/* The card's facts: a label and its value never touch, and a value never
+   splits inside a word for want of room beside its label (2026-11-07:
+   anywhere printed a rule name as "trend_breakou" over "t_cr…"). A value
+   wraps at its spaces beside the label; one whose longest word cannot sit
+   there takes the line under it, whole and right-aligned; a word breaks
+   only when even that line is too short for it. */
+.sr-pop-grid > div { gap: 0 8px; min-width: 0; flex-wrap: wrap; }
+.sr-pop-v { flex: 1 1 min-content; min-width: 0; overflow-wrap: break-word; word-break: normal; }
+body:not(.light-mode) .sr-pop-grid > div { border-bottom-color: var(--sv-line-1); }
+/* The watchlist's sparkline: jade when the day is up (coral down stays). */
+.wl-spark svg path { stroke: var(--sv-up); }
+.sr-pop-k, .sr-signal .sr-age {
+    font-family: var(--sv-font-sans); letter-spacing: var(--sv-track-label);
+}
+body:not(.light-mode) .sr-pop-k, body:not(.light-mode) .sr-signal .sr-age { color: var(--sv-ink-3); }
+.sr-pop-v { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+
+/* The rail's filters and LEFT THE RAIL (railfilters #90, merged 2026-11-07):
+   the ⚙ panel's keys, the group heads and LEFT THE RAIL's head are labels;
+   the counts and the times are figures; the status, the notes, the card's
+   facts and the departures' lines are words (their chips and buttons are
+   below). Never a display, an order or a visibility: the filters own those
+   (sv-rail.css, <style id="svRuleOff">, sv-rail-filters.js). */
+.rf-k, .sv-grp, .sr-gone-head {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase;
+}
+.rail-head .rh-held, .rf-status, .rf-opt, .rf-rule, .sr-rail-note, .sv-list-note,
+.ip-dropdown .ip-dd-note, .sr-pop-facts, .sr-pop-one, .sr-contra,
+.sr-gone-tags, .sr-gone-pos { font-family: var(--sv-font-sans); letter-spacing: 0; }
+.rf-chip b, .rf-rule b, .sr-gone-count, .sr-gone-at { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+.sr-gone-l1 .sr-sym { font-family: var(--sv-font-mono); font-weight: 600; letter-spacing: 0; }
+/* Opaque grounds for the rail's translucent ones: the ⚙ panel and the
+   departures recessed on the void, a group head raised like a table head,
+   hairlines between rows. */
+body:not(.light-mode) .rail-facets { border-bottom-color: var(--sv-line-1); }
+body:not(.light-mode) .rail-fpanel,
+body:not(.light-mode) .sr-gone { background: var(--sv-bg-0); }
+body:not(.light-mode) .sv-grp { background: var(--sv-bg-2); }
+body:not(.light-mode) .sr-gone-row { border-top-color: var(--sv-line-1); }
+/* "show all" is a link: ink-1 and its underline, never the Eye (§3.3). */
+body:not(.light-mode) .rf-peek { color: var(--sv-ink-1); }
+/* A muted rule stays struck through, at full strength in ink-3: dimmed to
+   55 % it fell under 4.5:1. */
+body:not(.light-mode) .rf-rule[aria-pressed="false"] { opacity: 1; color: var(--sv-ink-3); }
+/* MARKET SHUT (main's #99, #100 and #101, merged 2026-11-12). A signal
+   whose market is shut says so: a badge on its card with the hour the
+   market opens, a line in the card's facts, a line under its headband row,
+   a badge on /signals/; with the optional hold on, those signals wait in a
+   MARKET SHUT section shaped like LEFT THE RAIL. The hour is a figure: the
+   number face, and never cut (where it cannot sit beside the badge it
+   takes the line under it, whole; main's line clipped it). The section's
+   ground is opaque and its rows part on hairlines, as LEFT THE RAIL's do.
+   The colours are below, with the chips. Never a display, an order or a
+   visibility: the SHUT chip and the section's switch own those. */
+.sr-shut { letter-spacing: 0; flex-wrap: wrap; row-gap: 2px; }
+.sr-shut-opens, .sig-shut-opens {
+    font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums;
+    letter-spacing: 0; white-space: nowrap;
+}
+.ipr-shut { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+body:not(.light-mode) .sr-shut-sec { background: var(--sv-bg-0); }
+body:not(.light-mode) .sr-wait-row { border-top-color: var(--sv-line-1); }
+/* The ⚙ is a calm control; open, its panel is selected (the Eye's edge). */
+body:not(.light-mode) .rail-head .rh-gear:hover { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
+body:not(.light-mode) .rail-head .rh-gear[aria-expanded="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-eye); }
+/* "↻ N new", what a refresh holds while a card is read: a bubble, like the
+   head's count, not the Eye's wash. */
+body:not(.light-mode) .rail-head .rh-held { background: var(--sv-bg-3); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+body:not(.light-mode) .rail-head .rh-held:hover { background: var(--sv-bg-4); }
+
+/* The user's initials: legible, not green on green. */
+body:not(.light-mode) .um-avatar { background: var(--sv-bg-4); color: var(--sv-ink-1); }
+
+/* A value nobody measured is the em-dash in ink-3, at full strength: dimmed
+   to 65 % it fell under 4.5:1 on the cards. Light mode keeps today's 65 %
+   (frozen, plan §15). */
+body:not(.light-mode) .sv-unknown { opacity: 1; }
+
+/* The rail's TAKEN card on hover: a breath of the taken gold on bg-3. At
+   14 % its ages and rule fell to 4.1:1 and its BULL badge to 3.9; at 4 %
+   every word on it is 4.6:1 or more (tests/test_design_tokens computes
+   it). (2026-11-07) */
+body:not(.light-mode) .sr-signal-wrap.sr-acted .sr-signal:hover { background: color-mix(in srgb, var(--sr-taken) 4%, var(--sv-bg-3)); }
+
+/* A gain is jade wherever a shell sheet prints one: the Horde's strip and
+   tones, and the close advice's cards (its sheet loads after this one, so
+   the dark scope's weight carries it). They kept the Eye, beside the
+   band's jade (review, 2026-11-07). */
+body:not(.light-mode) .hd-tab-r.up,
+body:not(.light-mode) .hd-tone-up,
+body:not(.light-mode) .sv-adv-card .up { color: var(--sv-up); }
+
+/* Whose money, wherever else the shell or a page says it (2026-11-07). The
+   REAL family reads --sv-real by name (plan §3.10): these labels read
+   --accent-red, which is the loss coral since S1a, and printed real money
+   in the colour of a loss. Each is the REAL chip now, white on the only
+   solid red (4.94:1); the account card's edge is the REAL edge. Light
+   mode keeps today's red words (frozen). */
+body:not(.light-mode) .sv-adv-world.is-live,
+body:not(.light-mode) .pos-pop-venue.is-live,
+body:not(.light-mode) .hq-tag.hq-tag--live,
+body:not(.light-mode) .hq-brk.hq-brk--live,
+body:not(.light-mode) .ib-env.ib-env--live,
+body:not(.light-mode) .bk-env.bk-env--live {
+    color: var(--sv-real-ink);
+    background: var(--sv-real);
+    border-color: var(--sv-real);
+}
+body:not(.light-mode) .hq-brk.hq-brk--live small { color: var(--sv-real-ink); opacity: 1; }
+body:not(.light-mode) .bk-env.bk-env--live { padding: 0 4px; border-radius: var(--sv-radius-chip); }
+body:not(.light-mode) .hq-acct.hq-acct--live { border-left-color: var(--sv-real); }
+
+
+/* ══ §7 Overlays: one family ═════════════════════════════════════════════
+   Popovers (rail cards, quote cards, the bottom band's dropdowns, menus,
+   hover cards, the notifications, the user menu, the live-status list):
+   bg-2, a line-2 border, 6 px corners, the popover shadow, no glow. Their
+   placement, pinning and dismissal are their scripts', untouched. Ask
+   Sauron's panel joined them on 2026-11-12: it was a see-through gradient
+   under a blur with a green glow, and its suggestions hold figures ("Top
+   rules · 30d"); no figure sits on glass. */
+
+body:not(.light-mode) {
+    --pop-bg: var(--sv-bg-2);
+    --pop-bg-2: var(--sv-bg-3);
+    --pop-border: var(--sv-line-2);
+    --pop-shadow: var(--sv-shadow-pop);
+}
+/* Light mode, frozen (plan §15): sv-overlay.css computes these on :root
+   from --bg-card, --bg-card-hover and --border, and light mode inherited
+   the old dark root's values, never its own. The re-pointed root would
+   change them, so they are restated at today's values (2026-11-07). */
+body.light-mode {
+    --pop-bg: #0a1a14;
+    --pop-bg-2: #0e2218;
+    --pop-border: #133020;
+}
+:root { --pop-radius: var(--sv-radius-card); }
+
+body:not(.light-mode) .sr-popup,
+body:not(.light-mode) .dh-pop,
+body:not(.light-mode) .ip-dropdown,
+body:not(.light-mode) .notif-dropdown,
+body:not(.light-mode) .user-menu-dropdown,
+body:not(.light-mode) .lsp-dropdown,
+body:not(.light-mode) .exchange-dropdown,
+body:not(.light-mode) .ticker-popup,
+body:not(.light-mode) .nf-pop,
+body:not(.light-mode) .pos-pop,
+body:not(.light-mode) .se-chat-panel {
+    background: var(--sv-bg-2);
+    border: 1px solid var(--sv-line-2);
+    box-shadow: var(--sv-shadow-pop);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.sr-popup, .dh-pop, .notif-dropdown, .user-menu-dropdown, .lsp-dropdown,
+.exchange-dropdown, .ticker-popup, .nf-pop, .pos-pop { border-radius: var(--sv-radius-card); }
+.ip-dropdown { border-radius: var(--sv-radius-card) var(--sv-radius-card) 0 0; }
+/* The rail's card scrolls between a sticky head and foot (railfilters #90,
+   merged 2026-11-07): both on the card's own surface, the foot under a
+   hairline. A card pinned open by a click keeps the Eye's edge (selected),
+   which the border above would otherwise cover. A bottom-band dropdown's
+   sticky head sits on the dropdown's surface; the card's one-position note
+   is dashed in its own gold. */
+body:not(.light-mode) .sr-popup .sr-pop-head,
+body:not(.light-mode) .sr-pop-foot { background: var(--sv-bg-2); }
+body:not(.light-mode) .sr-pop-foot { border-top-color: var(--sv-line-2); }
+body:not(.light-mode) .sr-popup.sv-pinned { border-color: var(--sv-eye); }
+body:not(.light-mode) .ip-dropdown .ip-dd-head { background: var(--sv-bg-2); }
+body:not(.light-mode) .sr-pop-one { border-color: color-mix(in srgb, var(--accent-gold-ink) 45%, transparent); }
+
+/* The dialog: bg-2, the dialog shadow; its head carries the subject.
+   A dialog that takes the trading PIN moves real money: the LIVE ticket
+   (its PIN step, .sz-pin, is drawn only when live) and an SV.overlay
+   confirm given a secretLabel (a live close, CLOSE ALL over live rows,
+   arming or resuming a live bot). It carries the REAL red as a 3 px top
+   edge, and no other dialog does (review, 2026-11-07). .sv-dialog--danger
+   is set on every confirm({danger: true}) (Delete preset, Pause, a paper
+   close), on the paper funding ticket and on the lost answer: solid red
+   there said danger, which it never means (plan §3.9). A danger dialog
+   keeps the dialog's own line and an ink-1 title: coral is a loss, not a
+   danger. Light mode keeps today's (frozen). */
+body:not(.light-mode) .sv-dialog { box-shadow: var(--sv-shadow-dialog); }
+:where(body:not(.light-mode)) .sv-dialog--danger { border-color: var(--sv-line-2); }
+:where(body:not(.light-mode)) .sv-dialog:has(.sz-pin),
+:where(body:not(.light-mode)) .sv-dialog:has([data-role="secret-wrap"]) { border-top: 3px solid var(--sv-real); }
+body:not(.light-mode) .sv-dialog--danger .sv-dialog-title { color: var(--sv-ink-1); }
+.sv-dialog-title { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+.sv-dialog-fact { font-family: var(--sv-font-mono); }
+.sv-dialog-fact .lbl { font-family: var(--sv-font-sans); font-weight: 600; letter-spacing: var(--sv-track-label); }
+
+/* The dialog's buttons: Cancel neutral; the confirm neutral-strong (an ink
+   outline), so a SELL is never confirmed in green: the side's colours come
+   with the dialog's own markup (S2.1). A "danger" confirm (is-danger) is
+   the same outline: it rides every LIVE ticket on either side, the funding
+   ticket, CLOSE, CLOSE n POSITIONS, Pause and Disarm, and coral there said
+   loss and SELL, on a LIVE BUY too (review, 2026-11-07). */
+.sv-dialog-btn {
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-small);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+    min-height: var(--sv-ctl-md);
+    padding: 0 14px;
+    border-radius: var(--sv-radius-ctl);
+}
+/* :where() keeps these at a class's weight, so the confirm's look below wins. */
+:where(body:not(.light-mode)) .sv-dialog-btn { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .sv-dialog-btn:hover { border-color: var(--sv-line-3); background: var(--sv-bg-4); }
+.sv-dialog-btn.sv-dialog-btn--go {
+    background: transparent;
+    color: var(--sv-ink-1);
+    border: 1.5px solid var(--sv-ink-1);
+}
+.sv-dialog-btn.sv-dialog-btn--go:hover { background: var(--sv-bg-3); }
+.sv-dialog-btn.sv-dialog-btn--go.is-danger { color: var(--sv-ink-1); border-color: var(--sv-ink-1); background: transparent; }
+.sv-dialog-btn.sv-dialog-btn--go.is-danger:hover { background: var(--sv-bg-3); }
+
+/* The menu: 32 px items on bg-2. */
+.sv-menu-item { min-height: var(--sv-row); font-size: var(--sv-fs-base); }
+body:not(.light-mode) .sv-menu-item--danger { color: var(--sv-down); }
+
+
+/* ══ §7 Buttons on cards and popovers (the money ones, §10) ══════════════
+   The rail's signal card, the quote cards (bands and watchlist): outlines
+   with the side's colour, never a gradient slab. TAKE TRADE and ADD wear
+   their signal's side (a bearish signal is a SELL); LONG is the BUY look,
+   SHORT the SELL one; PASS is a neutral ghost, since it only dismisses. */
+
+.sr-pop-btn {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+    border-radius: var(--sv-radius-ctl);
+    min-height: var(--sv-ctl-sm);
+}
+/* The plain card button, at a class's weight (:where), so the side looks win. */
+:where(body:not(.light-mode)) .sr-pop-btn { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .sr-pop-btn:hover { background: var(--sv-bg-4); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+.sr-pop-btn.sr-pop-btn-act {
+    background: transparent;
+    color: var(--sv-up);
+    border: 1.5px solid var(--sv-up);
+    border-color: var(--sv-up);
+    box-shadow: none;
+    font-size: var(--sv-fs-small);
+}
+.sr-pop-btn.sr-pop-btn-act:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); box-shadow: none; }
+.sr-pop-btn.sr-pop-btn-short {
+    background: transparent;
+    color: var(--sv-down);
+    border: 1.5px solid var(--sv-down);
+    border-color: var(--sv-down);
+    box-shadow: none;
+    font-size: var(--sv-fs-small);
+}
+.sr-pop-btn.sr-pop-btn-short:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); box-shadow: none; }
+.sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act {
+    color: var(--sv-down);
+    border-color: var(--sv-down);
+}
+.sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+/* ADD TO POSITION: the same side, the words say it is an addition. */
+.sr-pop-btn.sr-pop-btn-act.sr-pop-btn-add { background: transparent; }
+.sr-pop-btn.sr-pop-btn-pass {
+    background: transparent;
+    color: var(--sv-ink-2);
+    border-color: transparent;
+    font-size: var(--sv-fs-small);
+}
+.sr-pop-btn.sr-pop-btn-pass:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); border-color: transparent; }
+/* LEFT THE RAIL's buttons (railfilters #90, merged 2026-11-07). ▶ TICKET
+   opens the ticket TAKE TRADE opens, so it wears its signal's side like
+   TAKE TRADE (a short signal is a SELL), an outline, never the Eye's wash;
+   a row with no side keeps the plain look. ↺ BRING BACK is a plain card
+   button. */
+.sr-gone-btn {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-button);
+    border-radius: var(--sv-radius-ctl);
+}
+:where(body:not(.light-mode)) .sr-gone-btn { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .sr-gone-btn:hover { background: var(--sv-bg-4); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+.sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-up);
+    border: 1.5px solid var(--sv-up);
+}
+.sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); }
+.sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-down);
+    border: 1.5px solid var(--sv-down);
+}
+.sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+/* MARKET SHUT's ▶ TICKET (main's #99-#101, merged 2026-11-12) is LEFT THE
+   RAIL's control in the section beside it: it opens the same ticket, so it
+   wears the same side, to the letter. */
+.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-up);
+    border: 1.5px solid var(--sv-up);
+}
+.sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); }
+.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket {
+    background: transparent;
+    color: var(--sv-down);
+    border: 1.5px solid var(--sv-down);
+}
+.sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+
+
+/* ══ §7 Buttons: the kit's variants (on .btn, sauron.css) ════════════════ */
+
+.btn.btn-secondary { background: var(--sv-bg-3); border-color: var(--sv-line-2); color: var(--sv-ink-1); }
+/* BUY / SELL: only on the actions that open or add to a position. */
+.btn.btn-buy { background: transparent; color: var(--sv-up); border: 1.5px solid var(--sv-up); }
+.btn.btn-buy:hover { background: var(--sv-up-wash); color: var(--sv-up); border-color: var(--sv-up); }
+.btn.btn-sell { background: transparent; color: var(--sv-down); border: 1.5px solid var(--sv-down); }
+.btn.btn-sell:hover { background: var(--sv-down-wash); color: var(--sv-down); border-color: var(--sv-down); }
+/* STOP: the protective actions (CLOSE ALL, all off, the brakes). */
+.btn.btn-stop { background: transparent; color: var(--sv-ink-1); border: 1.5px solid var(--sv-ink-1); }
+.btn.btn-stop::before { content: "■"; position: static; line-height: 1; }
+.btn.btn-stop:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); border-color: var(--sv-ink-1); }
+.btn.btn-icon { width: var(--sv-ctl-sm); min-height: var(--sv-ctl-sm); height: var(--sv-ctl-sm); padding: 0; }
+/* Disabled reads as disabled on every variant (§7: bg-2, ink-4, line-1):
+   the variants above meet sauron.css's disabled look at its weight and
+   came after it, so a disabled BUY kept its jade (review, 2026-11-07). */
+.btn:is(.btn-buy, .btn-sell, .btn-stop, .btn-secondary):is([disabled], .disabled) {
+    background: var(--sv-bg-2); color: var(--sv-ink-4); border-color: var(--sv-line-1);
+}
+
+/* On a phone the tap floor holds (sv-responsive.css: 44 px, CLOSE and
+   Close all 48 px, where a miss costs most). The size heights above sit at
+   a button's weight, over the phone sheet's single class, so they are
+   lifted here at the same weight; a kit field keeps the 16 px under which
+   iOS zooms the page on focus (review, 2026-11-07). */
+@media (max-width: 768px) {
+    .btn.btn-sm, .btn.btn-lg, .btn.btn-icon { min-height: 44px; }
+    .btn[data-sv-close-trade], .btn.btn-sm[data-sv-close-trade] { min-height: 48px; }
+    .sv-input { font-size: 16px; }
+}
+
+
+/* ══ §7 Chips: five styles instead of ten ════════════════════════════════
+   .sv-chip neutral outline; .sv-world whose money (above); .sv-side up or
+   down text on a 12 % wash, never filled; .sv-state a dot and a word;
+   .sv-count a bubble. Plus .sv-fresh (a price's source and age, §3.7) and
+   .sv-ai (a model). The older chips take the nearest of the five. */
+
+.sv-chip, .sv-side, .sv-state, .sv-ai, .sv-est {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 20px; padding: 0 7px;
+    border-radius: var(--sv-radius-chip);
+    font-family: var(--sv-font-sans);
+    font-size: var(--sv-fs-micro);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1;
+}
+.sv-chip { border: 1px solid var(--sv-line-3); color: var(--sv-ink-2); background: transparent; }
+.sv-chip--bullish, .sv-side--up { color: var(--sv-up); background: color-mix(in srgb, var(--sv-up) 12%, transparent); border-color: transparent; }
+.sv-chip--bearish, .sv-side--down { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); border-color: transparent; }
+.sv-chip--warn { color: var(--sv-warn); border-color: color-mix(in srgb, var(--sv-warn) 55%, transparent); background: transparent; }
+.sv-chip--muted { color: var(--sv-ink-3); border-color: var(--sv-line-2); }
+.sv-state { padding: 0; height: auto; color: var(--sv-ink-1); }
+.sv-state::before {
+    content: ""; width: 8px; height: 8px; border-radius: var(--sv-radius-round);
+    background: currentColor; flex: none;
+}
+.sv-state--on::before { background: var(--sv-eye); }
+.sv-state--off { color: var(--sv-ink-3); }
+.sv-state--off::before { background: transparent; border: 1.5px solid var(--sv-ink-3); box-sizing: border-box; }
+.sv-state--error { color: var(--sv-down); }
+.sv-state--stale, .sv-state--pending { color: var(--sv-warn); }
+.sv-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 6px;
+    border-radius: var(--sv-radius-round);
+    background: var(--sv-bg-3); color: var(--sv-ink-1);
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); font-weight: 500;
+}
+.sv-ai { padding: 0; height: auto; color: var(--sv-ai); text-transform: none; letter-spacing: 0; }
+.sv-ai::before { content: ""; width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ai); }
+.sv-est { border: 1px solid var(--sv-ink-4); color: var(--sv-ink-3); text-transform: none; letter-spacing: 0; height: 18px; }
+
+/* §3.7 Where a price comes from, and how old it is: a 6 px dot, the source
+   in words (Inter 11, ink-2), a middle dot, the age (mono 11, ink-3). */
+.sv-fresh {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-2);
+    white-space: nowrap;
+}
+.sv-fresh::before { content: ""; width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-ink-2); flex: none; }
+/* A live price's dot is the Eye, still: one heartbeat per page (.sv-live-dot), not one per row. */
+.sv-fresh--live::before { background: var(--sv-eye); }
+.sv-fresh--stale::before { background: var(--sv-warn); }
+.sv-fresh--closed::before { background: transparent; border: 1px solid var(--sv-ink-3); box-sizing: border-box; }
+.sv-fresh--ref::before { border-radius: 0; background: transparent; border: 1px solid var(--sv-ink-3); box-sizing: border-box; }
+.sv-fresh .sv-age, .sv-fresh-age { font-family: var(--sv-font-mono); color: var(--sv-ink-3); }
+.sv-fresh-stale-word { color: var(--sv-warn); }
+.sv-src { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+
+/* The older chips, onto the five. */
+.badge {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+body:not(.light-mode) .badge-bullish { color: var(--sv-up); background: color-mix(in srgb, var(--sv-up) 12%, transparent); }
+body:not(.light-mode) .badge-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); }
+.sr-signal .sr-badge, .sr-pop-dir, .wl-class, .sr-urg, .ipr-side, .tp-chip, .tnp-chip, .tnp-keyword, .nf-pop-chip {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+body:not(.light-mode) .sr-signal .sr-badge-bullish,
+body:not(.light-mode) .sr-pop-dir.sr-pop-dir-bullish { border-color: transparent; }
+body:not(.light-mode) .sr-signal .sr-badge-bearish,
+body:not(.light-mode) .sr-pop-dir.sr-pop-dir-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); border-color: transparent; }
+/* An asset class is a neutral outline (COMMODITY is not red). */
+body:not(.light-mode) .wl-class { color: var(--sv-ink-2); background: transparent; border: 1px solid var(--sv-line-3); }
+/* The pages' asset-class badges too, and MEDIUM (review, 2026-11-07):
+   --accent-blue is the chart's first slot now, 4.49:1 on its wash over a
+   card; FOREX in DEMO's gold and COMMODITY in the loss coral said what
+   they are not (plan §7: the class chips stop using red, gold and blue).
+   The ring is drawn inside, so no badge changes size. */
+body:not(.light-mode) .badge-stock,
+body:not(.light-mode) .badge-forex,
+body:not(.light-mode) .badge-commodity,
+body:not(.light-mode) .badge-crypto,
+body:not(.light-mode) .badge-index,
+body:not(.light-mode) .badge-etf { color: var(--sv-ink-2); background: transparent; box-shadow: inset 0 0 0 1px var(--sv-line-3); }
+body:not(.light-mode) .badge-medium { color: var(--sv-ink-2); background: color-mix(in srgb, var(--sv-ink-2) 10%, transparent); }
+/* Counts are bubbles, not alarms: the bell's and the drawer's numbers. */
+body:not(.light-mode) .notif-badge,
+body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: var(--sv-ink-1); font-family: var(--sv-font-mono); }
+
+/* The rail's filters (railfilters #90, merged 2026-11-07), as the approved
+   board draws them: a chip is a neutral outline and its count a figure;
+   pressed, it is selected (bg-3, ink-1, the Eye's edge); LONG and SHORT
+   carry their side. The ⚙ panel's options press the same way. :where()
+   keeps these at the sheet's own weight, so its states keep theirs. */
+.rf-chip {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+.rf-opt, .rf-rule { border-radius: var(--sv-radius-chip); }
+:where(body:not(.light-mode)) .rf-chip { color: var(--sv-ink-2); border-color: var(--sv-line-3); }
+:where(body:not(.light-mode)) button.rf-chip:hover { color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) button.rf-chip[aria-pressed="true"],
+:where(body:not(.light-mode)) .rf-opt[aria-pressed="true"] { background: var(--sv-bg-3); border-color: var(--sv-eye); color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .rf-chip[aria-pressed="true"] b { color: var(--sv-ink-1); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="long"] { color: var(--sv-up); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="short"] { color: var(--sv-down); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="long"]:not([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--sv-up) 50%, transparent); }
+:where(body:not(.light-mode)) .rf-chip[data-f-key="side"][data-f-val="short"]:not([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--sv-down) 50%, transparent); }
+
+/* LEFT THE RAIL's rows and the rail's stage chip (railfilters #90, merged
+   2026-11-07): the side in jade or coral on its wash, as on the rail's
+   cards; a tag is an outline in its tone: a loss coral, a target reached
+   jade (a gain, not the Eye), TAKEN the taken family's gold (it carries no
+   side, sauron.css --sr-taken). The stage chip's tones mean other things
+   (dashboard/signal_surface.py): "bearish" is TRADEABLE, a live stage
+   where real money can move, and "high" is PAUSED or REDUCED. TRADEABLE is
+   the strong neutral outline (brightness, not a hue: coral would say a
+   loss); PAUSED and REDUCED the warning amber, as are a departure that was
+   chased, paused or demoted, which main drew in the same tone (gold is
+   DEMO's). (Review of the merge, 2026-11-07.) */
+.sr-stage, .sr-gone-tag, .sr-gone-l1 .sr-badge {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+:where(body:not(.light-mode)) .sr-gone-l1 .sr-badge-bullish { color: var(--sv-up); background: color-mix(in srgb, var(--sv-up) 12%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-l1 .sr-badge-bearish { color: var(--sv-down); background: color-mix(in srgb, var(--sv-down) 12%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag { border-color: var(--sv-line-3); }
+:where(body:not(.light-mode)) .sr-gone-tag-stop_crossed,
+:where(body:not(.light-mode)) .sr-gone-tag-closed_stop,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_losing,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_losing_live { color: var(--sv-down); border-color: color-mix(in srgb, var(--sv-down) 45%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag-target_reached,
+:where(body:not(.light-mode)) .sr-gone-tag-closed_target { color: var(--sv-up); border-color: color-mix(in srgb, var(--sv-up) 45%, transparent); }
+:where(body:not(.light-mode)) .sr-gone-tag-taken { color: var(--sr-taken); border-color: var(--sr-taken-edge); }
+:where(body:not(.light-mode)) .sr-stage-bearish { color: var(--sv-ink-1); border-color: var(--sv-line-3); }
+:where(body:not(.light-mode)) .sr-gone-tag-chased,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_paused,
+:where(body:not(.light-mode)) .sr-gone-tag-rule_demoted,
+:where(body:not(.light-mode)) .sr-stage-high { color: var(--sv-warn); border-color: color-mix(in srgb, var(--sv-warn) 50%, transparent); }
+
+/* MARKET SHUT's badge, lines and tags (main's #99, #100 and #101, merged
+   2026-11-12): the warning amber, the badge an outline at half strength.
+   Never a fill (REAL is the only solid red) and never the Eye (a shut
+   market is not live). Main drew them in --accent-gold-ink, which is
+   DEMO's gold in the dark theme since S1a: a shut market is no demo
+   account. The hour beside the badge stays ink-2. On /signals/ the badge
+   is main's .badge-high, the same gold on a wash: the same outline here,
+   its ring drawn inside, so the badge keeps its size. Nothing lights any
+   of them, in any Ambience. Light mode keeps main's colours. */
+.sr-shut-tag {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    border-radius: var(--sv-radius-chip);
+}
+:where(body:not(.light-mode)) .sr-shut,
+:where(body:not(.light-mode)) .sr-shut-tag,
+:where(body:not(.light-mode)) .sr-pop-fact-shut,
+:where(body:not(.light-mode)) .ipr-shut,
+:where(body:not(.light-mode)) .sr-gone-tag-market_shut,
+:where(body:not(.light-mode)) .sr-gone-tag-market_settling { color: var(--sv-warn); }
+:where(body:not(.light-mode)) .sr-shut-tag,
+:where(body:not(.light-mode)) .sr-gone-tag-market_shut,
+:where(body:not(.light-mode)) .sr-gone-tag-market_settling { border-color: color-mix(in srgb, var(--sv-warn) 50%, transparent); }
+:where(body:not(.light-mode)) .sig-shut {
+    color: var(--sv-warn);
+    background: transparent;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sv-warn) 50%, transparent);
+}
+
+
+/* ══ §7 Data ═════════════════════════════════════════════════════════════
+   Table heads, number columns, the kit's tables, tiles, key-value grids,
+   P&L cells, meters and sparklines. */
+
+thead th {
+    font-family: var(--sv-font-sans);
+    font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    text-transform: uppercase;
+}
+body:not(.light-mode) thead th { color: var(--sv-ink-3); }
+
+/* The platform's shared table (.sv-perf-table, 52 templates) takes the
+   kit's head (Inter 600, uppercase, .06em, ink-3 on bg-2) in place of its
+   own mono head at 1.2 px tracking, and the kit's 8 px cell sides (the
+   spacing scale's 8) in place of 12 (9 on phones): with the head at the
+   11 px floor (9.5 before), the small cards' tables keep their columns
+   whole (/positions/' asset-class table at 1280 px with the rail open,
+   S0's measured guard, with Inter or with a fallback face). (2026-11-06) */
+.sv-perf-table thead th {
+    font-family: var(--sv-font-sans);
+    letter-spacing: var(--sv-track-label);
+}
+.sv-perf-table thead th,
+.sv-perf-table td { padding-left: var(--sv-sp-3); padding-right: var(--sv-sp-3); }
+body:not(.light-mode) .sv-perf-table thead th { background: var(--sv-bg-2); color: var(--sv-ink-3); }
+
+.sv-table { width: 100%; border-collapse: collapse; font-size: var(--sv-fs-base); }
+.sv-table th {
+    position: sticky; top: 0; height: 28px; padding: 0 var(--sv-sp-3);
+    background: var(--sv-bg-2); color: var(--sv-ink-3);
+    border-bottom: 1px solid var(--sv-line-2);
+    text-align: left; white-space: nowrap; z-index: 1;
+}
+.sv-table td { height: var(--sv-row); padding: 0 var(--sv-sp-3); border-bottom: 1px solid var(--sv-line-1); vertical-align: middle; }
+.sv-table tbody tr:hover td { background: var(--sv-bg-3); }
+.sv-table tbody tr.is-selected td { background: var(--sv-bg-4); }
+.sv-table .num { text-align: right; font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+.sv-table .sv-sym { font-family: var(--sv-font-mono); font-weight: 500; color: var(--sv-ink-1); white-space: nowrap; }
+.sv-table .sv-sym small { display: block; font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 400; color: var(--sv-ink-3); }
+.sv-table--compact td { height: var(--sv-row-compact); }
+.sv-table .sv-row--live > td:first-child { box-shadow: inset var(--sv-edge-world) 0 0 var(--sv-real); }
+
+.sv-panel {
+    background: var(--sv-bg-1);
+    border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card);
+}
+.sv-panel--link:hover { border-color: var(--sv-line-3); }
+.sv-panel-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    height: var(--sv-card-head); padding: 0 var(--sv-card-pad);
+    border-bottom: 1px solid var(--sv-line-2);
+}
+.sv-panel-title {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-2);
+}
+.sv-panel-meta { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sv-panel-body { padding: var(--sv-card-pad); }
+.sv-panel-foot { padding: 10px var(--sv-card-pad); border-top: 1px solid var(--sv-line-2); }
+
+.sv-label {
+    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3);
+}
+.sv-num { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; }
+
+.sv-kpi {
+    background: var(--sv-bg-1); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); padding: 10px 12px; min-width: 0;
+}
+.sv-kpi-value {
+    margin-top: 4px;
+    font-family: var(--sv-font-mono); font-size: var(--sv-fs-figure); font-weight: 500;
+    line-height: var(--sv-lh-figure); letter-spacing: var(--sv-track-figure);
+    font-variant-numeric: tabular-nums; color: var(--sv-ink-1);
+    white-space: nowrap;
+}
+.sv-kpi-value.up, .sv-kv dd.up { color: var(--sv-up); }
+.sv-kpi-value.down, .sv-kv dd.down { color: var(--sv-down); }
+.sv-kpi-sub { margin-top: 2px; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
+.sv-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sv-gutter); }
+
+.sv-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0; }
+.sv-kv--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sv-kv dt { font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3); }
+.sv-kv dd { margin: 2px 0 0; font-family: var(--sv-font-mono); font-size: var(--sv-fs-base); color: var(--sv-ink-1); font-variant-numeric: tabular-nums; }
+
+.sv-pnl { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.sv-pnl-value { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; color: var(--sv-ink-2); }
+.sv-pnl-value.up { color: var(--sv-up); }
+.sv-pnl-value.down { color: var(--sv-down); }
+.sv-pnl-src { font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
+
+/* The score meter: a 4 px bar on bg-3, filled in ink-2 (sv-overlay.css). */
+.sv-meter-track { height: 4px; background: var(--sv-bg-3); border-radius: var(--sv-radius-chip); }
+.sv-meter-fill { background: var(--sv-ink-2); border-radius: var(--sv-radius-chip); }
+.sv-meter-num { font-family: var(--sv-font-mono); font-size: var(--sv-fs-small); }
+
+/* The sparkline: 1.5 px in up or down by the period's sign, no glow. */
+.sv-spark { display: block; width: 100%; height: 28px; }
+.sv-spark path { fill: none; stroke: var(--sv-ink-2); stroke-width: 1.5; }
+.sv-spark--up path { stroke: var(--sv-up); }
+.sv-spark--down path { stroke: var(--sv-down); }
+body:not(.light-mode) .oc-sparkline path,
+body:not(.light-mode) .pop-spark svg path { filter: none; }
+
+/* Notices: info, warn and danger in one shape, with a title and words. */
+.sv-notice {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 14px; border-radius: var(--sv-radius-ctl);
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    box-shadow: inset 3px 0 0 var(--sv-ink-3);
+    color: var(--sv-ink-1); font-size: var(--sv-fs-base);
+}
+.sv-notice-title { font-weight: 600; }
+.sv-notice-icon { flex: none; font-weight: 600; color: var(--sv-ink-2); }
+.sv-notice--warn { box-shadow: inset 3px 0 0 var(--sv-warn); background: color-mix(in srgb, var(--sv-warn) 8%, var(--sv-bg-2)); }
+.sv-notice--warn .sv-notice-icon, .sv-notice--warn .sv-notice-title { color: var(--sv-warn); }
+.sv-notice--danger { box-shadow: inset 3px 0 0 var(--sv-down); background: color-mix(in srgb, var(--sv-down) 7%, var(--sv-bg-2)); }
+.sv-notice--danger .sv-notice-icon, .sv-notice--danger .sv-notice-title { color: var(--sv-down); }
+
+/* The empty state: the faint Eye, one sentence, one action. */
+.sv-empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 16px; text-align: center; color: var(--sv-ink-2); }
+.sv-empty-state svg { width: 48px; height: 48px; color: var(--sv-eye); opacity: .06; }
+.sv-empty-state p { max-width: var(--sv-measure); }
+
+
+/* ══ §7 Controls ═════════════════════════════════════════════════════════ */
+
+.sv-input {
+    height: var(--sv-ctl-md); padding: 0 10px; width: 100%;
+    background: var(--sv-bg-0); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: var(--sv-fs-base);
+}
+.sv-input--num { font-family: var(--sv-font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.sv-input::placeholder { color: var(--sv-ink-4); font-style: normal; }
+.sv-input:focus { outline: 2px solid var(--sv-eye); outline-offset: 2px; border-color: var(--sv-line-3); box-shadow: none; }
+.sv-unit { margin-left: 6px; font-size: var(--sv-fs-small); color: var(--sv-ink-3); }
+/* The PIN field: a password in mono at .3em; its label says what it unlocks. */
+.sv-pin-field { font-family: var(--sv-font-mono); letter-spacing: .3em; text-align: left; }
+
+/* Fields across the shell: the well, the line, the Eye's ring on focus. At
+   a field's own weight (:where), so a component's state wins over it: the
+   idle lock's filled PIN boxes had lost their edge to this rule's (0,2,2)
+   (review, 2026-11-07). */
+:where(body:not(.light-mode)) :is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select) {
+    background-color: var(--sv-bg-0); border-color: var(--sv-line-2); color: var(--sv-ink-1);
+}
+:is(.form-input, .input, input[type=text], input[type=password], input[type=email], input[type=number], input[type=search], textarea, select):focus {
+    border-color: var(--sv-line-3);
+    box-shadow: 0 0 0 2px var(--sv-bg-0), 0 0 0 4px var(--sv-eye);
+}
+:is(.form-input, .input, input, textarea)::placeholder { color: var(--sv-ink-4); font-style: normal; }
+
+/* The focus ring: 2 px of the Eye at 2 px, on everything that takes focus. */
+:is(a, button, [tabindex], summary, .btn):focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+
+/* Check and radio: 16 px; checked takes the Eye. */
+input[type=checkbox], input[type=radio] { accent-color: var(--sv-eye); }
+
+.sv-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--sv-fs-base); color: var(--sv-ink-2); }
+.sv-toggle-track { position: relative; width: 28px; height: 16px; border-radius: var(--sv-radius-round); background: var(--sv-bg-4); border: 1px solid var(--sv-line-3); transition: background var(--sv-dur-hover) var(--sv-ease); }
+.sv-toggle-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: var(--sv-radius-round); background: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
+.sv-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sv-toggle input:checked + .sv-toggle-track { background: color-mix(in srgb, var(--sv-eye) 22%, var(--sv-bg-3)); border-color: var(--sv-eye); }
+.sv-toggle input:checked + .sv-toggle-track::after { transform: translateX(12px); background: var(--sv-eye); }
+.sv-toggle input:focus-visible + .sv-toggle-track { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+
+.sv-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--sv-line-2); }
+.sv-tab {
+    height: var(--sv-ctl-md); padding: 0 12px; background: transparent; border: 0;
+    color: var(--sv-ink-2); font-family: var(--sv-font-sans); font-size: var(--sv-fs-base); font-weight: 500;
+    box-shadow: inset 0 -2px 0 transparent; cursor: pointer;
+}
+.sv-tab:hover { color: var(--sv-ink-1); }
+.sv-tab.is-active, .sv-tab[aria-selected="true"] { color: var(--sv-ink-1); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+
+.sv-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--sv-bg-0); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl); }
+.sv-seg-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 10px; border: 0; border-radius: 3px; background: transparent;
+    color: var(--sv-ink-2); font-family: var(--sv-font-mono); font-size: var(--sv-fs-small); cursor: pointer;
+}
+.sv-seg-btn.is-active, .sv-seg-btn[aria-pressed="true"] { background: var(--sv-bg-3); color: var(--sv-ink-1); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+
+/* His choice of Ambience, in the user menu (the magic kept, 2026-11-12):
+   Magic, Calm or Off, saved on his profile (static/js/sv-ambience.js posts
+   the click; only the server's answer changes the page). The kit's label
+   and its segmented control at the menu's width, three equal thirds; "Not
+   saved" beside the label in the warning's colour when a save fails (the
+   row keeps its height, so the menu does not move), and nothing else: the
+   menu explains nothing. The light theme's sweep takes every button's
+   shadow away: the pressed value keeps the Eye's underline there, flat. On
+   a phone every segment button takes the 44 px floor: the menu's three,
+   the kit's previews and its timeframe sample (review 2026-11-12). */
+.um-ambience { padding: 10px 16px 12px; }
+.um-ambience-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 18px; }
+.um-ambience-note { font-family: var(--sv-font-sans); font-size: var(--sv-fs-small); font-weight: 600; color: var(--sv-warn); white-space: nowrap; }
+.um-ambience .sv-seg { display: flex; margin-top: 8px; }
+.um-ambience .sv-seg-btn { flex: 1 1 0; min-width: 0; justify-content: center; font-family: var(--sv-font-sans); font-weight: 600; }
+.um-ambience .sv-seg-btn:hover { color: var(--sv-ink-1); }
+.um-ambience[aria-busy="true"] .sv-seg-btn { cursor: progress; }
+body.light-mode .um-ambience .sv-seg-btn[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--sv-eye); }
+@media (max-width: 768px) {
+    .sv-seg-btn { height: 44px; }
+}
+
+.sv-popover {
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+    width: 360px; max-width: 100%; display: flex; flex-direction: column;
+}
+.sv-popover--sm { width: 320px; }
+.sv-popover--lg { width: 420px; }
+.sv-popover-head { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--sv-line-2); font-weight: 600; }
+.sv-popover-body { padding: 12px; overflow-y: auto; }
+.sv-popover-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--sv-line-2); }
+
+
+/* ══ §8 The price flash: a background wash, 600 ms, never the text ══════ */
+
+.sv-flash { animation-duration: 600ms; }
+@keyframes sv-flash-up {
+    0%   { background-color: var(--sv-up-wash); }
+    100% { background-color: transparent; }
+}
+@keyframes sv-flash-down {
+    0%   { background-color: var(--sv-down-wash); }
+    100% { background-color: transparent; }
+}
+@keyframes sv-flash-same {
+    0%   { background-color: color-mix(in srgb, var(--sv-ink-2) 14%, transparent); }
+    100% { background-color: transparent; }
+}
+
+
+/* ══ THE MAGIC KEPT (2026-11-12) ═════════════════════════════════════════
+   The operator approved the look above and asked to keep Sauron's own
+   theme, "the magic, the prestige". It comes back in the frame and never
+   on the data:
+
+     - the display face, Orbitron, on the frame's titles, and Rajdhani on
+       the nav rows (above, in the nav's block);
+     - light on what lives: the wordmark, the Eye, the active row, a live
+       dot, the selected tab, a hero card while its figure is live. Never a
+       figure, a cell, a tile or a chip; never REAL, which is a fill, not a
+       light; never the Eye's green on a control that moves money. A BUY or
+       a SELL lights in its own side's colour, inside its own box, on hover
+       and focus only;
+     - the void behind opaque cards: light from above, a vignette, a still
+       grain, on two fixed composited layers. No figure sits on it;
+     - the Eye's breath and gaze, and moments that play once, for a proven
+       event only (static/js/sv-moments.js).
+
+   His Ambience decides how much: Magic (all of it), Calm (the still light,
+   nothing that moves) or Off, which is the approved look exactly: every
+   rule that lights anything sits under Magic or Calm, in the dark theme.
+   Light mode takes none of it (frozen). tests/test_magic_layer.py reads
+   the rules between this marker and the one that ends the block. */
+
+
+/* ── §4 The display face, on the frame only ──────────────────────────────
+   Orbitron in capitals, for titles: never a sentence, a button, a chip, a
+   table head, a figure or a money word. base.html loads it without digits,
+   so a digit in a title ("SMA 200", "Position #12") is drawn by JetBrains
+   Mono, the next face of the token's stack. */
+.sidebar-brand h1,
+.topbar-title,
+.card-title,
+.sv-panel-title,
+.sc-heading-title,
+.modal-title,
+.kbd-modal-title,
+.gollum-dialog .gl-title,
+.nav-section,
+.il-title,
+.sv-overline {
+    font-family: var(--sv-font-display);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--sv-track-display);
+}
+.topbar-title { font-size: 15px; }
+.card-title { font-size: 12px; }
+body:not(.light-mode) .card-title { color: var(--sv-ink-2); }
+.nav-section { letter-spacing: var(--sv-track-overline); }
+.il-title { font-weight: 900; }
+/* An overline: the small title above a page head (stage S2). */
+.sv-overline { font-size: var(--sv-fs-micro); letter-spacing: .2em; color: var(--sv-ink-3); }
+/* The wordmark: its own span named the old display face (Inter since the
+   approved look), over the brand rule's Orbitron; it takes the brand's. */
+.brand-text { font-family: inherit; font-size: 16px; font-weight: 700; letter-spacing: var(--sv-track-brand); }
+/* A money word inside a title wears the word face: BUY, SELL, REAL, LONG
+   and SHORT are never drawn in Orbitron. The position page's headline
+   ("Long EURCAD") is one, by its own class. */
+.sv-plain,
+.topbar-title .pd-title-long { font-family: var(--sv-font-sans); letter-spacing: var(--sv-track-label); }
+
+
+/* ── Light on the frame (Magic and Calm; Off is the approved look) ─────── */
+
+/* The wordmark: the one text that glows. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar-brand h1 { text-shadow: var(--sv-glow-brand-text); }
+
+/* The active nav row: the Eye's 2 px edge with its glow, a spill of light
+   fading to the right, the icon in the Eye's green. The icon takes no
+   glow: a lit glyph read as a live dot, the sign of "eToro · live" (review
+   2026-11-12, his decision); the edge and the spill say "chosen". */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active { background: var(--sv-spill-active), var(--sv-bg-3); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active::after {
+    content: ""; position: absolute; left: -2px; top: 4px; bottom: 4px; width: 2px;
+    background: var(--sv-eye); box-shadow: var(--sv-glow-edge);
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .nav-link.active .icon {
+    color: var(--sv-eye);
+}
+
+/* Live dots: a price LIVE, a feed alive, a component healthy. Still: one
+   dot per page beats (.sv-live-dot, above), as in the approved look. The
+   quote band's dot says up, down or flat, not live, so it takes no light:
+   the Eye's green never marks a gain. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-fresh--live::before,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-live-dot,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .status-dot.online { box-shadow: var(--sv-glow-dot); }
+
+/* The selected tab and segment: the Eye's underline and a short glow that
+   hangs below it, outside the control's own box. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-tab.is-active,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-tab[aria-selected="true"],
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-seg-btn.is-active,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-seg-btn[aria-pressed="true"] {
+    box-shadow: inset 0 -2px 0 var(--sv-eye), 0 4px 10px -6px rgba(0,232,104,.6);
+}
+
+/* The money buttons that open or add to a position: their own side's
+   light, on hover and focus only, inside their own box (inset), so nothing
+   beside them changes; never when disabled. At rest they are as approved
+   (no shadow). The focus ring stays the 2 px outline above: no halo. No
+   light at all on the primary button (it is also the PIN-guarded TURN ON
+   that arms real money), on the protective outline (CLOSE, CLOSE ALL, turn
+   off), on the dialog's confirm or on the REAL family. MARKET SHUT's
+   ▶ TICKET (merged 2026-11-12) is LEFT THE RAIL's control: the same light. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="long"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-in); }
+/* Coral after jade: a bearish card's TAKE TRADE is a SELL. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-pop-btn.sr-pop-btn-short:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn.sr-pop-btn-act:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-gone-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sr-wait-row[data-side="short"] .sr-gone-btn.sr-gone-btn-ticket:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-in); }
+/* A BUY or a SELL whose label holds a figure (the ticket's live bid and
+   ask; a size on a BUY or a SELL): the side's 1 px ring alone, with no
+   blur, so no light reaches the figure (C3's measure: a line or a ring
+   with no blur is no light). Review 2026-11-12. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-long:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-buy:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-up-ring); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .tk-short:not([disabled], .disabled):is(:hover, :focus-visible),
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .btn.btn-sell:not([disabled], .disabled):is(:hover, :focus-visible) { box-shadow: var(--sv-glow-down-ring); }
+
+/* The hero card: a page's one headline figure (pages adopt it from stage
+   S2; /design/kit/ shows it). A 1 px edge of light on top and a glow above
+   it, outside the card. Lit only while its figure is live: a stale,
+   closed, reference or estimated value puts the light out. And dark around
+   a world marker: a card that holds REAL is never a hero. The glow is half
+   its box wide, so it reaches nothing at both ends (at 60 % its ends were
+   cut square; review 2026-11-12, his decision). */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero { position: relative; border-color: var(--sv-line-3); }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero::before {
+    content: ""; position: absolute; left: 14px; right: 14px; top: -1px; height: 1px;
+    background: var(--sv-edge-hero); pointer-events: none;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero::after {
+    content: ""; position: absolute; top: -14px; height: 13px; left: 12%; right: 12%;
+    background: radial-gradient(50% 100% at 50% 100%, rgba(0,232,104,.30), rgba(0,232,104,0));
+    pointer-events: none;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-fresh--stale, .sv-fresh--closed, .sv-fresh--ref, .sv-est)::before,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-fresh--stale, .sv-fresh--closed, .sv-fresh--ref, .sv-est)::after { content: none; }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-world--live, .sv-venue--live, .tk-venue--live, .sv-armed-pill, .sv-adv-world.is-live, .pos-pop-venue.is-live, .hq-tag--live, .hq-brk--live, .ib-env--live, .bk-env--live)::before,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-panel--hero:has(.sv-world--live, .sv-venue--live, .tk-venue--live, .sv-armed-pill, .sv-adv-world.is-live, .pos-pop-venue.is-live, .hq-tag--live, .hq-brk--live, .ib-env--live, .bk-env--live)::after { content: none; }
+
+
+/* ── The void, and opaque grounds ────────────────────────────────────────
+   The page behind the cards: the Eye's light from above and a vignette on
+   one fixed layer, a still grain on another. Two composited layers, never
+   a background attached to the viewport, which the main thread repaints
+   behind every frame (measured: 2.6 times the cost at rest on a slow
+   CPU). <body> keeps its flat bg-0; the ember canvas (z-index 0) and the
+   layout stack above both. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])::before {
+    content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none; will-change: transform;
+    background: var(--sv-void-light), var(--sv-void-vignette);
+}
+/* The Eye's light reaches the page only where no figure sits on the void.
+   It is fixed to the window, so whatever a page puts in its band, at any
+   scroll, takes it: a page wears it once it has proved that no figure of
+   its sits on the void or on a see-through ground. A page with the embers
+   has proved it (data-sv-embers, base.html); the kit opts in on its own
+   (data-sv-light). Every other page keeps the light above, which fades
+   out under the chrome (check, 2026-11-13). */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]):is([data-sv-embers], [data-sv-light])::before {
+    background: var(--sv-void-light-reach), var(--sv-void-vignette);
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])::after {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; will-change: transform;
+    background-image: var(--sv-void-grain); opacity: var(--sv-grain-opacity);
+}
+
+/* No figure on the void or on glass. The cards were a gradient whose lower
+   40 % was 8 to 12 % see-through (496 elements in 92 templates): opaque
+   bg-1 now, within about 6 levels of what they read as. */
+body:not(.light-mode) :is(.card, .stat-box, .metric, .signal-item) { background: var(--sv-bg-1); }
+/* The instrument page's header (the symbol, the live price, the ticket's
+   two prices) sat on the void: it sits on a panel. The panel grows outward
+   into the page's own padding, so nothing inside the header moves. */
+body:not(.light-mode) .detail-header {
+    background: var(--sv-bg-1); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card);
+    padding: 12px 16px; margin: -13px -17px 11px;
+}
+@media (max-width: 768px) {
+    body:not(.light-mode) .detail-header { padding: 8px 10px; margin: -9px -11px 15px; }
+}
+/* And no figure on a see-through wash: what the shell and the two pages
+   with embers still drew behind a number is opaque now, the same tint
+   mixed onto the surface it sits on. The quote band's change (an 8 % wash
+   on the band's bg-1); the shared table's even rows (35 % of bg-3 on a
+   card's bg-1; :where() keeps both rules at the weight they had, and the
+   hover is restated after them as it was); Ask Sauron's suggestions (a
+   plain chip: the Eye's wash sat behind "30d"); the Operations Center's
+   selected tab, which holds its section's count and P&L (a selected
+   control's ground, bg-3, with no glow behind the figures; its Eye bar
+   stays). */
+body:not(.light-mode) .dh-chg.up { background: color-mix(in srgb, var(--sv-up) 8%, var(--sv-bg-1)); }
+body:not(.light-mode) .dh-chg.down { background: color-mix(in srgb, var(--sv-down) 8%, var(--sv-bg-1)); }
+:where(body:not(.light-mode)) .sv-perf-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--sv-bg-3) 35%, var(--sv-bg-1)); }
+:where(body:not(.light-mode)) .sv-perf-table tbody tr:hover { background: var(--sv-bg-3); }
+/* The positions book pins its last cell and paints the row's stripe in it
+   itself (sv-close-advice.css, --sv-pin-row, a 35 % wash over the card):
+   the pinned cell takes the same opaque stripe as its row, so the two
+   stay one colour. Under the pointer the row's own rule still decides. */
+body:not(.light-mode) .sv-perf-table > tbody > tr:nth-child(even):not(:hover) { --sv-pin-row: color-mix(in srgb, var(--sv-bg-3) 35%, var(--sv-bg-1)); }
+body:not(.light-mode) .se-suggest { background: var(--sv-bg-3); border-color: var(--sv-line-3); }
+body:not(.light-mode) .se-suggest:hover { background: var(--sv-bg-4); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+body:not(.light-mode) .oc-tab.active { background: var(--sv-bg-3); box-shadow: none; }
+/* What a page fills in after it loads sits on the same rule (/command/
+   swaps its tabs in and draws its day scheme by script; an instrument
+   prints its day change once a quote has one). The day scheme keeps its
+   soft centre, mixed onto its own bg-1 instead of laid over it (its
+   counts sit on it); an empty-state note keeps its 25 % tint, mixed onto
+   the card ("No fills in the last 24h" holds a figure); the instrument's
+   day change keeps its 10 % wash, mixed onto its header's panel. */
+body:not(.light-mode) .day-scheme-wrap { background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--sv-eye) 8%, var(--sv-bg-1)), var(--sv-bg-1) 55%); }
+body:not(.light-mode) :is(.oc-empty, .empty-state) { background: color-mix(in srgb, var(--sv-bg-3) 25%, var(--sv-bg-1)); }
+body:not(.light-mode) .dtl-chg.up { background: color-mix(in srgb, var(--sv-eye) 10%, var(--sv-bg-1)); }
+body:not(.light-mode) .dtl-chg.down { background: color-mix(in srgb, var(--sv-down) 10%, var(--sv-bg-1)); }
+
+/* Words that do sit on the void (a page head, stage S2) wear its own dark
+   halo, a shade in bg-0, not a glow; the embers dim near them
+   (sv-embers.js). A page head's age or source line holds a figure, so it
+   sits on an opaque pill and wears no halo. */
+body:not(.light-mode) .sv-on-void { text-shadow: 0 0 3px var(--sv-bg-0), 0 0 8px var(--sv-bg-0), 0 0 14px var(--sv-bg-0); }
+.sv-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sv-sp-5); flex-wrap: wrap; }
+.sv-page-head-lead { margin-top: 6px; max-width: var(--sv-measure); font-size: var(--sv-fs-lead); color: var(--sv-ink-1); }
+.sv-pill {
+    display: inline-flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px;
+    border-radius: var(--sv-radius-chip); font-size: var(--sv-fs-micro); color: var(--sv-ink-2); white-space: nowrap;
+}
+.sv-pill--solid { background: var(--sv-bg-1); border: 1px solid var(--sv-line-2); text-shadow: none; }
+/* A figure that would sit on the void outside a page head (the refresh
+   note under a page's last card) takes the same solid pill, in the dark
+   theme only: the light theme has no void, and stays as it was. */
+body:not(.light-mode) .sv-void-pill {
+    display: inline-flex; align-items: center; height: 24px; padding: 0 10px;
+    border-radius: var(--sv-radius-chip); background: var(--sv-bg-1); border: 1px solid var(--sv-line-2);
+    font-size: var(--sv-fs-micro); color: var(--sv-ink-2); white-space: nowrap;
+}
+
+
+/* ── The Eye mark, alive ─────────────────────────────────────────────────
+   Off keeps the approved mark: no halo, nothing moves (the rules at the
+   top of this sheet). Magic and Calm bring the halo back as a gradient (no
+   blur filter); under Magic, where motion is allowed, it breathes: opacity
+   and transform only, so the compositor runs it. The mark itself never
+   floats. Its iris looks toward the pointer (sv-moments.js).
+   The halo holds .16 to half its gradient's ray, so the breath reads at
+   arm's length (review 2026-11-12, his decision). It fades out at 70 %:
+   the halo is a 70 px circle whose gradient runs to the box's corner, so
+   its own circle cuts it at 70.7 %, and a later end leaves a hard edge.
+   In the collapsed sidebar (68 px, which clips what overflows it) the
+   mark is 30 px, its centre 29 px under the window's top and 30.5 px from
+   the sidebar's sides (inside its edge and its scrollbar): at 70 px the
+   window cut the halo at the breath's peak and the sidebar cut its side
+   (check, 2026-11-13). It is 52 px there, so it fades out 27.3 px from the
+   centre at the peak, inside both; and it holds .16 to 40 % of its ray,
+   so its fall to nothing runs over 11.7 px, not 7.8, and no step between
+   two device pixels passes 3 levels (at 50 % one reached 4). */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap::before {
+    opacity: .7; filter: none;
+    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 50%, rgba(0,232,104,0) 70%);
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar.mini .brand-eye-wrap::before {
+    width: 52px; height: 52px;
+    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%);
+}
+@media (prefers-reduced-motion: no-preference) {
+    body:not(.light-mode)[data-sv-ambience="magic"] .brand-eye-wrap::before {
+        opacity: 1;
+        animation: sv-eye-breath var(--sv-dur-breath) ease-in-out infinite;
+    }
+}
+@keyframes sv-eye-breath {
+    0%, 100% { opacity: .5; transform: translate(-50%, -50%) scale(.88); }
+    50% { opacity: .95; transform: translate(-50%, -50%) scale(1.06); }
+}
+.sv-brand-iris { transition: transform 240ms var(--sv-ease); }
+
+/* The flare: a burst and a 1 px ring in one circle, once, when a fill is
+   proven (sv-moments.js sets .sv-flare; never for an order the broker only
+   holds, a quote or a refresh). A close flares at 60 %. Calm: one soft
+   glow in place, no ring. Off and reduced motion: none. The circle opens
+   to 1.08 and no further, so the ring blooms whole and is never cut
+   (review 2026-11-12; at 1.9 it read as a sonar ping, cut at the top and
+   left). In the full sidebar the mark's centre sits 38 px from the
+   window's top and left edges: the 70 px ring ends 37.8 px from it. In
+   the collapsed sidebar the centre sits 29 px under the window's top and
+   30.5 px from the sidebar's sides (inside its edge and its scrollbar):
+   the window cut the 70 px ring from about 110 ms on, and the sidebar its
+   sides (check, 2026-11-13). There the circle is 50 px, so the ring ends
+   27 px from the centre and Calm's glow 25 px, inside both. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare::after {
+    content: ""; position: absolute; top: 50%; left: 50%; width: 70px; height: 70px;
+    box-sizing: border-box; border-radius: 50%; border: 1px solid rgba(0,232,104,.9);
+    background: radial-gradient(circle, rgba(170,255,205,.75) 0%, rgba(0,232,104,.42) 38%, rgba(0,232,104,0) 84%);
+    pointer-events: none; z-index: 0; opacity: 0;
+    transform: translate(-50%, -50%) scale(.6);
+    animation: sv-eye-flare var(--sv-dur-moment) var(--sv-ease) 1 both;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar.mini .brand-eye-wrap.sv-flare::after { width: 50px; height: 50px; }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap.sv-flare--soft::after { animation-name: sv-eye-flare-soft; }
+body:not(.light-mode)[data-sv-ambience="calm"] .brand-eye-wrap.sv-flare::after { border-color: transparent; animation-name: sv-eye-glow; }
+@keyframes sv-eye-flare {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+    12% { opacity: 1; transform: translate(-50%, -50%) scale(.9); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.08); }
+}
+@keyframes sv-eye-flare-soft {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+    12% { opacity: .6; transform: translate(-50%, -50%) scale(.9); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.08); }
+}
+@keyframes sv-eye-glow {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    20% { opacity: .6; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+
+/* ── Moments: light only when something real happened ────────────────────
+   Each is its own small light, placed by sv-moments.js, played once and
+   removed: only the light's opacity and background-position move, never a
+   content element's colour, transform or size, never a button, never a
+   figure. A stop that moved keeps the approved neutral wash (.sv-flash).
+
+   A fill: one light along the new row's bottom hairline, 2 px (the
+   hairline and one faint pixel above it, where no text reaches), from the
+   row's left edge to the action cell's left edge, so CLOSE never takes it.
+   No shadow, nothing spills. */
+.sv-row-light { position: absolute; height: 2px; pointer-events: none; z-index: 2; opacity: 0; }
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-row-light {
+    background:
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.95) 45%, rgba(190,255,215,1) 50%, rgba(0,232,104,.95) 55%, rgba(0,232,104,0)) 100% 100% / 300% 1px no-repeat,
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.22) 45%, rgba(0,232,104,.30) 50%, rgba(0,232,104,.22) 55%, rgba(0,232,104,0)) 100% 0 / 300% 1px no-repeat;
+    animation: sv-light-run var(--sv-dur-sweep) var(--sv-ease) 1 both;
+}
+/* A new signal: the same light along its card's top edge (the bright line
+   on the edge itself, the faint one under it). */
+.sv-moment-arrive::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    pointer-events: none; z-index: 2; opacity: 0;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-moment-arrive::after {
+    background:
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.22) 45%, rgba(0,232,104,.30) 50%, rgba(0,232,104,.22) 55%, rgba(0,232,104,0)) 100% 100% / 300% 1px no-repeat,
+        linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.95) 45%, rgba(190,255,215,1) 50%, rgba(0,232,104,.95) 55%, rgba(0,232,104,0)) 100% 0 / 300% 1px no-repeat;
+    animation: sv-light-run var(--sv-dur-sweep) var(--sv-ease) 1 both;
+}
+/* Calm: the lights fade in place; they do not travel. */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-row-light.sv-row-light--still,
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-moment-arrive.sv-moment--still::after {
+    background-position: 50% 100%, 50% 0;
+    animation-name: sv-light-fade;
+}
+/* The rail's signal icon: a round light behind the glyph, once. The count
+   beside it stays an opaque bubble. */
+.sv-moment-icon { position: relative; isolation: isolate; }
+.sv-moment-icon::before {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    z-index: -1; pointer-events: none; opacity: 0;
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sv-moment-icon::before {
+    background: radial-gradient(circle, rgba(0,232,104,.42) 0%, rgba(0,232,104,.14) 45%, rgba(0,232,104,0) 70%);
+    animation: sv-moment-icon var(--sv-dur-moment) ease-out 1 both;
+}
+@keyframes sv-light-run {
+    0% { opacity: 1; background-position: 100% 100%, 100% 0; }
+    92% { opacity: 1; background-position: 0% 100%, 0% 0; }
+    100% { opacity: 0; background-position: 0% 100%, 0% 0; }
+}
+@keyframes sv-light-fade {
+    0% { opacity: 0; }
+    30% { opacity: 1; }
+    100% { opacity: 0; }
+}
+@keyframes sv-moment-icon {
+    0% { opacity: 0; }
+    12% { opacity: 1; }
+    100% { opacity: 0; }
+}
+/* Reduced motion: no moment, no flare (the script sets none; this holds
+   it). The words and the approved washes still say what happened. */
+@media (prefers-reduced-motion: reduce) {
+    .sv-row-light, .sv-moment-arrive::after, .sv-moment-icon::before, .brand-eye-wrap.sv-flare::after { display: none; }
+}
+
+/* ══ END OF THE MAGIC KEPT ═══════════════════════════════════════════════ */

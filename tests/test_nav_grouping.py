@@ -187,11 +187,13 @@ class TheRailIsReadableByShapeTests(SimpleTestCase):
                     f"everywhere")
 
     def test_the_glyphs_come_from_blocks_the_font_stack_already_renders(self):
-        """`--font-heading` is Rajdhani, which contains none of these. Every
-        one of them arrives by font fallback, and fallback is per-BLOCK on
-        the platforms this runs on: a glyph from a block no other row uses
-        is a glyph that may render as a tofu box on the operator's machine
-        and as a shape on mine.
+        """`--font-heading` is Inter now (UI plan S1a, 2026-11-06; it was
+        Rajdhani), and the Latin subset Google Fonts serves of it carries
+        none of these but the up and down arrows. Every one of them arrives
+        by font fallback, as it did under Rajdhani, and fallback is
+        per-BLOCK on the platforms this runs on: a glyph from a block no
+        other row uses is a glyph that may render as a tofu box on the
+        operator's machine and as a shape on mine.
 
         So a new glyph must come from a block already proven by a row that
         renders today. That is a real constraint and the cheapest possible

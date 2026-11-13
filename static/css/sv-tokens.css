@@ -1,0 +1,291 @@
+/* Sauron Vision: the design tokens (UI plan S1a, 2026-11-06).
+
+   One sheet for the palette, the faces, the type scale and its desktop
+   tiers, spacing, shape and motion. The operator approved the look on
+   2026-11-06 from the preview ("Magnifique, attaque"): Bloomberg's
+   discipline and TradingView's calm, in Sauron's identity, dark, desktop
+   first. Loaded by base.html before sauron.css, whose old names
+   (--bg-void, --text-muted, --accent-red, --font-mono…) now read these.
+   The components that use them live in sv-kit.css.
+
+   Rules the palette keeps (plan §2.2, §3.9):
+     - surfaces are opaque; hierarchy is brightness, not colour;
+     - the Eye's green marks what is live and selected, and nothing else:
+       never a number, a button fill, body or link text;
+     - jade is up, gain, long, buy; coral is down, loss, short, sell (and
+       errors, with an icon and words); zero is ink-2, unknown the em-dash;
+     - --sv-real is the only solid red fill on the platform (REAL money);
+       DEMO is a gold outline, PAPER a grey one;
+     - colour never works alone: a sign and an arrow, a word, a title;
+     - every text role meets 4.5:1 on every surface (tests/test_design_tokens).
+
+   Light mode is frozen at today's colours (plan §15, decision 3): the
+   block at the end maps every colour token onto today's light palette,
+   so a kit component under body.light-mode draws in it.
+
+   The magic kept (2026-11-12). The operator approved this look and asked
+   to keep Sauron's own theme, "the magic, the prestige". It lives in the
+   frame, never on the data:
+     - the twelve neutrals are Eye-lit: each keeps the OKLab lightness the
+       approved look gave it, within 0.003, and takes the Eye's hue family
+       (160) at about main's chroma, so no contrast moves (the minimum is
+       still ink-3 on bg-4, 4.92:1);
+     - the display face, Orbitron, is for the frame's titles only, in
+       capitals; it is loaded without digits, so a digit in a title is
+       drawn by the next face of the stack, JetBrains Mono;
+     - light is the Eye's, or a side's own: the glow, edge and spill
+       tokens name the Eye's green, its pale core, jade and coral, and
+       nothing else. Never --sv-real: REAL is a fill, never a light. A
+       side's light is inset: it stays inside its own control;
+     - the void behind the cards carries the Eye's light from above, a
+       vignette and a still grain. No figure sits on it.
+   Light mode takes none of it. */
+
+:root {
+    /* ── §3.1 Surfaces and lines (all opaque) ── */
+    --sv-bg-0: #040B07;      /* the void: page, chart canvas, input wells */
+    --sv-bg-1: #07130C;      /* cards, panels, sidebar, rail, table body */
+    --sv-bg-2: #0D1B14;      /* raised: popovers, dialogs, sticky heads, toolbars */
+    --sv-bg-3: #14231B;      /* controls, row hover */
+    --sv-bg-4: #1B2C23;      /* selected row, pressed control */
+    --sv-line-1: #14261D;    /* hairlines between rows */
+    --sv-line-2: #1D3528;    /* card and input borders */
+    --sv-line-3: #2C4739;    /* strong borders, hover borders */
+
+    /* ── §3.2 Ink: brightness, not colour, for hierarchy ── */
+    --sv-ink-1: #E6F1EA;     /* values, primary text */
+    --sv-ink-2: #ACC4B6;     /* secondary text; zero and unchanged */
+    --sv-ink-3: #839B8D;     /* labels, captions, axis text (6.4:1 on bg-1) */
+    --sv-ink-4: #55665D;     /* disabled and placeholder only; never information */
+
+    /* ── §3.3 The Eye: live, selected, focused, Sauron's mark ── */
+    --sv-eye: #00E868;
+
+    /* ── §3.4 Market polarity ── */
+    --sv-up: #24B582;        /* jade: gains, LONG/BUY text and outlines */
+    --sv-down: #FF6B6E;      /* coral: losses, SHORT/SELL text and outlines */
+    --sv-up-fill: #1FA374;   /* up candles, bars, volume (at 35 %) */
+    --sv-down-fill: #E5484D; /* down candles, bars, volume (at 35 %) */
+    --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
+    --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+    --sv-up-tint: var(--sv-up);  /* the base of sauron.css's own washes and glows behind a gain */
+
+    /* ── §3.5 Whose money (the approved convention of 2026-09-30) ── */
+    --sv-real: #CC3A40;      /* the only solid red fill: REAL chip, armed pill, row edge */
+    --sv-real-ink: #FFFFFF;  /* white on it: 4.94:1 */
+    --sv-demo: #D6BC5E;      /* gold outline: a broker's demo account */
+    --sv-paper: var(--sv-ink-3); /* grey outline: Sauron's simulator */
+
+    /* ── §3.6 Status ── */
+    --sv-warn: #F29B38;      /* warning, stale: a box with ⚠ and a title, or a dot with words */
+    --sv-danger: var(--sv-down);
+    --sv-ai: #A48BFF;        /* a model wrote it or spends it */
+
+    /* ── §3.8 Charts: categorical slots (never up/down meaning) and chrome ── */
+    --sv-cat-1: #3987E5;
+    --sv-cat-2: #D95926;
+    --sv-cat-3: #9085E9;
+    --sv-cat-4: #C98500;
+    --sv-cat-5: #D55181;
+    --sv-grid: color-mix(in srgb, var(--sv-ink-1) 5%, transparent);
+
+    /* ── §4.1 Faces (Google Fonts only; base.html links them) ── */
+    --sv-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --sv-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    /* The frame's faces (the magic kept, 2026-11-12). The display face is
+       for titles in capitals: the wordmark, the page and card titles, the
+       nav's section heads. Orbitron is loaded without digits (base.html),
+       so a digit in a title is JetBrains Mono's. The frame face is for the
+       nav rows and the brand's subtitle: words only. */
+    --sv-font-display: "Orbitron", "JetBrains Mono", "Inter", sans-serif;
+    --sv-font-frame: "Rajdhani", "Inter", sans-serif;
+    --sv-font-brand: var(--sv-font-display);
+    --sv-track-display: .16em;
+    --sv-track-overline: .18em;
+    --sv-track-brand: .24em;
+
+    /* ── §4.3 Type scale, desktop tier D1/D2 (1280-1679 px) ── */
+    --sv-fs-micro: 11px;     /* uppercase labels, axis, ages */
+    --sv-fs-small: 12px;     /* secondary, chips, table heads */
+    --sv-fs-base: 13px;      /* body, cells, controls */
+    --sv-fs-lead: 15px;      /* card values, dialog text */
+    --sv-fs-title: 18px;     /* page and section titles */
+    --sv-fs-figure: 20px;    /* KPI tile values */
+    --sv-fs-hero: 28px;      /* portfolio value, instrument price */
+    --sv-fs-nav: calc(var(--sv-fs-base) + 2px);   /* nav rows: Rajdhani 600 sits like Inter at the base size */
+    --sv-body-weight: 400;
+    --sv-figure-weight: 500;   /* data figures: KPI values, hero, big numbers */
+    --sv-lh-text: 1.45;
+    --sv-lh-cell: 1.25;
+    --sv-lh-title: 1.2;
+    --sv-lh-figure: 1.1;
+    --sv-track-label: .06em;   /* labels, table heads, card titles: Inter 600, uppercase */
+    --sv-track-button: .04em;  /* buttons: Inter 600, uppercase */
+    --sv-track-figure: -.01em; /* hero figures */
+    --sv-measure: 72ch;        /* prose stops here; data surfaces do not */
+
+    /* ── §5 Density, spacing, shape ── */
+    --sv-sp-0: 2px;
+    --sv-sp-1: 4px;
+    --sv-sp-2: 6px;
+    --sv-sp-3: 8px;
+    --sv-sp-4: 12px;
+    --sv-sp-5: 16px;
+    --sv-sp-6: 20px;
+    --sv-sp-7: 24px;
+    --sv-sp-8: 32px;
+    --sv-sp-9: 40px;
+    --sv-sp-10: 48px;
+    --sv-row-compact: 28px;
+    --sv-row: 32px;
+    --sv-row-2: 44px;
+    --sv-row-touch: 44px;
+    --sv-ctl-sm: 28px;
+    --sv-ctl-md: 32px;
+    --sv-ctl-lg: 40px;
+    --sv-ctl-touch: 44px;
+    --sv-card-pad: 16px;
+    --sv-card-pad-compact: 12px;
+    --sv-card-head: 40px;
+    --sv-gutter: 12px;
+    --sv-radius-chip: 2px;
+    --sv-radius-ctl: 4px;
+    --sv-radius-card: 6px;
+    --sv-radius-round: 999px;  /* dots and count bubbles only */
+    --sv-edge-world: 3px;      /* the REAL edge on a row */
+    --sv-shadow-pop: 0 8px 24px rgba(0, 0, 0, .45);
+    --sv-shadow-dialog: 0 24px 64px rgba(0, 0, 0, .6);
+
+    /* ── §8 Motion ── */
+    --sv-dur-press: 80ms;
+    --sv-dur-hover: 140ms;
+    --sv-dur-drawer: 200ms;
+    --sv-ease: cubic-bezier(.2, 0, 0, 1);
+    --sv-dur-breath: 6s;       /* the Eye's breath, under Ambience Magic */
+    --sv-dur-moment: 1200ms;   /* the Eye's flare, the rail icon's light */
+    --sv-dur-sweep: 900ms;     /* a light along a row's or a card's edge */
+
+    /* ── Light: the Eye's, or a side's own (the magic kept, 2026-11-12) ──
+       The only places the Eye's green may glow: the wordmark, the active
+       nav row's edge and its spill, a live dot, a hero card's edge while
+       its figure is live. A BUY or a SELL lights in its own side's colour
+       on hover and focus, inside its own box. sv-kit.css names who wears
+       each; tests/test_magic_layer.py keeps the list. */
+    --sv-glow-brand-text: 0 0 12px rgba(0,232,104,.45), 0 0 2px rgba(0,232,104,.3);
+    --sv-glow-edge: 0 0 8px rgba(0,232,104,.75), 0 0 2px rgba(0,232,104,.9);
+    --sv-glow-dot: 0 0 6px rgba(0,232,104,.7);
+    --sv-glow-up-in: inset 0 0 0 1px rgba(36,181,130,.55), inset 0 0 12px rgba(36,181,130,.22);
+    --sv-glow-down-in: inset 0 0 0 1px rgba(255,107,110,.55), inset 0 0 12px rgba(255,107,110,.22);
+    /* A BUY or a SELL whose label holds a figure (the ticket's live price,
+       a size) takes the side's ring alone: no blur reaches its figure. */
+    --sv-glow-up-ring: inset 0 0 0 1px rgba(36,181,130,.55);
+    --sv-glow-down-ring: inset 0 0 0 1px rgba(255,107,110,.55);
+    --sv-spill-active: linear-gradient(90deg, rgba(0,232,104,.13), rgba(0,232,104,.03) 55%, rgba(0,232,104,0) 80%);
+    --sv-edge-hero: linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.85) 28%, rgba(120,255,180,.95) 50%, rgba(0,232,104,.85) 72%, rgba(0,232,104,0));
+
+    /* ── The void: light from above, a vignette, a still grain ──
+       Two lights from above, both fixed to the window. --sv-void-light,
+       centred 110 px above it, fades out at y = 156 px, under the chrome
+       (which ends at 142 px): it adds nothing to the page, whatever sits
+       there, at any scroll. Every page wears it.
+       --sv-void-light-reach is the Eye's light reaching the page (review
+       2026-11-12, his decision): centred just under the chrome, it falls
+       on the empty page above the first card, about +13 levels at its
+       brightest, and is gone by y = 460. It lies under whatever a page
+       puts there, so only a page proven to put no figure on the void
+       wears it (sv-kit.css, the void): given to every page, it lit
+       figures on the void or on see-through grounds on five of them by
+       +4 to +7 levels (check, 2026-11-13). */
+    --sv-void-light: radial-gradient(900px 360px at 46% -110px, rgba(0,232,104,.10), rgba(0,232,104,.025) 50%, rgba(0,232,104,0) 74%);
+    --sv-void-light-reach: radial-gradient(1000px 420px at 46% 150px, rgba(0,232,104,.06), rgba(0,232,104,.02) 50%, rgba(0,232,104,0) 74%);
+    --sv-void-vignette: radial-gradient(140% 120% at 50% 28%, rgba(0,0,0,0) 55%, rgba(0,0,0,.42) 100%);
+    --sv-void-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55 0 0 0 0 .95 0 0 0 0 .7 0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    --sv-grain-opacity: .07;
+}
+
+/* ── §4.3 The desktop tiers: every component scales with no page work ── */
+@media (min-width: 1680px) {
+    :root {
+        --sv-fs-micro: 11px;
+        --sv-fs-small: 12px;
+        --sv-fs-base: 14px;
+        --sv-fs-lead: 16px;
+        --sv-fs-title: 19px;
+        --sv-fs-figure: 22px;
+        --sv-fs-hero: 32px;
+        --sv-gutter: 16px;
+    }
+}
+@media (min-width: 2200px) {
+    :root {
+        --sv-fs-micro: 12px;
+        --sv-fs-small: 13px;
+        --sv-fs-base: 15px;
+        --sv-fs-lead: 17px;
+        --sv-fs-title: 20px;
+        --sv-fs-figure: 24px;
+        --sv-fs-hero: 36px;
+        --sv-gutter: 20px;
+    }
+}
+/* Phones: inputs stay at 16 px (sauron.css, the iOS focus zoom). */
+@media (max-width: 768px) {
+    :root {
+        --sv-fs-micro: 11px;
+        --sv-fs-small: 12px;
+        --sv-fs-base: 14px;
+        --sv-fs-lead: 15px;
+        --sv-fs-title: 17px;
+        --sv-fs-figure: 20px;
+        --sv-fs-hero: 26px;
+        --sv-gutter: 12px;
+    }
+}
+
+/* ── Light mode, frozen at today's colours (2026-11-06) ──
+   Every colour token takes the light palette as sauron.css's light block
+   has it today, so what the kit draws under body.light-mode stays in that
+   palette: .up is today's light accent, the REAL fill today's red. Light
+   mode gets no polish here (plan §15); a light kit would be its own stage. */
+body.light-mode {
+    --sv-bg-0: #f0f2f0;
+    --sv-bg-1: #ffffff;
+    --sv-bg-2: #e8ece8;
+    --sv-bg-3: #f5f8f5;
+    --sv-bg-4: #dfe5df;
+    --sv-line-1: #c0d0c0;
+    --sv-line-2: #c0d0c0;
+    --sv-line-3: #a0c0a0;
+    --sv-ink-1: #1a2a1a;
+    --sv-ink-2: #4a6a4a;
+    --sv-ink-3: #8aaa8a;
+    --sv-ink-4: #8aaa8a;
+    --sv-eye: #00994d;
+    --sv-up: #00994d;
+    --sv-down: #e83030;
+    --sv-up-fill: #00994d;
+    --sv-down-fill: #e83030;
+    --sv-real: #e83030;
+    --sv-real-ink: #ffffff;
+    --sv-demo: #8a6a00;
+    --sv-warn: #d89020;
+    --sv-ai: #8840d0;
+    --sv-cat-1: #1f6fb2;
+    --sv-cat-2: #b8501e;
+    --sv-cat-3: #6a5cc8;
+    --sv-cat-4: #8a6a00;
+    --sv-cat-5: #b03a68;
+    /* The derived tokens, declared again (2026-11-07): a custom property is
+       computed where it is declared, so on :root these took the dark
+       palette, and light mode inherited a jade wash and the dark ink-3 for
+       PAPER. Here they read the light palette above. */
+    --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
+    --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+    --sv-paper: var(--sv-ink-3);
+    --sv-danger: var(--sv-down);
+    --sv-grid: color-mix(in srgb, var(--sv-ink-1) 5%, transparent);
+    /* sauron.css's washes and glows behind a gain (the quote band's change,
+       a bullish badge, a sparkline's glow) were the dark Eye's green at a
+       low strength in both themes; light mode keeps that green. */
+    --sv-up-tint: #00e868;
+}

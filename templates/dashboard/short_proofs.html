@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Demo short proofs — Sauron Vision{% endblock %}
-{% block page_title %}DEMO SHORT PROOFS · eToro's demo account{% endblock %}
+{% block page_title %}<span class="sv-plain">DEMO SHORT PROOFS · eToro's demo account</span>{% endblock %}
 {% comment %}
 THE DEMO SHORT PROOFS (2026-10-31) — bot_program/short_proofs.py does the work; dashboard/views_short_proofs.py only
 reads the rows and, for a superuser, revokes a proof or clears an in-doubt stop with the trading PIN. Cached rows
@@ -29,7 +29,7 @@ only: this page asks eToro nothing.
 </div>
 
 <div class="card fade-in-up" style="margin-bottom:18px;">
-    <div class="card-header"><span class="card-title">What a bot's short goes through now</span></div>
+    <div class="card-header"><span class="card-title"><span class="sv-plain">What a bot's short goes through now</span></span></div>
     <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr><th>class</th><th>the bots' gate</th></tr></thead>

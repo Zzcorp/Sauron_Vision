@@ -15,6 +15,7 @@ from .views_newsletter import (admin_newsletters, newsletter_archive,
                                newsletter_detail, newsletter_unsubscribe)
 from .views_passation import passation_letter
 from .views_orcs import orc_detail, orc_thesis, orcs_list, orcs_seats
+from .views_design_kit import design_kit
 from .views_admin_bots import (
     admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
     admin_bot_reset_circuit, admin_bot_reconcile,
@@ -282,6 +283,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("setup/", views.setup, name="setup"),
     path("getting-started/", views.getting_started, name="getting_started"),
     path("toggle-theme/", views.toggle_theme, name="toggle_theme"),
+    path("ambience/", views.set_ambience, name="set_ambience"),
     path("admin-dashboard/", views.admin_dashboard, name="admin_dashboard"),
     path("admin-dashboard/eye/", admin_eye, name="admin_eye"),
     path("admin-dashboard/eye/geo/", admin_eye_geo, name="admin_eye_geo"),
@@ -402,6 +404,8 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # count beside the switch that writes it and the qualifier that says
     # what it means. Read-only, owns no data, caches nothing.
     path("oculus/", oculus_dashboard, name="oculus_dashboard"),
+    # The kit on one page, staff only (UI plan S1a, 2026-11-06).
+    path("design/kit/", design_kit, name="design_kit"),
 
     # ── The capital desk (2026-09-12) ────────────────────────
     # /shares/ sizes each POOL's share of the account; this one ranks a

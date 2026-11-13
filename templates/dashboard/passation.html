@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% load static %}
 {% block title %}Sauron Vision — Handover{% endblock %}
+{% comment %}
+The letter's faces are the shell's tokens (2026-11-12): the display face
+for its titles, the word face for its sentences, the number face for its
+codes and step numbers. It loaded Rajdhani, Share Tech Mono and a full
+Orbitron itself while the shell loaded none of them (2026-11-07); the shell
+loads the frame's faces again, and a page's own full Orbitron would draw
+digits in it.
+{% endcomment %}
 {% block content %}
 {% comment %}
 THE HANDOVER LETTER (2026-09-28, core/passation.py). Served only after
@@ -9,30 +17,30 @@ watch in practice, the second bot in five moves. No figure of money
 anywhere on it: tests/test_passation.py runs the tripwire over the article.
 {% endcomment %}
 <style>
-    .pass-wrap{max-width:860px;margin:10px auto 60px;font-family:'Rajdhani',sans-serif;color:var(--text,#c8e8d8)}
+    .pass-wrap{max-width:860px;margin:10px auto 60px;font-family:var(--sv-font-sans);color:var(--text,#c8e8d8)}
     .pass-letter{position:relative;padding:54px 58px 48px;border:1px solid var(--accent-dim,#0a5028);border-radius:14px;background:radial-gradient(ellipse at top,rgba(0,232,104,0.07),rgba(3,8,6,0.96) 60%),rgba(6,14,10,0.96);box-shadow:0 0 80px rgba(0,232,104,0.06),0 30px 80px rgba(0,0,0,0.6)}
     .pass-letter::before,.pass-letter::after{content:'';position:absolute;width:38px;height:38px;border:1px solid var(--accent,#00e868);opacity:.55}
     .pass-letter::before{top:14px;left:14px;border-right:0;border-bottom:0}
     .pass-letter::after{bottom:14px;right:14px;border-left:0;border-top:0}
-    .pass-kicker{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:4px;color:var(--text3,#3a6850);text-transform:uppercase;text-align:center;margin-bottom:14px}
-    .pass-title{font-family:'Orbitron',sans-serif;font-size:30px;font-weight:900;letter-spacing:8px;color:var(--accent,#00e868);text-align:center;text-shadow:0 0 30px rgba(0,232,104,0.25);margin:0 0 6px}
-    .pass-sub{font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:3px;color:var(--text3,#3a6850);text-align:center;margin-bottom:34px}
+    .pass-kicker{font-family:var(--sv-font-mono);font-size:11px;letter-spacing:4px;color:var(--text3,#3a6850);text-transform:uppercase;text-align:center;margin-bottom:14px}
+    .pass-title{font-family:var(--sv-font-display);font-size:30px;font-weight:900;letter-spacing:8px;color:var(--accent,#00e868);text-align:center;text-shadow:0 0 30px rgba(0,232,104,0.25);margin:0 0 6px}
+    .pass-sub{font-family:var(--sv-font-mono);font-size:12px;letter-spacing:3px;color:var(--text3,#3a6850);text-align:center;margin-bottom:34px}
     .pass-seal{display:block;width:96px;height:60px;margin:0 auto 30px;color:var(--accent,#00e868);filter:drop-shadow(0 0 14px rgba(0,232,104,0.5))}
     .pass-body p{font-size:19px;line-height:1.65;margin:0 0 20px;font-weight:400}
-    .pass-body p.first::first-letter{font-family:'Orbitron',sans-serif;font-size:56px;font-weight:900;color:var(--accent,#00e868);float:left;line-height:.9;margin:6px 12px 0 0;text-shadow:0 0 20px rgba(0,232,104,0.3)}
+    .pass-body p.first::first-letter{font-family:var(--sv-font-display);font-size:56px;font-weight:900;color:var(--accent,#00e868);float:left;line-height:.9;margin:6px 12px 0 0;text-shadow:0 0 20px rgba(0,232,104,0.3)}
     .pass-body em{color:var(--accent-bright,#40ff90);font-style:normal}
-    .pass-sign{margin-top:34px;text-align:right;font-family:'Orbitron',sans-serif;font-size:14px;letter-spacing:4px;color:var(--accent,#00e868)}
-    .pass-sign small{display:block;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3,#3a6850);margin-top:8px}
+    .pass-sign{margin-top:34px;text-align:right;font-family:var(--sv-font-display);font-size:14px;letter-spacing:4px;color:var(--accent,#00e868)}
+    .pass-sign small{display:block;font-family:var(--sv-font-mono);font-size:11px;letter-spacing:2px;color:var(--text3,#3a6850);margin-top:8px}
     .pass-rule{height:1px;margin:44px 0 30px;background:linear-gradient(90deg,transparent,var(--accent-dim,#0a5028),transparent)}
-    .pass-h{font-family:'Orbitron',sans-serif;font-size:15px;font-weight:700;letter-spacing:5px;color:var(--accent,#00e868);margin:0 0 18px}
+    .pass-h{font-family:var(--sv-font-display);font-size:15px;font-weight:700;letter-spacing:5px;color:var(--accent,#00e868);margin:0 0 18px}
     .pass-list{list-style:none;padding:0;margin:0}
     .pass-list li{position:relative;padding:0 0 14px 28px;font-size:17px;line-height:1.55}
     .pass-list li::before{content:'';position:absolute;left:2px;top:11px;width:8px;height:8px;border:1px solid var(--accent,#00e868);transform:rotate(45deg);box-shadow:0 0 8px rgba(0,232,104,0.5)}
-    .pass-list code{font-family:'Share Tech Mono',monospace;font-size:14px;color:var(--accent-bright,#40ff90);background:rgba(0,232,104,0.08);padding:1px 6px;border-radius:4px}
+    .pass-list code{font-family:var(--sv-font-mono);font-size:14px;color:var(--accent-bright,#40ff90);background:rgba(0,232,104,0.08);padding:1px 6px;border-radius:4px}
     .pass-warn{border-left:2px solid #e83030;padding:10px 16px;margin:6px 0 18px;color:#f0b0b0;font-size:16px}
     .pass-steps{counter-reset:step;list-style:none;padding:0;margin:0}
     .pass-steps li{counter-increment:step;position:relative;padding:0 0 16px 46px;font-size:17px;line-height:1.55}
-    .pass-steps li::before{content:counter(step);position:absolute;left:0;top:2px;width:30px;height:30px;border:1px solid var(--accent-dim,#0a5028);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Orbitron',sans-serif;font-size:12px;color:var(--accent,#00e868)}
+    .pass-steps li::before{content:counter(step);position:absolute;left:0;top:2px;width:30px;height:30px;border:1px solid var(--accent-dim,#0a5028);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--sv-font-mono);font-size:12px;color:var(--accent,#00e868)}
     @media (max-width:768px){.pass-letter{padding:36px 22px 30px}.pass-title{font-size:22px;letter-spacing:5px}.pass-body p{font-size:17px}}
 </style>
 <div class="pass-wrap">

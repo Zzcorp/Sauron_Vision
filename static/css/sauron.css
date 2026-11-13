@@ -3,43 +3,57 @@
    on every page view. As a static file the browser caches it and
    WhiteNoise compresses it. */
 
+        /* The old names, re-pointed onto the S1a tokens (UI plan §3.10,
+           2026-11-06): static/css/sv-tokens.css, which base.html loads
+           before this sheet, so every page changes at once. Each keeps its
+           old value as the var() fallback: a page that loads this sheet
+           without the tokens (the lock screen, the investor panel, both
+           standalone until S2.7) computes what it computed before. Light
+           mode restates the old colours in its own block below.
+           --accent stays the Eye (the logo, live, selected, focus); what
+           wore it for a gain reads --sv-up now (.up, .sign-up, bullish,
+           long). --accent-red is the loss coral; the REAL family reads
+           --sv-real by name, the only solid red. */
         :root {
-            --bg-void: #030806;
-            --bg-primary: #060e0a;
-            --bg-secondary: #081410;
-            --bg-card: #0a1a14;
-            --bg-card-hover: #0e2218;
-            --border: #133020;
-            --border-glow: #1a4030;
-            --text-primary: #daf0e6;
-            --text-secondary: #7aaa8a;
-            --text-muted: #3a6850;
-            --accent: #00e868;
+            --bg-void: var(--sv-bg-0, #030806);
+            --bg-primary: var(--sv-bg-0, #060e0a);
+            --bg-secondary: var(--sv-bg-1, #081410);
+            --bg-card: var(--sv-bg-1, #0a1a14);
+            --bg-card-hover: var(--sv-bg-3, #0e2218);
+            --border: var(--sv-line-2, #133020);
+            --border-glow: var(--sv-line-3, #1a4030);
+            --text-primary: var(--sv-ink-1, #daf0e6);
+            --text-secondary: var(--sv-ink-2, #7aaa8a);
+            --text-muted: var(--sv-ink-3, #3a6850);
+            --accent: var(--sv-eye, #00e868);
             --accent-dim: #0a5028;
             --accent-glow: rgba(0, 232, 104, 0.12);
             --accent-bright: #40ff90;
-            --accent-red: #e83030;
+            --accent-red: var(--sv-down, #e83030);
             --accent-red-dim: #581818;
-            --accent-gold: #d8b020;
-            --accent-blue: #30a0e8;
-            --accent-purple: #8840d0;
+            --accent-gold: var(--sv-demo, #d8b020);
+            --accent-blue: var(--sv-cat-1, #30a0e8);
+            --accent-purple: var(--sv-ai, #8840d0);
             /* The chart's levels (2026-10-07). Here with the palette: the
                card-containment section further down takes tokens only. */
             --lvl-swing: var(--accent-blue);   /* chart swings */
             --lvl-session: #a878f0;            /* chart Asian range: 6.4:1 on the void; --accent-purple is 3.5:1 */
             --lvl-session-london: #d870e0;     /* chart London session (2026-10-24): the violet's orchid */
             --lvl-session-ny: #7c88f8;         /* chart New York session: the violet's periwinkle */
-            --danger: #d03030;
-            --success: #00e868;
-            --warning: #d89020;
+            --danger: var(--sv-down, #d03030);
+            --success: var(--sv-up, #00e868);
+            --warning: var(--sv-warn, #d89020);
             --radius: 6px;
             --radius-lg: 12px;
             --shadow-card: 0 2px 20px rgba(0,0,0,0.5);
             --shadow-glow: 0 0 30px rgba(0, 232, 104, 0.06);
-            --font-display: 'Orbitron', sans-serif;
-            --font-heading: 'Rajdhani', sans-serif;
-            --font-mono: 'Share Tech Mono', monospace;
-            --font-body: 'Rajdhani', sans-serif;
+            /* Words in Inter, numbers in JetBrains Mono (plan §4). The
+               display face is Inter too, set at 600 by its rules; Orbitron
+               moves to --sv-font-brand, the wordmark's alone. */
+            --font-display: var(--sv-font-sans, 'Orbitron', sans-serif);
+            --font-heading: var(--sv-font-sans, 'Rajdhani', sans-serif);
+            --font-mono: var(--sv-font-mono, 'Share Tech Mono', monospace);
+            --font-body: var(--sv-font-sans, 'Rajdhani', sans-serif);
             --sidebar-width: 260px;
             --topbar-height: 56px;
         }
@@ -58,10 +72,21 @@
         :root { color-scheme: dark; }
         :root:has(> body.light-mode) { color-scheme: light; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* A form control takes the page's face and colour (UI plan S1a,
+           2026-11-06): the browser gives a <button> its own font (Arial)
+           and a colour of its own, and every button no class dressed
+           printed in them. At an element's weight, so every class that
+           dresses a control still wins (the field rule below keeps its
+           number face). */
+        button, input, select, textarea { font: inherit; color: inherit; }
+        /* Inter 13 on 1.45 at 400 (plan §4.3), from the tokens, whose tiers
+           take it to 14 at 1680 px and 15 at 2200. The fallbacks are the old
+           body, for a page without the token sheet. */
         body {
             background: var(--bg-void); color: var(--text-primary);
-            font-family: var(--font-body); font-size: 15px; font-weight: 500;
-            line-height: 1.6; min-height: 100vh; overflow-x: hidden;
+            font-family: var(--font-body); font-size: var(--sv-fs-base, 15px);
+            font-weight: var(--sv-body-weight, 500);
+            line-height: var(--sv-lh-text, 1.6); min-height: 100vh; overflow-x: hidden;
         }
         /* Links (2026-11-06). A link no class dresses took the browser's
            blue, unreadable on the void (/orcs/ "Orc #13", footnotes). Now
@@ -149,11 +174,6 @@
             position: fixed; top: 0; left: 0;
             width: 100%; height: 100%; z-index: 0; pointer-events: none;
         }
-        #caustics-canvas {
-            position: fixed; top: 0; left: 0;
-            width: 100%; height: 100%; z-index: 0; pointer-events: none;
-            opacity: 0.06; mix-blend-mode: screen;
-        }
         .grid-bg {
             position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
             z-index: 0; pointer-events: none;
@@ -167,6 +187,25 @@
         body.light-mode .grid-bg { background-image:
             linear-gradient(rgba(0,153,77,0.04) 1px, transparent 1px),
             linear-gradient(90deg, rgba(0,153,77,0.04) 1px, transparent 1px); }
+        /* A calm background (UI plan §8, S1a, 2026-11-06). Nothing moves on
+           a work page unless a value moved or the operator acted, and
+           nothing sits behind a number: the drifting grid, the globe-eye
+           and its glow and the circuit board are not displayed on the pages
+           this sheet styles. The atmosphere stays where it belongs: the
+           lock, the login and the intro, standalone pages with their own
+           layers. !important because no later rule may bring one back. */
+        .grid-bg, .eye-glow-shadow, .globe-eye-bg, .globe-circuits-bg { display: none !important; }
+        /* The embers (the magic kept, 2026-11-12): calm, behind opaque
+           cards, and only where all three hold: the page opted in (<body
+           data-sv-embers>: it proved no figure of its sits on the void),
+           the operator's Ambience is Magic, and the theme is dark.
+           static/js/sv-embers.js draws them and schedules nothing where
+           this rule hides the canvas. The caustics canvas and the two
+           code-stream paragraphs of invented log lines are gone from the
+           page, with their rules. */
+        body:not([data-sv-embers]) #particles-canvas,
+        body:not([data-sv-ambience="magic"]) #particles-canvas,
+        body.light-mode #particles-canvas { display: none !important; }
         /* No z-index here. It used to be `z-index: 1`, which established a
            stacking context over the entire application shell — so every modal
            rendered into {% block content %} was trapped inside it and painted
@@ -185,8 +224,11 @@
             display: flex; flex-direction: column; z-index: 100; overflow-y: auto;
         }
         .sidebar-brand { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); overflow: visible; }
+        /* The wordmark keeps Orbitron (2026-11-06): --font-display is Inter,
+           and --sv-font-brand reads the frame's display face (Orbitron for
+           the wordmark and the titles, sv-kit.css; 2026-11-12). */
         .sidebar-brand h1 {
-            font-family: var(--font-display); font-size: 15px; font-weight: 700;
+            font-family: var(--sv-font-brand, var(--font-display)); font-size: 15px; font-weight: 700;
             letter-spacing: 4px; color: var(--accent);
             text-shadow: 0 0 20px var(--accent-glow);
             display: flex; align-items: center; gap: 10px;
@@ -408,7 +450,14 @@
         .sidebar-overlay.visible { display: block; }
         /* stat-box — handled by unified card system */
         .stat-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
-        .stat-value { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text-primary); }
+        /* The big numbers are data: the number face, tabular, at the
+           figure size of the tier, 500 (UI plan §4.2, S1a, 2026-11-06).
+           Orbitron's wide digits stay on the wordmark. The same for
+           .metric-value, .ip-count, .dh-pop-price, .pos-pop-r-val and
+           .oc-strip-value below. */
+        .stat-value { font-family: var(--sv-font-mono, var(--font-display)); font-size: var(--sv-fs-figure, 22px);
+                      font-weight: var(--sv-figure-weight, 700); color: var(--text-primary);
+                      font-variant-numeric: tabular-nums; letter-spacing: var(--sv-track-figure, normal); }
         .stat-sub { font-family: var(--font-mono); font-size: 11px; margin-top: 3px; color: var(--text-secondary); }
         .stat-change { font-family: var(--font-mono); font-size: 12px; margin-top: 3px; }
         .stat-change.positive { color: var(--success); }
@@ -650,6 +699,12 @@
         }
 
         /* ── Light Mode ──────────────────────────── */
+        /* Frozen at today's colours (UI plan §3.10 and §15, 2026-11-06).
+           The root re-points the old names onto the dark tokens; every one
+           it re-points is restated here with the value light mode computed
+           before: its own where it set one, the old dark root's where it
+           inherited it (the reds, the gold, the blue, the purple, the
+           status colours). Only the faces change in light mode. */
         body.light-mode {
             --bg-void: #f0f2f0;
             --bg-primary: #e8ece8;
@@ -662,6 +717,13 @@
             --text-secondary: #4a6a4a;
             --text-muted: #8aaa8a;
             --accent: #00994d;
+            --accent-red: #e83030;
+            --accent-gold: #d8b020;
+            --accent-blue: #30a0e8;
+            --accent-purple: #8840d0;
+            --danger: #d03030;
+            --success: #00e868;
+            --warning: #d89020;
             --accent-dim: #d0f0d8;
             --accent-glow: rgba(0, 153, 77, 0.08);
             --shadow-card: 0 2px 12px rgba(0,0,0,0.06);
@@ -691,7 +753,6 @@
         body.light-mode .globe-eye-bg [stroke]:not([stroke="none"]) { stroke: #00994d !important; }
         body.light-mode .globe-eye-bg circle[fill="#00e868"] { fill: #00994d !important; }
         body.light-mode #particles-canvas { opacity: 0.4; }
-        body.light-mode #caustics-canvas { opacity: 0.02; }
 
         /* Light mode: remove ALL shadows from cards, headbands, and UI elements */
         body.light-mode .card,
@@ -934,53 +995,44 @@
         .ex-state.st-closed { color: var(--text-muted); background: rgba(90,138,106,0.08); }
         .ex-until { font-size: 9px; color: var(--text-muted); text-align: right; font-style: italic; }
 
-        /* ── Premium Button Design ───────────────── */
+        /* ── Buttons ───────────────────────────────
+           One family, calm (UI plan §7, S1a, 2026-11-06). The design-system
+           block further down (UPGRADE-2) is the one that wins on a .btn;
+           these single-class rules dress a control that carries a variant
+           class without .btn, and say the same thing. No button anywhere
+           is a green or a red slab: buttons carry words; only the actions
+           that buy or sell carry a market colour (sv-kit.css .btn-buy and
+           .btn-sell); a red fill is REAL money's alone. */
         .btn {
             display: inline-flex; align-items: center; gap: 8px;
             padding: 9px 20px; border: 1px solid var(--border);
-            border-radius: 8px; background: var(--bg-card);
+            border-radius: var(--sv-radius-ctl, 8px); background: var(--bg-card);
             color: var(--text-primary); font-family: var(--font-heading);
             font-size: 13px; font-weight: 600; letter-spacing: 1px;
             cursor: pointer; text-decoration: none;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: background-color var(--sv-dur-hover, .14s), border-color var(--sv-dur-hover, .14s), color var(--sv-dur-hover, .14s);
             position: relative; overflow: hidden;
         }
-        .btn::before {
-            content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.05), transparent);
-            transition: left 0.5s;
-        }
-        .btn:hover::before { left: 100%; }
-        .btn:hover {
-            border-color: var(--accent-dim); transform: translateY(-1px);
-            box-shadow: 0 4px 16px rgba(0,0,0,0.3), 0 0 1px var(--accent-dim);
-        }
-        .btn:active { transform: translateY(0); }
+        /* The light primary: Save, Apply, Preview, the non-money confirms. */
         .btn-primary {
-            background: linear-gradient(135deg, var(--accent-dim), rgba(0,232,104,0.25));
-            border-color: var(--accent); color: #fff;
+            background: var(--sv-ink-1, var(--text-primary)); border-color: var(--sv-ink-1, var(--text-primary));
+            color: var(--sv-bg-0, var(--bg-void));
         }
-        .btn-primary::before {
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
-        }
-        .btn-primary:hover {
-            background: linear-gradient(135deg, var(--accent), rgba(0,232,104,0.8));
-            color: #000; box-shadow: 0 4px 24px rgba(0,232,104,0.25), 0 0 2px var(--accent);
-        }
-        .btn-sm { padding: 6px 14px; font-size: 11px; border-radius: 6px; }
+        .btn-primary:hover { background: #fff; border-color: #fff; color: var(--sv-bg-0, var(--bg-void)); }
+        .btn-sm { padding: 6px 14px; font-size: 11px; }
+        /* .btn-danger carries CLOSE, RETRY CLOSE, CLOSE ALL, turn off, all
+           off and Cancel: the safe directions. A neutral outline, never the
+           red of a loss or of REAL money (UI plan §10). */
         .btn-danger {
-            background: rgba(232,48,48,0.08); border-color: var(--accent-red-dim);
-            color: var(--accent-red);
+            background: transparent; border-color: var(--sv-line-3, var(--border-glow));
+            color: var(--sv-ink-1, var(--text-primary));
         }
-        .btn-danger:hover {
-            background: rgba(232,48,48,0.2); border-color: var(--accent-red);
-            box-shadow: 0 4px 16px rgba(232,48,48,0.15);
-        }
+        .btn-danger:hover { background: var(--sv-bg-3, var(--bg-card-hover)); border-color: var(--sv-ink-3, var(--text-muted)); }
         .btn-ghost {
-            background: transparent; border-color: transparent; color: var(--text-secondary);
+            background: transparent; border-color: transparent; color: var(--sv-ink-2, var(--text-secondary));
             padding: 6px 12px;
         }
-        .btn-ghost:hover { color: var(--accent); background: var(--accent-glow); }
+        .btn-ghost:hover { color: var(--sv-ink-1, var(--text-primary)); background: var(--sv-bg-3, var(--accent-glow)); }
 
         /* ── Instrument Preview Popup ────────────── */
         .instrument-link { position: relative; }
@@ -1142,7 +1194,7 @@
         .ticker-item .t-price { color: #ffffff; font-weight: 600; }
         body.light-mode .ticker-item .t-price { color: #1a1a1a; }
         .ticker-item .t-change { font-size: 11px; font-weight: 600; }
-        .ticker-item .t-change.up { color: var(--accent); }
+        .ticker-item .t-change.up { color: var(--sv-up, var(--accent)); }
         .ticker-item .t-change.down { color: var(--accent-red); }
         .ticker-item .t-badge {
             font-size: 8px; letter-spacing: 1px; padding: 1px 5px;
@@ -1234,16 +1286,22 @@
         .ip-cat:hover { background: var(--bg-card); }
         .ip-cat .ip-label { font-size: 8px; letter-spacing: 1.5px; color: var(--text-muted); text-transform: uppercase; }
         .ip-cat .ip-count {
-            font-size: 14px; font-weight: 700; color: var(--accent);
-            font-family: var(--font-display); line-height: 1.1;
+            font-size: var(--sv-fs-base, 14px); font-weight: var(--sv-figure-weight, 700);
+            color: var(--sv-ink-1, var(--accent));
+            font-family: var(--sv-font-mono, var(--font-display)); line-height: 1.1;
+            font-variant-numeric: tabular-nums;
         }
+        /* Light mode keeps today's accent on the counts (frozen, 2026-11-07),
+           at this rule's weight and before the tone rules below, which win
+           over it as they did. */
+        :where(body.light-mode) .ip-cat .ip-count { color: var(--accent); }
         .ip-cat .ip-sub { font-size: 9px; color: var(--text-secondary); }
         /* OPEN P&L is the band's headline figure and reads at the size of
            one: a step above the sibling counts, tabular so a swing from
            +1,234.56 to -987.65 keeps its columns. The cell floats in the
            same scroller as the rest — nothing pins its width, so a wider
            figure pushes the strip rather than clipping. */
-        .ip-cat-pnl .ip-count { font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: 0.3px; }
+        .ip-cat-pnl .ip-count { font-size: var(--sv-fs-lead, 17px); font-variant-numeric: tabular-nums; letter-spacing: 0; }
         .ip-cat-pnl .ip-count .sv-unknown { font-size: 14px; }
         /* THE LIVE P&L LINE on the PORTFOLIO cell (2026-10-14): the open
            P&L of the REAL book, in money and in R, read without hovering,
@@ -1341,7 +1399,7 @@
            The selectors below are deliberately specific enough to beat
            `.ip-dd-cell .dv`, which paints every value accent-green. */
         .ip-dropdown .dv.up, .ip-dropdown .ipr-r.up,
-        .ip-dropdown .ipr-pct.up, .ip-cat .up { color: var(--accent); }
+        .ip-dropdown .ipr-pct.up, .ip-cat .up { color: var(--sv-up, var(--accent)); }
         .ip-dropdown .dv.down, .ip-dropdown .ipr-r.down,
         .ip-dropdown .ipr-pct.down, .ip-cat .down { color: var(--accent-red); }
         /* Gold that PRINTS a value takes the ink token: the glow token is
@@ -1572,8 +1630,8 @@
             letter-spacing: 1.5px; padding: 2px 6px; border-radius: 3px;
         }
         .sr-signal .sr-badge-bullish {
-            background: rgba(0,232,104,0.12); color: var(--accent);
-            border: 1px solid rgba(0,232,104,0.3);
+            background: color-mix(in srgb, var(--sv-up-tint, #00e868) 12%, transparent); color: var(--sv-up, var(--accent));
+            border: 1px solid color-mix(in srgb, var(--sv-up-tint, #00e868) 30%, transparent);
         }
         .sr-signal .sr-badge-bearish {
             background: rgba(255,94,94,0.12); color: var(--accent-red);
@@ -1617,7 +1675,7 @@
         }
         /* Legacy classes kept for backward-compat with other pages */
         .sr-signal .sr-dir { font-size: 9px; font-family: var(--font-mono); letter-spacing: 1px; }
-        .sr-signal .sr-dir.bullish { color: var(--accent); }
+        .sr-signal .sr-dir.bullish { color: var(--sv-up, var(--accent)); }
         .sr-signal .sr-dir.bearish { color: var(--accent-red); }
         .sr-signal .sr-score { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
         .sr-signal .sr-bar { height: 3px; background: var(--bg-void); border-radius: 2px; margin-top: 4px; }
@@ -1694,7 +1752,7 @@
             font-size: 9px; padding: 2px 6px;
             letter-spacing: 1.5px; border-radius: 2px;
         }
-        .sr-pop-dir.sr-pop-dir-bullish { background: rgba(0,232,104,0.18); color: var(--accent); }
+        .sr-pop-dir.sr-pop-dir-bullish { background: color-mix(in srgb, var(--sv-up-tint, #00e868) 18%, transparent); color: var(--sv-up, var(--accent)); }
         .sr-pop-dir.sr-pop-dir-bearish { background: rgba(232,48,48,0.18); color: var(--accent-red); }
         .sr-pop-title {
             font-size: 12px; line-height: 1.45; color: var(--text-secondary);
@@ -1711,7 +1769,7 @@
         }
         .sr-pop-k { color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-size: 9px; }
         .sr-pop-v { color: var(--text-primary); font-weight: 600; text-align: right; }
-        .sr-pop-v.up   { color: var(--accent); }
+        .sr-pop-v.up   { color: var(--sv-up, var(--accent)); }
         .sr-pop-v.down { color: var(--accent-red); }
         .sr-pop-actions {
             display: flex; flex-wrap: wrap; gap: 4px;
@@ -1822,11 +1880,12 @@
         .dh-pop-badge { width: 32px; height: 32px; border-radius: 50%; display: flex;
                         align-items: center; justify-content: center; font-size: 14px;
                         border: 1px solid var(--border); }
-        .dh-pop-badge.up { background: rgba(0,232,104,.1); color: var(--accent); border-color: var(--accent); }
+        .dh-pop-badge.up { background: color-mix(in srgb, var(--sv-up-tint, #00e868) 10%, transparent); color: var(--sv-up, var(--accent)); border-color: var(--sv-up, var(--accent)); }
         .dh-pop-badge.down { background: rgba(232,48,48,.1); color: var(--accent-red); border-color: var(--accent-red); }
         .dh-pop-badge.flat { color: var(--text-muted); }
         .dh-pop-big { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
-        .dh-pop-price { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--text-primary); }
+        .dh-pop-price { font-family: var(--sv-font-mono, var(--font-display)); font-size: var(--sv-fs-figure, 24px);
+                        font-weight: var(--sv-figure-weight, 700); color: var(--text-primary); font-variant-numeric: tabular-nums; }
         .dh-pop-pct { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
@@ -1970,38 +2029,54 @@
         /* ═══════════════════════════════════════════════════════════ */
         /* UPGRADE-2: Design system — buttons, inputs, metrics         */
         /* ═══════════════════════════════════════════════════════════ */
+        /* The button (UI plan §7, S1a, 2026-11-06): the secondary look by
+           default (bg-3, a line-2 border, ink-1), Inter 600 uppercase at
+           .04em, 32 px tall (28 small, 40 large), 4 px corners. Nothing
+           glows, nothing slides: a button never moves under the pointer.
+           The fallbacks are the old values, for a page without the token
+           sheet. */
         .btn {
             display: inline-flex; align-items: center; justify-content: center;
-            gap: 8px; padding: 11px 22px; border: 1px solid var(--border);
-            background: var(--bg-card); color: var(--text-primary);
-            font-family: var(--font-display); font-size: 12px; font-weight: 600;
-            letter-spacing: 2.5px; text-transform: uppercase; cursor: pointer;
-            border-radius: var(--radius); text-decoration: none;
-            transition: all .22s cubic-bezier(.2,.8,.2,1); position: relative; overflow: hidden;
+            gap: 8px; padding: 0 14px; min-height: var(--sv-ctl-md, 0px);
+            border: 1px solid var(--sv-line-2, var(--border));
+            background: var(--sv-bg-3, var(--bg-card)); color: var(--sv-ink-1, var(--text-primary));
+            font-family: var(--sv-font-sans, var(--font-display)); font-size: var(--sv-fs-small, 12px); font-weight: 600;
+            letter-spacing: var(--sv-track-button, 2.5px); text-transform: uppercase; cursor: pointer;
+            line-height: 1.2;
+            border-radius: var(--sv-radius-ctl, var(--radius)); text-decoration: none;
+            transition: background-color var(--sv-dur-hover, .14s) var(--sv-ease, ease),
+                        border-color var(--sv-dur-hover, .14s) var(--sv-ease, ease),
+                        color var(--sv-dur-hover, .14s) var(--sv-ease, ease);
+            position: relative; overflow: hidden;
         }
-        .btn::before {
-            content: ""; position: absolute; inset: 0;
-            background: linear-gradient(135deg, transparent, rgba(0,232,104,.08), transparent);
-            opacity: 0; transition: opacity .3s;
-        }
-        .btn:hover::before { opacity: 1; }
-        .btn:hover { border-color: var(--accent); transform: translateY(-1px);
-                     box-shadow: 0 4px 20px rgba(0,232,104,.12); color: var(--accent); }
-        .btn:active { transform: translateY(0); }
+        .btn::before { content: none; }
+        .btn:hover { border-color: var(--sv-line-3, var(--border-glow)); background: var(--sv-bg-4, var(--bg-card-hover));
+                     color: var(--sv-ink-1, var(--text-primary)); }
+        .btn:active { background: var(--sv-bg-4, var(--bg-card-hover)); }
+        .btn:focus-visible { outline: 2px solid var(--sv-eye, var(--accent)); outline-offset: 2px; }
+        /* The light primary: an ink fill with the void's text (Save, Apply,
+           Preview, TURN ON until its page gets the neutral one in S2). */
         .btn.btn-primary {
-            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
-            color: var(--bg-void); border-color: var(--accent); font-weight: 700;
+            background: var(--sv-ink-1, var(--text-primary));
+            color: var(--sv-bg-0, var(--bg-void)); border-color: var(--sv-ink-1, var(--text-primary)); font-weight: 600;
         }
-        .btn.btn-primary:hover { color: var(--bg-void); box-shadow: 0 6px 28px rgba(0,232,104,.35); }
+        .btn.btn-primary:hover { background: #fff; border-color: #fff; color: var(--sv-bg-0, var(--bg-void)); }
+        /* The neutral outline (CLOSE, CLOSE ALL, turn off, all off, Cancel):
+           closing and switching off are the safe directions, never red. */
         .btn.btn-danger {
-            background: linear-gradient(135deg, #3a0e0e, var(--accent-red));
-            color: #fff; border-color: var(--accent-red);
+            background: transparent;
+            color: var(--sv-ink-1, var(--text-primary)); border-color: var(--sv-line-3, var(--border-glow));
         }
-        .btn.btn-danger:hover { color: #fff; box-shadow: 0 6px 28px rgba(232,48,48,.3); }
-        .btn.btn-ghost { background: transparent; }
-        .btn.btn-sm { padding: 7px 14px; font-size: 10px; letter-spacing: 2px; }
-        .btn.btn-lg { padding: 15px 30px; font-size: 14px; letter-spacing: 3px; }
-        .btn[disabled], .btn.disabled { opacity: .4; pointer-events: none; }
+        .btn.btn-danger:hover { background: var(--sv-bg-3, var(--bg-card-hover)); border-color: var(--sv-ink-3, var(--text-muted));
+                                color: var(--sv-ink-1, var(--text-primary)); }
+        .btn.btn-ghost { background: transparent; border-color: transparent; color: var(--sv-ink-2, var(--text-secondary)); }
+        .btn.btn-ghost:hover { background: var(--sv-bg-3, var(--bg-card-hover)); color: var(--sv-ink-1, var(--text-primary)); }
+        .btn.btn-sm { padding: 0 12px; min-height: var(--sv-ctl-sm, 0px); font-size: var(--sv-fs-micro, 10px); letter-spacing: var(--sv-track-button, 2px); }
+        .btn.btn-lg { padding: 0 20px; min-height: var(--sv-ctl-lg, 0px); font-size: var(--sv-fs-base, 14px); letter-spacing: var(--sv-track-button, 3px); }
+        /* Disabled reads as disabled, in full colour: bg-2, ink-4, line-1. */
+        .btn[disabled], .btn.disabled { opacity: 1; pointer-events: none;
+            background: var(--sv-bg-2, var(--bg-card)); color: var(--sv-ink-4, var(--text-muted));
+            border-color: var(--sv-line-1, var(--border)); }
 
         .input, input[type=text].input, input[type=password].input, input[type=email].input,
         input[type=number].input, textarea.input, select.input {
@@ -2021,10 +2096,11 @@
         /* metric label/value/sub (layout only — box handled by unified card system) */
         .metric-label { font-family: var(--font-mono); font-size: 9px;
                         letter-spacing: 2.5px; color: var(--text-muted); text-transform: uppercase; }
-        .metric-value { font-family: var(--font-display); font-size: 26px; font-weight: 700;
+        .metric-value { font-family: var(--sv-font-mono, var(--font-display)); font-size: var(--sv-fs-figure, 26px);
+                        font-weight: var(--sv-figure-weight, 700); font-variant-numeric: tabular-nums;
                         color: var(--text-primary); margin: 6px 0 2px; }
         .metric-change { font-family: var(--font-mono); font-size: 11px; }
-        .metric-change.up { color: var(--accent); }
+        .metric-change.up { color: var(--sv-up, var(--accent)); }
         .metric-change.down { color: var(--accent-red); }
         .metric-spark { height: 28px; margin-top: 8px; }
         .metric-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
@@ -2121,7 +2197,7 @@
             font-family: var(--font-mono); font-size: 10px; font-weight: 700;
             padding: 2px 6px; border-radius: 3px; min-width: 56px; text-align: center;
         }
-        .wl-chg.up { color: var(--accent); background: rgba(0,232,104,0.10); }
+        .wl-chg.up { color: var(--sv-up, var(--accent)); background: color-mix(in srgb, var(--sv-up-tint, #00e868) 10%, transparent); }
         .wl-chg.down { color: var(--accent-red); background: rgba(255,94,94,0.10); }
         /* Second line under the acronym — full name + asset-class chip. */
         .wl-rowname {
@@ -2201,10 +2277,10 @@
         .dh-val { color: var(--text-primary); font-weight: 700; font-size: 15px; letter-spacing: 0.5px; }
         .dh-chg { font-size: 12px; font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.5px;
                   padding: 2px 6px; border-radius: 3px; }
-        .dh-chg.up { color: var(--accent); background: rgba(0,232,104,0.08); }
+        .dh-chg.up { color: var(--sv-up, var(--accent)); background: color-mix(in srgb, var(--sv-up-tint, #00e868) 8%, transparent); }
         .dh-chg.down { color: var(--accent-red); background: rgba(232,48,48,0.08); }
         .dh-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-        .dh-dot.up { background: var(--accent); box-shadow: 0 0 8px var(--accent), 0 0 16px rgba(0,232,104,0.3); }
+        .dh-dot.up { background: var(--sv-up, var(--accent)); box-shadow: 0 0 8px var(--accent), 0 0 16px color-mix(in srgb, var(--sv-up-tint, #00e868) 30%, transparent); }
         .dh-dot.down { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red), 0 0 16px rgba(232,48,48,0.3); }
         .dh-dot.flat { background: var(--text-muted); }
         /* Popup — fixed position, anchored by JS to escape the scroll container */
@@ -2234,11 +2310,12 @@
         .dh-pop-badge { width: 32px; height: 32px; border-radius: 50%; display: flex;
                         align-items: center; justify-content: center; font-size: 14px;
                         border: 1px solid var(--border); }
-        .dh-pop-badge.up { background: rgba(0,232,104,.1); color: var(--accent); border-color: var(--accent); }
+        .dh-pop-badge.up { background: color-mix(in srgb, var(--sv-up-tint, #00e868) 10%, transparent); color: var(--sv-up, var(--accent)); border-color: var(--sv-up, var(--accent)); }
         .dh-pop-badge.down { background: rgba(232,48,48,.1); color: var(--accent-red); border-color: var(--accent-red); }
         .dh-pop-badge.flat { color: var(--text-muted); }
         .dh-pop-big { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
-        .dh-pop-price { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--text-primary); }
+        .dh-pop-price { font-family: var(--sv-font-mono, var(--font-display)); font-size: var(--sv-fs-figure, 24px);
+                        font-weight: var(--sv-figure-weight, 700); color: var(--text-primary); font-variant-numeric: tabular-nums; }
         .dh-pop-pct { font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
         .dh-pop-row { display: flex; justify-content: space-between; padding: 4px 0;
                       font-size: 11px; border-top: 1px dashed var(--border); }
@@ -2288,7 +2365,7 @@
         .nf-pop-fact { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
         /* --accent flips for light mode; --accent-green stays dark-theme
            neon and would be near-invisible on a white card. */
-        .nf-pop-fact.up { color: var(--accent); }
+        .nf-pop-fact.up { color: var(--sv-up, var(--accent)); }
         .nf-pop-fact.down { color: var(--accent-red); }
         .nf-pop-cta { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--text-muted); text-align: right; }
@@ -2351,7 +2428,7 @@
             font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em;
         }
         .pos-pop-side { font-weight: 700; }
-        .pos-pop-side.up { color: var(--accent); }
+        .pos-pop-side.up { color: var(--sv-up, var(--accent)); }
         .pos-pop-side.down { color: var(--accent-red); }
         .pos-pop-qty { color: var(--text-secondary); }
         .pos-pop-venue {
@@ -2392,7 +2469,16 @@
         .sv-venue {
             font-weight: 700; letter-spacing: .04em;
         }
-        .sv-venue--live { color: var(--accent-red); }
+        /* REAL money as a marker, not as a colour of text (UI plan §3.5,
+           2026-11-06): the REAL red is under 4.5:1 as text, and the coral
+           that --accent-red is now means a loss. So the label is the REAL
+           chip in small, white on --sv-real (4.94:1); sv-kit.css gives it
+           the chip's shape. Without the tokens (a standalone page) it is
+           the old red word. */
+        .sv-venue--live {
+            color: var(--sv-real-ink, var(--accent-red));
+            background: var(--sv-real, transparent);
+        }
         .sv-venue--paper { color: var(--text-muted); }
         /* DEMO on the label (2026-10-14): a broker's demo account, gold
            like .sv-world--demo below, in the ink token that survives on
@@ -2428,10 +2514,15 @@
             letter-spacing: .08em; line-height: 1.5; white-space: nowrap;
             text-transform: uppercase;
         }
+        /* The REAL family reads --sv-real by name (S1a, 2026-11-06): the
+           only solid red on the platform, white on it at 4.94:1, and no
+           glow (nothing glows but the focus ring, plan §5). --accent-red is
+           the loss coral now; it is only the fallback here, for a page
+           without the token sheet. */
         .sv-world--live {
-            color: #fff; background: var(--accent-red);
-            border-color: var(--accent-red);
-            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-red) 45%, transparent);
+            color: var(--sv-real-ink, #fff); background: var(--sv-real, var(--accent-red));
+            border-color: var(--sv-real, var(--accent-red));
+            box-shadow: none;
         }
         .sv-world--demo {
             color: var(--accent-gold-ink); border-color: var(--accent-gold-ink);
@@ -2445,7 +2536,7 @@
         .sv-act-meta .sv-world { margin-left: 4px; }
         tr.sv-row--live > td:first-child,
         div.sv-row--live, li.sv-row--live {
-            box-shadow: inset 3px 0 0 var(--accent-red);
+            box-shadow: inset 3px 0 0 var(--sv-real, var(--accent-red));
         }
         /* THE ARMED PILL: on every page while a live config is enabled. */
         .sv-armed-pill {
@@ -2453,10 +2544,10 @@
             padding: 3px 10px; border-radius: 999px; text-decoration: none;
             font-family: var(--font-mono); font-size: 10px; font-weight: 700;
             letter-spacing: .1em; text-transform: uppercase; white-space: nowrap;
-            color: #fff; background: var(--accent-red);
-            box-shadow: 0 0 12px color-mix(in srgb, var(--accent-red) 50%, transparent);
+            color: var(--sv-real-ink, #fff); background: var(--sv-real, var(--accent-red));
+            box-shadow: none;
         }
-        .sv-armed-pill:hover { color: #fff; filter: brightness(1.1); }
+        .sv-armed-pill:hover { color: var(--sv-real-ink, #fff); filter: brightness(1.1); }
         .sv-armed-dot {
             width: 7px; height: 7px; border-radius: 50%; background: #fff;
             animation: sv-armed-beat 1.6s ease-in-out infinite;
@@ -2475,11 +2566,12 @@
         }
         .pos-pop-r { text-align: right; flex: 0 0 auto; }
         .pos-pop-r-val {
-            font-family: var(--font-display); font-size: 22px; font-weight: 700;
+            font-family: var(--sv-font-mono, var(--font-display)); font-size: var(--sv-fs-figure, 22px);
+            font-weight: var(--sv-figure-weight, 700);
             line-height: 1; color: var(--text-primary);
             font-variant-numeric: tabular-nums;
         }
-        .pos-pop-r.up .pos-pop-r-val { color: var(--accent); }
+        .pos-pop-r.up .pos-pop-r-val { color: var(--sv-up, var(--accent)); }
         .pos-pop-r.down .pos-pop-r-val { color: var(--accent-red); }
         .pos-pop-r-cap {
             font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .12em;
@@ -2492,7 +2584,7 @@
         }
         .pos-pop-pnl { font-size: 15px; font-weight: 700; color: var(--text-primary); }
         .pos-pop-pnlpct { font-size: 12px; color: var(--text-secondary); }
-        .pos-pop-pnl.up, .pos-pop-pnlpct.up { color: var(--accent); }
+        .pos-pop-pnl.up, .pos-pop-pnlpct.up { color: var(--sv-up, var(--accent)); }
         .pos-pop-pnl.down, .pos-pop-pnlpct.down { color: var(--accent-red); }
         .pos-pop-money-cap {
             font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
@@ -2530,7 +2622,7 @@
             font-size: 12px; font-weight: 600; color: var(--text-primary);
             overflow-wrap: anywhere;
         }
-        .pos-pop-mrow .mv.up { color: var(--accent); }
+        .pos-pop-mrow .mv.up { color: var(--sv-up, var(--accent)); }
         .pos-pop-mrow .mv.down { color: var(--accent-red); }
         /* The provenance of the number beside it — "qty × entry", "broker-set
            — not recorded", "what the close dialog says". It is the reason
@@ -2622,7 +2714,7 @@
             color: var(--text-primary); font-family: var(--font-mono);
             overflow-wrap: anywhere;
         }
-        .pos-pop-kv .v.up { color: var(--accent); }
+        .pos-pop-kv .v.up { color: var(--sv-up, var(--accent)); }
         .pos-pop-kv .v.down { color: var(--accent-red); }
 
         .pos-pop-why {
@@ -2692,8 +2784,8 @@
         .pop-spark { margin: 0 0 8px; }
         .pop-spark svg { width: 100%; height: 34px; display: block; }
         .pop-spark svg path {
-            fill: none; stroke: var(--accent); stroke-width: 1.6;
-            filter: drop-shadow(0 0 3px rgba(0,232,104,0.35));
+            fill: none; stroke: var(--sv-up, var(--accent)); stroke-width: 1.6;
+            filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sv-up-tint, #00e868) 35%, transparent));
         }
         .pop-spark[data-up="0"] svg path {
             stroke: var(--accent-red);
@@ -3303,7 +3395,7 @@
             color: var(--text-muted); font-style: italic; font-size: 12px;
             padding: 12px 0;
         }
-        .oc-empty.up   { color: var(--accent); font-style: normal; }
+        .oc-empty.up   { color: var(--sv-up, var(--accent)); font-style: normal; }
         .oc-empty.down { color: var(--accent-red); font-style: normal; }
 
         .oc-strip {
@@ -3321,11 +3413,11 @@
             color: var(--text-muted); text-transform: uppercase;
         }
         .oc-strip-value {
-            font-family: var(--font-mono); font-size: 18px; font-weight: 700;
+            font-family: var(--font-mono); font-size: 18px; font-weight: var(--sv-figure-weight, 700);
             color: var(--text-primary); letter-spacing: 0.5px;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .oc-strip-value.up   { color: var(--accent); }
+        .oc-strip-value.up   { color: var(--sv-up, var(--accent)); }
         .oc-strip-value.down { color: var(--accent-red); }
         .oc-strip-sub {
             font-family: var(--font-mono); font-size: 10px;
@@ -3343,9 +3435,9 @@
         /* Sparkline */
         .oc-sparkline { width: 100%; height: 48px; display: block; }
         .oc-sparkline path {
-            fill: none; stroke: var(--accent); stroke-width: 1.5;
+            fill: none; stroke: var(--sv-up, var(--accent)); stroke-width: 1.5;
             stroke-linejoin: round; stroke-linecap: round;
-            filter: drop-shadow(0 0 4px rgba(0,232,104,0.4));
+            filter: drop-shadow(0 0 4px color-mix(in srgb, var(--sv-up-tint, #00e868) 40%, transparent));
         }
         .oc-sparkline.bearish path {
             stroke: var(--accent-red);
@@ -3385,7 +3477,7 @@
         .oc-mini-row:last-child { border-bottom: none; }
         .oc-mini-sym { font-weight: 700; color: var(--text-primary); }
         .oc-mini-side { font-size: 10px; letter-spacing: 1px; color: var(--text-muted); }
-        .oc-mini-side.bullish, .oc-mini-side.up,   .oc-mini-side.BUY  { color: var(--accent); }
+        .oc-mini-side.bullish, .oc-mini-side.up,   .oc-mini-side.BUY  { color: var(--sv-up, var(--accent)); }
         .oc-mini-side.bearish, .oc-mini-side.down, .oc-mini-side.SELL { color: var(--accent-red); }
         .oc-mini-meta { color: var(--text-muted); font-size: 10px; }
         /* The percentage that rides beside a money figure. A gain of 250 is a
@@ -3408,20 +3500,20 @@
            loss colour — a loss asserted rather than observed. The third
            class is the whole point: an unmeasured number takes a neutral
            colour, the same way its em-dash does. */
-        .sign-up   { color: var(--accent); }
-        .sign-down { color: var(--accent-red); }
+        .sign-up   { color: var(--sv-up, var(--accent)); }
+        .sign-down { color: var(--sv-down, var(--accent-red)); }
         .sign-flat { color: var(--text-muted); }
 
         .oc-mini-pnl  { font-weight: 700; }
-        .oc-mini-pnl.up   { color: var(--accent); }
+        .oc-mini-pnl.up   { color: var(--sv-up, var(--accent)); }
         .oc-mini-pnl.down { color: var(--accent-red); }
 
         /* Universal up/down text-color helpers — used inside table cells
            on all enriched pages (positions, performance, hypotheses, …)
            where I'd previously written class="up"/"down" expecting a
            global rule. */
-        .up   { color: var(--accent); }
-        .down { color: var(--accent-red); }
+        .up   { color: var(--sv-up, var(--accent)); }
+        .down { color: var(--sv-down, var(--accent-red)); }
 
     
 
@@ -3954,71 +4046,6 @@
         .globe-circuits-bg .bg-diff path { animation: none; }
     }
 
-    /* ── Background code-stream — 2 generating paragraphs flanking the
-       big globe-eye, behind page content. Anchored to viewport sides
-       (not the FAB), so they stay fixed while the user scrolls. They
-       respect sidebar / signals-rail width via :has().                  */
-    .se-cs-paragraph {
-        position: fixed;
-        top: 22vh; height: 56vh;
-        pointer-events: none; z-index: 0;
-        font-family: var(--font-mono);
-        font-size: 11px; line-height: 1.7;
-        color: var(--accent);
-        opacity: 0.32;
-        text-shadow: 0 0 4px rgba(0,232,104,0.25);
-        white-space: pre;
-        overflow: hidden;
-        width: 22vw; max-width: 320px; min-width: 220px;
-        display: flex; flex-direction: column;
-        justify-content: flex-start;
-        transition: left 0.35s cubic-bezier(.4,0,.2,1),
-                    right 0.35s cubic-bezier(.4,0,.2,1),
-                    opacity 0.35s ease;
-    }
-    .se-cs-paragraph.left {
-        left: calc(var(--sidebar-width) + 24px);
-        text-align: left;
-        mask-image: linear-gradient(90deg, #000 0%, #000 70%, transparent 100%);
-        -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 70%, transparent 100%);
-    }
-    body:has(.sidebar.mini) .se-cs-paragraph.left {
-        left: calc(68px + 24px);
-    }
-    .se-cs-paragraph.right {
-        right: calc(44px + 24px);  /* signals-rail collapsed = 44px */
-        text-align: right;
-        mask-image: linear-gradient(90deg, transparent 0%, #000 30%, #000 100%);
-        -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 30%, #000 100%);
-    }
-    body:has(.signals-rail.open) .se-cs-paragraph.right {
-        right: calc(280px + 24px);
-    }
-    body:has(.se-eye-fab.working) .se-cs-paragraph { opacity: 0.55; }
-    .se-cs-line {
-        opacity: 0;
-        animation: seLineFade 9s linear forwards;
-    }
-    .se-cs-line .ts   { color: var(--text-muted); }
-    .se-cs-line .tag  { color: var(--accent-bright); }
-    .se-cs-line .num  { color: var(--accent-gold); }
-    .se-cs-line .neg  { color: var(--accent-red); }
-    .se-cs-line .cursor {
-        display: inline-block; width: 6px; height: 1em;
-        background: var(--accent); margin-left: 2px;
-        animation: seCursorBlink 0.8s steps(1) infinite;
-        vertical-align: text-bottom;
-    }
-    @keyframes seCursorBlink { 50% { opacity: 0; } }
-    @keyframes seLineFade {
-        0%   { opacity: 0; transform: translateY(4px); }
-        12%  { opacity: 0.95; transform: translateY(0); }
-        80%  { opacity: 0.95; }
-        100% { opacity: 0; transform: translateY(-4px); }
-    }
-    @media (max-width: 1100px) { .se-cs-paragraph { display: none; } }
-    body.light-mode .se-cs-paragraph { opacity: 0.22; }
-
     /* (FAB no longer uses the old SVG pupil-look / frame keyframes.) */
 
     /* ── Chat panel — the palantír "blooms" outward from the FAB.
@@ -4399,9 +4426,9 @@
     line-height: 1.2;
 }
 .oc-strip-value {
-    font-size: 20px;
+    font-size: var(--sv-fs-figure, 20px);
     line-height: 1.15;
-    letter-spacing: -0.2px;   /* mono at size needs tightening, not opening */
+    letter-spacing: var(--sv-track-figure, -0.2px);   /* mono at size needs tightening, not opening */
 }
 .oc-strip-sub {
     font-size: 10.5px;
@@ -4964,6 +4991,29 @@ button:focus-visible,
     /* Geometry */
     --radius-md:   8px;
     --se-panel-height: 420px;
+}
+/* Light mode, frozen (UI plan §15, 2026-11-07). The comment above is half
+   right: a var() here is resolved where the alias is DECLARED, on :root,
+   and the result inherits as a value. Light mode never redefined the
+   aliases, so it computed the old dark root's colours for them; S1a's
+   re-pointed root would have moved them (--down from #d03030 to the loss
+   coral, 5.06:1 on a white card to 2.77). They are restated here at the
+   values light mode computes on origin/main ede54d0. */
+body.light-mode {
+    --text: #daf0e6;
+    --text2: #7aaa8a;
+    --text3: #3a6850;
+    --bg: #060e0a;
+    --bg2: #081410;
+    --bg3: #0a1a14;
+    --bg-alt: #081410;
+    --bg-elev: #0e2218;
+    --bg-darker: #030806;
+    --accent-green: #00e868;
+    --down: #d03030;
+    --purple: #8840d0;
+    --gold: #d8b020;
+    --blue: #30a0e8;
 }
 
 /* ── The lead metric ─────────────────────────────────────────────────────
@@ -5577,12 +5627,14 @@ body.light-mode .il-overlay { background: var(--bg-secondary); }
     0%, 100% { opacity: .55; transform: scale(1); }
     50%      { opacity: .95; transform: scale(1.04); }
 }
+/* A clock is a figure: the number face, at 400 (2026-11-12; it asked for
+   Orbitron at 200 and got 400). The lock's small words reach 11 px. */
 .il-clock {
-    font-family: var(--font-display); font-size: 46px; font-weight: 200;
+    font-family: var(--sv-font-mono, var(--font-mono)); font-size: 46px; font-weight: 400;
     letter-spacing: .06em; color: var(--text-primary); line-height: 1;
 }
 .il-standby {
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: .28em;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .28em;
     text-transform: uppercase; color: var(--text-muted); margin-top: 12px;
 }
 /* Everything interactive fades in together once the screen is woken. */
@@ -5652,7 +5704,7 @@ body.light-mode .il-overlay { background: var(--bg-secondary); }
 }
 .il-sub {
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 3px;
     text-transform: uppercase;
     color: var(--text-muted);
@@ -6626,7 +6678,7 @@ body.light-mode .sv-bars-base { stroke: var(--border-glow); }
    namespaces the gradient per instance and sets the paint inline, so this
    only carries the opacity. */
 .oc-sparkline-fill { opacity: 0.18; }
-.oc-sparkline-dot { fill: var(--accent); }
+.oc-sparkline-dot { fill: var(--sv-up, var(--accent)); }
 .oc-sparkline.bearish .oc-sparkline-dot { fill: var(--accent-red); }
 .oc-sparkline-ref {
     /* Was rgba(255,255,255,0.06) — a white line on a white card. */
@@ -7546,10 +7598,10 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
 }
 .tk-lbl { font-size: 9px; letter-spacing: .18em; }
 .tk-px  { font-size: 14px; font-weight: 700; line-height: 1.1; }
-.tk-long  .tk-lbl, .tk-long  .tk-px { color: var(--accent); }
-.tk-short .tk-lbl, .tk-short .tk-px { color: var(--accent-red); }
-.tk-long:hover  { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.tk-short:hover { background: color-mix(in srgb, var(--accent-red) 14%, transparent); }
+.tk-long  .tk-lbl, .tk-long  .tk-px { color: var(--sv-up, var(--accent)); }
+.tk-short .tk-lbl, .tk-short .tk-px { color: var(--sv-down, var(--accent-red)); }
+.tk-long:hover  { background: var(--sv-up-wash, color-mix(in srgb, var(--accent) 14%, transparent)); }
+.tk-short:hover { background: var(--sv-down-wash, color-mix(in srgb, var(--accent-red) 14%, transparent)); }
 .tk-side:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tk-side[disabled] { cursor: default; opacity: .55; }
 .tk-side[disabled]:hover { background: transparent; }
@@ -7575,9 +7627,12 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     padding: 1px 5px; border-radius: 2px; line-height: 1.4;
 }
 .tk-venue--paper { color: var(--text-muted); border: 1px solid var(--border); }
+/* The ticket's REAL chip is the world family's (UI plan §10, S1a,
+   2026-11-06): white on the solid --sv-real, the only solid red, where it
+   was a red word on a red wash that read as a loss. */
 .tk-venue--live {
-    color: var(--accent-red); border: 1px solid var(--accent-red);
-    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+    color: var(--sv-real-ink, var(--accent-red)); border: 1px solid var(--sv-real, var(--accent-red));
+    background: var(--sv-real, color-mix(in srgb, var(--accent-red) 12%, transparent));
 }
 .tk-v { font-size: 11px; color: var(--text-secondary); }
 /* A quote too old to trade on stops claiming a price. The buttons stay

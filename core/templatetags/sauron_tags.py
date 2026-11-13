@@ -95,6 +95,27 @@ def get_theme(context):
     return "dark"
 
 @register.simple_tag(takes_context=True)
+def get_ambience(context):
+    """How much of Sauron's theme the page shows: "magic" (embers, light,
+    moments), "calm" or "off", printed onto <body data-sv-ambience> and
+    onto the user menu's control (the magic kept, 2026-11-12). The
+    operator's own choice, from his profile like the theme, which the same
+    request has already read. "magic" for an anonymous user, for a user
+    with no profile yet, on any error, and for a value that is not one of
+    the three: the page never carries an Ambience its sheets and scripts
+    do not know. Display only: no engine, bot, Orc, alert, gate or ticket
+    reads it."""
+    request = context.get("request")
+    if request and hasattr(request, "user") and request.user.is_authenticated:
+        try:
+            ambience = request.user.trader_profile.ambience
+        except Exception:
+            return "magic"
+        if ambience in ("magic", "calm", "off"):
+            return ambience
+    return "magic"
+
+@register.simple_tag(takes_context=True)
 def tour_pending(context):
     """True when this user should see the guided tour: authenticated with
     no TraderProfile row yet, or a profile whose tour_completed_at is
@@ -584,3 +605,61 @@ def money_world(value, compact=""):
         words = "REAL"
     return format_html('<span class="sv-world sv-world--{}" title="{}">{}</span>',
                        key, _WORLD_TITLES[key], words)
+
+
+# ── The number rules of the UI plan (§4.4, S1a, 2026-11-06) ─────────────────
+# Two filters for the pages S2 rebuilds; unused by any template until then
+# except /design/kit/, which shows them. Display only.
+
+#: At most this many significant digits in a quantity (8 for crypto's
+#: fractions); the whole part is never rounded away.
+QTY_DIGITS = 8
+
+
+@register.filter
+def qty(value):
+    """A quantity as a trader reads it: trailing zeros trimmed, thousands
+    grouped, at most eight significant digits. `20000.00000000` is
+    "20,000", `0.05000000` "0.05", `1.50000000` "1.5". Unknown is the
+    em-dash; a value that is not a number comes back as it was."""
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    if value is None or value == "":
+        return DASH
+    try:
+        d = Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, ValueError):
+        return value
+    if not d.is_finite():
+        return value
+    if d == 0:
+        return "0"
+    places = max(0, QTY_DIGITS - (d.adjusted() + 1))
+    d = d.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    sign = "-" if d < 0 else ""
+    whole, _, frac = format(abs(d), "f").partition(".")
+    frac = frac.rstrip("0")
+    out = "{:,}".format(int(whole))
+    return sign + out + ("." + frac if frac else "")
+
+
+#: A price's source as its name, never its tag (§3.7). The tag -> feed map
+#: is dashboard.chart_source's (FAMILY, FEED_NAME), one mapping; "paper" is
+#: Sauron's simulator.
+@register.filter
+def src_name(value):
+    """`yfinance_public` -> "Yahoo", `binance_ws` -> "Binance", `etoro` ->
+    "eToro", `paper` -> "paper". An unknown tag reads as words, never with
+    its underscores; no source is the em-dash."""
+    tag = str(value or "").strip()
+    if not tag:
+        return DASH
+    from dashboard.chart_source import FAMILY, FEED_NAME
+    low = tag.lower()
+    if low == "paper":
+        return "paper"
+    family = FAMILY.get(low)
+    if family and family in FEED_NAME:
+        return FEED_NAME[family]
+    if low in FEED_NAME:
+        return FEED_NAME[low]
+    return tag.replace("_", " ")

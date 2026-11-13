@@ -58,7 +58,11 @@
     <meta name="twitter:image" content="{% static_abs 'logo/og-card.png' %}">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    {# The faces (UI plan §4.1, S1a, 2026-11-06): Inter for words, JetBrains Mono for numbers. Google Fonts only. #}
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&amp;family=JetBrains+Mono:wght@400..700&amp;display=swap" rel="stylesheet">
+    {# The frame's faces (the magic kept, 2026-11-12): Orbitron for titles and the nav rows' face at 600. Two links, because text= applies to a whole request, and it is what keeps the digits out: Orbitron comes as a subset of the capitals, the Latin-1 capitals and the title punctuation only, since a digit must never be drawn in Orbitron (its 5, 6, 8 and 9 are the least distinct of the four faces). A title's digits fall to JetBrains Mono, the next face of --sv-font-display. #}
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&amp;text=ABCDEFGHIJKLMNOPQRSTUVWXYZ%C3%80%C3%81%C3%82%C3%84%C3%87%C3%88%C3%89%C3%8A%C3%8B%C3%8E%C3%8F%C3%94%C3%96%C3%99%C3%9B%C3%9C%20%C2%B7%E2%80%94%E2%80%93-%26%27%E2%80%99()%2F%3A.%2C!%3F%23%2B%25&amp;display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&amp;display=swap" rel="stylesheet">
 
 
 
@@ -77,6 +81,8 @@
     gesture from arriving.
     {% endcomment %}
     <script>window.SV_HOVER_BEAT_MS = 450;</script>
+    {# The design tokens (UI plan S1a, 2026-11-06), before sauron.css, whose old names read them. #}
+    <link rel="stylesheet" href="{% static 'css/sv-tokens.css' %}">
     <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
     {% comment %} The overlay system loads after sauron.css: it re-points the older
        hand-picked z-indexes onto one ladder, and that has to win. {% endcomment %}
@@ -117,11 +123,14 @@
     {# A group header whose class has no row left to show (2026-11-06): one rule per host and class, written by static/js/sv-rail-filters.js — in <head>, so no live region ever sees a client edit. #}
     <style id="svGrpOff"></style>
     <script src="{% static 'js/sv-rail-filters.js' %}" defer></script>
+    {# The kit (UI plan S1a, 2026-11-06): the components on the tokens, and the calm of a work page. After every shell sheet it restyles by class, before the phone tier. #}
+    <link rel="stylesheet" href="{% static 'css/sv-kit.css' %}">
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
 </head>
-<body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
+{# data-sv-ambience (the magic kept, 2026-11-12): how much of Sauron's theme shows: magic, calm or off. Display only. A page opts into the embers by filling sv_embers with " data-sv-embers", once it has proved no figure of its sits on the void (tests/test_magic_layer.py); that page also wears the Eye's light reaching the page (sv-kit.css, the void). A page with no embers opts into that light alone by filling sv_light with " data-sv-light", on the same proof (2026-11-13). #}
+<body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}" data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}{% block sv_light %}{% endblock %}>
 
 <!-- Animated grid background -->
 <div class="grid-bg"></div>
@@ -405,7 +414,6 @@
 
 <canvas id="particles-canvas"></canvas>
 <div id="navMiniTip" aria-hidden="true"></div>
-<canvas id="caustics-canvas"></canvas>
 
 {% block layout %}
 <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
@@ -431,10 +439,16 @@
                          stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter">
                         <polygon points="12,1.4 21.2,6.7 21.2,17.3 12,22.6 2.8,17.3 2.8,6.7"
                                  stroke-width="1"/>
+                        <defs><clipPath id="svBrandLid"><path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"/></clipPath></defs>
                         <path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"
                               fill="currentColor" fill-opacity="0.14" stroke-width="1.5"/>
-                        <circle cx="12" cy="12" r="3.1" fill="currentColor" stroke="none"/>
-                        <circle cx="12" cy="12" r="1.25" fill="var(--bg-secondary, #081410)" stroke="none"/>
+                        {# The iris looks toward the pointer under Ambience Magic (sv-moments.js moves this group, inside the lid's own almond). #}
+                        <g clip-path="url(#svBrandLid)">
+                            <g class="sv-brand-iris">
+                                <circle cx="12" cy="12" r="3.1" fill="currentColor" stroke="none"/>
+                                <circle cx="12" cy="12" r="1.25" fill="var(--bg-secondary, #081410)" stroke="none"/>
+                            </g>
+                        </g>
                         <path d="M12 1.4V3.2M12 22.6V20.8" stroke-width="0.9"/>
                     </svg>
                 </span>
@@ -752,6 +766,19 @@
                             <a class="um-link sv-phone-only" href="{% url 'toggle_theme' %}" role="menuitem">
                                 <span class="um-icon">&#9680;</span> Light / dark mode
                             </a>
+                        </div>
+                        {# His choice of Ambience (the magic kept, 2026-11-12): Magic, Calm or Off, saved on his profile. static/js/sv-ambience.js posts a click to set_ambience; only the server's 200 that echoes the value changes the body's attribute and the pressed button, and a failure writes "Not saved" into the note. Display only. The menu explains nothing more. #}
+                        {% get_ambience as sv_ambience %}
+                        <div class="um-section um-ambience" id="umAmbience" data-sv-ambience-url="{% url 'set_ambience' %}">
+                            <div class="um-ambience-head">
+                                <span class="sv-label" id="umAmbienceLabel">Ambience</span>
+                                <span class="um-ambience-note" role="status"></span>
+                            </div>
+                            <div class="sv-seg" role="group" aria-labelledby="umAmbienceLabel">
+                                <button type="button" class="sv-seg-btn" data-sv-ambience-set="magic" aria-pressed="{% if sv_ambience == 'magic' %}true{% else %}false{% endif %}">Magic</button>
+                                <button type="button" class="sv-seg-btn" data-sv-ambience-set="calm" aria-pressed="{% if sv_ambience == 'calm' %}true{% else %}false{% endif %}">Calm</button>
+                                <button type="button" class="sv-seg-btn" data-sv-ambience-set="off" aria-pressed="{% if sv_ambience == 'off' %}true{% else %}false{% endif %}">Off</button>
+                            </div>
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'notifications_inbox' %}" role="menuitem">
@@ -4249,49 +4276,6 @@
 })();
 </script>
 
-<!-- ═══════════════════════════════════════════════════════════════════ -->
-<!-- Cursor-tracking pupil for the background Sauron Eye                 -->
-<!-- ═══════════════════════════════════════════════════════════════════ -->
-<script>
-(function() {
-    var pupil = document.getElementById('globePupilGroup');
-    if (!pupil) return;
-    var prefersReducedMotion = window.matchMedia &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) return;
-
-    // Pupil-cursor track range in viewBox units. The 60-radius iris ring
-    // gives ~22 horizontal / 14 vertical headroom before the pupil clips.
-    var PUPIL_RANGE_X = 22;
-    var PUPIL_RANGE_Y = 14;
-    var W = window.innerWidth, H = window.innerHeight;
-    window.addEventListener('resize', function() {
-        W = window.innerWidth; H = window.innerHeight;
-    });
-
-    document.addEventListener('mousemove', function(e) {
-        var mx = (e.clientX / W - 0.5) * 2;   // -1..+1
-        var my = (e.clientY / H - 0.5) * 2;
-        var px = Math.max(-1, Math.min(1, mx));
-        var py = Math.max(-1, Math.min(1, my));
-        pupil.style.transform =
-            'translate(' + (px * PUPIL_RANGE_X) + 'px, ' + (py * PUPIL_RANGE_Y) + 'px)';
-    });
-
-    // Touch devices: idle drift so the eye still feels alive without cursor.
-    if ('ontouchstart' in window) {
-        var t0 = Date.now();
-        setInterval(function() {
-            var phase = (Date.now() - t0) / 1000;
-            var px = Math.sin(phase * 0.4) * 0.7;
-            var py = Math.cos(phase * 0.3) * 0.5;
-            pupil.style.transform =
-                'translate(' + (px * PUPIL_RANGE_X) + 'px, ' + (py * PUPIL_RANGE_Y) + 'px)';
-        }, 80);
-    }
-})();
-</script>
-
 <!-- UPGRADE-9: Sidebar edge toggle (identical to rail edge toggle) -->
 <button type="button" class="sidebar-toggle-btn" id="sidebarToggleBtn"
         onclick="toggleSidebar()" title="Toggle menu">
@@ -4301,200 +4285,15 @@
 </button>
 {% endblock %}
 
+{# The embers, calm (the magic kept, 2026-11-12): static/js/sv-embers.js draws them on the pages that opted in, under Ambience Magic, in the dark theme, and schedules nothing anywhere else, nor while the tab is hidden, the lock is up or a dialog holds the page. It replaces main's ember loop, the hidden globe's pupil and parallax loops and the water-light layer. sv-moments.js: the Eye's gaze and flare, and the lights of proven events. #}
+<script src="{% static 'js/sv-embers.js' %}" defer></script>
+<script src="{% static 'js/sv-moments.js' %}" defer></script>
+{# His choice of Ambience, from the user menu: sv-ambience.js saves it on his profile and changes the body's attribute on the server's answer only; the two scripts above and the sheets follow the attribute at once. #}
+<script src="{% static 'js/sv-ambience.js' %}" defer></script>
+
 <script>
+/* The topbar's clock, on its own. */
 (function() {
-    const canvas = document.getElementById('particles-canvas');
-    const ctx = canvas.getContext('2d');
-    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-    resize(); window.addEventListener('resize', resize);
-
-    /* ── Ticker data pool for particle labels ─────────────────── */
-    var TICKERS = [
-        {sym:'BTC',base:67500},{sym:'ETH',base:3420},{sym:'SOL',base:178},
-        {sym:'AAPL',base:192},{sym:'TSLA',base:248},{sym:'NVDA',base:880},
-        {sym:'MSFT',base:425},{sym:'GOOG',base:176},{sym:'AMZN',base:185},
-        {sym:'META',base:510},{sym:'XAU',base:2340},{sym:'EUR/USD',base:1.085},
-        {sym:'GBP/USD',base:1.268},{sym:'JPY',base:154.2},{sym:'SPX',base:5210},
-        {sym:'NAS100',base:18350},{sym:'BNB',base:605},{sym:'XRP',base:0.62},
-        {sym:'DOGE',base:0.165},{sym:'ADA',base:0.48},{sym:'DOT',base:7.8},
-        {sym:'CL',base:78.5},{sym:'NG',base:2.15},{sym:'SI',base:28.4}
-    ];
-    function tickerPrice(t, time) {
-        var swing = t.base * 0.03;
-        return t.base + Math.sin(time * 0.0007 + t.base) * swing
-            + Math.cos(time * 0.0013 + t.sym.length) * swing * 0.5;
-    }
-
-    /* ── Embers & Ash particle system ─────────────────────────── */
-    var PARTICLE_COUNT = 240;
-    var ASH_COUNT = 50;
-    var particles = [];
-    var ashes = [];
-
-    class Ember {
-        constructor() { this.spawn(); }
-        spawn() {
-            this.x = -10 - Math.random() * 100;
-            this.y = Math.random() * canvas.height;
-            this.size = Math.random() * 3.0 + 0.4;
-            this.speed = 0.25 + Math.random() * 0.8 + this.size * 0.18;
-            this.drift = (Math.random() - 0.5) * 0.35;
-            this.alpha = Math.random() * 0.32 + 0.06;
-            this.pulse = Math.random() * Math.PI * 2;
-            this.pulseSpeed = 0.012 + Math.random() * 0.025;
-            /* Tail — ~40% of larger particles get a fading trail */
-            this.hasTail = this.size > 1.0 && Math.random() < 0.4;
-            this.trail = [];
-            this.trailMax = this.hasTail ? (8 + Math.floor(Math.random() * 10)) : 0;
-            /* Ticker label — ~30% of particles get one */
-            this.ticker = null;
-            if (this.size > 1.4 && Math.random() < 0.35) {
-                this.ticker = TICKERS[Math.floor(Math.random() * TICKERS.length)];
-                this.pricePhase = Math.random() * 10000;
-            }
-        }
-        update() {
-            if (this.hasTail) {
-                this.trail.push({x: this.x, y: this.y});
-                if (this.trail.length > this.trailMax) this.trail.shift();
-            }
-            this.x += this.speed;
-            this.y += this.drift + Math.sin(this.pulse) * 0.18;
-            this.pulse += this.pulseSpeed;
-            if (this.x > canvas.width + 80 || this.y < -30 || this.y > canvas.height + 30) {
-                this.trail = [];
-                this.spawn();
-            }
-        }
-        draw(now) {
-            var a = this.alpha * (0.6 + 0.4 * Math.sin(this.pulse));
-            /* Fading tail — oldest = faintest */
-            if (this.hasTail && this.trail.length > 1) {
-                for (var ti = 0; ti < this.trail.length; ti++) {
-                    var frac = ti / this.trail.length;
-                    var tailA = a * frac * 0.35;
-                    var tailR = this.size * frac * 0.7;
-                    if (tailR < 0.3) continue;
-                    ctx.beginPath();
-                    ctx.arc(this.trail[ti].x, this.trail[ti].y, tailR, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(0,232,104,' + tailA.toFixed(4) + ')';
-                    ctx.fill();
-                }
-            }
-            /* Glow halo — stronger */
-            var glowR = this.size * 4.5;
-            ctx.beginPath(); ctx.arc(this.x, this.y, glowR, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.08).toFixed(4) + ')'; ctx.fill();
-            /* Mid glow */
-            if (this.size > 0.8) {
-                ctx.beginPath(); ctx.arc(this.x, this.y, this.size * 2.5, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.18).toFixed(4) + ')'; ctx.fill();
-            }
-            /* Core */
-            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,232,104,' + a.toFixed(4) + ')'; ctx.fill();
-            /* Ticker label */
-            if (this.ticker) {
-                var price = tickerPrice(this.ticker, now + this.pricePhase);
-                var decimals = this.ticker.base >= 100 ? 1 : this.ticker.base >= 1 ? 2 : 4;
-                var labelA = a * 0.7;
-                ctx.font = '600 9px "Share Tech Mono", monospace';
-                ctx.fillStyle = 'rgba(0,232,104,' + labelA.toFixed(4) + ')';
-                ctx.fillText(this.ticker.sym, this.x + this.size + 4, this.y - 3);
-                ctx.font = '8px "Share Tech Mono", monospace';
-                ctx.fillStyle = 'rgba(218,240,230,' + (labelA * 0.8).toFixed(4) + ')';
-                ctx.fillText(price.toFixed(decimals), this.x + this.size + 4, this.y + 8);
-            }
-        }
-    }
-
-    class Ash {
-        constructor() { this.spawn(); }
-        spawn() {
-            this.x = -10 - Math.random() * 200;
-            this.y = Math.random() * canvas.height;
-            this.w = 2 + Math.random() * 6;
-            this.h = 1 + Math.random() * 3;
-            this.speed = 0.12 + Math.random() * 0.35;
-            this.drift = (Math.random() - 0.5) * 0.3;
-            this.rot = Math.random() * Math.PI * 2;
-            this.rotSpeed = (Math.random() - 0.5) * 0.015;
-            this.alpha = 0.03 + Math.random() * 0.08;
-            this.wobble = Math.random() * Math.PI * 2;
-            this.wobbleAmp = 0.15 + Math.random() * 0.2;
-        }
-        update() {
-            this.x += this.speed;
-            this.y += this.drift + Math.sin(this.wobble) * this.wobbleAmp;
-            this.rot += this.rotSpeed;
-            this.wobble += 0.012;
-            if (this.x > canvas.width + 30) this.spawn();
-        }
-        draw() {
-            ctx.save();
-            ctx.translate(this.x, this.y);
-            ctx.rotate(this.rot);
-            /* Soft outer glow on ash */
-            ctx.fillStyle = 'rgba(0,180,80,' + (this.alpha * 0.25).toFixed(4) + ')';
-            ctx.fillRect(-this.w / 2 - 1, -this.h / 2 - 1, this.w + 2, this.h + 2);
-            ctx.fillStyle = 'rgba(60,120,80,' + this.alpha + ')';
-            ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
-            ctx.restore();
-        }
-    }
-
-    for (var i = 0; i < PARTICLE_COUNT; i++) {
-        var p = new Ember(); p.x = Math.random() * canvas.width; particles.push(p);
-    }
-    for (var j = 0; j < ASH_COUNT; j++) {
-        var a = new Ash(); a.x = Math.random() * canvas.width; ashes.push(a);
-    }
-
-    function animate() {
-        var now = performance.now();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ashes.forEach(function(a) { a.update(); a.draw(); });
-        particles.forEach(function(p) { p.update(); p.draw(now); });
-        requestAnimationFrame(animate);
-    }
-    animate();
-
-    /* ── Mouse parallax on globe-eye + eye-glow-shadow ─────── */
-    var globe = document.querySelector('.globe-eye-bg');
-    var eyeShadow = document.querySelector('.eye-glow-shadow');
-    /* The circuit layer shares the eye's coordinate system: its bond pads sit
-       on the die edge, its traces leave the lid apexes, its power buses meet
-       the eye tips. All of that is registration, and the parallax used to move
-       the eye by up to 60px while leaving the board where it was — so on the
-       first mouse move the pads slid off the iris and ploughed across the
-       striations, and the traces detached from the lid. The two layers have to
-       travel together or they must not share coordinates at all. */
-    var circuits = document.querySelector('.globe-circuits-bg');
-    /* Smoothed (lerped) target so the eye eases toward the cursor instead
-       of jittering frame-to-frame */
-    var pTargetX = 0, pTargetY = 0, pCurX = 0, pCurY = 0;
-    document.addEventListener('mousemove', function(e) {
-        var w = window.innerWidth || canvas.width || 1;
-        var h = window.innerHeight || canvas.height || 1;
-        pTargetX = (e.clientX / w - 0.5) * 2;
-        pTargetY = (e.clientY / h - 0.5) * 2;
-    });
-    (function loop() {
-        pCurX += (pTargetX - pCurX) * 0.08;
-        pCurY += (pTargetY - pCurY) * 0.08;
-        if (globe || circuits) {
-            var eyeShift =
-                'translate(calc(-50% + ' + (pCurX * 60) + 'px), calc(-50% + ' + (pCurY * 60) + 'px))';
-            if (globe) globe.style.transform = eyeShift;
-            if (circuits) circuits.style.transform = eyeShift;
-        }
-        if (eyeShadow) {
-            eyeShadow.style.transform =
-                'translate(calc(-50% + ' + (pCurX * 110) + 'px), calc(-50% + ' + (pCurY * 110) + 'px))';
-        }
-        requestAnimationFrame(loop);
-    })();
-
     function updateClock(){
         const el=document.getElementById('clock');
         if(el){
@@ -4509,85 +4308,6 @@
         }
     }
     setInterval(updateClock,1000);updateClock();
-})();
-</script>
-
-<script>
-/* ── Underwater caustics / light-through-water effect ─────── */
-(function(){
-    var c = document.getElementById('caustics-canvas');
-    if (!c) return;
-    var gl = c.getContext('2d');
-    function resize(){ c.width = window.innerWidth; c.height = window.innerHeight; }
-    resize(); window.addEventListener('resize', resize);
-
-    var t = 0;
-    /* Simple 2D value noise for organic movement */
-    function noise(x, y) {
-        var ix = Math.floor(x), iy = Math.floor(y);
-        var fx = x - ix, fy = y - iy;
-        fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
-        var a = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453;
-        a = a - Math.floor(a);
-        var b = Math.sin((ix+1) * 127.1 + iy * 311.7) * 43758.5453;
-        b = b - Math.floor(b);
-        var cc = Math.sin(ix * 127.1 + (iy+1) * 311.7) * 43758.5453;
-        cc = cc - Math.floor(cc);
-        var d = Math.sin((ix+1) * 127.1 + (iy+1) * 311.7) * 43758.5453;
-        d = d - Math.floor(d);
-        return a + (b-a)*fx + (cc-a)*fy + (a-b-cc+d)*fx*fy;
-    }
-
-    function render(){
-        t += 0.003;
-        gl.clearRect(0, 0, c.width, c.height);
-
-        /* Overall intensity breathes slowly — stronger */
-        var breath = 0.7 + 0.3 * Math.sin(t * 0.7);
-
-        /* Draw several soft light shafts — more, stronger */
-        var shaftCount = 7;
-        for (var i = 0; i < shaftCount; i++) {
-            var seed = i * 1.618;
-            var cx = c.width * (0.1 + 0.8 * noise(seed, t * 0.12 + i));
-            var cy = c.height * (0.15 + 0.7 * noise(seed + 50, t * 0.08 + i));
-            var r = (250 + 350 * noise(seed + 100, t * 0.06)) * (c.width / 1400);
-            var intensity = breath * (0.4 + 0.6 * noise(seed + 200, t * 0.15));
-
-            var grd = gl.createRadialGradient(cx, cy, 0, cx, cy, r);
-            grd.addColorStop(0, 'rgba(0,232,104,' + (0.14 * intensity).toFixed(4) + ')');
-            grd.addColorStop(0.4, 'rgba(0,180,80,' + (0.06 * intensity).toFixed(4) + ')');
-            grd.addColorStop(1, 'rgba(0,232,104,0)');
-            gl.fillStyle = grd;
-            gl.fillRect(cx - r, cy - r, r * 2, r * 2);
-        }
-
-        /* Fine caustic ripples — small bright cells */
-        var cellSize = 120;
-        var cols = Math.ceil(c.width / cellSize) + 1;
-        var rows = Math.ceil(c.height / cellSize) + 1;
-        for (var gx = 0; gx < cols; gx++) {
-            for (var gy = 0; gy < rows; gy++) {
-                var n1 = noise(gx * 0.8 + t * 0.5, gy * 0.8 + t * 0.3);
-                var n2 = noise(gx * 1.2 - t * 0.4, gy * 1.2 + t * 0.2);
-                var val = n1 * n2;
-                if (val > 0.3) {
-                    var bx = gx * cellSize + noise(gx + t, gy) * 40;
-                    var by = gy * cellSize + noise(gx, gy + t) * 40;
-                    var br = 25 + val * 70;
-                    var ba = (val - 0.3) * 0.22 * breath;
-                    var bg = gl.createRadialGradient(bx, by, 0, bx, by, br);
-                    bg.addColorStop(0, 'rgba(0,232,104,' + ba.toFixed(4) + ')');
-                    bg.addColorStop(1, 'rgba(0,232,104,0)');
-                    gl.fillStyle = bg;
-                    gl.fillRect(bx - br, by - br, br * 2, br * 2);
-                }
-            }
-        }
-
-        requestAnimationFrame(render);
-    }
-    render();
 })();
 </script>
 
@@ -6872,10 +6592,6 @@ if ('serviceWorker' in navigator) {
 {% if request.user.is_authenticated %}
 <!-- ── Phase 64: Sauron's Eye floating chat shortcut ─────────────────── -->
 
-{# ── Phase 64: 2 background code-stream paragraphs (flank the screen) ── #}
-<div class="se-cs-paragraph left"  id="seCsParaLeft"  aria-hidden="true"></div>
-<div class="se-cs-paragraph right" id="seCsParaRight" aria-hidden="true"></div>
-
 {% comment %}Gollum — the guide who knows the way to Mordor. Bottom-left,
 opposite the Palantír: one orb SEES (Ask Sauron), the other POINTS. He
 searches every page and section from the sidebar's own links plus his
@@ -8209,164 +7925,6 @@ never nags. He never acts.{% endcomment %}
     document.getElementById('seResizeL').addEventListener('pointerdown', function(e){ startResize('l', e); });
     document.getElementById('seResizeT').addEventListener('pointerdown', function(e){ startResize('t', e); });
     document.getElementById('seResizeTL').addEventListener('pointerdown', function(e){ startResize('tl', e); });
-
-    // ── Ambient code-stream — fake "Sauron's current activity" feed ──
-    // Two background paragraphs, each typing log lines letter-by-letter
-    // and fading out. Decoration only. Honors prefers-reduced-motion.
-    var prefersReduced = window.matchMedia &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var streamLeft  = document.getElementById('seCsParaLeft');
-    var streamRight = document.getElementById('seCsParaRight');
-
-    if (streamLeft && streamRight && !prefersReduced) {
-        var TEMPLATES = [
-            'brain.observe(<tag>regime</tag>=<num>{regime}</num>)',
-            '[<ts>{ts}</ts>] gate.evaluate <tag>{rule}</tag> -> {decision}',
-            'RuleControl.tick id=<num>{rid}</num> stage=<tag>{stage}</tag>',
-            'signal.grade <tag>{sym}</tag> realized_r=<num>{r}</num>',
-            'audit.record kind=<tag>{ev}</tag> hash=<ts>{hash}</ts>',
-            'orchestrator.scan exposure=<num>{exp}</num>%',
-            'eye.observe market_state... <num>{n}</num> rows',
-            'AssetBotTrade.close <tag>{sym}</tag> {ws}<num>{r}</num>R',
-            'critic.dissent <tag>{agent}</tag> -> <num>{c}</num>',
-            'consolidate.run promoted=<num>{n}</num> pruned=<num>{m}</num>',
-            'allocator.weight <tag>{rule}</tag> = <num>{w}</num>',
-            'OpportunitySetup.match <tag>{sym}</tag> score=<num>{s}</num>',
-            'pattern_miner.lift = <num>{lift}</num> (apriori)',
-            'brain.synthesize ms=<num>{ms}</num> tok=<num>{t}</num>',
-            'demoter.check <tag>{rule}</tag> n_losses=<num>{n}</num>',
-            'kelly.f* = <num>{k}</num> · clamped={ck}',
-            'orchestrator.theme <tag>{theme}</tag> contrib=<num>{c}</num>',
-            'tax_lot.consume FIFO qty=<num>{q}</num>',
-            'health.check db=<tag>ok</tag> redis=<tag>ok</tag>',
-            'walk_forward.split train=<num>70</num>% test=<num>30</num>%',
-            'hypothesis.vote {agent} pred=<num>{p}</num>',
-            'IBKR.fetch <tag>{sym}</tag> bars=<num>{b}</num>',
-            '[<ts>{ts}</ts>] briefing.fan_out users=<num>{n}</num>',
-            'price_alert.fire <tag>{sym}</tag> @ <num>{px}</num>',
-            'reconcile.orphan ageMin=<num>{m}</num>',
-        ];
-        var SYMBOLS = ['BTCUSD','ETHUSD','EURUSD','XAUUSD','SPX','AAPL','TSLA','NDX','USDJPY','SOLUSD','GBPUSD','CL','NG','HG','BNBUSD','META','NVDA'];
-        var RULES   = ['breakout_v3','meanrev_macro','momo_intraday','vol_squeeze','rsd_filter','fvg_strict','smc_bos_v2','liq_sweep'];
-        var THEMES  = ['usd_beta','equity_beta','vol_long','tech_sector','crude','gold'];
-        var EVENTS  = ['trade_open','trade_close','gate_reject','rule_demoted','proposal_approved','brain_soft_block'];
-        var AGENTS  = ['sauron_mind','critic','strategist','generator'];
-        var REGIMES = ['trending','choppy','risk_on','risk_off','consolidating'];
-        var STAGES  = ['RESEARCH','PAPER','LIVE_SMALL','LIVE_FULL'];
-        var DECIS   = ['allow','reject','soft_block'];
-
-        function pick(a) { return a[(Math.random() * a.length) | 0]; }
-        function rand(min, max, dp) {
-            var v = min + Math.random() * (max - min);
-            return dp == null ? Math.round(v) : v.toFixed(dp);
-        }
-        function timestamp() {
-            var d = new Date();
-            return ('0' + d.getHours()).slice(-2) + ':' +
-                   ('0' + d.getMinutes()).slice(-2) + ':' +
-                   ('0' + d.getSeconds()).slice(-2);
-        }
-        function shortHash() {
-            var c = '0123456789abcdef'; var s = '';
-            for (var i = 0; i < 8; i++) s += c[(Math.random() * 16) | 0];
-            return s;
-        }
-        function buildLine() {
-            var t = pick(TEMPLATES);
-            var r = (Math.random() * 6 - 3);  // -3..+3 R
-            var rstr = (r >= 0 ? '+' : '') + r.toFixed(2);
-            return t
-                .replace('{ts}',     timestamp())
-                .replace('{sym}',    pick(SYMBOLS))
-                .replace('{rule}',   pick(RULES))
-                .replace('{theme}',  pick(THEMES))
-                .replace('{ev}',     pick(EVENTS))
-                .replace('{agent}',  pick(AGENTS))
-                .replace('{regime}', pick(REGIMES))
-                .replace('{stage}',  pick(STAGES))
-                .replace('{decision}', pick(DECIS))
-                .replace('{ws}',     r >= 0 ? '+' : '')
-                .replace('{r}',      rstr)
-                .replace('{rid}',    rand(1, 99))
-                .replace('{exp}',    rand(20, 90))
-                .replace('{n}',      rand(1, 250))
-                .replace('{m}',      rand(0, 50))
-                .replace('{c}',      rand(0, 1, 2))
-                .replace('{w}',      rand(0, 1, 3))
-                .replace('{s}',      rand(0, 1, 2))
-                .replace('{lift}',   rand(1, 5, 2))
-                .replace('{ms}',     rand(800, 18000))
-                .replace('{t}',      rand(2000, 12000))
-                .replace('{k}',      rand(0, 0.4, 3))
-                .replace('{ck}',     Math.random() > 0.5 ? '<tag>true</tag>' : '<tag>false</tag>')
-                .replace('{p}',      rand(0, 1, 2))
-                .replace('{q}',      rand(1, 100))
-                .replace('{px}',     rand(20, 5000))
-                .replace('{b}',      rand(50, 500))
-                .replace('{hash}',   shortHash());
-        }
-
-        // Type a single line letter-by-letter into a target stream. Returns
-        // a promise that resolves once the line is fully drawn.
-        function typeLine(stream) {
-            return new Promise(function(resolve) {
-                var raw = buildLine();
-                var line = document.createElement('div');
-                line.className = 'se-cs-line';
-                stream.appendChild(line);
-                // Keep paragraph bounded: keep at most last 8 lines.
-                while (stream.childNodes.length > 8) {
-                    stream.removeChild(stream.firstChild);
-                }
-                // Type out incrementally, but we need to render embedded
-                // <ts>/<tag>/<num> markers as styled spans. Strategy: parse
-                // raw into a sequence of (text, className?) chunks, then
-                // type chunk-by-chunk character-by-character.
-                var chunks = [];
-                var re = /<(ts|tag|num|neg)>([\s\S]*?)<\/\1>|([^<]+)/g, m;
-                while ((m = re.exec(raw)) !== null) {
-                    if (m[1]) chunks.push({ cls: m[1], txt: m[2] });
-                    else      chunks.push({ cls: null, txt: m[3] });
-                }
-                var ci = 0, charI = 0, currentSpan = null;
-                function step() {
-                    if (ci >= chunks.length) {
-                        // Add blinking cursor at end briefly, then resolve.
-                        var cur = document.createElement('span');
-                        cur.className = 'cursor';
-                        line.appendChild(cur);
-                        setTimeout(function() {
-                            if (cur.parentNode) cur.parentNode.removeChild(cur);
-                            resolve();
-                        }, 380);
-                        return;
-                    }
-                    var ch = chunks[ci];
-                    if (charI === 0) {
-                        currentSpan = document.createElement(ch.cls ? 'span' : 'span');
-                        if (ch.cls) currentSpan.className = ch.cls;
-                        line.appendChild(currentSpan);
-                    }
-                    currentSpan.textContent += ch.txt[charI];
-                    charI++;
-                    if (charI >= ch.txt.length) { ci++; charI = 0; }
-                    setTimeout(step, 12 + Math.random() * 18);
-                }
-                step();
-            });
-        }
-
-        // Independent loop per side — staggered start so they don't sync.
-        function loop(stream, initialDelay) {
-            setTimeout(function tick() {
-                typeLine(stream).then(function() {
-                    setTimeout(tick, 600 + Math.random() * 1800);
-                });
-            }, initialDelay);
-        }
-        loop(streamLeft,  300);
-        loop(streamRight, 1100);
-    }
 })();
 </script>
 {% endif %}
