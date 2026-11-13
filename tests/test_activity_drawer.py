@@ -42,6 +42,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from dashboard import activity_feed as feed
+from tests.cold_cache import _cold_cache
 
 URL = "/api/activity/feed/"
 BASE = Path(settings.BASE_DIR)
@@ -428,6 +429,9 @@ class TheLogTests(TestCase):
 class TheCeilingTests(TestCase):
 
     def setUp(self):
+        # A presence stamp an earlier test left could run out between the
+        # warm-up poll and the measured one: from cold, the warm-up pays it.
+        _cold_cache()
         self.user = _user()
         self.client.force_login(self.user)
 

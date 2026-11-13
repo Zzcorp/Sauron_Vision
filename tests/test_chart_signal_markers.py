@@ -53,6 +53,8 @@ from django.contrib.auth.models import User
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, TestCase
 
+from tests.cold_cache import _cold_cache
+
 NODE = shutil.which("node")
 SCRIPT_RE = re.compile(r"<script>(.*?)</script>", re.S)
 HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
@@ -154,6 +156,9 @@ def _signal(inst, **kw):
 class ThePayloadCarriesTheCardTests(TestCase):
 
     def setUp(self):
+        # A presence stamp or chart overlay an earlier test left could run
+        # out between "before" and "after": from cold, the warm-up pays them.
+        _cold_cache()
         self.user = User.objects.create_user("sigdot_u", password="x")
         self.client.force_login(self.user)
         self.inst = _instrument("EURUSD", "forex", last="1.08425")
