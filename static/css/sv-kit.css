@@ -1435,6 +1435,16 @@ body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]):
     content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none; will-change: transform;
     background: var(--sv-void-light), var(--sv-void-vignette);
 }
+/* The Eye's light reaches the page only where no figure sits on the void.
+   It is fixed to the window, so whatever a page puts in its band, at any
+   scroll, takes it: a page wears it once it has proved that no figure of
+   its sits on the void or on a see-through ground. A page with the embers
+   has proved it (data-sv-embers, base.html); the kit opts in on its own
+   (data-sv-light). Every other page keeps the light above, which fades
+   out under the chrome (check, 2026-11-13). */
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]):is([data-sv-embers], [data-sv-light])::before {
+    background: var(--sv-void-light-reach), var(--sv-void-vignette);
+}
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])::after {
     content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; will-change: transform;
     background-image: var(--sv-void-grain); opacity: var(--sv-grain-opacity);
@@ -1516,13 +1526,25 @@ body:not(.light-mode) .sv-void-pill {
    blur filter); under Magic, where motion is allowed, it breathes: opacity
    and transform only, so the compositor runs it. The mark itself never
    floats. Its iris looks toward the pointer (sv-moments.js).
-   The halo holds .16 to half its radius, so the breath reads at arm's
-   length (review 2026-11-12, his decision). It fades out at 70 %: the
-   halo is a 70 px circle whose gradient runs to the box's corner, so its
-   own circle cuts it at 70.7 %, and a later end leaves a hard edge. */
+   The halo holds .16 to half its gradient's ray, so the breath reads at
+   arm's length (review 2026-11-12, his decision). It fades out at 70 %:
+   the halo is a 70 px circle whose gradient runs to the box's corner, so
+   its own circle cuts it at 70.7 %, and a later end leaves a hard edge.
+   In the collapsed sidebar (68 px, which clips what overflows it) the
+   mark is 30 px, its centre 29 px under the window's top and 30.5 px from
+   the sidebar's sides (inside its edge and its scrollbar): at 70 px the
+   window cut the halo at the breath's peak and the sidebar cut its side
+   (check, 2026-11-13). It is 52 px there, so it fades out 27.3 px from the
+   centre at the peak, inside both; and it holds .16 to 40 % of its ray,
+   so its fall to nothing runs over 11.7 px, not 7.8, and no step between
+   two device pixels passes 3 levels (at 50 % one reached 4). */
 body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .brand-eye-wrap::before {
     opacity: .7; filter: none;
     background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 50%, rgba(0,232,104,0) 70%);
+}
+body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar.mini .brand-eye-wrap::before {
+    width: 52px; height: 52px;
+    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%);
 }
 @media (prefers-reduced-motion: no-preference) {
     body:not(.light-mode)[data-sv-ambience="magic"] .brand-eye-wrap::before {

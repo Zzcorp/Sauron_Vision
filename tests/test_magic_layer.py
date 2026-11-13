@@ -268,17 +268,25 @@ class EyeLitTokenTests(SimpleTestCase):
         self.assertEqual(focus, {"outline": "2px solid var(--sv-eye)", "outline-offset": "2px"})
 
     def test_the_void_and_the_motion_tokens(self):
-        """The Eye's light from above reaches the page. Updated deliberately
-        (2026-11-12): the operator's brief ("magique dans l'esprit de
-        Sauron, high end et financier") and his decision on the review's
-        CR2. C1's light, 900 x 360 px centred 110 px above the window,
-        faded out at y = 156 px, where the chrome ends at 142 and the first
-        card starts at 184: it added 0.0 levels to the page. Centred 150 px
-        down, 1000 x 420 px, it lights the empty page just under the chrome
-        and is gone by y = 460 (LightFromAboveMeasuredTests). The cards are
-        opaque and it is behind them: no figure takes it."""
+        """Two lights from above. Updated deliberately (2026-11-13, the
+        check of CR2): the Eye's light that reaches the page (the
+        operator's brief, "magique dans l'esprit de Sauron, high end et
+        financier", and his decision on the review's CR2: 1000 x 420 px
+        centred 150 px down, it lights the empty page just under the chrome
+        and is gone by y = 460) is fixed to the window, so it lies under
+        whatever a page puts there, at any scroll. On five pages the
+        commit never measured, figures on the void took it (+4 to +7
+        levels). It is --sv-void-light-reach now, worn only by a page
+        proven to put no figure on the void (sv-kit.css, the void); every
+        other page keeps C1's light, --sv-void-light again: 900 x 360 px
+        centred 110 px above the window, it fades out at y = 156 px, under
+        the chrome, and adds nothing to the page (LightFromAboveMeasuredTests
+        reads every page of the nav)."""
         r = self.root
         self.assertEqual(r["--sv-void-light"],
+                         "radial-gradient(900px 360px at 46% -110px, rgba(0,232,104,.10), "
+                         "rgba(0,232,104,.025) 50%, rgba(0,232,104,0) 74%)")
+        self.assertEqual(r["--sv-void-light-reach"],
                          "radial-gradient(1000px 420px at 46% 150px, rgba(0,232,104,.06), "
                          "rgba(0,232,104,.02) 50%, rgba(0,232,104,0) 74%)")
         self.assertIn("rgba(0,0,0,.42)", r["--sv-void-vignette"])
@@ -673,6 +681,20 @@ class VoidAndEmbersSourceTests(SimpleTestCase):
                          ("fixed", "0", "-1", "none", "transform", "var(--sv-void-grain)",
                           "var(--sv-grain-opacity)"))
 
+    def test_the_light_that_reaches_the_page_only_where_no_figure_sits_on_the_void(self):
+        """2026-11-13, the check of CR2: the light that reaches the page is
+        fixed to the window, under whatever scrolls there. A page wears it
+        once it has proved no figure of its sits on the void: a page with
+        the embers (data-sv-embers), and the kit by its own opt-in
+        (data-sv-light). Every other page keeps C1's light, which fades
+        out under the chrome. One rule names the token, and only it."""
+        kit = read(KIT)
+        reach = LIT + ":is([data-sv-embers], [data-sv-light])::before"
+        self.assertEqual(block(kit, reach), {"background": "var(--sv-void-light-reach), var(--sv-void-vignette)"})
+        named = [sel for prelude, body, _ctx in rules(read(KIT)) + rules(read(SAURON))
+                 if "--sv-void-light-reach" in body for sel in selectors(prelude)]
+        self.assertEqual(named, [reach])
+
     def test_nothing_is_attached_to_the_viewport_by_a_background(self):
         """background-attachment: fixed makes the main thread repaint the
         page behind every frame (measured: 2.6 times the cost at rest)."""
@@ -710,13 +732,20 @@ class VoidAndEmbersSourceTests(SimpleTestCase):
                          ("var(--sv-bg-1)", "1px solid var(--sv-line-2)", "none"))
 
     def test_the_body_says_the_ambience_and_a_page_opts_into_the_embers(self):
+        """Updated deliberately (2026-11-13, the check of CR2): the body
+        carries a second opt-in, the light that reaches the page, which the
+        kit fills (a page with the embers wears that light already)."""
         base = read(BASE)
-        self.assertIn(' data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}>', base)
+        self.assertIn(' data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}'
+                      '{% block sv_light %}{% endblock %}>', base)
         opted = sorted(rel for rel, t in under_base().items() if "{% block sv_embers %}" in t and rel != BASE)
         self.assertEqual(opted, ["templates/dashboard/command.html",
                                  "templates/dashboard/positions_list.html"])
         for rel in opted:
             self.assertIn("{% block sv_embers %} data-sv-embers{% endblock %}", read(rel))
+        lit = sorted(rel for rel, t in under_base().items() if "{% block sv_light %}" in t and rel != BASE)
+        self.assertEqual(lit, [KIT_PAGE])
+        self.assertIn("{% block sv_light %} data-sv-light{% endblock %}", read(KIT_PAGE))
 
     def test_get_ambience_answers_magic(self):
         """With nobody signed in the tag answers "magic". Updated
@@ -845,6 +874,41 @@ class MomentsSheetTests(SimpleTestCase):
         self.assertLessEqual(fades_at, radius)
         grown = max(float(s) for s in re.findall(r"scale\(([\d.]+)\)", self.frames()["sv-eye-breath"]))
         self.assertLessEqual(fades_at * grown, 38)
+
+    def test_the_collapsed_mark_s_halo_fades_inside_the_window_and_the_sidebar(self):
+        """2026-11-13, the check of CR4: in the collapsed sidebar (68 px,
+        overflow-x hidden) the mark is 30 px, its centre 14 + 15 = 29 px
+        under the window's top and, with the sidebar's 1 px edge and its
+        6 px scrollbar, (68 - 1 - 6) / 2 = 30.5 px from either side. The
+        70 px halo fades out 36.7 px from it at the breath's peak: the
+        check saw the window cut it at the top (+23.7 levels) and the
+        sidebar on its right (a straight +11-level edge). At 52 px it
+        fades out at .70 x 26 x sqrt(2) x 1.06 = 27.3 px, inside both. It
+        holds .16 to 40 % of its ray, not half: from 50 % its fall to
+        nothing ran over 7.8 px and a step between two device pixels
+        reached 4 levels at the peak; from 40 % it runs over 11.7 px, 3 at
+        most (CollapsedMarkMeasuredTests measures both)."""
+        kit, shell = read(KIT), read(SAURON)
+        mini = block(kit, LIT + " .sidebar.mini .brand-eye-wrap::before")
+        self.assertEqual(mini, {"width": "52px", "height": "52px",
+                                "background": "radial-gradient(circle, rgba(0,232,104,.34) 0%, "
+                                              "rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%)"})
+        end = float(re.findall(r"rgba\(0,232,104,0\) ([\d.]+)%\)$", mini["background"])[0]) / 100
+        grown = max(float(s) for s in re.findall(r"scale\(([\d.]+)\)", self.frames()["sv-eye-breath"]))
+        self.assertEqual(block(shell, ".brand-eye-wrap::before")["border-radius"], "50%")
+        fades_at = end * 52 / 2 * 2 ** 0.5 * grown
+        self.assertLessEqual(fades_at, 52 / 2 * grown)            # inside its own circle
+        # Where the collapsed mark sits (sauron.css).
+        self.assertEqual(block(shell, ".sidebar.mini"), {"width": "68px"})
+        self.assertEqual(block(shell, ".sidebar.mini .brand-eye-wrap,\n        .sidebar.mini .brand-eye"),
+                         {"width": "30px", "height": "30px"})
+        self.assertEqual(block(shell, ".sidebar.mini .sidebar-brand")["padding"], "14px 8px")
+        self.assertIn("::-webkit-scrollbar{width:6px}", shell)
+        self.assertEqual(block(shell, ".sidebar")["border-right"], "1px solid var(--border)")
+        top = 14 + 30 / 2
+        side = (68 - 1 - 6) / 2
+        self.assertLess(fades_at, top - 1)
+        self.assertLess(fades_at, side - 1)
 
     def test_the_only_infinite_animation_the_magic_adds_is_the_breath(self):
         kit = read(KIT)
@@ -1757,26 +1821,93 @@ ABOVE_PROBE = r"""(function () {
 })()"""
 
 
+#: The light from above off, then on again: both of its tokens, C1's light,
+#: which every page wears, and the light that reaches the page, which only
+#: a page proven off the void wears (setting a token no sheet names is
+#: harmless).
+LIGHT_OFF = ("(function () { var s = document.documentElement.style;"
+             " s.setProperty('--sv-void-light', 'none'); s.setProperty('--sv-void-light-reach', 'none');"
+             " return __sv.settle(); })()")
+LIGHT_ON = ("(function () { var s = document.documentElement.style;"
+            " s.removeProperty('--sv-void-light'); s.removeProperty('--sv-void-light-reach');"
+            " return __sv.settle(); })()")
+#: The two floating orbs (Ask Sauron, Gollum) are drawn on layers of their
+#: own, which headless Chromium redraws a fraction of a pixel apart from
+#: one picture to the next, light or not (as KitMagicMeasuredTests found):
+#: held out of the pictures, so a figure near them reads as it is.
+ORBS_OUT = ("(function () { Array.prototype.forEach.call(document.querySelectorAll('.gollum-fab, .se-eye-fab'),"
+            " function (e) { e.style.visibility = 'hidden'; }); return __sv.settle(); })()")
+
+#: For the sweep: where the window stands, the boxes of every figure the eye
+#: can see in it (as ABOVE_PROBE reads them, with their text), the light
+#: from above the page computes, and whether the page opted into the light
+#: that reaches it.
+SWEEP_PROBE = r"""(function () {
+  var boxes = [], b = document.body;
+  __sv.figureNodes().forEach(function (f) {
+    if (!f[1].checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+    var range = document.createRange(); range.selectNodeContents(f[0]);
+    Array.prototype.forEach.call(range.getClientRects(), function (q) {
+      if (q.width > 0 && q.height > 0 && q.bottom > 0 && q.right > 0 && q.top < innerHeight && q.left < innerWidth)
+        boxes.push([Math.max(0, Math.floor(q.left)), Math.max(0, Math.floor(q.top)),
+                    Math.min(innerWidth, Math.ceil(q.right)), Math.min(innerHeight, Math.ceil(q.bottom)),
+                    f[2].slice(0, 32)]);
+    });
+  });
+  return { y: Math.round(scrollY), boxes: boxes, light: getComputedStyle(b, '::before').backgroundImage,
+           optedIn: b.hasAttribute('data-sv-embers') || b.hasAttribute('data-sv-light') };
+})()"""
+
+
+def _nav_urls(markup):
+    """Every page the sidebar's nav links, in its order, as a page renders
+    it for a staff session (which sees every row)."""
+    nav = markup[markup.index('<nav class="sidebar-nav"'):]
+    nav = nav[:nav.index("</nav>")]
+    urls = []
+    for tag in re.findall(r"<a\b[^>]*>", nav):
+        href = re.search(r'\bhref="(/[^"]*)"', tag)
+        if href and re.search(r'\bclass="nav-link\b', tag) and href.group(1) not in urls:
+            urls.append(href.group(1))
+    return urls
+
+
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class LightFromAboveMeasuredTests(TestCase):
     """The Eye's light from above reaches the page (2026-11-12, the
-    operator's brief and his decision on the review's CR2). On /positions/
-    and /command/ at 1440 and 1920, each picture is taken twice with
-    nothing else moving, the light on, then its token set to none: what
-    differs is the light alone. On the empty page above the first card, at
-    the light's column, it adds at least 2 levels of green at its brightest
-    point (C1's light, centred 110 px above the window, added 0.0 there);
-    Off has none. And no pixel of any figure in the window moves with it,
-    while every figure computes no light and none sits on the void: the
-    light is behind the opaque cards."""
+    operator's brief and his decision on the review's CR2), and only where
+    no figure sits on the void (2026-11-13, the check of CR2).
 
-    URLS = (POSITIONS, COMMAND)
+    On the pages that opted in (/positions/ and /command/, which have the
+    embers, and the kit) at 1440 and 1920, each picture is taken twice
+    with nothing else moving, the light on, then its tokens set to none:
+    what differs is the light alone. On the empty page above the first
+    card, at the light's column, it adds at least 2 levels of green at its
+    brightest point (C1's light, centred 110 px above the window, adds 0.0
+    there); Off has none. No pixel of any figure in the window moves with
+    it, while every figure computes no light and none sits on the void.
+
+    And on every page the sidebar's nav reaches, at 1440, under Magic and
+    Calm, at scroll 0 and one screen down: the light moves no pixel of any
+    figure's box by more than one level. The light that reaches the page is
+    fixed to the window, so it lies under whatever a page puts there at any
+    scroll; at ae1a803, which gave it to every page, it lit figures on the
+    void or on see-through grounds by +4 to +7 levels on /evidence/,
+    /asset-bots/, /evolution/, /big-money/ and /treasury/. Only the pages
+    that opted in wear it now; every other page computes C1's light, which
+    fades out under the chrome."""
+
+    URLS = (POSITIONS, COMMAND, KIT_URL)
     VIEWPORTS = ((1440, 900), (1920, 1080))
     MODES = ("magic", "calm", "off")
+    SWEEP_VIEWPORT = (1440, 900)
+    SWEEP_MODES = ("magic", "calm")
 
     @classmethod
     def setUpTestData(cls):
-        pages = {u: _file_page(m) for u, m in _pages(_book("magic_above"), cls.URLS).items()}
+        client = _book("magic_above")
+        cls.nav = _nav_urls(_get(client, POSITIONS))
+        pages = {u: _file_page(m) for u, m in _pages(client, sorted(set(cls.URLS) | set(cls.nav))).items()}
         b = _Browser(pages, "sv-magic-above-")
         try:
             cls.got = {}
@@ -1784,15 +1915,37 @@ class LightFromAboveMeasuredTests(TestCase):
                 sid = b.tab(width, height)
                 for url in cls.URLS:
                     b.open(sid, url, PROBES)
+                    b.js(sid, ORBS_OUT)
                     for mode in cls.MODES:
                         b.js(sid, "__sv.mode('%s'); __sv.settle()" % mode)
                         got = b.js(sid, ABOVE_PROBE)
                         on = b.shot(sid)
-                        b.js(sid, "document.documentElement.style.setProperty('--sv-void-light', 'none'); __sv.settle()")
+                        b.js(sid, LIGHT_OFF)
                         none = b.shot(sid)
-                        b.js(sid, "document.documentElement.style.removeProperty('--sv-void-light'); __sv.settle()")
+                        b.js(sid, LIGHT_ON)
                         got["brightest"], got["figurePixels"] = cls._light(got, on, none)
                         cls.got[(url, width, mode)] = got
+            cls.sweep = {}
+            sid = b.tab(*cls.SWEEP_VIEWPORT)
+            for url in cls.nav:
+                b.open(sid, url, PROBES)
+                b.js(sid, ORBS_OUT)
+                for mode in cls.SWEEP_MODES:
+                    seen = set()
+                    for screens in (0, 1):
+                        b.js(sid, "(function () { __sv.mode('%s'); scrollTo(0, %d * innerHeight);"
+                                  " return __sv.settle(); })()" % (mode, screens))
+                        got = b.js(sid, SWEEP_PROBE)
+                        if got["y"] in seen:
+                            continue        # shorter than two screens: one screen down is the end
+                        seen.add(got["y"])
+                        on = b.shot(sid)
+                        b.js(sid, LIGHT_OFF)
+                        none = b.shot(sid)
+                        b.js(sid, LIGHT_ON)
+                        got["worst"], got["moved"] = cls._moved(got["boxes"], on, none)
+                        got["boxes"] = len(got["boxes"])
+                        cls.sweep[(url, mode, got["y"])] = got
         finally:
             b.close()
 
@@ -1813,6 +1966,22 @@ class LightFromAboveMeasuredTests(TestCase):
                      default=None)
         return brightest, figure
 
+    @staticmethod
+    def _moved(boxes, on, none):
+        """The most the light moves a pixel of any figure's box, and the
+        boxes it moves by more than one level, the most first."""
+        from PIL import ImageChops
+        moved = ImageChops.difference(on, none)
+        worst, out = 0, []
+        for x0, y0, x1, y1, text in boxes:
+            if x1 <= x0 or y1 <= y0:
+                continue
+            hi = max(h for _l, h in moved.crop((x0, y0, x1, y1)).getextrema())
+            worst = max(worst, hi)
+            if hi > 1:
+                out.append((hi, text, x0, y0))
+        return worst, sorted(out, reverse=True)
+
     def test_the_light_from_above_lights_the_empty_page_above_the_first_card(self):
         for (url, width, mode), got in sorted(self.got.items()):
             with self.subTest(url=url, width=width, mode=mode):
@@ -1830,6 +1999,124 @@ class LightFromAboveMeasuredTests(TestCase):
                 self.assertEqual(got["figurePixels"], 0)
                 self.assertEqual(got["lit"], [])
                 self.assertEqual(got["onVoid"], [])
+
+    def test_the_light_moves_no_figure_on_any_page_of_the_nav(self):
+        """Every page of the nav, under Magic and Calm, at scroll 0 and one
+        screen down: no pixel of any figure's box moves with the light by
+        more than one level."""
+        self.assertGreater(len(self.nav), 55)
+        for url in self.nav:
+            with self.subTest(url=url):
+                self.assertEqual(sorted({m for u, m, _y in self.sweep if u == url}), sorted(self.SWEEP_MODES))
+        self.assertGreater(len([k for k in self.sweep if k[2] > 0]), 40)     # read one screen down too
+        for (url, mode, y), got in sorted(self.sweep.items()):
+            with self.subTest(url=url, mode=mode, scroll=y):
+                self.assertGreater(got["boxes"], 0)
+                self.assertLessEqual(got["worst"], 1, got["moved"][:4])
+
+    def test_the_light_reaches_only_the_pages_that_opted_in(self):
+        """The light that reaches the page on the pages proven off the void
+        (in the nav, the two with the embers); C1's light everywhere else."""
+        opted = sorted({url for (url, _m, _y), got in self.sweep.items() if got["optedIn"]})
+        self.assertEqual(opted, sorted([COMMAND, POSITIONS]))
+        for (url, mode, y), got in sorted(self.sweep.items()):
+            with self.subTest(url=url, mode=mode, scroll=y):
+                self.assertIn("at 46% 150px" if got["optedIn"] else "at 46% -110px", got["light"])
+
+
+#: The collapsed sidebar's mark: where it stands, the sidebar's clip (its
+#: padding box, inside its 1 px edge and its scrollbar) and the halo's box.
+MINI_PROBE = r"""(function () {
+  var sb = document.getElementById('mainSidebar'), w = sb.querySelector('.brand-eye-wrap');
+  var s = sb.getBoundingClientRect(), r = w.getBoundingClientRect(), h = getComputedStyle(w, '::before');
+  return { mini: sb.classList.contains('mini'), cx: r.left + r.width / 2, cy: r.top + r.height / 2,
+           clipLeft: s.left + sb.clientLeft, clipRight: s.left + sb.clientLeft + sb.clientWidth,
+           halo: [h.width, h.height, h.opacity, h.transform] };
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class CollapsedMarkMeasuredTests(TestCase):
+    """The Eye's halo in the collapsed sidebar (2026-11-13, the check of
+    CR4), at DPR 2, under Magic at the breath's peak (3 s of its 6) and
+    under Calm. The halo alone (its picture against the same picture with
+    the halo hidden; the mark, the wordmark and the toggle hidden in both)
+    adds nothing on the window's top row nor on the first and last columns
+    inside the sidebar's clip: it fades out inside the window and the
+    sidebar. Its largest step between neighbouring device pixels is 3
+    levels. At ae1a803 the 70 px halo, at the breath's peak, still added
+    23 levels on the window's top row, 17 and 21 on the sidebar's first and
+    last columns (15, 10 and 12 under Calm), and stepped by 5."""
+
+    CLIP = (0, 0, 120, 100)
+
+    @classmethod
+    def setUpTestData(cls):
+        import numpy as np
+        pages = {POSITIONS: _file_page(_get(_book("magic_mini"), POSITIONS))}
+        b = _Browser(pages, "sv-magic-mini-")
+        try:
+            sid = b.tab(1440, 900)
+            b.chrome.call("Emulation.setDeviceMetricsOverride",
+                          {"width": 1440, "height": 900, "deviceScaleFactor": 2, "mobile": False}, session=sid)
+            b.open(sid, POSITIONS, PROBES)
+            b.js(sid, "(function () { document.getElementById('mainSidebar').classList.add('mini');"
+                      " var s = document.createElement('style'); s.textContent ="
+                      " '.sidebar-brand > :not(h1), .brand-eye-wrap > *, .brand-text { visibility: hidden !important; }';"
+                      " document.head.appendChild(s); return 0; })()")
+            cls.got = {}
+            for mode in ("magic", "calm"):
+                b.js(sid, "(function () { __sv.mode('%s'); return __sv.settle().then(function () {"
+                          " document.getAnimations().forEach(function (a) {"
+                          "   if (a.animationName === 'sv-eye-breath') { a.pause(); a.currentTime = 3000; } });"
+                          " return __sv.frame(); }).then(function () { return 0; }); })()" % mode)
+                got = b.js(sid, MINI_PROBE)
+                on = np.asarray(b.shot(sid, cls.CLIP), dtype=int)[..., 1]
+                b.js(sid, "(function () { var s = document.createElement('style'); s.id = 'svProbeNoHalo';"
+                          " s.textContent = '.brand-eye-wrap::before { visibility: hidden !important; }';"
+                          " document.head.appendChild(s); return __sv.frame().then(function () { return 0; }); })()")
+                off = np.asarray(b.shot(sid, cls.CLIP), dtype=int)[..., 1]
+                b.js(sid, "(function () { document.getElementById('svProbeNoHalo').remove();"
+                          " return __sv.frame().then(function () { return 0; }); })()")
+                got.update(cls._halo(got, on - off, on.shape[1] / cls.CLIP[2]))
+                cls.got[mode] = got
+        finally:
+            b.close()
+
+    @staticmethod
+    def _halo(got, added, scale):
+        """The halo alone (G levels, device px): what it adds on the
+        window's top row and on the first and last columns inside the
+        sidebar's clip, at its brightest and its least, and its largest
+        step between neighbouring device px inside the clip."""
+        import numpy as np
+        inside = added[:, int(round(got["clipLeft"] * scale)):int(round(got["clipRight"] * scale))]
+        step = max(int(np.abs(np.diff(inside, axis=1)).max()), int(np.abs(np.diff(inside, axis=0)).max()))
+        return {"scale": scale, "top": int(inside[0].max()), "left": int(inside[:, 0].max()),
+                "right": int(inside[:, -1].max()), "brightest": int(inside.max()), "least": int(inside.min()),
+                "step": step}
+
+    def test_the_sidebar_is_collapsed_and_read_at_dpr_2(self):
+        for mode, got in sorted(self.got.items()):
+            with self.subTest(mode=mode):
+                self.assertTrue(got["mini"])
+                self.assertEqual(got["scale"], 2)
+                self.assertLess(got["clipRight"] - got["clipLeft"], 68)
+        self.assertEqual(self.got["magic"]["halo"][2], "0.95")         # the breath's peak
+        self.assertIn("1.06", self.got["magic"]["halo"][3])
+        self.assertEqual(self.got["calm"]["halo"][2], "0.7")
+
+    def test_the_halo_fades_out_inside_the_window_and_the_sidebar(self):
+        for mode, got in sorted(self.got.items()):
+            with self.subTest(mode=mode):
+                self.assertGreaterEqual(got["brightest"], 20, got)              # the halo is there
+                self.assertGreaterEqual(got["least"], -1, got)                  # it only adds
+                self.assertEqual((got["top"], got["left"], got["right"]), (0, 0, 0), got)
+
+    def test_the_halo_s_largest_step_is_3_levels(self):
+        for mode, got in sorted(self.got.items()):
+            with self.subTest(mode=mode):
+                self.assertLessEqual(got["step"], 3, got)
 
 
 FACE_PROBE = r"""(function () {

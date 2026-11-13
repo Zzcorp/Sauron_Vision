@@ -184,12 +184,20 @@
     --sv-edge-hero: linear-gradient(90deg, rgba(0,232,104,0), rgba(0,232,104,.85) 28%, rgba(120,255,180,.95) 50%, rgba(0,232,104,.85) 72%, rgba(0,232,104,0));
 
     /* ── The void: light from above, a vignette, a still grain ──
-       The light is centred just under the chrome (which ends at 142 px),
-       so it falls on the empty page above the first card, about +13
-       levels at its brightest, and is gone by y = 460. Centred 110 px
-       above the window it faded out at 156 px and added nothing (review
-       2026-11-12, his decision). The cards are opaque: no figure takes it. */
-    --sv-void-light: radial-gradient(1000px 420px at 46% 150px, rgba(0,232,104,.06), rgba(0,232,104,.02) 50%, rgba(0,232,104,0) 74%);
+       Two lights from above, both fixed to the window. --sv-void-light,
+       centred 110 px above it, fades out at y = 156 px, under the chrome
+       (which ends at 142 px): it adds nothing to the page, whatever sits
+       there, at any scroll. Every page wears it.
+       --sv-void-light-reach is the Eye's light reaching the page (review
+       2026-11-12, his decision): centred just under the chrome, it falls
+       on the empty page above the first card, about +13 levels at its
+       brightest, and is gone by y = 460. It lies under whatever a page
+       puts there, so only a page proven to put no figure on the void
+       wears it (sv-kit.css, the void): given to every page, it lit
+       figures on the void or on see-through grounds on five of them by
+       +4 to +7 levels (check, 2026-11-13). */
+    --sv-void-light: radial-gradient(900px 360px at 46% -110px, rgba(0,232,104,.10), rgba(0,232,104,.025) 50%, rgba(0,232,104,0) 74%);
+    --sv-void-light-reach: radial-gradient(1000px 420px at 46% 150px, rgba(0,232,104,.06), rgba(0,232,104,.02) 50%, rgba(0,232,104,0) 74%);
     --sv-void-vignette: radial-gradient(140% 120% at 50% 28%, rgba(0,0,0,0) 55%, rgba(0,0,0,.42) 100%);
     --sv-void-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55 0 0 0 0 .95 0 0 0 0 .7 0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
     --sv-grain-opacity: .07;

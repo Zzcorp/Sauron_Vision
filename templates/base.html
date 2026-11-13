@@ -129,8 +129,8 @@
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
 </head>
-{# data-sv-ambience (the magic kept, 2026-11-12): how much of Sauron's theme shows: magic, calm or off. Display only. A page opts into the embers by filling sv_embers with " data-sv-embers", once it has proved no figure of its sits on the void (tests/test_magic_layer.py). #}
-<body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}" data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}>
+{# data-sv-ambience (the magic kept, 2026-11-12): how much of Sauron's theme shows: magic, calm or off. Display only. A page opts into the embers by filling sv_embers with " data-sv-embers", once it has proved no figure of its sits on the void (tests/test_magic_layer.py); that page also wears the Eye's light reaching the page (sv-kit.css, the void). A page with no embers opts into that light alone by filling sv_light with " data-sv-light", on the same proof (2026-11-13). #}
+<body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}" data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}{% block sv_light %}{% endblock %}>
 
 <!-- Animated grid background -->
 <div class="grid-bg"></div>
