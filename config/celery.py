@@ -756,36 +756,63 @@ app.conf.beat_schedule = {
     # the 15 at which the demo short proofs stand aside, and the same
     # minute needs 29 of 28: a refused sync read holds that account's eToro
     # entries until the next read (AssetBot._cash_gate). 20 s would be safe
-    # only with two distinct keys. KEPT IN WALL-CLOCK TERMS: the stall
-    # alert after thirty missed beats, fifteen minutes, a pass that held
-    # the beats behind it counting them (tasks.BROKER_MISS_ALERT_AFTER_BY_
-    # KIND, _beats_missed); the history one row in five minutes
-    # (tasks.ETORO_HISTORY_SLACK_S, half a beat); the venue's health noted
-    # from ONE pass a minute per account (tasks.ETORO_SYNC_NOTE_EVERY_S,
-    # EtoroTrader.health_quiet), as often as at 60 s, never more; the
-    # passes between grant no 429 pause either (the review: their pause
-    # skipped the noting pass, and a 429 storm made eToro sick later than
-    # at 60 s); the shock trigger asked from that same pass only, at most
-    # once per old beat (the final check, F4: an automated money path
-    # keeps its sensitivity; the operator decides any change to it). WHEN
-    # A HICCUP TURNS eTORO SICK, measured on the real code (the final
-    # check, 2026-11-13): with passes on time and REAL read first, a 5xx or
-    # 429 hiccup exactly when it did at 60 s; against a 60 s walk that
-    # read DEMO first (it had no stated order), up to 2.4 s sooner, and
-    # under timeouts up to 30 s sooner and in some 45 to 60 s hiccups it
-    # rode out (tasks.sync_etoro_accounts, REAL FIRST); with passes 6 to
-    # 24 s late, never more often, an incident up to about 30 s sooner or
-    # later. ONE PASS AT A TIME (tasks.
-    # ETORO_SYNC_LOCK_KEY): a beat that finds a pass running is idle, and
-    # a run not started within 25 s is dropped (expire_seconds: the
-    # database scheduler's spelling), so a pass slowed by timeouts holds
-    # one worker slot, never piles up in front of the tick. The price of
-    # it, said: under timeouts the failing passes run one after the other,
-    # one every 90 to 120 s, so eToro turns sick LATER than at 60 s, whose
-    # passes overlapped, or not at all: a 60 s connect hiccup 50 % of the
-    # time against 83 %, a three-minute blackout with nothing held 50 %
-    # against 100 %. New real entries are then not held for that incident;
-    # an order's own failure still makes eToro sick at once.
+    # only with two distinct keys. KEPT IN WALL-CLOCK TERMS: the stall alert
+    # after thirty missed beats, fifteen minutes, a pass that held the beats
+    # behind it counting them (tasks.BROKER_MISS_ALERT_AFTER_BY_KIND,
+    # _beats_missed); the history one row in five minutes
+    # (tasks.ETORO_HISTORY_SLACK_S, half a beat); the venue's health noted, and
+    # the shock trigger asked (the final check, F4: an automated money path;
+    # the operator decides any change to it), from ONE pass a minute per
+    # account: the first pass of each minute of the clock, the minute its beat
+    # sent it in (the third round, 2026-11-13: tasks.ETORO_SYNC_TURN_S,
+    # _beat_sent_at, venue_health.old_beat_turn). Never two in one minute, so
+    # never more often than at 60 s; a turn in every minute in which one of its
+    # passes runs, the worker on time or late, so as often as at 60 s while the
+    # passes end within their beat (a turn whose pass reads nothing asks
+    # nothing, as at 60 s); and nothing drifts after a late or long pass. The
+    # passes between note nothing (EtoroTrader.health_quiet) and grant no 429
+    # pause (the review: their pause skipped the noting pass). On time the
+    # noting passes are 60 s apart, the 60 s beat's own instants or 30 s off
+    # them as the beat's phase falls on the clock (around a restart of the beat
+    # one gap of 30 to 90 s); late, they keep their minute and come no closer
+    # than 60 s less the lateness, as at 60 s (30 s less after a minute whose
+    # first beat was idle). WHEN A HICCUP TURNS eTORO SICK, measured on the
+    # real code (the PR's third round): with every pass on time and REAL read
+    # first, a 5xx or 429 hiccup of 10 to 90 s with exactly the 60 s beat's
+    # odds over the clock's phases (5.6, 22.2, 50.0, 75.0, 100 and 100 %), each
+    # incident up to 30 s sooner or later or on one side only, as each noting
+    # pass is the old beat's or the one half a beat before it (5xx: sick only
+    # here in 160 of 1728 runs, only at 60 s in 160); with the passes 0 to 24 s
+    # late (the quotes' 0 to 12 s, dropped from 10 s), 5xx hiccups of 10 to
+    # 45 s sick 3.6, 17.4, 39.1 and 70.5 % of the time over the phases against
+    # 3.2, 22.2, 43.1 and 71.8 % at 60 s (429s 6.6, 21.8, 46.5 and 75.6 %
+    # against 7.9, 20.8, 48.1 and 77.8 %), each incident up to 40 s sooner or
+    # later or on one side only (5xx: sick only here in 364 of 3456 runs, only
+    # at 60 s in 448); a 5xx 15 minutes after a 45 s read-timeout outage with
+    # the 60 s beat's odds, each incident within 15 s or on one side only
+    # (until the third round 0.0, 8.3 and 58.3 % for 10, 20 and 30 s against
+    # 5.6, 22.2 and 50.0 %). ONE PASS AT A TIME (tasks.ETORO_SYNC_LOCK_KEY): a
+    # beat that finds a pass running is idle (a minute whose first beat it is
+    # goes to its second, 30 s later), and a run not started within 25 s is
+    # dropped (expire_seconds: the database scheduler's spelling; Celery stamps
+    # each run with its send instant plus it, which is how _beat_sent_at reads
+    # the send instant), so a pass slowed by timeouts holds one worker slot,
+    # never piles up in front of the tick. The price of it, said: under
+    # timeouts the failing passes run one after the other, one every 90 to
+    # 180 s (83 s passes to the 163 s of tasks.ETORO_SYNC_LOCK_S's sizing), so
+    # where the instant differs from 60 s, whose passes overlapped, eToro turns
+    # sick later or not at all more often than sooner (connect timeouts: 516
+    # runs against 336 of 1440, the other 588 the same), sooner by up to 30 s
+    # where a noting pass falls half a beat before the old beat's: connect
+    # timeouts of 45 and 60 s sick 37.5 and 50.0 % of the time over the clock's
+    # phases against 41.7 and 83.3 % at 60 s, read timeouts of 60 and 90 s 50.0
+    # and 75.0 % against 72.2 and 100 %, per incident up to 30 s sooner
+    # (connect: 255 of 1440 runs) or up to 52 s later (read: 69 s), sick only
+    # here in 81 and 71 runs, only at 60 s in 189 and 235; the sync alone, a
+    # three-minute blackout with nothing held, 50 % against 100 %. New real
+    # entries are then not held for that incident; an order's own failure still
+    # makes eToro sick at once. REAL is read first (tasks.sync_etoro_accounts,
+    # REAL FIRST).
     "sync-etoro-accounts": {
         "task": "bot_program.tasks.sync_etoro_accounts",
         "schedule": 30.0,
@@ -808,12 +835,23 @@ app.conf.beat_schedule = {
     # a pass starts no read past 5 s. The beat skips only an answer younger
     # than half its beat (etoro_quotes.OWN_FRESH_S): at 15 s it skipped its
     # own last answer and read every 30 s. Its failures are noted on the
-    # venue's health from one pass per 30 s, the passes the old beat ran,
-    # each turn spent whatever the pass does, and by a beat the lock holds
-    # behind the pass that holds it (the final check, F2: a pass outliving
-    # 30 s noted every 45 s, the old beat every 60 s); the passes between
-    # grant no 429 pause. The cap judges a pass at the instant it starts
-    # (etoro_quotes._note_sent), so a steady pass is never blank.
+    # venue's health from one pass per 30 s: the first pass of each half
+    # minute of the clock, the half minute its beat sent it in (the third
+    # round, 2026-11-13: etoro_quotes.TURN_S, tasks._beat_sent_at), each
+    # turn spent whatever the pass does, and by a beat the lock holds
+    # behind a pass that took its turn as its half minute's first beat (the
+    # final check, F2: a pass outliving 30 s noted every 45 s, the old beat
+    # every 60 s). Measured in price-read stalls on the real code (the
+    # PR's third round), with passes of 27 to 60 s: on time, behind 34 s
+    # passes, notes 90 s apart and a three-minute stall sick in 0 of 24
+    # phases against 24 at 30 s; over all five stall shapes (864 runs),
+    # where the 30 s beat was sick (290) later or not at all in 187,
+    # sooner by at most 15 s in 47, and sick only here in 9; with beats up
+    # to 10 s late behind 34 s passes (216 runs), sooner in 6, by at most
+    # 16.2 s, and never sick where the 30 s beat was not (until the third
+    # round: up to 57.3 s sooner). The passes between grant no 429 pause.
+    # The cap judges a pass at the instant it starts (etoro_quotes.
+    # _note_sent), so a steady pass is never blank.
     "refresh-etoro-quotes": {
         "task": "bot_program.tasks.refresh_etoro_quotes",
         "schedule": 15.0,

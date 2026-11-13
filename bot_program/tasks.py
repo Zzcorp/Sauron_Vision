@@ -650,7 +650,8 @@ def _prune_equity_history(broker: str, account_pk: int, now) -> None:
 #: 2026-11-06, 300 s from 2026-10-31). What was tuned to the 60 s pass is
 #: kept in wall-clock terms from this figure: the history's slack (below),
 #: the stall alert's count (BROKER_MISS_ALERT_AFTER_BY_KIND, _beats_missed)
-#: and the passes that note the venue's health (ETORO_SYNC_NOTE_EVERY_S).
+#: and the passes that note the venue's health and ask the shock trigger,
+#: one per minute of the clock (ETORO_SYNC_TURN_S).
 ETORO_SYNC_BEAT_S = 30
 
 #: THE eTORO WALK'S HISTORY KEEPS ITS FIVE MINUTES (2026-11-06): the walk
@@ -684,13 +685,17 @@ ETORO_HISTORY_SLACK_S = ETORO_SYNC_BEAT_S // 2
 ETORO_SYNC_LOCK_KEY = "etoro_sync:pass"
 ETORO_SYNC_LOCK_S = 180
 #: THE VENUE'S HEALTH FROM ONE PASS A MINUTE PER ACCOUNT (2026-11-13,
-#: venue_health.noting_slot): the passes the 60 s beat ran. A failing pass
-#: is two failed reads (the aggregate and /portfolio), and three inside
-#: 180 s make eToro SICK for ten minutes; noted from every 30 s pass, a
-#: 30 s hiccup would make eToro sick from the sync alone (simulated 57 %,
-#: 0 % at 60 s). 60 s less the beat's jitter. The same turn asks the shock
-#: trigger (the final check, F4, 2026-11-13: sync_etoro_accounts).
-ETORO_SYNC_NOTE_EVERY_S = 55
+#: venue_health.old_beat_turn): the first pass of each minute of the clock
+#: (a window of the old 60 s beat), the minute its beat sent it in
+#: (_beat_sent_at). A failing pass is two failed reads (the aggregate and
+#: /portfolio), and three inside 180 s make eToro SICK for ten minutes;
+#: noted from every 30 s pass, a 30 s hiccup would make eToro sick from the
+#: sync alone (simulated 57 %, 0 % at 60 s). The same turn asks the shock
+#: trigger (the final check, F4, 2026-11-13: sync_etoro_accounts). ON A
+#: FIXED GRID since the third round (2026-11-13): until then the turn came
+#: back 55 s after the last one, and a late or long pass moved every turn
+#: after it.
+ETORO_SYNC_TURN_S = 60
 ETORO_SYNC_NOTE_KEY = "etoro_sync:noting:{pk}"
 
 
@@ -1186,22 +1191,59 @@ def _one_etoro_pass(fn):
     return wrapper
 
 
-def _quiet_between_noting_passes(client, account_pk) -> bool:
+def _beat_sent_at(task, beat: str, now: float) -> float:
+    """THE INSTANT THE BEAT SENT THIS RUN (the third round, 2026-11-13):
+    what the old beats' turns are keyed on (venue_health.old_beat_turn), so
+    a run the worker starts late keeps the window its beat was sent in. The
+    database scheduler gives each run the entry's expiry (expire_seconds,
+    config/celery.py `beat`'s options), Celery stamps it as the send
+    instant plus that expiry (the `expires` header, the run's
+    request.expires), and the worker drops the run once it is past: the
+    send instant is `expires` less the expiry. `now` (epoch seconds, the
+    wall clock at the run's start) stands in for a run with no expiry or
+    called directly (tests, the shell), and for one whose expiry does not
+    fit its start (sent after it, or more than the expiry and 5 s before
+    it: an expiry an admin changed on the stored row, say). Never
+    raises."""
+    try:
+        from datetime import datetime as _dt
+        expires = getattr(task.request, "expires", None)
+        if not expires:
+            return now
+        when = (expires if isinstance(expires, _dt)
+                else _dt.fromisoformat(str(expires)))
+        if when.tzinfo is None:
+            return now
+        expiry = float(
+            task.app.conf.beat_schedule[beat]["options"]["expire_seconds"])
+        sent = when.timestamp() - expiry
+        if sent > now + 1.0 or sent < now - expiry - 5.0:
+            return now
+        return sent
+    except Exception:  # noqa: BLE001 — unread: the wall clock, as before
+        return now
+
+
+def _quiet_between_noting_passes(client, account_pk, at=None) -> bool:
     """THE VENUE'S HEALTH FROM ONE PASS A MINUTE (2026-11-13): a pass that
-    does not hold the account's noting slot (venue_health.noting_slot,
-    ETORO_SYNC_NOTE_EVERY_S) reads, writes and counts its miss as every
-    pass does, and its client notes no READ failure (EtoroTrader.
-    health_quiet). True when this pass holds the turn, the old 60 s beat's
-    pass: it notes, and it alone asks the shock trigger (the final check,
-    F4: sync_etoro_accounts). Never raises: a slot that cannot be claimed
-    notes and asks, as before (True)."""
+    does not hold the account's turn (venue_health.old_beat_turn: the
+    first pass of its minute of the clock, ETORO_SYNC_TURN_S, keyed on
+    `at`, epoch seconds: the instant its beat sent it, _beat_sent_at, or
+    its start) reads, writes and counts its miss as every pass does, and
+    its client notes no READ failure (EtoroTrader.health_quiet).
+    True when this pass holds the turn: it notes, and it alone asks the
+    shock trigger (the final check, F4: sync_etoro_accounts). Never raises:
+    a turn that cannot be read notes and asks, as before the turns
+    (True)."""
     try:
         from django.utils import timezone
 
         from . import venue_health
-        noting = venue_health.noting_slot(
+        if at is None:
+            at = timezone.now().timestamp()
+        noting = venue_health.old_beat_turn(
             ETORO_SYNC_NOTE_KEY.format(pk=account_pk),
-            ETORO_SYNC_NOTE_EVERY_S, now=timezone.now().timestamp())
+            ETORO_SYNC_TURN_S, at=at)
         client.health_quiet = (
             "" if noting else
             f"the account sync notes the venue's health from one pass a "
@@ -1237,10 +1279,11 @@ def sync_etoro_accounts():
     EVERY 30 s since 2026-11-13 (ETORO_SYNC_BEAT_S; the operator: "aussi le
     refresh etoro par minute est toujours trop long, je suggère 20-30
     secondes non?"), one pass at a time (_one_etoro_pass), each account's
-    read failures noted on the venue's health from one pass a minute
-    (_quiet_between_noting_passes), the shock trigger asked from that same
-    pass only (the old 60 s beat's, below), a miss counting the beats it
-    stood for (_beats_missed), the history one row in five minutes.
+    read failures noted on the venue's health from one pass a minute, the
+    first of the minute of the clock its beat sent it in (_quiet_between_
+    noting_passes, _beat_sent_at), the shock trigger asked from that same
+    pass only (the old 60 s beat's pace, below), a miss counting the beats
+    it stood for (_beats_missed), the history one row in five minutes.
     """
     from django.utils import timezone
 
@@ -1249,20 +1292,31 @@ def sync_etoro_accounts():
     from .models import EtoroAccount
 
     out = {"attempted": 0, "stored": 0, "unreachable": 0, "cells_unread": 0}
+    # THE INSTANT THE BEAT SENT THIS PASS (the third round, 2026-11-13):
+    # every account's turn is the minute of the clock it falls in, however
+    # late the worker started the pass and whenever the walk reaches the
+    # account (_beat_sent_at, venue_health.old_beat_turn); the pass's start
+    # when the run carries no expiry.
+    started_at = _beat_sent_at(sync_etoro_accounts, "sync-etoro-accounts",
+                               timezone.now().timestamp())
     # REAL FIRST (review, 2026-11-13): one key pair opens both worlds and
     # both spend one request budget, so whatever runs short in a pass (the
     # account minute's tokens, a lock that runs out, an exception that
     # stops the walk) reaches DEMO first, never REAL. SAID WHOLE (the final
     # check, 2026-11-13): main walked them with no ORDER BY, in whatever
     # order the database returned (Postgres moves a row with its updates).
-    # Against a main that read REAL first the venue's health is the same
-    # (5xx and 429 hiccups alike; timeouts later or not at all). Against
-    # one that read DEMO first, REAL's reads now come a DEMO read earlier
-    # in the pass, and eToro can be marked sick sooner in some phases of a
-    # hiccup (measured: by 2.4 s under 5xx, 0.4 s under 429s, up to 30 s
-    # under timeouts) and in some 45 to 60 s timeout hiccups that main rode
-    # out: new real entries are then held ten minutes, the cautious way.
-    # Closes and stop moves are never held.
+    # Measured on the third round's code (the noting turns on the clock's
+    # grid, venue_health.old_beat_turn): against a main that read REAL
+    # first, a 5xx or 429 hiccup turns eToro sick with main's odds over
+    # the clock's phases, each incident up to 30 s either way or on one
+    # side only (timeouts: config/celery.py). Against one that read DEMO
+    # first, REAL's reads come a DEMO read earlier in the pass: the same
+    # odds under 5xx and 429s, each incident sooner in 558 of 1728 runs
+    # (by up to 32.4 s) and later in 231; under timeouts sick more often
+    # in 45 and 60 s hiccups (connect 37.5 and 50.0 % against 0 and
+    # 16.7 %), up to 50.8 s sooner: new real entries are then held ten
+    # minutes sooner, the cautious way. Closes and stop moves are never
+    # held.
     for acct in (EtoroAccount.objects.exclude(api_key_enc="")
                  .order_by("demo", "pk")):
         user = acct.user
@@ -1276,7 +1330,8 @@ def sync_etoro_accounts():
         holds_turn = True
         try:
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
-            holds_turn = _quiet_between_noting_passes(client, acct.pk)
+            holds_turn = _quiet_between_noting_passes(client, acct.pk,
+                                                      at=started_at)
             # THE STAMP IS TAKEN BEFORE THE READ (2026-10-31). The cells
             # are dated by the instant the GET left, not by the end of the
             # pass: AssetBot._pledged_since charges every row opened AFTER
@@ -1423,12 +1478,35 @@ def sync_etoro_accounts():
                 # from every 30 s pass, it read the equity twice as often,
                 # and a dip shorter than a minute was caught up to twice
                 # as often. Asked only by the pass that holds the
-                # account's noting turn (_quiet_between_noting_passes):
-                # at most once per old beat, a dip caught exactly as often
-                # as at 60 s. A pass that holds the turn and reads nothing
-                # (a miss, a budget deferral) spends it, as the old beat's
-                # did. The operator decides any change to it. The pools
-                # above are still resized from every pass.
+                # account's turn (_quiet_between_noting_passes): the first
+                # pass of each minute of the clock, the minute its beat
+                # sent it in (_beat_sent_at), never two in one minute. A
+                # pass that holds the turn and reads nothing (a miss, a
+                # budget deferral) spends it, as the old beat's did; a beat
+                # the lock idles holds none, and a minute whose first beat
+                # it idled is asked by its second, 30 s later. ON A FIXED
+                # GRID (the third round, 2026-11-13; until then a turn came
+                # 55 s after the last, and with passes 0 to 24 s late it
+                # was asked 15 % less often than at 60 s). Measured on the
+                # real code (the PR's third round), REAL's asks: on time
+                # one a minute, 60 s apart, at the 60 s beat's instants or
+                # 30 s off them as the beat's phase falls on the clock, a
+                # dip shorter than a minute caught exactly as often as at
+                # 60 s at every phase; with passes 0 to 24 s late one a
+                # minute, 36 to 84 s apart (at 60 s 37 to 84 s), a 10, 30
+                # and 59 s dip caught 18.9, 48.3 and 90.0 % of the time
+                # over the clock's phases against 17.8, 43.3 and 88.9 %, as
+                # often within sampling (the 60 s beat's very runs in half
+                # the phases; in the other half the asks sit on the beats
+                # between, late by their own draws: over nine draws 14.4,
+                # 53.3 and 90.0 % against 17.0, 49.6 and 88.9 %); where a
+                # slow pass idles a minute's first beat (a 40 s stalled
+                # read every third beat), asks 30 to 90 s apart, a 59 s dip
+                # caught 83.3 % against 100 %, and with passes also 0 to
+                # 24 s late both beats of a minute can find the lock held,
+                # that minute unasked: asks 7 to 142 s apart, 80.0 %
+                # against 91.1 %. The operator decides any change to it.
+                # The pools above are still resized from every pass.
                 if holds_turn:
                     _shock_trigger(user, now)
     if out["cells_unread"]:
@@ -1674,9 +1752,12 @@ def refresh_etoro_quotes() -> dict:
     Under the sync's own switches (platform_master, broker_account_sync),
     asked inline as refresh_etoro_cells asks them rather than through
     guarded_task: the component row is the sync's verdict, and a beat every
-    15 s must not overwrite it. Never raises."""
-    from .etoro_quotes import refresh
-    return refresh()
+    15 s must not overwrite it. Never raises. Its turns on the venue's
+    health are keyed on the instant the beat sent this run (_beat_sent_at,
+    the third round, 2026-11-13)."""
+    from .etoro_quotes import _now, refresh
+    return refresh(at=_beat_sent_at(refresh_etoro_quotes,
+                                    "refresh-etoro-quotes", _now()))
 
 
 def _beats_missed(cache, kind, pk) -> int:

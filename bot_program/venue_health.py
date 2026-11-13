@@ -34,6 +34,7 @@ Never raises: a cache that cannot be read is a venue nobody can call sick,
 and a note that cannot be written is logged and lost.
 """
 import logging
+import math
 from datetime import timedelta, timezone as dt_timezone
 
 from django.utils import timezone
@@ -178,8 +179,9 @@ def _refusals_key(venue: str, world: str) -> str:
 def note_refusal(venue: str, world: str, where: str, *, detail: str = "",
                  now=None) -> bool:
     """Keep ONE HTTP 429 a QUIET pass met (review, 2026-11-13): the account
-    sync and the held quotes note the venue's health from the passes their
-    old beats ran (noting_slot), and the passes between note nothing. Their
+    sync and the held quotes note the venue's health from one pass per
+    window of their old beats (old_beat_turn), and the passes between note
+    nothing. Their
     429 was then a log line only, while the readers that step aside after
     a 429 (recent_refusals: the demo short proofs, the bar refresh) read
     the noted ones, and the account reads grant no pause. Kept here, apart
@@ -201,11 +203,24 @@ def note_refusal(venue: str, world: str, where: str, *, detail: str = "",
         return False
 
 
-def noting_slot(key: str, hold_s: float, *, now: float) -> bool:
-    """THE NOTING SLOT (2026-11-13): may the pass that asks it note its
-    READ failures on the venue's health? True for the pass that claims
-    `key` (free, or held by a pass `hold_s` or more before `now`, epoch
-    seconds on the caller's clock), False while another pass holds it.
+def old_beat_window(beat_s: float, at: float) -> int:
+    """The window of the old beat's length `beat_s` that the instant `at`
+    (epoch seconds) falls in: floor(at / beat_s), the same on every worker
+    that reads the same clock. Raises on an instant that is no number."""
+    return int(math.floor(float(at) / float(beat_s)))
+
+
+def old_beat_turn(key: str, beat_s: float, *, at: float) -> bool:
+    """THE OLD BEAT'S TURN, ON A FIXED GRID (2026-11-13; the third round):
+    may the pass keyed on `at` note its READ failures on the venue's health
+    (and, for the account sync, ask the shock trigger)? `at` is epoch
+    seconds on the caller's clock: the instant the beat SENT the run
+    (tasks._beat_sent_at), or the pass's start for a run that carries no
+    such instant (called directly). True for the FIRST pass of its window
+    of the old beat's length (`beat_s`: 60 s for the sync, 30 s for the
+    quotes; old_beat_window) to ask, whatever that pass then does; False
+    for every other pass of the same window. One cache.add per window and
+    account, on `key` and the window's index, kept two windows.
 
     The eToro beats went faster (the operator: "aussi le refresh etoro par
     minute est toujours trop long, je suggère 20-30 secondes non?"): the
@@ -213,33 +228,58 @@ def noting_slot(key: str, hold_s: float, *, now: float) -> bool:
     beat that notes every pass would note twice as often, and a brief
     hiccup would make eToro SICK sooner and more often for the same
     trouble (simulated: a 30 s hiccup sick 57 % of the time from the sync
-    alone, 0 % at 60 s). The slot keeps the notes to the passes the old
-    beat would have run: `hold_s` a little under the old beat (55 s for
-    the sync, 25 s for the quotes), so the pass after the old beat's
-    interval claims it again. Every other pass reads, writes and counts
-    its miss as before, and its client notes nothing
-    (EtoroTrader.health_quiet): the odds and the time to sick stay the old
-    beats' (simulated over 12,000 random hiccups each, this rule: sick
-    after a 10, 20, 30 s hiccup 5.0, 21.0, 47.9 % of the time against 4.7,
-    20.7, 47.5 % at 60 s and 30 s, and 32 s into a failure against 33 s).
-    Per incident the instant can differ (the final check, 2026-11-13, on
-    the real code: the same with passes on time under 5xx and 429s, later
-    or not at all under timeouts, up to about 30 s either way once a pass
-    has run late; the sync's walk order: tasks.sync_etoro_accounts).
-    An order's failure is always noted (WRITE_SITES), whatever pass sent
-    it.
+    alone, 0 % at 60 s). One turn per old-beat window keeps the notes to
+    the old beat's count: every other pass reads, writes and counts its
+    miss as before, and its client notes nothing (EtoroTrader.
+    health_quiet).
 
-    Never raises: a cache that cannot be read notes, as before the slot."""
+    WHAT HOLDS, AND WHEN.
+      * Always, while the cache answers: never two passes hold one
+        window's turn, so never more often than the old beat, window by
+        window; and nothing drifts: a window's turn goes to the first of
+        its own runs to ask, never to a run timed from the last turn, so
+        a late run, a pass that outlives its beat or a beat the lock idles
+        moves no later window's. (Unread, every pass notes: below; a cache
+        emptied inside a window lets that window be taken once more.)
+      * On time: one pass in two, one old beat apart, at the same second of
+        each window: the first of the window's two beats. That is the pass
+        the old beat ran, or the one halfway between, as the beat's phase
+        falls on the clock; either way the old beat's pace and odds, as an
+        old beat run at that phase would have them. Per incident, so, the
+        instant eToro turns sick is the old beat's, or that of an old beat
+        run half a beat away: sooner or later, or on one side only
+        (measured on the real code under 5xx and 429 hiccups, the PR's
+        third round: the odds over the clock's phases exactly the old
+        beats', each incident within 30 s). A pass that outlives its beat:
+        its caller says what its lock does.
+      * Late inside the expiry (25 s for the sync, 10 s for the quotes,
+        both under half a beat): keyed on the instant its beat sent it, a
+        run keeps its window however late it starts, so the windows'
+        turns go to the same beats as on time, each as late as the worker
+        made it: two never closer than an old beat less the lateness, as
+        the old beat's own late passes (half a beat less after a window
+        whose first beat was idle or dropped, its second holding the
+        turn). A run that carries no send instant is keyed on its start: a
+        window's second beat started late enough to fall in the next
+        window would take that window's turn ahead of its first beat
+        (measured in the third round before keying on the send instant,
+        passes 0 to 24 s late: two shock asks 11 s apart).
+    Until the third round a turn came back `hold_s` (55 s, 25 s) after the
+    LAST one, so a turn taken late, or a pass that outlived its beat, moved
+    every turn after it: the shock trigger 15 % less often than at 60 s
+    with passes 0 to 24 s late, a price-read stall sick up to 57 s sooner
+    with quotes beats late inside their 10 s expiry, and the notes off the
+    old beat after any timeout incident.
+
+    An order's failure is always noted (WRITE_SITES), whatever pass sent
+    it. Never raises: a cache that cannot be read, or an instant that is no
+    number, notes (and asks), as before the turns."""
     try:
         from django.core.cache import cache
-        if cache.add(key, float(now), int(hold_s) + 5):
-            return True
-        held = cache.get(key)
-        if held is None or float(now) - float(held) >= float(hold_s):
-            cache.set(key, float(now), int(hold_s) + 5)
-            return True
-        return False
-    except Exception:  # noqa: BLE001 — unread: noted, as before the slot
+        window = old_beat_window(beat_s, at)
+        return bool(cache.add(f"{key}:{window}", float(at),
+                              int(2 * float(beat_s))))
+    except Exception:  # noqa: BLE001 — unread: noted, as before the turns
         return True
 
 

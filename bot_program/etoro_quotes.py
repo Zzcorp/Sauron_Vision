@@ -64,21 +64,22 @@ which grants the shared pause, a 5xx after the read's one bounded retry, a
 transport failure, a refused redirect) and when PASS_BUDGET_S has gone; it
 does not start while eToro is SICK (bot_program.venue_health) or while the
 shared 429 pause holds. A failed read is noted on the venue's health as
-every read is, from one pass per 30 s (NOTE_EVERY_S, 2026-11-13): the
-passes the old 30 s beat ran, one turn per old beat, so the venue's
-health is noted as often as before, never more; the passes between read
-and note nothing (EtoroTrader.health_quiet, venue_health.noting_slot),
-and grant no 429 pause either (review, 2026-11-13: their pause skipped
-the next noting pass, and a 429 storm made eToro sick later than before,
-or not at all); a 429 they meet is kept for the readers that step aside
+every read is, from one pass per 30 s (TURN_S, 2026-11-13): the first
+pass of each half minute of the clock, the half minute its beat sent it
+in (refresh's `at`), never two in one, so the
+venue's health is never noted more often than before
+(venue_health.old_beat_turn says what holds on time and late); the
+passes between read and note nothing (EtoroTrader.health_quiet), and
+grant no 429 pause either (review, 2026-11-13: their pause skipped the
+next noting pass, and a 429 storm made eToro sick later than before, or
+not at all); a 429 they meet is kept for the readers that step aside
 after one (venue_health.note_refusal), never counted toward SICK. A beat
-the lock holds spends the turn the running pass holds, as the old beat
-behind a long pass lost its own (the final check, F2: passes outliving
-30 s noted every 45 s, the old beat every 60 s; now never closer than
-60 s, and every 90 s behind 34 s passes: later, never sooner). When a
-hiccup turns eToro sick, against the old beats, is measured in the PR:
-the same with passes on time under 5xx and 429s, later or not at all
-under timeouts, up to about 30 s either way once a pass has run late.
+the lock holds spends its own half minute's turn when the running pass
+took its own as the first beat of its half minute, as the old beat
+behind its own long pass lost its turn (the final check, F2: passes
+outliving 30 s noted every 45 s, the old beat every 60 s;
+_spend_the_turns_behind_the_lock). When a hiccup turns eToro sick,
+against the old beats, is measured in the PR's third round.
 
 UNDER THE SYNC'S SWITCHES (platform_master, broker_account_sync), read
 inline as tasks.refresh_etoro_cells does: the component row is the sync's
@@ -160,17 +161,29 @@ PASS_BUDGET_S = 5.0
 #: 15 s beat, which then read every instrument every other pass.
 OWN_FRESH_S = BEAT_S // 2
 #: THE VENUE'S HEALTH FROM ONE PASS PER 30 s (2026-11-13,
-#: venue_health.noting_slot): the passes the 30 s beat ran, per account.
-#: 30 s less the beat's jitter.
-NOTE_EVERY_S = 25
+#: venue_health.old_beat_turn): the first pass of each half minute of the
+#: clock (a window of the old 30 s beat), the half minute its beat sent it
+#: in (refresh's `at`, tasks._beat_sent_at), per account. ON A
+#: FIXED GRID since the third round (2026-11-13): until then the turn came
+#: back 25 s after the last one, and a late or long pass moved every turn
+#: after it.
+TURN_S = 30
 NOTE_KEY = "etoro_quotes:noting:{pk}"
+#: THE HALF MINUTES WHOSE FIRST BEAT FOUND THE LOCK HELD AND SPENT NOTHING
+#: (the third round, 2026-11-13), per account: the pass that later takes
+#: such a half minute's turn is not where the old beat would have run, so
+#: a beat the lock holds behind it spends nothing
+#: (_spend_the_turns_behind_the_lock).
+FIRST_IDLE_KEY = "etoro_quotes:first_idle:{pk}"
 #: One pass at a time; a pass that died holds it this long at most. The
 #: lock holds the running pass's own token (the final check, 2026-11-13).
 LOCK_KEY = "etoro_quotes:pass"
 LOCK_S = 60
 #: THE TURN THE RUNNING PASS HOLDS (the final check, F2, 2026-11-13): per
-#: account, the token of the pass that claimed its noting turn, read by a
-#: beat the lock holds behind that pass (_spend_the_turns_behind_the_lock).
+#: account, {"token": the running pass's own, "at": the instant its turns
+#: are keyed on, "first": whether it took its turn as the first beat of its
+#: half minute}, read by a beat the lock holds behind that pass
+#: (_spend_the_turns_behind_the_lock).
 TURN_KEY = "etoro_quotes:turn:{pk}"
 #: When each instrument was last asked, per key hash: the rotation.
 ASKED_KEY = "etoro_quotes:asked:{kh}"
@@ -476,13 +489,16 @@ def _read_account(client, symbols, out, started) -> str:
     return ""
 
 
-def refresh() -> dict:
+def refresh(at=None) -> dict:
     """ONE PASS (the module docstring): {"accounts", "symbols", "asked"
     (requests sent), "written", "refused" (writes a higher-ranked feed's
     hold refused, P-c.1)}, with "held_by" ({symbol: that feed}) when one
     was, and "skipped" (why nothing was asked) or "stopped" (why the pass
     ended early) in words. The pass is kept for manage.py etoro_budget
-    (_record). Never raises."""
+    (_record). `at` (epoch seconds) is the instant its turns on the
+    venue's health are keyed on: the instant the beat sent this run
+    (tasks.refresh_etoro_quotes, tasks._beat_sent_at), the clock (_now)
+    when not given. Never raises."""
     out = {"accounts": 0, "symbols": 0, "asked": 0, "written": 0,
            "refused": 0}
     try:
@@ -500,13 +516,17 @@ def refresh() -> dict:
     except Exception as e:  # noqa: BLE001 — no lock, no pass
         out["skipped"] = f"the lock could not be read ({type(e).__name__})"
         return out
+    try:
+        at = _now() if at is None else float(at)
+    except (TypeError, ValueError):
+        at = _now()
     if not took:
         out["skipped"] = "a pass is running"
-        _spend_the_turns_behind_the_lock(c)
+        _spend_the_turns_behind_the_lock(c, at=at)
         return out
     started = time.monotonic()
     try:
-        return _pass(out, started, token)
+        return _pass(out, started, token, at=at)
     except Exception as e:  # noqa: BLE001 — a display beat never raises
         logger.warning("eToro quotes: the pass failed (%s)",
                        type(e).__name__)
@@ -574,80 +594,112 @@ def report(now=None) -> dict:
     return out
 
 
-def _quiet_between_noting_passes(client, account_pk) -> bool:
+def _quiet_between_noting_passes(client, account_pk, at=None) -> bool:
     """THE VENUE'S HEALTH FROM ONE PASS PER 30 s (2026-11-13): a pass that
-    does not hold the account's noting slot (NOTE_EVERY_S) reads and
-    writes as every pass does, and its client notes no READ failure
-    (EtoroTrader.health_quiet); it still stops at its first failure. Set
-    on every pass, the noting one included: the client may outlive one.
-    True when this pass holds the turn. Never raises: a slot that cannot
-    be claimed notes (True)."""
+    does not hold the account's turn (venue_health.old_beat_turn: the
+    first pass of its half minute of the clock, TURN_S, keyed on `at`: the
+    instant its beat sent it, or its start) reads and writes as every pass
+    does, and its client notes no READ
+    failure (EtoroTrader.health_quiet); it still stops at its first
+    failure. Set on every pass, the noting one included: the client may
+    outlive one. True when this pass holds the turn. Never raises: a turn
+    that cannot be read notes (True), as before the turns."""
     try:
         from bot_program import venue_health
-        noting = venue_health.noting_slot(NOTE_KEY.format(pk=account_pk),
-                                          NOTE_EVERY_S, now=_now())
+        noting = venue_health.old_beat_turn(
+            NOTE_KEY.format(pk=account_pk), TURN_S,
+            at=_now() if at is None else at)
         client.health_quiet = (
             "" if noting else
             f"the held quotes note the venue's health from one pass per "
             f"30 s; this {BEAT_S} s pass reads only")
         return bool(noting)
     except Exception as e:  # noqa: BLE001 — unread: noted, as before
-        logger.debug("eToro quotes: the noting slot was not read (%s)",
+        logger.debug("eToro quotes: the noting turn was not read (%s)",
                      type(e).__name__)
         return True
 
 
-def _spend_noting_turn(account_pk) -> None:
-    """The old 30 s beat's turn, spent by a pass that reads nothing (eToro
-    sick: see _pass) or by a beat the lock holds behind the pass that
-    holds it (_spend_the_turns_behind_the_lock). Never raises."""
+def _spend_noting_turn(account_pk, at=None) -> None:
+    """The turn of the old 30 s beat's window `at` falls in, spent by a
+    pass that reads nothing (eToro sick: see _pass) or by a beat the lock
+    holds behind a pass that holds its own (_spend_the_turns_behind_the_
+    lock). A window whose turn a pass already holds is left as it is.
+    Never raises."""
     try:
         from bot_program import venue_health
-        venue_health.noting_slot(NOTE_KEY.format(pk=account_pk),
-                                 NOTE_EVERY_S, now=_now())
+        venue_health.old_beat_turn(NOTE_KEY.format(pk=account_pk), TURN_S,
+                                   at=_now() if at is None else at)
     except Exception:  # noqa: BLE001 — unread: the next pass notes
         pass
 
 
-def _hold_the_turn(account_pk, token) -> None:
-    """Say that the running pass (its lock's `token`) holds `account_pk`'s
-    noting turn, for a beat the lock holds behind it (TURN_KEY). Never
-    raises: unsaid, the beats behind spend nothing (the next pass notes,
-    as before this fix)."""
+def _first_idle_key(account_pk, at) -> str:
+    """The cache key that marks `at`'s half minute as one whose first beat
+    found the lock held and spent nothing (FIRST_IDLE_KEY). Raises on an
+    instant that is no number."""
+    from bot_program import venue_health
+    return (f"{FIRST_IDLE_KEY.format(pk=account_pk)}:"
+            f"{venue_health.old_beat_window(TURN_S, at)}")
+
+
+def _hold_the_turn(account_pk, token, at) -> None:
+    """Say that the running pass (its lock's `token`, keyed on `at`) holds
+    `account_pk`'s noting turn, and whether it took it as the first beat
+    of its half minute (no beat before it there found the lock held:
+    FIRST_IDLE_KEY), for a beat the lock holds behind it (TURN_KEY).
+    Never raises: unsaid, the beats behind spend nothing (the next pass of
+    their half minute notes, as before the final check's fix)."""
     if not token:
         return
     try:
-        _cache().set(TURN_KEY.format(pk=account_pk), token, LOCK_S)
+        c = _cache()
+        first = c.get(_first_idle_key(account_pk, at)) is None
+        c.set(TURN_KEY.format(pk=account_pk),
+              {"token": token, "at": float(at), "first": bool(first)},
+              LOCK_S)
     except Exception:  # noqa: BLE001 — unsaid: nothing spent behind it
         pass
 
 
-def _spend_the_turns_behind_the_lock(c) -> None:
+def _spend_the_turns_behind_the_lock(c, at=None) -> None:
     """THE OLD BEAT'S TURN, LOST BEHIND A LONG PASS AS IT WAS (the final
     check, F2, 2026-11-13). A quotes pass can outlive 30 s (a slow answer,
     then a read that opens and stalls: about 34 s). The old 30 s beat that
     came while it ran found the lock held and was gone, and its turn with
     it; at 15 s the beat the lock held left the turn free, the next pass
     took it 15 s later, and such passes noted every 45 s where the old
-    beat noted every 60 s. A beat the lock holds now spends the turn of
-    each account whose turn the RUNNING pass holds (TURN_KEY, its token),
-    over the accounts a pass reads (_accounts), through _spend_noting_turn:
-    claimed only once the old beat's interval has gone by, as the old beat
-    behind that pass lost it. Never two noting passes closer than the old
-    beat's; where the 15 s beat has no pass at the old beat's instant
-    (passes at 0, 45, 90 behind 34 s passes), the next noting pass comes
-    later, never sooner.
+    beat noted every 60 s.
+
+    ON THE GRID (the third round, 2026-11-13). A beat the lock holds
+    (keyed on `at`) spends its own half minute's turn (_spend_noting_turn)
+    for each account whose turn the RUNNING pass holds (TURN_KEY: its
+    token) and took as the FIRST beat of its own half minute: the
+    old beat's place on the grid, so this beat stands where the old beat's
+    next one stood, lost behind that pass. Behind any other pass (a quiet
+    one, or one that took its turn after its half minute's first beat had
+    found the lock held) it spends nothing, marks its half minute
+    (FIRST_IDLE_KEY), and the half minute's next pass takes the turn: that
+    pass is not where the old beat would have run, and the beats behind it
+    spend nothing either. Until the third round a beat spent the turn when
+    the running pass had taken it 25 s or more before: a turn taken late
+    left the old beat's next one unspent, and with beats late inside their
+    10 s expiry a price-read stall made eToro sick up to about 60 s sooner
+    than the old beat (the recheck: 57.3 s).
 
     NOT THE TURN OF A QUIET PASS: one between two old beats that runs over
     an old beat leaves that beat's turn to the next pass, as before.
     Spending it there would leave every pass of a read-timeout outage
     quiet (each about 21 s, so one every 30 s, all between two old beats):
     measured on the real code, a two-minute read-timeout outage sick 67 %
-    of the time, against 100 % at the old beat and before this fix.
+    of the time, against 100 % at the old beat and before the final
+    check's fix.
 
-    Never raises: the lock or the accounts unread, nothing is spent and
-    the next pass notes, as before."""
+    Never raises: the lock, the turns or the accounts unread, nothing is
+    spent and the next pass of each half minute notes, as before the
+    fix."""
     try:
+        at = _now() if at is None else float(at)
         running = c.get(LOCK_KEY)
         accounts = _accounts() if running else []
     except Exception as e:  # noqa: BLE001 — unread: nothing spent
@@ -656,14 +708,21 @@ def _spend_the_turns_behind_the_lock(c) -> None:
         return
     for acct, _rows in accounts:
         try:
-            holds = c.get(TURN_KEY.format(pk=acct.pk)) == running
+            turn = c.get(TURN_KEY.format(pk=acct.pk))
+            spent = (isinstance(turn, dict) and turn.get("token") == running
+                     and turn.get("first") is True)
         except Exception:  # noqa: BLE001 — unread: not spent
-            holds = False
-        if holds:
-            _spend_noting_turn(acct.pk)
+            spent = False
+        if spent:
+            _spend_noting_turn(acct.pk, at)
+            continue
+        try:
+            c.add(_first_idle_key(acct.pk, at), 1, int(2 * TURN_S))
+        except Exception:  # noqa: BLE001 — unmarked: the next pass is first
+            pass
 
 
-def _pass(out, started, token=None) -> dict:
+def _pass(out, started, token=None, at=None) -> dict:
     """THE OLD BEAT'S TURN IS SPENT WHATEVER THE PASS DOES (review,
     2026-11-13): each account's noting turn is claimed before anything can
     skip the pass (the venue sick, the 429 pause, nothing to ask), as the
@@ -672,10 +731,13 @@ def _pass(out, started, token=None) -> dict:
     the review's harness found a 429 noted 15 s sooner than the old beat
     could have, eToro sick 0.2 s sooner in 12 of 432 phases. The turn a
     pass holds is said beside its lock (`token`, _hold_the_turn), so a
-    beat the lock holds behind it spends it as the old beat behind a long
-    pass lost its own (the final check, F2)."""
+    beat the lock holds behind it spends its own window's as the old beat
+    behind a long pass lost its own (the final check, F2). Every turn is
+    the window of `at`, the instant the beat sent this run, or its start
+    (the third round, 2026-11-13: venue_health.old_beat_turn)."""
     from bot_program import venue_health
     from bot_program.engine import etoro_budget
+    at = _now() if at is None else at
     accounts = _accounts()
     if not accounts:
         out["skipped"] = "no open real eToro row"
@@ -683,7 +745,7 @@ def _pass(out, started, token=None) -> dict:
     sick = venue_health.sick("etoro", "live")
     if sick:
         for acct, _rows in accounts:
-            _spend_noting_turn(acct.pk)
+            _spend_noting_turn(acct.pk, at)
         out["skipped"] = f"eToro is sick: {sick.get('words', '')}"[:200]
         return out
     for acct, rows in accounts:
@@ -691,8 +753,8 @@ def _pass(out, started, token=None) -> dict:
         if client is None:
             continue
         out["accounts"] += 1
-        if _quiet_between_noting_passes(client, acct.pk):
-            _hold_the_turn(acct.pk, token)
+        if _quiet_between_noting_passes(client, acct.pk, at):
+            _hold_the_turn(acct.pk, token, at)
         pause = venue_health.pause_s(client)
         if pause > 0:
             out["skipped"] = (f"the shared 429 pause holds ({pause:.0f} s "

@@ -1472,11 +1472,11 @@ class EtoroTrader:
         # A BACKGROUND read (klines, for the bar refresh) notes nothing on
         # the venue's health and grants no 429 pause: see klines.
         self._background = False
-        # A QUIET pass of a beat (2026-11-13, venue_health.noting_slot):
+        # A QUIET pass of a beat (2026-11-13, venue_health.old_beat_turn):
         # why its READ failures are not noted on the venue's health, or ""
-        # (they are). Set by the account sync and the held quotes on the
-        # passes between the ones their old beats ran; an order's failure
-        # is noted whatever it says (_note_health).
+        # (they are). Set by the account sync and the held quotes on every
+        # pass that does not hold its old-beat window's turn; an order's
+        # failure is noted whatever it says (_note_health).
         self.health_quiet = ""
         # The quota-looking headers of the last answer _read received.
         self.last_rate_headers: dict = {}
@@ -1585,12 +1585,12 @@ class EtoroTrader:
 
         Not a READ of a QUIET pass (`health_quiet`, 2026-11-13): the
         account sync beats every 30 s and the held quotes every 15 s, and
-        each notes its read failures from one pass in two, the passes their
-        old beats (60 s, 30 s) ran, so the venue's health is noted as often
-        as before, never more (venue_health.noting_slot); when a hiccup
-        turns it sick against the old beats is measured in the PR (the
-        same on time under 5xx and 429s with REAL read first, later or not
-        at all under timeouts). The read
+        each notes its read failures only from the first pass of each
+        window of its old beat on the clock (60 s, 30 s), the window its
+        beat sent it in (venue_health.old_beat_turn): one pass in two on
+        time, never two in a window, so never more often than before. When a hiccup turns it
+        sick against the old beats is measured in the PR (venue_health.
+        old_beat_turn says what holds). The read
         is logged here and counted where it was asked (the sync's miss); a
         write site's failure (venue_health.WRITE_SITES, the order) is noted
         whatever the pass.

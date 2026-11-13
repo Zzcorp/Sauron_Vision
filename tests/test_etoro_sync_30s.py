@@ -31,13 +31,14 @@ instruments to 30 s.
       - the equity history one row in five minutes (the slack is half a
         beat, 15 s);
       - the venue's health noted from ONE pass a minute per account for the
-        sync, and from one pass per 30 s for the quotes: the passes the old
-        beats would have run. The others read, write and count their miss
-        as every pass does, and note nothing (EtoroTrader.health_quiet), so
-        the venue's health is noted as often as before, never more (when a
-        hiccup turns eToro sick, per incident, is measured in the PR: the
-        same on time under 5xx and 429s with REAL read first, later or not
-        at all under timeouts); an order's failure is always noted.
+        sync, and from one pass per 30 s for the quotes: the first pass of
+        each window of the old beat on the clock, the window its beat sent
+        it in (since the third round; venue_health.old_beat_turn,
+        tasks._beat_sent_at). The others read, write and
+        count their miss as every pass does, and note nothing (EtoroTrader.
+        health_quiet), so the venue's health is never noted more often than
+        before (when a hiccup turns eToro sick, per incident, is measured
+        in the PR); an order's failure is always noted.
   * MONEY: the order gates read eToro's cash, used margin and equity at
     most about 30 s old instead of 60 s, from the same cells by the same
     rules; no limit, threshold, ratio or formula moves (TheMoneyWindows
@@ -533,7 +534,10 @@ class TheSyncNotesTheVenueOnceAMinuteTests(TestCase):
         p = mock.patch(TRADER, side_effect=_over(self.wire))
         p.start()
         self.addCleanup(p.stop)
-        self.t0 = timezone.now().replace(microsecond=0)
+        # ON THE MINUTE (the third round, 2026-11-13): the noting turns are
+        # the clock's minutes (venue_health.old_beat_turn), and the old
+        # 60 s beat's passes here start on one.
+        self.t0 = timezone.now().replace(second=0, microsecond=0)
 
     def _at(self, s):
         return self.t0 + timedelta(seconds=s)
@@ -611,8 +615,13 @@ class TheSyncNotesTheVenueOnceAMinuteTests(TestCase):
 
 
 class TheNotingSlotTests(SimpleTestCase):
-    """venue_health.noting_slot: the pass that claims it notes; it is free
-    again `hold_s` after the pass that claimed it, on the caller's clock."""
+    """venue_health.old_beat_turn (the noting slot until the third round,
+    2026-11-13): the first pass keyed in each window of the old beat's
+    length on the caller's clock notes; the others of that window do
+    not.
+    (Until the third round the slot was free again `hold_s` after the pass
+    that claimed it, and late passes moved it: tests.
+    test_etoro_old_beat_turns.)"""
 
     def setUp(self):
         cache.clear()
@@ -620,16 +629,16 @@ class TheNotingSlotTests(SimpleTestCase):
 
     def test_claimed_held_then_free_again(self):
         key = "e30:slot:1"
-        self.assertTrue(vh.noting_slot(key, 55, now=1000.0))
-        self.assertFalse(vh.noting_slot(key, 55, now=1030.0))
-        self.assertTrue(vh.noting_slot(key, 55, now=1060.0))
-        self.assertFalse(vh.noting_slot(key, 55, now=1090.0))
-        self.assertTrue(vh.noting_slot("e30:slot:2", 55, now=1090.0),
+        self.assertTrue(vh.old_beat_turn(key, 60, at=960.0))
+        self.assertFalse(vh.old_beat_turn(key, 60, at=990.0))
+        self.assertTrue(vh.old_beat_turn(key, 60, at=1020.0))
+        self.assertFalse(vh.old_beat_turn(key, 60, at=1050.0))
+        self.assertTrue(vh.old_beat_turn("e30:slot:2", 60, at=1050.0),
                         "each account its own")
 
     def test_a_cache_that_cannot_be_read_notes_as_before(self):
         with mock.patch.object(cache, "add", side_effect=RuntimeError("down")):
-            self.assertTrue(vh.noting_slot("e30:slot:3", 55, now=1.0))
+            self.assertTrue(vh.old_beat_turn("e30:slot:3", 60, at=1.0))
 
 
 class TheQuotesNoteAsTheirOldBeatDidTests(_QuotesCase):
