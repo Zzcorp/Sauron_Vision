@@ -2,8 +2,9 @@
 
 10 min, 30 min and 2h are intraday frames: their forming bar is the one
 whose period has not ended, by the frame's seconds, and the live tick welds
-onto it under C1's guards (the same feed, fresh, taken inside the bar,
-within the class's jump bar); a bar whose period has ended takes none, and
+onto it under C1's guards (the same feed, at the candles' close side since
+2026-11-12, fresh, taken inside the bar, within the class's jump bar); a
+bar whose period has ended takes none, and
 the bar-close countdown runs. The weekly candle is a daily-family frame,
 handled the way 1d is: the server marks this week's candle forming, the
 tick welds only onto it, and only while it holds today's forming day (the
@@ -43,7 +44,10 @@ FINE = SCENARIO_HEAD + r"""
     for (let i = 0; i < 6; i++) await flush();
     const api = sandbox.svCharts[ID];
     const R = {};
-    const fresh = { source_family: 'etoro', stand_in: '', quote_age_seconds: 5,
+    /* at the candles' close side (2026-11-12, one price everywhere: a
+       quote is welded only on its own feed's candles AND side; SRC reads
+       eToro's candles as closing on the bid, tests.test_chart_one_price_widget) */
+    const fresh = { source_family: 'etoro', side: 'bid', stand_in: '', quote_age_seconds: 5,
                     source_words: 'eToro (synced)' };
     api.tick(4003.5, fresh);
     R.forming = { n: log.updates.length, last: lastUpdate(), tick: role('tick') };
@@ -86,8 +90,10 @@ WEEKLY = SCENARIO_HEAD + r"""
     });
     bars.push({ time: iso(monday), open: 255, high: 258, low: 254, close: 256,
                 volume: 0, forming: true });
+    /* Yahoo's candles close on the last trade (chart_source.CLOSE_SIDES) */
     const src = Object.assign({}, SRC, { family: 'yahoo', label: 'Yahoo AAPL',
                                          words: 'Yahoo AAPL', route: '', tick_bar: 0.03,
+                                         close_side: 'last',
                                          notes: ["this week's candle is forming"] });
     /* opened on this week's Wednesday, and on the Thursday of last week */
     const positions = [
@@ -108,7 +114,7 @@ WEEKLY = SCENARIO_HEAD + r"""
     move(100, 100, iso(monday));
     R.legend = legendEl.innerHTML;
     R.countdown = els[ID + '-countdown'].textContent;
-    const q = { source_family: 'yahoo', stand_in: '', quote_age_seconds: 20,
+    const q = { source_family: 'yahoo', side: 'last', stand_in: '', quote_age_seconds: 20,
                 source_words: 'Yahoo AAPL' };
     api.tick(256.5, q);
     R.forming = { n: log.updates.length, last: lastUpdate(), tick: role('tick') };
@@ -136,9 +142,10 @@ WEEK_WITHOUT_TODAY = SCENARIO_HEAD + r"""
        Yahoo's days, forming, and today's hours eToro's, so not in it */
     bars.push({ time: iso(monday), open: 1.105, high: 1.109, low: 1.103, close: 1.107,
                 volume: 0, forming: true, no_tick: M.no_tick });
+    /* Yahoo's candles close on the last trade (chart_source.CLOSE_SIDES) */
     const src = Object.assign({}, SRC, { family: 'yahoo', label: 'Yahoo EURUSD=X',
         words: "Yahoo EURUSD=X, not eToro's price", route: 'etoro', stand_in: '',
-        same_feed_only: false, tick_bar: 0.005, notes: [M.note] });
+        same_feed_only: false, tick_bar: 0.005, close_side: 'last', notes: [M.note] });
     PAYLOAD = { symbol: 'EURUSD', timeframe: '1wk', bars: bars, source: src,
                 positions: [], signals: [] };
     vm.runInContext(M.pure, sandbox, { filename: 'pure.js' });
@@ -149,8 +156,9 @@ WEEK_WITHOUT_TODAY = SCENARIO_HEAD + r"""
     const R = { served: last() };
     move(100, 100, iso(monday));
     R.legend = legendEl.innerHTML;
-    /* eToro's quote, +0.31%: inside forex's 0.5% bar, and no stand-in */
-    const etoro = { source_family: 'etoro', stand_in: '', quote_age_seconds: 5,
+    /* eToro's quote, +0.31%: inside forex's 0.5% bar, and no stand-in;
+       at the bid, the side a held BUY is valued at (sv-venue.js sends it) */
+    const etoro = { source_family: 'etoro', side: 'bid', stand_in: '', quote_age_seconds: 5,
                     source_words: 'eToro' };
     api.tick(1.1104, etoro);
     R.first = { n: log.updates.length, tick: role('tick'), last: last() };
@@ -158,7 +166,7 @@ WEEK_WITHOUT_TODAY = SCENARIO_HEAD + r"""
     await refresh(JSON.parse(JSON.stringify(PAYLOAD)));
     api.tick(1.1105, etoro);
     R.second = { n: log.updates.length, tick: role('tick'), last: last() };
-    api.tick(1.1106, { source_family: 'yahoo', stand_in: '', quote_age_seconds: 20,
+    api.tick(1.1106, { source_family: 'yahoo', side: 'last', stand_in: '', quote_age_seconds: 20,
                        source_words: 'Yahoo EURUSD=X' });
     R.sameFeed = { n: log.updates.length, tick: role('tick') };
     process.stdout.write(JSON.stringify(R));
@@ -269,10 +277,19 @@ class TheWeekWithoutTodayTests(SimpleTestCase):
     the week's close and high took today's price every 15 s, the 60 s
     refresh put Tuesday's figures back, and the next tick welded again.
     The server says why the bar takes no tick (`no_tick`); the caption
-    says it, and nothing flips across a refresh."""
+    says it, and nothing flips across a refresh.
+
+    One price everywhere (2026-11-12): a quote is welded only on its own
+    feed's candles AND side (chart_widget tickRefusal), so eToro's quote
+    is refused on Yahoo's candles before any reason of the bar's, and the
+    caption says it is another feed; the candles' own feed's quote, at
+    their close side, is the one the bar's `no_tick` refuses, in the
+    server's words."""
 
     #: The server's words (tests.test_chart_divisions pins them there).
     words = "this week's candle leaves today out"
+    #: The widget's words for eToro's quote on Yahoo's candles.
+    other_feed = "it is eToro, another feed than these candles (Yahoo EURUSD=X)"
 
     @classmethod
     def setUpClass(cls):
@@ -285,7 +302,7 @@ class TheWeekWithoutTodayTests(SimpleTestCase):
         first = self.r["first"]
         self.assertEqual(first["n"], 0, first)
         self.assertEqual(first["tick"],
-                         {"text": "live quote not drawn: " + self.words,
+                         {"text": "live quote not drawn: " + self.other_feed,
                           "hidden": False})
         self.assertEqual(first["last"], self.r["served"])
 
@@ -296,7 +313,7 @@ class TheWeekWithoutTodayTests(SimpleTestCase):
         self.assertEqual((second["last"]["close"], second["last"]["high"]),
                          (1.107, 1.109))
         self.assertEqual(second["tick"]["text"],
-                         "live quote not drawn: " + self.words)
+                         "live quote not drawn: " + self.other_feed)
 
     def test_the_same_feed_s_quote_is_not_welded_either(self):
         same = self.r["sameFeed"]

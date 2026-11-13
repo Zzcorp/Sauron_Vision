@@ -56,9 +56,14 @@ srcEl.querySelector = function (sel) {
 const nowS = Math.floor(Date.now() / 1000);
 const role = function (n) { return roles[n] ? { text: roles[n].textContent, hidden: roles[n].hidden } : null; };
 const lastUpdate = function () { return log.updates[log.updates.length - 1] || null; };
+/* close_side (2026-11-12, one price everywhere): a quote is welded only
+   on its own feed's candles AND side. These scenarios read eToro's candles
+   as if M5 had measured their close at the bid (in production it is
+   unmeasured, chart_source.ETORO_CANDLE_CLOSE_SIDE, and nothing is welded:
+   tests/test_one_quote_chart). */
 const SRC = { family: 'etoro', label: 'eToro', words: "eToro's own candles",
               stand_in: '', route: 'etoro', tick_bar: 0.02, notes: [],
-              positions: '' };
+              positions: '', close_side: 'bid' };
 """
 
 INTRADAY = SCENARIO_HEAD + r"""
@@ -92,7 +97,7 @@ INTRADAY = SCENARIO_HEAD + r"""
         return { priceRange: { minValue: 0, maxValue: 4004 }, margins: { above: 0.1, below: 0.1 } };
     }) : null;
 
-    const fresh = { source_family: 'etoro', stand_in: '', quote_age_seconds: 5,
+    const fresh = { source_family: 'etoro', side: 'bid', stand_in: '', quote_age_seconds: 5,
                     source_words: 'eToro (synced)' };
     api.tick(4003.5, fresh);
     R.same = { n: log.updates.length, last: lastUpdate(), tick: role('tick') };
@@ -111,7 +116,7 @@ INTRADAY = SCENARIO_HEAD + r"""
     R.sameInstrument = { n: log.updates.length - before, last: lastUpdate(), tick: role('tick') };
 
     let n0 = log.updates.length;
-    api.tick(4003.3, { source_family: 'etoro', stand_in: '', quote_age_seconds: 1200,
+    api.tick(4003.3, { source_family: 'etoro', side: 'bid', stand_in: '', quote_age_seconds: 1200,
                        source_words: 'eToro (synced)' });
     R.stale = { n: log.updates.length - n0, tick: role('tick') };
 
@@ -155,6 +160,7 @@ DAILY = SCENARIO_HEAD + r"""
                 forming: true });
     const src = Object.assign({}, SRC, { family: 'yahoo', label: 'Yahoo AAPL',
                                          words: 'Yahoo AAPL', route: '', tick_bar: 0.03,
+                                         close_side: 'last',
                                          notes: ["today's candle is forming from Yahoo AAPL hourly bars"],
                                          positions: 'Your position lines are eToro prices; these candles are Yahoo AAPL.' });
     PAYLOAD = { symbol: 'AAPL', timeframe: '1d', bars: bars, source: src,
@@ -213,7 +219,7 @@ REVIEW = SCENARIO_HEAD + r"""
                        source_words: 'Binance stream' });
     R.binanceOnEtoro = { n: log.updates.length - n0, tick: role('tick') };
     n0 = log.updates.length;
-    api.tick(4003.5, { source_family: 'etoro', stand_in: '', quote_age_seconds: 3,
+    api.tick(4003.5, { source_family: 'etoro', side: 'bid', stand_in: '', quote_age_seconds: 3,
                        source_words: 'eToro (synced)' });
     R.etoroOnEtoro = { n: log.updates.length - n0 };
 
@@ -288,10 +294,13 @@ class TheTickOnAnIntradayChartTests(SimpleTestCase):
         self.assertIn("Yahoo GC=F", other["tick"]["text"])
         self.assertIn("another feed", other["tick"]["text"])
 
-    def test_the_same_instrument_from_another_feed_is_welded(self):
+    def test_the_same_instrument_from_another_feed_is_not_welded(self):
+        """One price everywhere (2026-11-12): an OANDA print welded onto
+        eToro's candle drew a wick nobody printed; the chart's "now" line
+        shows a price, the candles stay their feed's own."""
         s = self.r["sameInstrument"]
-        self.assertEqual(s["n"], 1)
-        self.assertEqual(s["last"]["close"], 4003.4)
+        self.assertEqual(s["n"], 0)
+        self.assertIn("another feed", s["tick"]["text"])
 
     def test_a_stale_quote_is_not_drawn(self):
         self.assertEqual(self.r["stale"]["n"], 0)

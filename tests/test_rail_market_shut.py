@@ -53,8 +53,8 @@ from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 
-from tests.test_rail_every_signal import (HOST, _cards, _page, _partial,
-                                          _user)
+from tests.test_rail_every_signal import (HOST, _cards, _cold_cache, _page,
+                                          _partial, _user)
 from tests.test_signal_market_hold import (MON_1000, SAT_0005, SAT_NOON,
                                            SUN_0900, SUN_2130, SUN_2205,
                                            SUN_2217, SUN_2220, _at, _db_inst,
@@ -140,6 +140,7 @@ def _meta(html):
 
 class _Base(TestCase):
     def setUp(self):
+        _cold_cache()       # the warm-ups below pay the stamp and the sparks
         self.user = _user("rms_u")
         self.client.force_login(self.user)
         self.fx = _db_inst("EURUSD")
@@ -361,7 +362,7 @@ class DisplayOnlyTests(_Base):
         insts = [_db_inst(f"RMSQ{i:02d}") for i in range(30)]
         for inst in insts[:3]:
             _sig(inst, SAT_1100, rule="rms_qc")
-        self._rail(SAT_NOON)                       # warm the session
+        self._rail(SAT_NOON)                # warm the session and the cache
         with _at(SAT_NOON), CaptureQueriesContext(connection) as three:
             self.assertEqual(len(_cards(_partial(self.client))), 3)
         for inst in insts[3:]:
@@ -858,7 +859,7 @@ class TheMarketShutSectionTests(_HoldBase):
         insts = [_db_inst(f"RMSW{i:02d}") for i in range(30)]
         for inst in insts[:3]:
             _sig(inst, SAT_1100, rule="rms_qc")
-        self._rail(SAT_NOON)
+        self._rail(SAT_NOON)                # warm the session and the cache
         with _at(SAT_NOON), CaptureQueriesContext(connection) as three:
             self.assertEqual(len(_waiting_rows(_partial(self.client))), 3)
         for inst in insts[3:]:

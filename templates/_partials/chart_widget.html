@@ -855,6 +855,7 @@ the first reply names its feed.{% endcomment %}
     <span class="sv-src-notes" data-role="notes"></span>
     <span class="sv-src-positions" data-role="positions" hidden></span>
     <span class="sv-src-tick" data-role="tick" aria-live="polite" hidden></span>
+    <span class="sv-src-now" data-role="now" hidden></span>
 </div>
 
 {% comment %}The signal dots' key, under the chart (2026-09-27). Outside the
@@ -3964,15 +3965,15 @@ is under it.{% endcomment %}
            the operator's money, dashed an idea, dotted the tape's price. */
         if (type === 'candlestick' || type === 'heikin') {
             mainSeries = chart.addCandlestickSeries({
-                autoscaleInfoProvider: type === 'candlestick' ? suspectAwareAutoscale : undefined,
+                autoscaleInfoProvider: nowAware(type === 'candlestick' ? suspectAwareAutoscale : null),
                 upColor:        c.accent,
                 downColor:      c.red,
                 borderUpColor:  c.accent,
                 borderDownColor:c.red,
                 wickUpColor:    c.accent,
                 wickDownColor:  c.red,
-                lastValueVisible: true,
-                priceLineVisible: true,
+                lastValueVisible: false,
+                priceLineVisible: false,
                 priceLineStyle: LightweightCharts.LineStyle.Dotted,
                 priceFormat: seriesPriceFormat(lastBars),
             });
@@ -3980,8 +3981,9 @@ is under it.{% endcomment %}
             mainSeries = chart.addLineSeries({
                 color:     c.accent,
                 lineWidth: 2,
-                lastValueVisible: true,
-                priceLineVisible: true,
+                autoscaleInfoProvider: nowAware(null),
+                lastValueVisible: false,
+                priceLineVisible: false,
                 priceLineStyle: LightweightCharts.LineStyle.Dotted,
                 priceFormat: seriesPriceFormat(lastBars),
             });
@@ -3991,12 +3993,15 @@ is under it.{% endcomment %}
                 topColor:    c.accentWash,
                 bottomColor: c.accentGhost,
                 lineWidth:   2,
-                lastValueVisible: true,
-                priceLineVisible: true,
+                autoscaleInfoProvider: nowAware(null),
+                lastValueVisible: false,
+                priceLineVisible: false,
                 priceLineStyle: LightweightCharts.LineStyle.Dotted,
                 priceFormat: seriesPriceFormat(lastBars),
             });
         }
+        /* The one "now" line moves to the new series (sv-venue.js). */
+        nowHandOver();
     }
 
     /* Heikin-Ashi: each candle averages the raw bar and the previous HA
@@ -4047,6 +4052,32 @@ is under it.{% endcomment %}
        pane. The scale over the visible bars is built from every other
        bar's range and a suspect bar's BODY; its wick runs off the pane,
        still drawn. With no suspect bar, the library's own answer. */
+    /* ONE PRICE EVERYWHERE (2026-11-12). The series' own last-value line
+       is off: it was the last bar's close, whatever feed the bars are, a
+       second "now" beside the numbers. The one painter (sv-venue.js) draws
+       ONE price line at the price every number beside the chart prints,
+       and the scale always includes it (nowAware), so it is never
+       off-screen. */
+    var NOW_V = null;
+    function nowAware(inner) {
+        return function (original) {
+            var res = inner ? inner(original) : original();
+            if (NOW_V === null || !isFinite(NOW_V)) return res;
+            if (!res || !res.priceRange) {
+                return { priceRange: { minValue: NOW_V, maxValue: NOW_V },
+                         margins: res ? res.margins : undefined };
+            }
+            return { priceRange: { minValue: Math.min(res.priceRange.minValue, NOW_V),
+                                   maxValue: Math.max(res.priceRange.maxValue, NOW_V) },
+                     margins: res.margins };
+        };
+    }
+    function nowHandOver() {
+        if (window.SVVenue && window.svCharts && window.svCharts[CHART_ID]) {
+            try { window.SVVenue.chart(window.svCharts[CHART_ID]); } catch (e) { /* the chart stands */ }
+        }
+    }
+
     function suspectAwareAutoscale(original) {
         var res = original();
         if (!res || !res.priceRange || !lastBars.some(function (b) { return b.suspect; })) return res;
@@ -6197,6 +6228,7 @@ is under it.{% endcomment %}
                    restored: the RSI pane may have just been created and
                    must receive the same viewport as the main chart. */
                 applyOverlays(bars);
+                nowHandOver();
                 if (keepRange) {
                     try { chart.timeScale().setVisibleLogicalRange(keepRange); }
                     catch (e) { /* a shrunk series can refuse the old range */ }
@@ -6646,11 +6678,20 @@ is under it.{% endcomment %}
     function tickRefusal(price, q, bar) {
         var who = (q && (q.source_words || q.source)) || 'an unnamed feed';
         if (!q || !SOURCE || !q.source_family) return 'live quote not drawn: its feed is not known';
-        var sameFeed = q.source_family === SOURCE.family;
-        var sameInstrument = !q.stand_in && !SOURCE.stand_in && !SOURCE.same_feed_only;
-        if (!sameFeed && !sameInstrument) {
+        /* THE CANDLES' OWN FEED AND SIDE ONLY (2026-11-12, one price
+           everywhere). Another feed's price on these candles drew a wick
+           nobody printed (an eToro quote on Yahoo's EURUSD, Finnhub's
+           print on eToro's AAPL candle): the chart's "now" line shows it
+           instead. An eToro price is welded onto eToro's candles only
+           once their close side is measured (source.close_side, M5). */
+        if (q.source_family !== SOURCE.family) {
             return 'live quote not drawn: it is ' + who + ', another feed than these candles ('
                  + (SOURCE.label || SOURCE.family) + ')';
+        }
+        var qSide = q.side || 'last';
+        if (!SOURCE.close_side || qSide !== SOURCE.close_side) {
+            return 'live quote not drawn: it is ' + who + ' ' + qSide + ', and these candles close on '
+                 + (SOURCE.close_side ? 'the ' + SOURCE.close_side : 'a side not yet measured');
         }
         var nowS = Date.now() / 1000;
         var opened = barEpoch(bar.time);
@@ -6692,6 +6733,18 @@ is under it.{% endcomment %}
     // axis price live between refreshes.
     window.svCharts = window.svCharts || {};
     window.svCharts[CHART_ID] = {
+        /* For the one price painter (sv-venue.js, 2026-11-12): the chart's
+           instrument, its main series, the bars and the feed it serves,
+           the caption's "now" line, and the value the scale must hold. */
+        symbol: SYMBOL,
+        series: function () { return mainSeries; },
+        bars: function () { return lastBars; },
+        source: function () { return SOURCE; },
+        caption: function () { return srcRole('now'); },
+        setNow: function (v) {
+            var n = (v === null || v === undefined) ? null : Number(v);
+            NOW_V = (n !== null && isFinite(n)) ? n : null;
+        },
         refresh: function () { if (chart) loadData(currentTf, {background: true}); },
         tick: function (price, q) {
             /* A chart that takes no tick says no reason (2026-10-31): the

@@ -207,6 +207,17 @@ class RailFacts:
     mark_fresh: bool = False
     progress_r: Optional[float] = None
     rr_now: Optional[float] = None
+    #: What the popup's "R:R now" cell is worked out from, for the
+    #: browser's one painter to work it out again as the price moves
+    #: (2026-11-12, the review: sv-venue.js field "rr"): the order's side,
+    #: the stop and the target as stored, the freshness bound in seconds.
+    rr_order: str = ""
+    rr_stop: str = ""
+    rr_target: str = ""
+    rr_max: int = 0
+    #: The cell's text as the server prints it, by the browser's own rule
+    #: (market_data.one_quote.field_words "rr"), so the two never differ.
+    rr_text: str = ""
     affirmed_at: object = None
     leaves_at: object = None
     contra: Optional[dict] = None
@@ -357,6 +368,70 @@ def _fresh_mark(inst, now):
     at = getattr(q, "updated_at", None)
     fresh = bool(at and (now - at).total_seconds() <= MAX_QUOTE_AGE_SECONDS)
     return last, fresh
+
+
+def _shown(request, signals) -> dict:
+    """{SYMBOL: the one price every screen prints} for the rail's cards
+    (market_data.one_quote, 2026-11-12): the response's answers, so the
+    popup's `mark` and the R:R now beside it read the price the headband,
+    the Horde and the hero print. {} when it cannot be read."""
+    syms = sorted({(s.instrument.symbol or "").upper() for s in signals
+                   if getattr(s, "instrument", None)} - {""})
+    if not syms:
+        return {}
+    try:
+        from market_data.one_quote import for_request
+        return {k.upper(): v for k, v in
+                for_request(request).many(syms).items()}
+    except Exception as e:  # noqa: BLE001 — the quote rows' marks stand
+        logger.debug("[rail] one-price answers unread: %s", e)
+        return {}
+
+
+def _shown_mark(ctx, inst, now):
+    """(mark, fresh) for a card's progress and R:R now (display figures
+    beside the popup's price): the one price every screen prints, fresh
+    within the engine's own bound (signals.performance); without an
+    answer, the quote row (_fresh_mark). The departures keep _fresh_mark:
+    a verdict is not a display figure."""
+    sh = (ctx.get("quotes") or {}).get((inst.symbol or "").upper())
+    if sh is None:
+        return _fresh_mark(inst, now)
+    from signals.performance import MAX_QUOTE_AGE_SECONDS
+    if sh.price is None:
+        return None, False
+    fresh = bool(sh.at and sh.state != "none"
+                 and (now - sh.at).total_seconds() <= MAX_QUOTE_AGE_SECONDS)
+    # The number the cell prints (its px text), so the figures beside it
+    # are worked out from exactly what the browser works them out from.
+    return float(sh.text()), fresh
+
+
+def _rr_inputs(s, order, ctx, inst, now) -> dict:
+    """The R:R now cell's inputs as the browser reads them (data-q-o,
+    data-q-stop, data-q-target, data-q-max) and its text by the same rule
+    (field_words "rr"): only for a card whose mark is the one price (ctx
+    quotes), and levels both stored."""
+    sh = (ctx.get("quotes") or {}).get((inst.symbol or "").upper())
+    if sh is None:
+        return {}
+    if not order or s.suggested_stop is None or s.suggested_target is None:
+        return {}
+    from market_data.one_quote import field_words, ref_text
+    from signals.performance import MAX_QUOTE_AGE_SECONDS
+    cls, sym = inst.asset_class or "", inst.symbol or ""
+    out = {"rr_order": order,
+           "rr_stop": ref_text(s.suggested_stop, cls, sym),
+           "rr_target": ref_text(s.suggested_target, cls, sym),
+           "rr_max": int(MAX_QUOTE_AGE_SECONDS)}
+    if not (out["rr_stop"] and out["rr_target"]):
+        return {}
+    out["rr_text"] = field_words(
+        sh.payload(), "rr", int(round(now.timestamp() * 1000)),
+        attrs={"data-q-o": order, "data-q-stop": out["rr_stop"],
+               "data-q-target": out["rr_target"],
+               "data-q-max": str(out["rr_max"])})
+    return out
 
 
 def _levels(s):
@@ -758,7 +833,7 @@ def _facts(s, ctx, now) -> RailFacts:
     votes = may_vote and now <= vote_until
     stage = badge.get("stage") or ""
     held = ctx["held"].get((inst.symbol or "").upper(), "")
-    mark, fresh = _fresh_mark(inst, now)
+    mark, fresh = _shown_mark(ctx, inst, now)
     entry, stop, target = _levels(s)
     progress = rr_now = None
     order = _order_side(side)
@@ -792,6 +867,7 @@ def _facts(s, ctx, now) -> RailFacts:
         leaves_words=leaves,
         held=bool(held), held_venue=held, rule_key=rule_key(s.rule_name),
         mark=mark, mark_fresh=fresh, progress_r=progress, rr_now=rr_now,
+        **_rr_inputs(s, order, ctx, inst, now),
         affirmed_at=aff, leaves_at=aff + timedelta(hours=RAIL_FRESH_HOURS),
         record_words=_record_words(s.rule_name, rf.get("stats")),
         live_words=_live_words(s.rule_name, pool,
@@ -998,7 +1074,8 @@ def _build(request) -> dict:
 
     ctx = {"now": now, "mine": mine, "life": life, "newest": newest,
            "last_flag": last_flag, "rules": rule_facts,
-           "demotions": demotions, "held": held, "hold": _hold_on()}
+           "demotions": demotions, "held": held, "hold": _hold_on(),
+           "quotes": _shown(request, candidates)}
 
     # 4. The verdicts. The rail's own lifecycle judges every candidate, the
     #    ones this operator passed included (the lifecycle is the rail's, a

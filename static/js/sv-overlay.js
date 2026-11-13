@@ -619,6 +619,9 @@
         var now = Date.now();
         for (var i = 0; i < nodes.length; i++) {
             var el = nodes[i];
+            /* A price's own age is the one painter's (sv-venue.js, in the
+               server's words, every second): never rewritten here. */
+            if (el.hasAttribute("data-q-f")) continue;
             var at = Date.parse(el.getAttribute("data-sv-at"));
             if (isNaN(at)) continue;
             var age = Math.max(0, (now - at) / 1000);

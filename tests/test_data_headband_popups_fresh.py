@@ -703,10 +703,13 @@ class TheCardSaysWhenTests(TestCase):
         self.inst = Instrument.objects.create(
             symbol="EURUSD", name="Euro / Dollar", asset_class="forex",
             is_active=True)
+        # The day change measured by the price's own feed (change_source):
+        # one price everywhere (2026-11-12) prints no other feed's change.
         self.q = LiveQuote.objects.create(
             instrument=self.inst, last=Decimal("1.08425"),
             bid=Decimal("1.08420"), ask=Decimal("1.08430"),
-            change_pct=Decimal("0.4200"), volume=1234, source="oanda")
+            change_pct=Decimal("0.4200"), volume=1234, source="oanda",
+            change_source="oanda")
 
     def _band(self):
         from core.context_ui import ui_extras

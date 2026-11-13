@@ -93,6 +93,7 @@ Why it is shaped this way
         Array.prototype.forEach.call(c.querySelectorAll(
             '[data-sv-live-ephemeral],[data-sv-live-stamp],[data-sv-live-status]'
         ), function (el) { el.textContent = ''; });
+        if (window.SVVenue && window.SVVenue.canon) window.SVVenue.canon(c);  /* the one painter's own paint (sv-venue.js) */
         return c.innerHTML;
     }
 

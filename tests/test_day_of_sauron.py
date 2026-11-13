@@ -295,7 +295,10 @@ class TheQueuesAreResolvedLikeCeleryTests(SimpleTestCase):
         self.assertLessEqual(set(scheme["queues"]),
                              {"fast", "default", "slow", "ai", "orcs"})
         self.assertIn("orcs", scheme["queues"])
-        self.assertEqual(scheme["fastest"], "15 s")
+        # 2026-11-12, one price everywhere: the held relay
+        # (relay-held-quotes, every 10 s, tests/test_one_quote_relay.py) is
+        # the schedule's fastest beat; it was the 15 s polls before it.
+        self.assertEqual(scheme["fastest"], "10 s")
 
 
 class TheFactsComeFromTheWallTests(TestCase):

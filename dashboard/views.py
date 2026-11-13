@@ -256,9 +256,16 @@ def instruments_list(request):
     except Exception:
         _ex_status, market_status_for = None, None
 
+    # ONE PRICE EVERYWHERE (2026-11-12, market_data.one_quote): every row
+    # prints the instrument's one price by the rule, in its own digits
+    # ({% q %}); the answers for the whole table in one read. The mover
+    # buckets keep the quote rows' day change (a count, not a price cell).
+    from market_data.one_quote import for_request
+    shown = for_request(request).many([i.symbol for i in instruments])
     items = []
     for inst in instruments:
         q = quotes_map.get(inst.id)
+        sh = shown.get(inst.symbol)
         market = None
         if _ex_status is not None:
             try:
@@ -281,7 +288,9 @@ def instruments_list(request):
             "sector": inst.sector or "—",
             "country": inst.country or "—",
             "is_watchlist": inst.is_watchlist,
-            "last": float(q.last) if q else None,
+            "last": (float(sh.price) if sh is not None and sh.price is not None
+                     else None),
+            "chg": sh.chg if sh is not None else None,
             "change_pct": float(q.change_pct) if q else None,
             "bid": float(q.bid) if q and q.bid else None,
             "ask": float(q.ask) if q and q.ask else None,
@@ -1810,7 +1819,43 @@ def _mark_words(row) -> dict:
     return {"mark_word": "", "mark_wait": "", "mark_title": ""}
 
 
-def _live_row(row, stops, levs=None, worlds=None, venues=None):
+def _row_quote(row, mark, quotes):
+    """The Current cell of a row by the one rule (2026-11-12, market_data
+    .one_quote): the instrument's one price at the row's closing side, in
+    px digits, with its words and hover; `quotes` is {SYMBOL: Shown} (a
+    response's answers). Display only: the R, the P&L and every figure
+    beside it keep reading the valuation mark (venue_mark.resolve); the
+    hover says so when the two differ. Without an answer for the symbol,
+    the valuation mark itself, in px digits."""
+    from core.price_format import format_price
+    from market_data.one_quote import closing_side
+    instrument = getattr(row, "instrument", None)
+    sym = (getattr(instrument, "symbol", "") or "").upper()
+    cls = getattr(instrument, "asset_class", "") or ""
+    side = closing_side(getattr(row, "direction", ""))
+    sh = (quotes or {}).get(sym) if sym else None
+    if sh is None or sh.price is None:
+        text = (format_price(mark, cls, sym) if mark is not None
+                else LIVE_DASH)
+        return {"last_text": text, "q_text": "", "q_side": side,
+                "q_words": "", "q_title": "", "q_tail": "", "q": sh}
+    text = sh.text(side)
+    # The hover's tail names the valuation price when it differs; the cell
+    # carries it in data-q-title, so the painter rewrites the hover with
+    # the price and keeps the tail (the review, 2026-11-12).
+    tail = ""
+    if mark is not None:
+        valued = format_price(mark, cls, sym)
+        if valued != text:
+            tail = (f"valued for profit and loss at {valued} (the "
+                    f"position's own venue mark)")
+    return {"last_text": text, "q_text": text, "q_side": side,
+            "q_words": sh.words(side=side),
+            "q_title": sh.title(side=side, tail=tail), "q_tail": tail,
+            "q": sh}
+
+
+def _live_row(row, stops, levs=None, worlds=None, venues=None, quotes=None):
     """One open position, shaped the way the tables already read it, plus R.
 
     A dict and not the model instance: UnifiedPosition declares __slots__, so
@@ -1834,6 +1879,12 @@ def _live_row(row, stops, levs=None, worlds=None, venues=None):
     "estimate: <feed> quote, <age>" under the P&L wherever the figure is
     not eToro's own. The price cell and its mark words are untouched: they
     describe the price, not the money.
+
+    ONE PRICE EVERYWHERE (2026-11-12): the Current cell (`last_text`, its
+    words and hover) is the instrument's one price by the rule every
+    screen prints (`_row_quote`, `quotes` the response's answers), at the
+    row's closing side: the Horde, the headband and this cell print one
+    number. The R, the P&L and the percentages keep the valuation mark.
     """
     source = getattr(row, "source", "") or "position"
     ident = getattr(row, "trade_id", None) or getattr(row, "pk", None)
@@ -1930,7 +1981,7 @@ def _live_row(row, stops, levs=None, worlds=None, venues=None):
         "mark_source": getattr(row, "mark_source", None),
         "mark_age_s": getattr(row, "mark_age_s", None),
         **_mark_words(row),
-        "last_text": _live_num(mark, "{:,.4f}"),
+        **_row_quote(row, mark, quotes),
         "pnl_text": _live_num(pnl),
         "pnl_tone": _live_tone(pnl),
         "pct_text": _live_num(pct, "{:+.2f}%"),
@@ -1970,7 +2021,7 @@ def _live_row(row, stops, levs=None, worlds=None, venues=None):
     }
 
 
-def _live_open_book(user, portfolio, *, union=None):
+def _live_open_book(user, portfolio, *, union=None, quotes=None):
     """Every open position, both books, marked to live quotes, with R.
 
     views_command._open_book is the platform's one union-and-mark: it reads
@@ -1991,17 +2042,45 @@ def _live_open_book(user, portfolio, *, union=None):
     objects are never written: `union` (the _open_book 4-tuple a caller
     already holds, to hand on to live_book_value untouched) or the read
     here goes to the caller exactly as the marks priced it.
+
+    `quotes` (2026-11-12): the response's one-price answers
+    (market_data.one_quote.for_request(request)); the rule is asked here
+    for the user's own rows when the caller has none.
     """
     from .views_command import _open_book
     objects, n_priced, unrealized, deployed = (
         _open_book(user, portfolio) if union is None else union)
     stops, worlds, venues = _stop_and_world_maps(objects, user=user)
     levs = _leverage_map(objects)
-    rows = [_live_row(r, stops, levs, worlds, venues) for r in objects]
+    quotes = _quotes_for(objects, quotes, user)
+    rows = [_live_row(r, stops, levs, worlds, venues, quotes)
+            for r in objects]
     if venues:
         from portfolio.services import shown_unrealized
         unrealized = shown_unrealized(rows)
     return (objects, rows, n_priced, unrealized, deployed)
+
+
+def _quotes_for(objects, quotes, user):
+    """{SYMBOL: Shown} for the rows' instruments: from the response's
+    Registry when the caller hands one (one answer per symbol per page),
+    else asked of the rule for `user` (three queries)."""
+    syms = sorted({(getattr(getattr(r, "instrument", None), "symbol", "")
+                    or "").upper() for r in objects} - {""})
+    if not syms:
+        return {}
+    try:
+        if quotes is not None and hasattr(quotes, "many"):
+            got = quotes.many(syms)
+        elif isinstance(quotes, dict):
+            return {k.upper(): v for k, v in quotes.items()}
+        else:
+            from market_data.one_quote import shown_many
+            got = shown_many(syms, user=user)
+        return {k.upper(): v for k, v in got.items()}
+    except Exception as e:  # noqa: BLE001 — a price cell, never a 500
+        logger.warning("[one quote] rows unanswered: %s", e)
+        return {}
 
 
 def _shown_mark_source(row):
@@ -2223,8 +2302,9 @@ def _render_portfolio(request, live_only):
     # union exactly as the marks priced it.
     from .views_command import _open_book
     union = _open_book(request.user, portfolio)
+    from market_data.one_quote import for_request
     _objects, open_rows, n_priced, unrealized, deployed = _live_open_book(
-        request.user, portfolio, union=union)
+        request.user, portfolio, union=union, quotes=for_request(request))
     closed_positions = unified_closed_positions(request.user, portfolio)
     stats = _closed_stats(closed_positions)
 
@@ -2524,6 +2604,14 @@ def _pos_num(value):
         return None
 
 
+def _ref_text(value, asset_class="", symbol="") -> str:
+    """A level as the painter works a figure out from it (data-q-ref):
+    the instrument's own price digits, more when the level has more
+    (market_data.one_quote.ref_text); "" for none."""
+    from market_data.one_quote import ref_text
+    return ref_text(value, asset_class, symbol)
+
+
 def _pos_fmt(value, digits=None):
     """A number as the card should print it, or "" for one we do not have.
 
@@ -2749,7 +2837,8 @@ def _pos_committed_pct(committed, trade):
     return _pos_fmt(float(committed) / capital * 100, 1)
 
 
-def _position_card_details(user, positions, *, orcs=False, venues=None):
+def _position_card_details(user, positions, *, orcs=False, venues=None,
+                           quotes=None):
     """One dict per position with everything the hover card shows that the
     ROW cannot carry — aligned with `positions`, same order.
 
@@ -2792,7 +2881,7 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
     # up promising an R the ledger never books.
     from bot_program.manual_close import _initial_stop, _risk_dollars
     from bot_program.tax_lot_models import TaxLot
-    from core.context_ui import _recent_closes
+    from core.context_ui import recent_closes, spark_words
     from instruments.models import Instrument
     from signals.models import Signal
 
@@ -2860,21 +2949,28 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
     symbols = {getattr(p.instrument, "symbol", "") for p in positions
                if getattr(p, "instrument", None)}
     symbols.discard("")
+    # One feed per spark, and whose (2026-11-12): {"spark", "fam", "bars"}.
     sparks, missing = {}, []
     for sym in symbols:
-        hit = cache.get("pos:spark:" + sym)
+        hit = cache.get("pos:spark2:" + sym)
         if hit is None:
             missing.append(sym)
         else:
             sparks[sym] = hit
     if missing:
-        inst_ids = dict(Instrument.objects.filter(symbol__in=missing)
-                        .values_list("symbol", "id"))
+        insts = {i.symbol: i for i in Instrument.objects.filter(
+            symbol__in=missing).only("id", "symbol", "asset_class")}
         for sym in missing:
-            closes = _recent_closes(inst_ids[sym]) if sym in inst_ids else []
-            sparks[sym] = closes
-            cache.set("pos:spark:" + sym, closes, 300)
+            got = (recent_closes(insts[sym].id) if sym in insts
+                   else {"spark": [], "fam": "", "tf": ""})
+            got = {"spark": got["spark"], "fam": got["fam"],
+                   "bars": spark_words(got["fam"], got["tf"], insts.get(sym))}
+            sparks[sym] = got
+            cache.set("pos:spark2:" + sym, got, 300)
 
+    # The open book's MARK rung prints the rule's price (2026-11-12): the
+    # response's answers when the caller hands them, none for history.
+    qmap = _quotes_for(positions, quotes, user) if quotes is not None else {}
     details = []
     for p in positions:
         trade = trades.get(getattr(p, "trade_id", None))
@@ -2891,16 +2987,6 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
                  else None)
         if venue is not None:
             pnl, pnl_pct = _pos_num(venue["pnl_usd"]), venue["pnl_pct"]
-
-        stop_pct, stop_through = _pos_distance(mark, stop, is_long)
-        target_pct, target_through = _pos_distance(mark, target, not is_long)
-
-        # Where the mark stands between the ENTRY stop and the target. The
-        # formula is direction-agnostic: for a short both differences are
-        # negative and the ratio comes out the same way up.
-        progress = ""
-        if None not in (mark, istop, target) and target != istop:
-            progress = "{:.1f}".format((mark - istop) / (target - istop) * 100)
 
         # What 1R is worth in the config's base currency — the SIZE of the
         # risk, which no column prints. The R MULTIPLE itself is deliberately
@@ -2921,7 +3007,37 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
 
         lot = lots.get(getattr(p, "trade_id", None))
         sym = getattr(p.instrument, "symbol", "") if getattr(p, "instrument", None) else ""
-        spark = sparks.get(sym) or []
+        card_q = _row_quote(p, mark, qmap)
+        _sh = card_q["q"]
+        shown_mark = (float(_sh.value(card_q["q_side"]))
+                      if _sh is not None and _sh.price is not None else mark)
+        # The card's distances and its bar are worked out from the price
+        # its MARK rung prints (the review, 2026-11-12: "TARGET 0.32% away"
+        # was the valuation mark's, beside the rung's newer price). Display
+        # only: the R and the P&L keep the valuation mark.
+        stop_pct, stop_through = _pos_distance(shown_mark, stop, is_long)
+        target_pct, target_through = _pos_distance(shown_mark, target,
+                                                   not is_long)
+        # Where the mark stands between the ENTRY stop and the target. The
+        # formula is direction-agnostic: for a short both differences are
+        # negative and the ratio comes out the same way up.
+        progress = ""
+        if None not in (shown_mark, istop, target) and target != istop:
+            progress = "{:.1f}".format(
+                (shown_mark - istop) / (target - istop) * 100)
+        _cls = getattr(getattr(p, "instrument", None), "asset_class", "") or ""
+        q_refs = {"q_entry": _ref_text(p.entry_price, _cls, sym),
+                  "q_stop": _ref_text(p.stop_loss, _cls, sym),
+                  "q_target": _ref_text(p.take_profit, _cls, sym)}
+        since = ""
+        if _sh is not None and _sh.price is not None and q_refs["q_entry"]:
+            from market_data.one_quote import field_words, now as _oq_now
+            since = field_words(
+                _sh.payload(), "since",
+                int(round(_oq_now().timestamp() * 1000)),
+                side=card_q["q_side"], attrs={"data-q-ref": q_refs["q_entry"]})
+        sp = sparks.get(sym) or {}
+        spark = sp.get("spark") or []
         paper = getattr(p, "paper", None)
         opened = p.opened_at
 
@@ -2975,7 +3091,10 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
             # never the LIVE `venue` above says for it.
             "world": _world_of(trade if trade is not None else p),
             "entry": _pos_fmt(entry),
-            "mark": _pos_fmt(mark),
+            # The MARK rung is the row's Current cell (2026-11-12): the
+            # instrument's one price at the row's closing side (_row_quote).
+            "mark": (card_q["q_text"] or _pos_fmt(mark)),
+            "q_side": card_q["q_side"],
             "stop": _pos_fmt(stop),
             "target": _pos_fmt(target),
             "initial_stop": _pos_fmt(istop),
@@ -2990,8 +3109,13 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
             # 4% fall that made money. Printing the P&L sign against a price
             # would have the card claim the market moved up when it moved
             # down.
-            "mark_pct": (_pos_fmt((mark - entry) / entry * 100, 2)
-                         if mark is not None and entry else ""),
+            "mark_pct": (_pos_fmt((shown_mark - entry) / entry * 100, 2)
+                         if shown_mark is not None and entry else ""),
+            # The same move in the painter's words ("+0.22% since entry"),
+            # and the exact levels it works the figures out from as the
+            # price moves (sv-venue.js since/away: data-q-ref).
+            "mark_since": since,
+            **q_refs,
             # LEVERAGE, as a fact rather than a control. Nothing on this
             # platform sets it — the broker does — but the platform models
             # it: `manual_trade.CAPITAL_USE_FRACTION` is the fraction of a
@@ -3055,6 +3179,8 @@ def _position_card_details(user, positions, *, orcs=False, venues=None):
             "spark_min": _pos_fmt(min(spark), 8) if spark else "",
             "spark_max": _pos_fmt(max(spark), 8) if spark else "",
             "spark_up": "1" if len(spark) > 1 and spark[-1] >= spark[0] else "",
+            "spark_fam": sp.get("fam", ""),
+            "spark_bars": sp.get("bars", ""),
             # The click destination. Only a bot trade has a timeline; a row
             # from the shared book has no page to open, and the card says so
             # rather than offering a link that 404s.
@@ -3106,8 +3232,9 @@ def _render_positions(request, live_only, *, deep_link=None):
     # BOTH books: that shared Position book plus the user's AssetBotTrades —
     # a trade taken from a signal used to show in fills, the Op Center and
     # forensics but never here.
+    from market_data.one_quote import for_request
     open_objects, open_rows, n_priced, unrealized, deployed = _live_open_book(
-        request.user, portfolio)
+        request.user, portfolio, quotes=for_request(request))
     closed_positions = unified_closed_positions(request.user, portfolio)
     stats = _closed_stats(closed_positions)
 
@@ -3225,7 +3352,8 @@ def _render_positions(request, live_only, *, deep_link=None):
         request.GET if tab == "open" else {},
         list(zip(open_rows,
                  _position_card_details(request.user, open_objects,
-                                        orcs=True, venues=open_venues))),
+                                        orcs=True, venues=open_venues,
+                                        quotes=for_request(request)))),
         keep={"tab": "open"}, base_url=positions_url)
     closed_view = build_view(
         request.GET if tab == "history" else {},
@@ -5041,23 +5169,26 @@ def _instrument_page(request, instrument, *, deep_link=None):
         for bar in _daily_chart_bars(instrument, limit=200)
     ]
 
-    # Get quote
-    quote = None
-    try:
-        quote = instrument.live_quote
-    except Exception:
-        pass
+    # ONE PRICE EVERYWHERE (2026-11-12, market_data.one_quote): the hero,
+    # the quote card and the ticket's two sides print the instrument's one
+    # price by the rule every screen prints — for a held instrument eToro's
+    # newest reading at the side it is valued at — never the LiveQuote row
+    # another feed won. `quote` is that answer, LiveQuote-shaped.
+    from market_data.one_quote import for_request
+    shown = for_request(request).get(instrument.symbol)
+    quote = shown.as_quote()
 
     # Whose price the hero prints (2026-10-31, dashboard.chart_source): the
     # feed, its age, the stand-in words, whether the day change is the same
-    # feed's, and the venue's last known price beside it — the same facts
-    # the preview API repaints every 15 seconds.
+    # feed's — the same facts the preview API repaints every 15 seconds. The
+    # line beside it is the OUTSIDE quote, when one sits beside an eToro
+    # price (2026-11-12: the rule's slot), never a second eToro price.
     hero = None
     try:
         from dashboard import chart_source
-        hero = chart_source.quote_facts(
-            instrument, quote,
-            route=chart_source.route_of(request.user, instrument))
+        hero = chart_source.quote_facts(instrument, quote if quote else None,
+                                        route="")
+        hero["venue"] = shown.slot
     except Exception as e:  # noqa: BLE001 — words beside a price never 500
         logger.warning("[instrument page] %s: whose-price facts failed: %s",
                        instrument.symbol, e)
@@ -6169,37 +6300,22 @@ def instrument_preview_api(request, symbol):
     except Instrument.DoesNotExist:
         return JsonResponse({"symbol": symbol, "error": "not_found"})
 
-    # Get quote
-    price = None
-    change_pct = 0
-    volume = None
-    bid = ask = spread = None
-    age = None
-    try:
-        quote = inst.live_quote
-        price = str(quote.last)
-        # `change_pct` is nullable and this used to be a bare float() inside
-        # the same try as the price — so a quote that had never been given a
-        # change threw here and the caller got NO PRICE at all, from a row
-        # that had one.
-        change_pct = float(quote.change_pct) if quote.change_pct is not None else 0
-        volume = str(quote.volume) if quote.volume else None
-        # Bid, ask and the spread between them. The template has rendered
-        # these into `data-dq` hooks since e0f3959 and NOTHING has ever
-        # repainted them — they were frozen at page load, which was
-        # survivable while they sat in a stats row and is not now that they
-        # ride the buttons that trade on them.
-        bid = str(quote.bid) if quote.bid is not None else None
-        ask = str(quote.ask) if quote.ask is not None else None
-        if quote.bid is not None and quote.ask is not None:
-            spread = str(quote.spread)
-        # How old the row is, so the client can refuse to print a price it
-        # cannot stand behind onto a BUY button. Unmeasured is not zero and
-        # a fossil is not a quote.
-        if quote.updated_at:
-            age = int((timezone.now() - quote.updated_at).total_seconds())
-    except Exception:
-        pass
+    # ONE PRICE EVERYWHERE (2026-11-12, market_data.one_quote): the hero's
+    # 15-second poll and every hover preview print the rule's answer, in
+    # its digits, and carry it whole (`q`) for the browser's one painter.
+    from market_data.one_quote import for_request
+    reg = for_request(request)
+    shown = reg.get(inst.symbol)
+    quote = shown.as_quote()
+    price = shown.text() if shown.price is not None else None
+    change_pct = float(shown.chg) if shown.chg is not None else 0
+    volume = str(shown.volume) if shown.volume else None
+    bid = shown.side_text("bid") if shown.bid is not None else None
+    ask = shown.side_text("ask") if shown.ask is not None else None
+    spread = (shown.side_text("spread")
+              if shown.bid is not None and shown.ask is not None else None)
+    age = (int((reg.now - shown.at).total_seconds())
+           if shown.at is not None else None)
 
     # Count signals
     active_signals = Signal.objects.filter(instrument=inst, is_active=True).count()
@@ -6217,6 +6333,9 @@ def instrument_preview_api(request, symbol):
         "spread": spread,
         "quote_age_seconds": age,
         "active_signals": active_signals,
+        "q": shown.payload(),
+        "t": int(round(reg.now.timestamp() * 1000)),
+        "side": shown.side,
     }
     # WHOSE PRICE THIS IS (2026-10-31, dashboard.chart_source.quote_facts):
     # the feed and its words ("Yahoo GC=F, the front-month future"), the
@@ -6227,11 +6346,13 @@ def instrument_preview_api(request, symbol):
     # from what the platform already holds, never a new venue request.
     try:
         from dashboard import chart_source
-        facts = chart_source.quote_facts(
-            inst, getattr(inst, "live_quote", None),
-            route=chart_source.route_of(request.user, inst))
+        facts = chart_source.quote_facts(inst, quote if quote else None,
+                                         route="")
         facts["decimals"] = _chart_decimals(inst)
         facts.pop("quote_age_seconds", None)   # the one computed above
+        # Beside an eToro price, the outside quote (the rule's slot), never
+        # a second eToro price (2026-11-12).
+        facts["venue"] = shown.slot
         out.update(facts)
     except Exception as e:  # noqa: BLE001 — the price itself still goes out
         logger.warning("[instrument_preview_api] %s: whose-price facts "
@@ -6655,7 +6776,10 @@ def chart_data_api(request):
                              "error": f"Unknown timeframe '{timeframe}'"},
                             status=400)
 
-    extra = {}
+    # ONE PRICE EVERYWHERE (2026-11-12): the price the numbers beside the
+    # chart print (market_data.one_quote), for its "now" line.
+    from market_data.one_quote import for_request
+    extra = {"now": for_request(request).get(instrument.symbol).payload()}
     if overlays:
         # The SAME two functions instrument_detail calls, deliberately: a
         # second queryset built for the refresh is how the tape and the

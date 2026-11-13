@@ -125,9 +125,15 @@ class TheSignalCardPrintsRealPricesTests(TestCase):
         self.assertIn("s.risk_reward_ratio|floatformat:2", src)
 
     def test_the_card_shows_the_mark_the_levels_are_measured_against(self):
+        """The mark is the instrument's one price (2026-11-12, ONE PRICE
+        EVERYWHERE: market_data.one_quote, the {% q %} cell the painter
+        keeps), no longer its LiveQuote row printed apart: that row showed
+        a future's previous close beside the Horde's eToro price."""
         src = (BASE / "templates" / "_partials"
                / "signal_rail_items.html").read_text(encoding="utf-8")
-        self.assertIn("s.instrument.live_quote.last", src)
+        self.assertIn('data-q="{{ s.instrument.symbol }}"', src)
+        self.assertIn("{% q s.instrument.symbol %}", src)
+        self.assertNotIn("s.instrument.live_quote.last", src)
 
 
 class TheTakenBannerSaysWhatThePositionIsDoingTests(TestCase):
