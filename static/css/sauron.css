@@ -1170,14 +1170,12 @@
            twin button sat in plain sight. */
         body:has(.signals-rail) .ticker-bar { right: 44px; }
         body:has(.signals-rail.open) .ticker-bar { right: 280px; }
+        /* No keyframes (2026-11-13): static/js/sv-marquee.js moves the
+           track at a constant speed and holds it on hover (sv-kit.css §8).
+           Their speed was half the track's width over 240 s, so it was
+           the content's, and a refetch that changed the width moved it. */
         .ticker-track {
             display: inline-flex; gap: 0;
-            animation: tickerScroll 240s linear infinite;
-        }
-        .ticker-bar:hover .ticker-track { animation-play-state: paused; }
-        @keyframes tickerScroll {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
         }
         .ticker-item {
             display: inline-flex; align-items: center; gap: 10px;
@@ -2251,10 +2249,9 @@
             opacity: 0; pointer-events: none;
         }
         .dh-scroll { height: 48px; overflow-x: hidden; overflow-y: visible; position: relative; }
+        /* Moved by static/js/sv-marquee.js (2026-11-13), as the ticker. */
         .dh-track { display: inline-flex; gap: 0; align-items: stretch;
-                    animation: dhScroll 200s linear infinite; white-space: nowrap; }
-        @keyframes dhScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        .data-headband:hover .dh-track { animation-play-state: paused; }
+                    white-space: nowrap; }
         body:has(.sidebar.mini) .data-headband { left: 68px; }
         body:has(.signals-rail) .data-headband { right: 44px; }
         body:has(.signals-rail.open) .data-headband { right: 280px; }

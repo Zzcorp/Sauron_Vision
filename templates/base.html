@@ -816,7 +816,12 @@
         </header>
 
         <!-- Ticker Bar (fixed, always visible) -->
-        <div class="ticker-bar" id="tickerBar">
+        {% comment %}The two strips scroll on their own (2026-11-13, the
+        operator's decision): static/js/sv-marquee.js moves each at its
+        frame's data-sv-marquee-speed, in px per second (news 30, prices
+        40), and holds it still while a card it opened
+        (data-sv-marquee-pop) is on the page.{% endcomment %}
+        <div class="ticker-bar" id="tickerBar" data-sv-marquee-speed="30" data-sv-marquee-pop=".ticker-popup">
             <button type="button" class="hb-collapse-btn" data-collapse="ticker" aria-label="Hide ticker bar" title="Hide ticker bar">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
@@ -828,7 +833,7 @@
         </div>
 
         <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
-<div class="data-headband" id="dataHeadband">
+<div class="data-headband" id="dataHeadband" data-sv-marquee-speed="40" data-sv-marquee-pop=".dh-pop">
   <button type="button" class="hb-collapse-btn" data-collapse="data" aria-label="Hide data headband" title="Hide data headband">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
@@ -4290,6 +4295,8 @@
 <script src="{% static 'js/sv-moments.js' %}" defer></script>
 {# His choice of Ambience, from the user menu: sv-ambience.js saves it on his profile and changes the body's attribute on the server's answer only; the two scripts above and the sheets follow the attribute at once. #}
 <script src="{% static 'js/sv-ambience.js' %}" defer></script>
+{# The price headband and the news ticker scroll again (2026-11-13, the operator's decision): one position per strip, moved at its frame's data-sv-marquee-speed, still under the hand, on a card it opened, with focus or a finger in it, in a hidden tab, collapsed, and under reduced motion; the wheel and the drag move the same position. Content, not the magic: every Ambience. #}
+<script src="{% static 'js/sv-marquee.js' %}" defer></script>
 
 <script>
 /* The topbar's clock, on its own. */
@@ -4417,31 +4424,49 @@ function toggleSidebar() {
    over it. Both frames already pause their animation on hover, so this
    simply gives the paused strip a position. Leaving the strip hands it
    back to the marquee, which is a rule the operator can predict — and
-   it means there is no timeout deciding to move the page under them. */
+   it means there is no timeout deciding to move the page under them.
+
+   ONE POSITION (2026-11-13, the operator's decision: the strips scroll
+   again, continuously, still on hover). static/js/sv-marquee.js owns where
+   each strip stands and moves it on its own; the wheel moves that same
+   position (SVMarquee.offset / .to, wrapped on the loop), so leaving the
+   strip hands the auto-scroll the place the hand chose instead of
+   snapping it back. Nothing to reveal (no loop) is the end: the page has
+   the wheel. Without the driver (the file did not load) the rule above
+   still holds. */
 window.svWheelMarquee = function (frame, track) {
     if (!frame || !track || frame._svMarquee) return;
     frame._svMarquee = true;
     var offset = 0;
+    function one() { var m = window.SVMarquee; return m && m.owns(track) ? m : null; }
 
     function release() {
+        if (one()) return;                       /* it goes on from here */
         offset = 0;
         track.style.transform = '';
         track.style.animationPlayState = '';
     }
 
     frame.addEventListener('wheel', function (e) {
-        /* The track is rendered twice so the loop is seamless, so half
-           its width is one full pass — past that and the operator is
-           scrolling into the duplicate. */
-        var max = track.scrollWidth / 2;
-        if (max <= 0) return;
+        var m = one();
         var delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         if (!delta) return;
-        var next = Math.min(0, Math.max(-max, offset - delta));
+        var next;
+        if (m) {
+            offset = m.offset(track);
+            next = m.to(track, offset - delta);
+        } else {
+            /* Twice the items, so half the width is one full pass. */
+            var max = track.scrollWidth / 2;
+            if (max <= 0) return;
+            next = Math.min(0, Math.max(-max, offset - delta));
+        }
         if (next === offset) return;   /* at an end — let the page have it */
         offset = next;
-        track.style.animationPlayState = 'paused';
-        track.style.transform = 'translateX(' + offset + 'px)';
+        if (!m) {
+            track.style.animationPlayState = 'paused';
+            track.style.transform = 'translateX(' + offset + 'px)';
+        }
         e.preventDefault();
     }, { passive: false });
 
@@ -4540,10 +4565,12 @@ window.svWheelMarquee = function (frame, track) {
             // Reset any inline transform / paused animation that the
             // drag-scroll or wheel handlers may have left on the inner track,
             // so the CSS scroll animation resumes after re-expanding.
+            // Not when sv-marquee.js keeps the strip (2026-11-13): it stood
+            // still while collapsed and goes on from the same spot.
             var track = (kind === 'ticker')
                 ? document.getElementById('tickerTrack')
                 : document.getElementById('dhTrack');
-            if (track) {
+            if (track && !(window.SVMarquee && window.SVMarquee.owns(track))) {
                 track.style.transform = '';
                 track.style.animationPlayState = '';
                 // Force a reflow + reapply animation so paused state clears
@@ -5905,15 +5932,26 @@ window.svWheelMarquee = function (frame, track) {
   var dhTrack = document.getElementById('dhTrack');
   if (dhTrack) {
     var dhOffset = 0, dhTimer = 0, dhManual = false;
-    function dhStep(dir){
+    /* The strip to offset v. ONE POSITION (2026-11-13): when
+       sv-marquee.js keeps the strip, the arrows and the drag move its
+       position and the scroll goes on from there; without it, the old
+       paused transform. */
+    var dhTo = function(v){
+      var m = window.SVMarquee;
+      if (m && m.owns(dhTrack)) { dhOffset = m.to(dhTrack, v); return; }
       dhManual = true;
-      dhOffset += dir * 4;
+      dhOffset = v;
       var max = dhTrack.scrollWidth / 2;
       if (dhOffset > 0) dhOffset = 0;
       if (dhOffset < -max) dhOffset = -max;
       dhTrack.style.animationPlayState = 'paused';
       dhTrack.style.transform = 'translateX(' + dhOffset + 'px)';
-    }
+    };
+    var dhAt = function(){
+      var m = window.SVMarquee;
+      return m && m.owns(dhTrack) ? m.offset(dhTrack) : dhOffset;
+    };
+    function dhStep(dir){ dhTo(dhAt() + dir * 4); }
     document.querySelectorAll('.data-headband .dh-arrow').forEach(function(btn){
       var dir = btn.classList.contains('right') ? -1 : 1;
       btn.addEventListener('mouseenter', function(){
@@ -5949,15 +5987,23 @@ window.svWheelMarquee = function (frame, track) {
   var tTrack = document.getElementById('tickerTrack');
   if (tTrack) {
     var tOffset = 0, tTimer = 0, tManual = false;
-    function tStep(dir){
+    /* The same one position as the headband's (dhTo above). */
+    var tTo = function(v){
+      var m = window.SVMarquee;
+      if (m && m.owns(tTrack)) { tOffset = m.to(tTrack, v); return; }
       tManual = true;
-      tOffset += dir * 4;
+      tOffset = v;
       var max = tTrack.scrollWidth / 2;
       if (tOffset > 0) tOffset = 0;
       if (tOffset < -max) tOffset = -max;
       tTrack.style.animationPlayState = 'paused';
       tTrack.style.transform = 'translateX(' + tOffset + 'px)';
-    }
+    };
+    var tAt = function(){
+      var m = window.SVMarquee;
+      return m && m.owns(tTrack) ? m.offset(tTrack) : tOffset;
+    };
+    function tStep(dir){ tTo(tAt() + dir * 4); }
     document.querySelectorAll('.ticker-bar .tb-arrow').forEach(function(btn){
       var dir = btn.classList.contains('right') ? -1 : 1;
       btn.addEventListener('mouseenter', function(){
@@ -5976,15 +6022,10 @@ window.svWheelMarquee = function (frame, track) {
         tManual = false; tOffset = 0;
       }
     });
-    /* Mouse wheel scroll for ticker bar */
-    document.querySelector('.ticker-bar')?.addEventListener('wheel', function(e){
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        tStep(e.deltaX > 0 ? -1 : 1);
-      } else {
-        tStep(e.deltaY > 0 ? -3 : 3);
-      }
-      e.preventDefault();
-    }, {passive: false});
+    /* No wheel listener here (2026-11-13): the ticker's wheel is
+       svWheelMarquee's alone, bound with the collapse block. A second one
+       here moved the strip 12 px a notch on top of it, with an offset of
+       its own: two drivers on one strip, the later one winning. */
   }
 
   // Info panel hover arrows (scrollLeft-based because the panel uses native overflow)
@@ -6213,39 +6254,52 @@ window.svWheelMarquee = function (frame, track) {
   if(dhArrowR) dhArrowR.style.display = '';
 
   // User drag scrolling for ticker and headband
+  /* ONE POSITION (2026-11-13): the drag reads and moves the strip's own
+     offset (tAt / tTo, dhAt / dhTo: sv-marquee.js's position when it keeps
+     the strip, so the scroll goes on from where the hand let go), holds the
+     strip still while the button is down (the pointer may leave it
+     mid-drag), and a drag that moved the strip is not a click: letting go
+     over an item neither follows its link nor pins its card. The primary
+     button only: a context menu would swallow the mouseup. */
   function enableDragScroll(container, track, getOffset, setOffset){
-    var dragging = false, startX = 0, startOff = 0;
+    var dragging = false, startX = 0, startOff = 0, moved = 0, swallow = false;
+    function held(on){ var m = window.SVMarquee; if (m && m.owns(track)) m.hold(track, 'drag', on); }
     container.addEventListener('mousedown', function(e){
+      if(e.button) return;
       if(e.target.closest('.tb-arrow,.dh-arrow,.ticker-popup,.dh-pop')) return;
-      dragging = true; startX = e.clientX; startOff = getOffset();
+      dragging = true; startX = e.clientX; startOff = getOffset(); moved = 0;
       container.style.cursor = 'grabbing';
       track.style.animationPlayState = 'paused';
+      held(true);
       e.preventDefault();
     });
     window.addEventListener('mousemove', function(e){
       if(!dragging) return;
       var dx = e.clientX - startX;
+      moved = Math.max(moved, Math.abs(dx));
       setOffset(startOff + dx);
     });
     window.addEventListener('mouseup', function(){
       if(!dragging) return;
       dragging = false;
       container.style.cursor = '';
+      held(false);
+      if (moved > 4) { swallow = true; setTimeout(function(){ swallow = false; }, 0); }
     });
+    container.addEventListener('click', function(e){
+      if (!swallow) return;
+      swallow = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
   }
   // Ticker drag scroll
   if(tTrack){
-    enableDragScroll(document.getElementById('tickerBar'), tTrack,
-      function(){ return tOffset; },
-      function(v){ tManual=true; tOffset=v; var max=tTrack.scrollWidth/2; if(tOffset>0)tOffset=0; if(tOffset<-max)tOffset=-max; tTrack.style.transform='translateX('+tOffset+'px)'; }
-    );
+    enableDragScroll(document.getElementById('tickerBar'), tTrack, tAt, tTo);
   }
   // Data headband drag scroll
   if(dhTrack){
-    enableDragScroll(document.querySelector('.data-headband'), dhTrack,
-      function(){ return dhOffset; },
-      function(v){ dhManual=true; dhOffset=v; var max=dhTrack.scrollWidth/2; if(dhOffset>0)dhOffset=0; if(dhOffset<-max)dhOffset=-max; dhTrack.style.transform='translateX('+dhOffset+'px)'; }
-    );
+    enableDragScroll(document.querySelector('.data-headband'), dhTrack, dhAt, dhTo);
   }
 })();
 </script>
