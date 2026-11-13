@@ -435,6 +435,14 @@ def news_detail(request, pk: int):
         instrument_rows = _instrument_rows(article, affected)
     except Exception:
         instrument_rows = []
+    # The rows' price cells ({% q %}) asked of the rule in ONE read
+    # (2026-11-12, the review: one read per symbol).
+    try:
+        from market_data.one_quote import for_request
+        for_request(request).many([r["symbol"] for r in instrument_rows
+                                   if r.get("last") is not None])
+    except Exception:  # noqa: BLE001 — the cells ask one by one
+        pass
     try:
         coverage = _coverage(article, affected)
     except Exception:
@@ -455,11 +463,26 @@ def news_detail(request, pk: int):
 @never_cache
 @login_required
 def live_metrics_json(request):
-    """Lightweight polling endpoint. Frontend calls every 15s."""
+    """Lightweight polling endpoint. Frontend calls every 15s.
+
+    ONE PRICE EVERYWHERE (2026-11-12): a headband or watchlist item carries
+    the one price rule's answer (`q`, a market_data.one_quote.Shown) for the
+    shell's templates. On the wire it travels as its browser value
+    (Shown.payload) with the server's clock (`t`), the way every other JSON
+    reply carries it: the Shown itself is not JSON, and this endpoint
+    answered 500 (probe_routes, CI 2026-11-13)."""
     from core.context_ui import ui_extras
+    from market_data.one_quote import for_request
     ctx = ui_extras(request)
+
+    def wire(items):
+        return [{**item, "q": item["q"].payload()}
+                if hasattr(item.get("q"), "payload") else item
+                for item in items]
+
     return JsonResponse({
         "metrics": ctx.get("ui_metrics", {}),
-        "headband": ctx.get("ui_headband", []),
-        "watchlist": ctx.get("ui_watchlist", []),
+        "headband": wire(ctx.get("ui_headband", [])),
+        "watchlist": wire(ctx.get("ui_watchlist", [])),
+        "t": int(round(for_request(request).now.timestamp() * 1000)),
     })

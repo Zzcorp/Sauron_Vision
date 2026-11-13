@@ -358,7 +358,9 @@ def positions_metrics(request):
         # portfolio, and the consequence in the meantime was two panels on
         # one screen counting two different books.
         portfolio = get_or_create_default_portfolio(user=request.user)
-        rows, n_priced = _live_open_book(request.user, portfolio)[1:3]
+        from market_data.one_quote import for_request
+        rows, n_priced = _live_open_book(request.user, portfolio,
+                                         quotes=for_request(request))[1:3]
     except Exception as e:
         # Said out loud, in the panel and in the log. The predecessor put
         # the exception string in ctx["error"] and the template never

@@ -757,6 +757,17 @@ app.conf.beat_schedule = {
         "schedule": 30.0,
         "options": {"expires": 25, "expire_seconds": 25},
     },
+    # 2026-11-12 — ONE PRICE EVERYWHERE, the held relay (display only):
+    # every 10 s the one price rule's answer for each instrument held open
+    # at eToro goes to the browsers, only when it changed, through the
+    # existing quote_update handler. The database only: no eToro request,
+    # no outside call (market_data.tasks.relay_held_quotes). A run not
+    # started within 8 s is dropped.
+    "relay-held-quotes": {
+        "task": "market_data.tasks.relay_held_quotes",
+        "schedule": 10.0,
+        "options": {"expires": 8, "expire_seconds": 8},
+    },
     # 2026-09-17 — Saxo's OAuth session keeper. UNGATED: the refresh token
     # lives forty minutes and rotates, so a session that died because a
     # sync switch was off for an afternoon would cost a browser sign-in.

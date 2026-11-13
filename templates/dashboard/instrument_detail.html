@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load sauron_tags %}
+{% load sauron_tags quote_tags %}
 {% block title %}{{ instrument.symbol }} — Sauron Vision{% endblock %}
 {% block page_title %}{{ instrument.symbol }} — {{ instrument.name }}{% endblock %}
 
@@ -32,18 +32,12 @@
             change measured by another feed than the price's is a dash,
             its title says whose.{% endcomment %}
             <div class="dtl-price" data-decimals="{{ quote_decimals }}">
-                <span class="dtl-last">{% px quote.last instrument.asset_class instrument.symbol %}</span>
-                {% if hero and hero.change_same_feed is False %}
-                <span class="dtl-chg dtl-chg--other" title="{{ hero.change_words }}">—</span>
-                {% else %}
-                <span class="dtl-chg {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}">
-                    {% if quote.change_pct >= 0 %}▲ +{% else %}▼ {% endif %}{{ quote.change_pct|floatformat:2 }}%
-                </span>
-                {% endif %}
+                <span class="dtl-last" data-q="{{ instrument.symbol }}">{% px quote.last instrument.asset_class instrument.symbol %}</span>
+                <span class="dtl-chg{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</span>
             </div>
             <div class="dtl-who">
-                <span class="dtl-src" data-hero="src">{{ hero.source_words|default:quote.source }}{% if hero.age_words %} · {{ hero.age_words }} old{% endif %}</span>
-                <span class="dtl-venue" data-hero="venue"{% if not hero.venue %} hidden{% endif %}>{% if hero.venue %}{{ hero.venue.label }} {{ hero.venue.price_text }} · {{ hero.venue.age_words }} old{% if hero.gap_words %} · {{ hero.gap_words }}{% endif %}{% endif %}</span>
+                <span class="dtl-src" data-hero="src" data-q="{{ instrument.symbol }}" data-q-f="words" data-q-title>{% q instrument.symbol "words" %}</span>
+                <span class="dtl-venue" data-hero="venue" data-q="{{ instrument.symbol }}" data-q-f="slot"{% if not hero.venue %} hidden{% endif %}>{% q instrument.symbol "slot" %}</span>
             </div>
             {% endif %}
             {% if market %}
@@ -288,12 +282,12 @@ exactly what a second queryset built for a table would eventually do.
         (2026-10-31, data-lq): rendered once, its LAST disagreed with the
         hero from the first tick. SOURCE in words, the stand-in said.{% endcomment %}
         <ul class="kv-list" data-decimals="{{ quote_decimals }}">
-            <li><span class="label">LAST</span><span class="value" data-lq="last" style="font-size:18px;font-weight:700;">{% px quote.last instrument.asset_class instrument.symbol %}</span></li>
-            <li><span class="label">CHANGE 24H</span>{% if hero and hero.change_same_feed is False %}<span class="value dtl-chg--other" data-lq="change" title="{{ hero.change_words }}">—</span>{% else %}<span class="value {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}" data-lq="change">{% if quote.change_pct >= 0 %}+{% endif %}{{ quote.change_pct|floatformat:2 }}%</span>{% endif %}</li>
-            <li><span class="label">BID / ASK</span><span class="value" data-lq="sides"{% if hero.sides_words %} title="Bid and ask from {{ hero.sides_words }}"{% endif %}>{% px quote.bid instrument.asset_class instrument.symbol %} / {% px quote.ask instrument.asset_class instrument.symbol %}</span></li>
+            <li><span class="label">LAST</span><span class="value" data-lq="last" data-q="{{ instrument.symbol }}" style="font-size:18px;font-weight:700;">{% px quote.last instrument.asset_class instrument.symbol %}</span></li>
+            <li><span class="label">CHANGE 24H</span><span class="value{% if hero and hero.change_same_feed is False %} dtl-chg--other{% elif quote.change_pct >= 0 %} up{% else %} down{% endif %}" data-lq="change" data-q="{{ instrument.symbol }}" data-q-f="chg"{% if hero and hero.change_same_feed is False %} title="{{ hero.change_words }}"{% endif %}>{% q instrument.symbol "chg" %}</span></li>
+            <li><span class="label">BID / ASK</span><span class="value" data-lq="sides" data-q="{{ instrument.symbol }}" data-q-f="sides"{% if hero.sides_words %} title="Bid and ask from {{ hero.sides_words }}"{% endif %}>{% q instrument.symbol "sides" %}</span></li>
             <li><span class="label">VOLUME</span><span class="value">{% if quote.volume %}{{ quote.volume|floatformat:0 }}{% else %}—{% endif %}</span></li>
-            <li><span class="label">SOURCE</span><span class="value" data-lq="source" style="color:var(--accent);">{{ hero.source_words|default:quote.source|default:"—" }}</span></li>
-            <li><span class="label">UPDATED</span><span class="value" data-lq="updated">{{ quote.updated_at|timesince }} ago</span></li>
+            <li><span class="label">SOURCE</span><span class="value" data-lq="source" data-q="{{ instrument.symbol }}" data-q-f="who" style="color:var(--accent);">{% q instrument.symbol "who" %}</span></li>
+            <li><span class="label">UPDATED</span><span class="value" data-lq="updated" data-q="{{ instrument.symbol }}" data-q-f="age">{% q instrument.symbol "age" %}</span></li>
         </ul>
         {% else %}
         <div class="empty-state" style="padding:30px;"><p>NO QUOTE DATA YET</p></div>

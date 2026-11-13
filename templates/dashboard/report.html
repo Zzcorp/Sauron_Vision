@@ -1,4 +1,4 @@
-{% load static %}
+{% load static quote_tags %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -378,7 +378,7 @@
             <td>{{ p.direction|upper }}</td>
             <td style="font-family:var(--font-mono);">{{ p.quantity|floatformat:4 }}</td>
             <td style="text-align:right;font-family:var(--font-mono);">{{ p.entry_price|floatformat:4 }}</td>
-            <td style="text-align:right;font-family:var(--font-mono);">{{ p.current_price|floatformat:4 }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);">{% q p.instrument.symbol side=p.direction %}</td>
             <td style="text-align:right;font-family:var(--font-mono);" class="{% if p.unrealized_pnl >= 0 %}positive{% else %}negative{% endif %}">
                 {% if p.unrealized_pnl >= 0 %}+{% endif %}€{{ p.unrealized_pnl|floatformat:2 }}
             </td>

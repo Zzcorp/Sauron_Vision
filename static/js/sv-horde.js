@@ -668,6 +668,9 @@
     return null;
   }
   function paintBoard(d) {
+    /* The seats' prices to the one painter first (sv-venue.js): a seat's
+       mark is the same cell as every other price of its instrument. */
+    if (window.SVVenue && d && d.quotes) window.SVVenue.ingestBlock(d.quotes);
     state.board = d;
     state.lastGoodAt = Date.now();
     root.classList.remove('hd-stale');
@@ -1024,8 +1027,18 @@
         var mk = el('span', 'hd-mark', s.mark.t);
         mk.title = s.mark.title || '';
         mk.setAttribute('data-flash', s.key + ':mark');
+        /* the one price painter's cell (sv-venue.js, 2026-11-12) */
+        var q = s.mark.q || {};
+        if (q.s) { mk.setAttribute('data-q', q.s); if (q.side) mk.setAttribute('data-q-side', q.side); }
+        /* its hover follows the price, its tail (the valuation price when
+           it differs) kept (the review, 2026-11-12) */
+        if (q.s && s.mark.tail !== undefined) mk.setAttribute('data-q-title', s.mark.tail || '');
         markBits.push(mk);
-        if (s.mark.word && s.world !== 'paper') markBits.push(el('span', 'hd-muted', s.mark.word));
+        if (s.mark.word && s.world !== 'paper') {
+          var wd = el('span', 'hd-muted', s.mark.word);
+          if (q.s) { wd.setAttribute('data-q', q.s); wd.setAttribute('data-q-f', 'words'); if (q.side) wd.setAttribute('data-q-side', q.side); }
+          markBits.push(wd);
+        }
       }
     }
     var notFilled = s.working ? el('span', 'hd-wait', s.money.note) : null;
@@ -1425,6 +1438,8 @@
       if (d.ok === false) throw new Error(d.error || 'unavailable');
       state.seatData = d;
       state.seatRev = d.seat && d.seat.rev;
+      /* the peers' prices to the one painter first, as the board's */
+      if (window.SVVenue && d.quotes) window.SVVenue.ingestBlock(d.quotes);
       paintDossier(d);
     }).catch(function () {
       if (state.seatKey !== key) return;
@@ -1444,7 +1459,24 @@
     rows.forEach(function (r) {
       if (!r) return;
       var dt = add(dl, el('dt', '', r.label));
-      var dd = add(dl, el('dd', '', r.t === undefined ? DASH : dash(r.t)));
+      var dd;
+      if (r.q && r.q.s) {
+        /* A price line (the seat's Mark): the one painter's cells, the
+           price and its words, kept on the newest value (2026-11-12). */
+        dd = add(dl, el('dd'));
+        var mq = add(dd, el('span', '', dash(r.q.t)));
+        mq.setAttribute('data-q', r.q.s);
+        if (r.q.side) mq.setAttribute('data-q-side', r.q.side);
+        if (r.q.word) {
+          add(dd, txt(' \u00b7 '));
+          var mw = add(dd, el('span', '', r.q.word));
+          mw.setAttribute('data-q', r.q.s);
+          mw.setAttribute('data-q-f', 'words');
+          if (r.q.side) mw.setAttribute('data-q-side', r.q.side);
+        }
+      } else {
+        dd = add(dl, el('dd', '', r.t === undefined ? DASH : dash(r.t)));
+      }
       if (r.title) { dd.title = r.title; dt.title = r.title; }
       if (r.sub) add(dd, el('small', '', r.sub));
       if (r.progress_v !== undefined && r.progress_v !== null) {
@@ -1478,7 +1510,16 @@
       add(r2, el('span', toneCls(s.money.r_tone), s.money.r_t));
       add(r2, el('span', toneCls(s.money.pnl_tone), s.money.pnl_t + (s.money.pnl_v !== null && s.money.ccy ? ' ' + s.money.ccy : '')));
       if (s.mark.v === null || s.mark.v === undefined) add(r2, el('span', 'hd-wait', DASH + ' ' + (s.mark.wait || '')));
-      else add(r2, el('span', '', s.mark.t + (s.mark.word ? ' ' + s.mark.word : '')));
+      else {
+        /* the seat's mark, as on its card: the one painter's cells */
+        var hq = s.mark.q || {};
+        var hm = add(r2, el('span', '', s.mark.t));
+        if (hq.s) { hm.setAttribute('data-q', hq.s); if (hq.side) hm.setAttribute('data-q-side', hq.side); }
+        if (s.mark.word) {
+          var hw = add(r2, el('span', '', s.mark.word));
+          if (hq.s) { hw.setAttribute('data-q', hq.s); hw.setAttribute('data-q-f', 'words'); if (hq.side) hw.setAttribute('data-q-side', hq.side); }
+        }
+      }
       if (s.money.pnl_words) add(r2, el('span', 'hd-muted', s.money.pnl_words));
     }
     /* Every reason that fired, in the sticky head, in a box of its own
@@ -1819,7 +1860,15 @@
         if (p.bet_t) add(top, el('span', 'hd-wait', p.bet_t));
         /* A price with no measured day change shows a dash there, with the
            server's reason: an empty slot read as "no move" (final review). */
-        var px_ = add(top, el('span', 'hd-peer-last', dash(p.last_t)));
+        var px_ = add(top, el('span', 'hd-peer-last'));
+        /* The price, the one painter's cell (the review, 2026-11-12: a peer
+           kept the price the dossier opened with while its own seat moved);
+           the dossier's quote block carries its value. */
+        var pv = add(px_, el('span', '', dash(p.last_t)));
+        if (p.q && p.q.s) {
+          pv.setAttribute('data-q', p.q.s);
+          if (p.q.side) pv.setAttribute('data-q-side', p.q.side);
+        }
         if (p.change_t) add(px_, txt(' ' + p.change_t));
         else if (p.last_t && p.change_why) {
           add(px_, txt(' '));

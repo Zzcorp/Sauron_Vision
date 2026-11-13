@@ -281,7 +281,7 @@ says it in eToro's words.{% endcomment %}
             data-pos-symbol="{{ d.symbol }}" data-pos-side="{{ d.side }}"
             data-pos-qty="{{ d.qty }}" data-pos-status="{{ d.status }}"
             data-pos-venue="{{ d.venue }}"
-            data-pos-entry="{{ d.entry }}" data-pos-mark="{{ d.mark }}"
+            data-pos-entry="{{ d.entry }}" data-pos-mark="{{ d.mark }}" data-pos-q="{{ d.symbol }}" data-pos-q-side="{{ d.q_side }}" data-pos-q-entry="{{ d.q_entry }}" data-pos-q-stop="{{ d.q_stop }}" data-pos-q-target="{{ d.q_target }}"
             data-pos-stop="{{ d.stop }}" data-pos-target="{{ d.target }}"
             data-pos-initial-stop="{{ d.initial_stop }}"
             data-pos-stop-pct="{{ d.stop_pct }}" data-pos-stop-through="{{ d.stop_through }}"
@@ -313,7 +313,7 @@ says it in eToro's words.{% endcomment %}
             data-pos-signal="{{ d.signal }}" data-pos-signal-dir="{{ d.signal_dir }}"
             data-pos-signal-score="{{ d.signal_score }}" data-pos-signal-sub="{{ d.signal_sub }}"
             data-pos-spark="{{ d.spark }}" data-pos-spark-min="{{ d.spark_min }}"
-            data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}"
+            data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}" data-pos-spark-fam="{{ d.spark_fam }}" data-pos-spark-bars="{{ d.spark_bars }}"
             data-pos-href="{{ d.href }}"{% if d.orc %} data-pos-orc-label="{{ d.orc.label }}" data-pos-orc-plan="{{ d.orc.plan }}" data-pos-orc-compare="{{ d.orc.compare }}" data-pos-orc-j1="{{ d.orc.j1 }}" data-pos-orc-j2="{{ d.orc.j2 }}" data-pos-orc-j3="{{ d.orc.j3 }}" data-pos-orc-href="{{ d.orc.page }}"{% endif %}>
             {# THE TICK (static/js/sv-close-advice.js). Only a bot trade has #}
             {# one: a row from the shared portfolio book has no close path, #}
@@ -355,7 +355,7 @@ says it in eToro's words.{% endcomment %}
             {# mark 4% below entry is a 4% fall that made money — so the two #}
             {# columns deliberately disagree rather than one of them lying. #}
             <td data-label="Current" class="num pos-price-cell" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">
-                {% if p.current_price is not None %}<span class="pos-price" title="{{ p.mark_title }}">{{ p.last_text }}</span>{% if p.mark_word and not p.paper %}<span class="pos-price-src sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="font-size:.7em;margin-left:.35em;letter-spacing:.04em;text-transform:uppercase;">{{ p.mark_word }}</span>{% endif %}{% if d.mark_pct %}<span class="pos-price-pct sign-{{ d.mark_pct|sign_class }}">{{ d.mark_pct }}% since entry</span>{% endif %}
+                {% if p.current_price is not None %}<span class="pos-price" data-q="{{ p.symbol }}" data-q-side="{{ p.q_side }}"{% if p.q_text %} data-q-title="{{ p.q_tail }}"{% endif %} title="{{ p.q_title|default:p.mark_title }}">{{ p.last_text }}</span>{% if p.mark_word and not p.paper %}<span class="pos-price-src sv-muted" data-mark-source="{{ p.mark_source }}"{% if p.q_words %} data-q="{{ p.symbol }}" data-q-f="words" data-q-side="{{ p.q_side }}"{% endif %} title="{{ p.mark_title }}" style="font-size:.7em;margin-left:.35em;letter-spacing:.04em;">{{ p.q_words|default:p.mark_word }}</span>{% endif %}{% if d.mark_pct %}<span class="pos-price-pct sign-{{ d.mark_pct|sign_class }}"{% if d.mark_since %} data-q="{{ p.symbol }}" data-q-f="since" data-q-side="{{ p.q_side }}" data-q-ref="{{ d.q_entry }}">{{ d.mark_since }}{% else %}>{{ d.mark_pct }}% since entry{% endif %}</span>{% endif %}
                 {% else %}<span class="sv-unknown" title="{{ p.mark_title }}">&mdash;</span>{% if p.mark_wait %}<span class="pos-price-src pos-price-wait sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="display:block;font-size:.7em;font-weight:400;">{{ p.mark_wait }}</span>{% endif %}{% endif %}
             </td>
 {% comment %}

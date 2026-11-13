@@ -203,8 +203,10 @@ class OpenPaperForexTests(_Base):
 
     def test_the_prices_the_size_and_the_levels_in_plain_words(self):
         self.assertIn("Entry price 1.59030", self.text)
-        self.assertIn("Price now 1.61030 as of ", self.text)
-        self.assertRegex(self.text, r"as of \d\d:\d\d:\d\d UTC")
+        # The one price's words (2026-11-12, the review's fixes): whose
+        # reading and how old, as every other surface prints it; the line
+        # read "as of HH:MM:SS UTC".
+        self.assertRegex(self.text, r"Price now 1\.61030 test · \d+ s")
         self.assertIn("Position size 1,159.42 USD 1,000 units at the current "
                       "price", self.text)
         self.assertIn("Stop 1.52670 5.2% away", self.text)
@@ -538,7 +540,10 @@ class MarketAndStaleTests(_Base):
         self.assertIn("The price is stale: the last one came in 2 hours ago",
                       notes)
         price_now = [f for f in summary["facts"] if f["label"] == "Price now"]
-        self.assertEqual(price_now[0]["sub"], "as of 10:00:00 UTC")
+        # ONE PRICE EVERYWHERE (2026-11-12, the review's fixes): "Price now"
+        # is the instrument's one price, worded as on every other surface
+        # (whose reading, how old); it said "as of 10:00:00 UTC".
+        self.assertEqual(price_now[0]["sub"], "test · 2 h")
 
     def test_a_fresh_price_in_an_open_market_carries_no_note(self):
         _quote(self.inst, "1.61030", at=self.WEDNESDAY - timedelta(seconds=30))

@@ -37,6 +37,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.db import connection
 from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
@@ -50,6 +51,23 @@ ROW_RE = re.compile(r'class="ip-dd-row sv-sig-row"[^>]*?data-signal-id="(\d+)"')
 
 
 # ── fixtures shared with tests/test_rail_lifecycle.py ─────────────────────
+
+def _cold_cache():
+    """A test starts from a cold cache (2026-11-13, CI run 43384272086:
+    test_rail_market_shut's test_9 failed 69 != 75).
+
+    LocMem lives as long as the worker process, while the rows a test
+    writes are rolled back, and SQLite rolls its sequence back too: the
+    next test's user has the same pk. A request on the rail reads two
+    entries an earlier test may have left: the presence throttle
+    (presence:<pk>, 60 s, core.presence) and the headband's sparks
+    (hb:sparks3, 300 s, core.context_ui). Both run out on the wall clock,
+    which _at() does not fix, so one could run out between the two
+    requests a query count compares, and the second request alone paid
+    the presence stamp (or the sparks). From cold, the test's first
+    request pays both, and the requests after it read the same cache."""
+    cache.clear()
+
 
 def _user(name="rail_u"):
     return get_user_model().objects.create_user(name, password="x")
@@ -133,6 +151,7 @@ def _upgrade3():
 
 class EverySignalIsOnTheRailTests(TestCase):
     def setUp(self):
+        _cold_cache()
         self.user = _user()
         self.client.force_login(self.user)
 
@@ -227,7 +246,7 @@ class EverySignalIsOnTheRailTests(TestCase):
             _quote(inst, "1.08000")
         for inst in insts[:3]:
             _sig(inst, rule="rl_qc")
-        _partial(self.client)                     # warm the session
+        _partial(self.client)              # warm the session and the cache
         with CaptureQueriesContext(connection) as three:
             self.assertEqual(len(_cards(_partial(self.client))), 3)
         for inst in insts[3:]:

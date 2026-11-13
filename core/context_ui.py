@@ -38,35 +38,103 @@ def _testing() -> bool:
 
 
 def _spark_fallback(inst_id):
-    """The 1h-bar spark of one starred instrument, cached 5 minutes — the
-    watchlist draws up to 200 of them and a chart that moves hourly need
-    not be re-read on every render (bypassed under the test runner, whose
-    rolled-back ids would otherwise share one key)."""
+    """The 1h-bar spark of one starred instrument and its feed
+    (recent_closes), cached 5 minutes — the watchlist draws up to 200 of
+    them and a chart that moves hourly need not be re-read on every render
+    (bypassed under the test runner, whose rolled-back ids would otherwise
+    share one key)."""
     if _testing():
-        return _recent_closes(inst_id)
+        return recent_closes(inst_id)
     from django.core.cache import cache
-    key = f"wl:spark:{inst_id}"
+    key = f"wl:spark3:{inst_id}"
     hit = cache.get(key)
     if hit is not None:
         return hit
-    closes = _recent_closes(inst_id)
+    closes = recent_closes(inst_id)
     cache.set(key, closes, 300)
     return closes
 
 
-def _recent_closes(inst_id, n=12):
-    """Last n closes, oldest-first — daily bars when they exist, 1h bars
-    otherwise. The fallback matters: bot bars are written at 1h/4h and the
-    watchlist pass mirrors that, so daily-only sparklines were blank for
-    exactly the instruments the operator starred."""
+def _family(tag) -> str:
+    try:
+        from dashboard.chart_source import family
+        return family(tag)
+    except Exception:  # noqa: BLE001
+        return str(tag or "").lower()
+
+
+def recent_closes(inst_id, n=12) -> dict:
+    """{"spark": the last n closes oldest-first, "fam": their feed, "tf":
+    "1d" or "1h"} — daily bars when they exist, 1h bars otherwise, and ONE
+    FEED's (2026-11-12: the newest row's feed, its rows only; a spark that
+    joined Yahoo's days to eToro's hours drew a step nobody traded). The
+    fallback matters: bot bars are written at 1h/4h and the watchlist pass
+    mirrors that, so daily-only sparklines were blank for exactly the
+    instruments the operator starred."""
     from market_data.models import PriceData
     for tf in ("1d", "1h"):
         rows = list(PriceData.objects.filter(
             instrument_id=inst_id, timeframe=tf)
-            .order_by("-timestamp").values_list("close", flat=True)[:n])
+            .order_by("-timestamp").values_list("close", "source")[:n])
+        if not rows:
+            continue
+        fam = _family(rows[0][1])
+        rows = [c for c, src in rows if _family(src) == fam]
         if len(rows) >= 2:
-            return [float(c) for c in reversed(rows)]
-    return []
+            return {"spark": [float(c) for c in reversed(rows)], "fam": fam,
+                    "tf": tf}
+    return {"spark": [], "fam": "", "tf": ""}
+
+
+def spark_words(fam, tf, instrument) -> str:
+    """Whose bars a spark draws, in the chart's words (dashboard
+    .chart_source.what): "Yahoo EURUSD=X daily closes", "eToro hourly
+    closes", "Yahoo GC=F, the front-month future daily closes". The review,
+    2026-11-12: every spark's hover read "dot: eToro bid now" and never
+    said that the line was Yahoo's future, beside eToro's price."""
+    if not fam:
+        return ""
+    try:
+        from dashboard.chart_source import what
+        who = what(fam, instrument)
+    except Exception:  # noqa: BLE001 — the feed's own tag
+        who = str(fam)
+    return f"{who} {'daily' if tf == '1d' else 'hourly'} closes"
+
+
+def _recent_closes(inst_id, n=12):
+    """Last n closes, oldest-first, of one feed (recent_closes)."""
+    return recent_closes(inst_id, n)["spark"]
+
+
+def _quote_fields(sh) -> dict:
+    """A headband or watchlist item's quote, from the rule's answer
+    (market_data.one_quote.Shown): the price, its sides, its day change
+    (its own source's, else None: a dash), whose and when, and the answer
+    itself for the cells that print its words."""
+    if sh is None or sh.price is None:
+        return {"last": None, "change_pct": None, "bid": None, "ask": None,
+                "volume": 0, "source": getattr(sh, "source", "") or "",
+                "updated": "", "updated_at": None, "updated_utc": "",
+                "updated_human": "", "q": sh, "q_text": "—", "q_chg": "—",
+                "q_sides": "—", "q_who": (sh.who if sh is not None else "")
+                or "—", "q_asof": "—", "q_age": "",
+                "q_title": sh.title() if sh is not None else ""}
+    at = sh.at.isoformat() if sh.at is not None else ""
+    # The cells' own texts (the rule's field_text), so the shell prints
+    # them without a tag library: one spelling, the browser's too.
+    return {"last": sh.price, "change_pct": sh.chg,
+            "bid": sh.bid, "ask": sh.ask, "volume": sh.volume or 0,
+            "source": sh.source or "", "updated": at, "updated_at": at or None,
+            "updated_utc": (sh.at.strftime("%H:%M:%S") if sh.at is not None
+                            else ""),
+            "updated_human": sh.age_text(), "q": sh,
+            "q_text": sh.text(), "q_chg": sh.chg_text(),
+            "q_sides": sh.side_text("sides"), "q_who": sh.who or "—",
+            "q_asof": sh.asof_text(), "q_age": sh.age_text(),
+            # the hover of the compact cells: the words, who read it, the
+            # outside quote (a shut market says "closed" there too)
+            "q_title": sh.title()}
 
 
 def _headband_sparks():
@@ -74,22 +142,25 @@ def _headband_sparks():
     cached for 5 minutes — ~38 symbols x up to 2 bar queries is too much
     to pay on every request for a chart that moves daily."""
     from django.core.cache import cache
-    sparks = cache.get("hb:sparks")
+    sparks = cache.get("hb:sparks3")
     if sparks is not None:
         return sparks
     from instruments.models import Instrument
     sparks = {}
-    insts = {i.symbol.upper(): i.id for i in Instrument.objects.filter(
-        symbol__in=HEADBAND_SYMBOLS, is_active=True)}
+    insts = {i.symbol.upper(): i for i in Instrument.objects.filter(
+        symbol__in=HEADBAND_SYMBOLS, is_active=True).only(
+            "id", "symbol", "asset_class")}
     for sym in HEADBAND_SYMBOLS:
-        inst_id = insts.get(sym.upper())
-        if inst_id is None:
+        inst = insts.get(sym.upper())
+        if inst is None:
             continue
-        closes = _recent_closes(inst_id)
+        got = recent_closes(inst.id)
+        closes = got["spark"]
         if len(closes) >= 2:
-            sparks[sym] = {"spark": closes,
+            sparks[sym] = {"spark": closes, "fam": got["fam"],
+                           "bars": spark_words(got["fam"], got["tf"], inst),
                            "min": min(closes), "max": max(closes)}
-    cache.set("hb:sparks", sparks, 300)
+    cache.set("hb:sparks3", sparks, 300)
     return sparks
 
 
@@ -208,10 +279,19 @@ def ui_extras(request):
             PriceData.objects.filter(
                 instrument_id__in=inst_ids, timeframe="1d",
             ).order_by("instrument_id", "-timestamp")
-            .values("instrument_id", "timestamp", "close")[:len(inst_ids) * 12]
+            .values("instrument_id", "timestamp", "close",
+                    "source")[:len(inst_ids) * 12]
         )
         spark_by_inst: dict = {}
+        spark_fam: dict = {}
+        spark_tf: dict = {}
         for r in spark_rows:
+            # ONE FEED PER SPARK (2026-11-12): the newest row's feed, its
+            # rows only, so a spark never joins Yahoo's days to eToro's.
+            fam = _family(r["source"])
+            spark_fam.setdefault(r["instrument_id"], fam)
+            if fam != spark_fam[r["instrument_id"]]:
+                continue
             spark_by_inst.setdefault(r["instrument_id"], []).append(float(r["close"]))
         # Reverse so they're oldest-first, cap at 12.
         for k in spark_by_inst:
@@ -221,12 +301,22 @@ def ui_extras(request):
         for inst in qs:
             if len(spark_by_inst.get(inst.id, [])) < 2:
                 closes = _spark_fallback(inst.id)
-                if closes:
-                    spark_by_inst[inst.id] = closes
+                if closes and closes["spark"]:
+                    spark_by_inst[inst.id] = closes["spark"]
+                    spark_fam[inst.id] = closes["fam"]
+                    spark_tf[inst.id] = closes.get("tf") or "1h"
 
+        # ONE PRICE EVERYWHERE (2026-11-12, market_data.one_quote): the
+        # price, its sides and its day change are the rule's, the same
+        # answer every other cell of the symbol prints in this response.
+        from market_data.one_quote import for_request
+        # Asked, not printed: the shell prints them (its own block at the
+        # end of base.html carries them); a sweep or a fragment does not.
+        shown = for_request(request).many([i.symbol for i in qs],
+                                          printed=False)
         items = []
         for inst in qs:
-            q = _safe(lambda: inst.live_quote, None)
+            sh = shown.get(inst.symbol)
             spark = spark_by_inst.get(inst.id, [])
             spark_min = min(spark) if spark else 0
             spark_max = max(spark) if spark else 0
@@ -234,15 +324,13 @@ def ui_extras(request):
                 "symbol": inst.symbol,
                 "name": inst.name,
                 "asset_class": inst.asset_class,
-                "last": float(q.last) if q and q.last is not None else None,
-                "change_pct": float(q.change_pct) if q and q.change_pct is not None else 0.0,
-                "bid": float(q.bid) if q and q.bid is not None else None,
-                "ask": float(q.ask) if q and q.ask is not None else None,
-                "volume": int(q.volume) if q else 0,
-                "updated_at": q.updated_at.isoformat() if q and q.updated_at else None,
+                **_quote_fields(sh),
                 "spark": spark,
                 "spark_min": spark_min,
                 "spark_max": spark_max,
+                "spark_fam": spark_fam.get(inst.id, ""),
+                "spark_bars": spark_words(spark_fam.get(inst.id, ""),
+                                          spark_tf.get(inst.id, "1d"), inst),
             })
         _watch_facts(request, items, total)
         data["ui_watchlist"] = items
@@ -290,46 +378,32 @@ def ui_extras(request):
 
     # ── Dashboard headband metrics ─────────────────────────
     try:
-        from market_data.models import LiveQuote
+        # ONE PRICE EVERYWHERE (2026-11-12, market_data.one_quote): ONE
+        # answer per symbol for the response, three queries for the whole
+        # band (it was one LiveQuote query per symbol, whichever feed won
+        # the row): a held instrument's eToro reading, at the side it is
+        # valued at, any other's one LiveQuote row, said whose and how old.
+        from instruments.models import Instrument
+        from market_data.one_quote import for_request
         sparks = _safe(_headband_sparks, {}) or {}
+        shown = for_request(request).many(HEADBAND_SYMBOLS, printed=False)
+        names = {i.symbol.upper(): (i.name, i.asset_class) for i in
+                 Instrument.objects.filter(symbol__in=HEADBAND_SYMBOLS)
+                 .only("symbol", "name", "asset_class")}
         band = []
         for sym in HEADBAND_SYMBOLS:
             sp = sparks.get(sym) or {}
-            q = LiveQuote.objects.filter(instrument__symbol__iexact=sym).first()
-            if q:
-                import datetime as _dt
-                from django.utils.timesince import timesince
-                band.append({
-                    "symbol": sym,
-                    "last": float(q.last or 0),
-                    "change_pct": float(q.change_pct or 0),
-                    "name": q.instrument.name or sym,
-                    "asset_class": q.instrument.asset_class or "",
-                    "volume": int(q.volume or 0),
-                    "bid": float(q.bid) if q.bid else None,
-                    "ask": float(q.ask) if q.ask else None,
-                    "source": q.source or "",
-                    "updated": q.updated_at.isoformat() if q.updated_at else "",
-                    "updated_human": (timesince(q.updated_at) + " ago") if q.updated_at else "—",
-                    # The card's "As of" (_partials/dh_item.html): the same
-                    # instant as `updated`, on the UTC clock face. The page
-                    # re-reads `updated` itself whenever a tick or a sweep
-                    # replaces the record.
-                    "updated_utc": (q.updated_at.astimezone(_dt.timezone.utc)
-                                    .strftime("%H:%M:%S")) if q.updated_at else "",
+            sh = shown.get(sym)
+            name, cls = names.get(sym, (sym, ""))
+            item = {"symbol": sym, "name": name or sym,
+                    "asset_class": cls or "",
                     "spark": sp.get("spark", []),
                     "spark_min": sp.get("min", 0),
                     "spark_max": sp.get("max", 0),
-                })
-            else:
-                # No quote yet — the spark still renders when bars exist,
-                # so a keyless install's popups are not entirely blank.
-                band.append({"symbol": sym, "last": None, "change_pct": 0,
-                             "name": sym, "asset_class": "", "volume": 0,
-                             "updated": "",
-                             "spark": sp.get("spark", []),
-                             "spark_min": sp.get("min", 0),
-                             "spark_max": sp.get("max", 0)})
+                    "spark_fam": sp.get("fam", ""),
+                    "spark_bars": sp.get("bars", "")}
+            item.update(_quote_fields(sh))
+            band.append(item)
         data["ui_headband"] = band
     except Exception:
         pass

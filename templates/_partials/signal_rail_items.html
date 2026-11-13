@@ -1,4 +1,4 @@
-{% load sauron_tags %}
+{% load sauron_tags quote_tags %}
 {% comment %}
 The signal rail's cards. Lives as a partial for one reason: the
 signal_rail_partial view re-renders it when the dashboard WebSocket
@@ -209,9 +209,9 @@ first render passes rail_initial and renders those rows itself.
                         {% comment %}The mark the levels above are measured
                         against. Without it the operator has to guess whether
                         a suggested entry is still reachable.{% endcomment %}
-                        <div><span class="sr-pop-k">mark</span><span class="sr-pop-v">{% px s.instrument.live_quote.last s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        <div><span class="sr-pop-k">mark</span><span class="sr-pop-v" data-q="{{ s.instrument.symbol }}" data-q-title title="{% q_title s.instrument.symbol %}">{% q s.instrument.symbol %}</span></div>
                         <div><span class="sr-pop-k">age</span><span class="sr-pop-v">{{ s.created_at|timesince }}</span></div>
-                        <div><span class="sr-pop-k">R:R now</span><span class="sr-pop-v">{% if s.rail.rr_now is not None %}{{ s.rail.rr_now|floatformat:2 }}{% else %}<span class="sv-unknown" title="No fresh quote, or no levels to weigh">&mdash;</span>{% endif %}</span></div>
+                        <div><span class="sr-pop-k">R:R now</span><span class="sr-pop-v"{% if s.rail.rr_order %} data-q="{{ s.instrument.symbol }}" data-q-f="rr" data-q-o="{{ s.rail.rr_order }}" data-q-stop="{{ s.rail.rr_stop }}" data-q-target="{{ s.rail.rr_target }}" data-q-max="{{ s.rail.rr_max }}"{% endif %}>{% if s.rail.rr_order %}{{ s.rail.rr_text }}{% elif s.rail.rr_now is not None %}{{ s.rail.rr_now|floatformat:2 }}{% else %}<span class="sv-unknown" title="No fresh quote, or no levels to weigh">&mdash;</span>{% endif %}</span></div>
                         <div><span class="sr-pop-k">leaves</span><span class="sr-pop-v" title="{{ s.rail.leaves_words }}">{{ s.rail.leaves_at|timeuntil|truncatechars:10 }}</span></div>
                     </div>
                     {% comment %}Can anything act on it, and what is its
@@ -290,3 +290,4 @@ first render passes rail_initial and renders those rows itself.
 </div>
 <div data-sv-rail-meta hidden>{{ rail.meta|json_script }}</div>
 {% if not rail_initial %}<template data-sv-mirror="hbSignalRows">{% include "_partials/signal_rows_compact.html" %}</template>{% endif %}
+{% q_json %}
