@@ -623,8 +623,11 @@ class Command(BaseCommand):
 
         from django.db.models import Q
 
-        from bot_program.capital_truth import (account_equity, broker_backed,
-                                               broker_env, broker_kind)
+        from bot_program.capital_truth import (account_equity,
+                                               allocate_shares, broker_backed,
+                                               broker_env, broker_kind,
+                                               followers_of, foreign_venue,
+                                               tracks_broker)
         from bot_program.models import AssetBotConfig, IBKRAccount
         from core.platform_control import PlatformComponent, is_component_enabled
         from market_data.models import PriceData
@@ -992,16 +995,87 @@ class Command(BaseCommand):
                     same_ccy = (reading["currency"] and cfg.base_currency
                                 and reading["currency"].upper()
                                 == cfg.base_currency.upper())
-                    if not same_ccy and reading["currency"]:
+                    # WHOSE FIGURE IT IS (2026-11-12). A pool that follows
+                    # the account takes its figure from the account's
+                    # reading: only its label is wrong, and the sync writes
+                    # the reading's currency over it
+                    # (tasks._follow_the_account). Any other pool carries a
+                    # figure typed in its own label.
+                    # ASKED WITH THE SYNC'S OWN TWO TESTS (the review of
+                    # 2026-11-12), never the class flags above: the sync
+                    # retunes no follower that trades at another venue than
+                    # the book (capital_truth.foreign_venue, every symbol,
+                    # any venue the router names), and nothing at all while
+                    # the followers' shares do not fit in one account
+                    # (allocate_shares, with this one counted in). Only
+                    # where both say yes does a sync write the label.
+                    _follows = tracks_broker(cfg)
+                    _foreign, _fits = "", True
+                    if (not same_ccy and reading["currency"] and _follows
+                            and book is not None):
+                        _foreign = foreign_venue(user, cfg, broker_kind(book))
+                        if not _foreign:
+                            _fits = bool(allocate_shares(followers_of(
+                                user, include=cfg))["ok"])
+                    _etoro_book = (book is not None
+                                   and broker_kind(book) == "etoro")
+                    if (not same_ccy and reading["currency"] and _follows
+                            and not _foreign and _fits):
+                        _when = ("the next sync" if cfg.enabled else
+                                 "the first sync after it is enabled")
+                        w(f"        ^ CURRENCY MISMATCH: pool labelled "
+                          f"{cfg.base_currency}, account reads in "
+                          f"{reading['currency']} — this pool follows the "
+                          f"account: only its label is wrong, and {_when} "
+                          f"writes {reading['currency']}")
+                        blockers.append(
+                            f"config {cfg.id} ({cfg.name}) follows the "
+                            f"account and is labelled {cfg.base_currency} "
+                            f"while the account reads in "
+                            f"{reading['currency']}: its figure is taken "
+                            f"from the account's reading (the whole of it, "
+                            f"or its share), so the label is wrong, not the "
+                            f"figure — {_when} writes {reading['currency']}"
+                            + (" (until then the cash check refuses its "
+                               "eToro orders)" if _etoro_book else ""))
+                    elif (not same_ccy and reading["currency"] and _follows
+                            and not _foreign):
+                        w(f"        ^ CURRENCY MISMATCH: pool labelled "
+                          f"{cfg.base_currency}, account reads in "
+                          f"{reading['currency']} — this pool follows the "
+                          f"account, but the sync retunes nothing until the "
+                          f"followers' shares fit in 100%: its label stays "
+                          f"{cfg.base_currency}")
+                        blockers.append(
+                            f"config {cfg.id} ({cfg.name}) follows the "
+                            f"account and is labelled {cfg.base_currency} "
+                            f"while the account reads in "
+                            f"{reading['currency']}, and the sync retunes "
+                            f"nothing, its label included, until the "
+                            f"followers' shares fit in 100%: its label stays "
+                            f"{cfg.base_currency} until then"
+                            + (" and the cash check refuses its eToro orders"
+                               if _etoro_book else ""))
+                    elif not same_ccy and reading["currency"]:
+                        try:
+                            _pool_words = f"{float(cfg.capital):,.2f}"
+                        except (TypeError, ValueError):
+                            _pool_words = str(cfg.capital)
                         w(f"        ^ CURRENCY MISMATCH: pool declared in "
                           f"{cfg.base_currency}, account reads in "
                           f"{reading['currency']}")
                         blockers.append(
-                            f"config {cfg.id} ({cfg.name}) declares its pool "
-                            f"in {cfg.base_currency} while the account is in "
-                            f"{reading['currency']} — every limit derived from "
-                            f"`capital` is wrong by the FX rate, and nothing "
-                            f"here converts")
+                            f"config {cfg.id} ({cfg.name}) "
+                            + (f"follows the account but trades at "
+                               f"{_foreign}, so the sync never writes its "
+                               f"pool: its pool of {_pool_words}"
+                               if tracks_broker(cfg) else
+                               f"does not follow the account: its typed pool "
+                               f"of {_pool_words}")
+                            + f" is read in {cfg.base_currency} while the "
+                            f"account is in {reading['currency']} — every "
+                            f"limit derived from `capital` is wrong by the FX "
+                            f"rate, and nothing here converts")
                     try:
                         pool = float(cfg.capital)
                     except (TypeError, ValueError):

@@ -916,9 +916,11 @@ class TheWriterThreadTests(_Autocommit):
     def _pending_rows(self):
         """The three CLOSE_PENDING rows the drain books. Saved BEFORE the
         writer is patched: saving a real row CLOSE_PENDING is a harm row of
-        its own ("real close left pending for the drain"), written here at
-        once (SQLite, no writer thread), so that the patched writer below
-        is handed the drain's rows and nothing else (2026-11-12: made
+        its own ("real close left pending for the drain"), written before
+        the patch (at once on SQLite; on PostgreSQL in autocommit by the
+        real writer thread, which the test then drains with flush()), so
+        that the patched writer below is handed the drain's rows and
+        nothing else (2026-11-12: made
         inside the patch, these three rode the same writer thread, and the
         count of 3 the test waits for was met by whichever rows the
         writer's first batch happened to hold: three of the fixture's when
@@ -954,6 +956,12 @@ class TheWriterThreadTests(_Autocommit):
         main = threading.get_ident()
         gate = threading.Event()
         self._pending_rows()
+        # ON ANY ENGINE (the review of 2026-11-12): on PostgreSQL in
+        # autocommit the fixture's harm rows go to the real writer thread;
+        # flush() writes what is still queued, on this thread, and waits
+        # for a batch in flight, so none of them meets the patch below.
+        # On SQLite they were written at once and there is nothing to do.
+        fh.flush()
 
         def slow_insert(rows):
             gate.wait(5)

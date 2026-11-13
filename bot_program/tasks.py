@@ -698,11 +698,28 @@ def _follow_the_account(user, value, currency) -> None:
     reading was taken), floored at zero, taken off ONCE before any share
     is applied. So every follower shrinks by the same proportion, the
     shares themselves are untouched, and this path — as ever — only saves
-    `capital`: nothing is sold to find the money, it simply stops being
-    deployed and builds up as positions close. What was held back is on
-    the INFO line below, beside every pool it shrank. If the reserve
-    cannot be read, nothing is retuned: sizing the pools from the whole
-    reading would deploy money somebody has asked to take out.
+    `capital` (and its label, below): nothing is sold to find the money,
+    it simply stops being deployed and builds up as positions close. What
+    was held back is on the INFO line below, beside every pool it shrank.
+    If the reserve cannot be read, nothing is retuned: sizing the pools
+    from the whole reading would deploy money somebody has asked to take
+    out.
+
+    THE LABEL TRAVELS WITH THE FIGURE (2026-11-12). A follower's figure
+    is the reading's, in the reading's currency, and this path wrote the
+    figure and never its label (`base_currency`): a follower labelled in
+    another currency than the account kept the old label for ever, and
+    the cash check (AssetBot._cash_gate) refused every eToro order of it,
+    "pool in EUR against cash read in USD". The reading's currency is
+    written into `base_currency` in the same save as the figure, and a
+    follower already at the figure whose label differs is relabelled too.
+    A reading with no currency writes no label (the last one a reading
+    carried stands); a pool that does not follow the account carries a
+    figure typed in its own label and is never relabelled here. The
+    operator is told (_alert_relabelled, the review of 2026-11-12): one
+    alert for a sync that relabels, naming each pool and its old label,
+    because the label is a field he types on /asset-bots/ and the sync
+    writes over it within a minute.
     """
     from decimal import Decimal
 
@@ -742,6 +759,10 @@ def _follow_the_account(user, value, currency) -> None:
         # follower is non-paper, so the routing of a symbol does not differ
         # between them.
         _venue_of: dict = {}
+        # The reading's currency, the label every follower's figure is in
+        # ("" when the reading carries none: no label is written).
+        label = _reading_label(currency)
+        relabelled = []
 
         for cfg in followers:
             foreign = foreign_venue(user, cfg, _book_kind, _venue_of)
@@ -754,18 +775,64 @@ def _follow_the_account(user, value, currency) -> None:
                 continue
             share = float(alloc["plan"].get(cfg.pk, 0.0))
             new = Decimal(str(round(float(base) * share, 2)))
-            if cfg.capital == new:
+            old_label = str(cfg.base_currency or "")
+            relabel = bool(label) and old_label.strip().upper() != label
+            if cfg.capital == new and not relabel:
                 continue
             old = cfg.capital
             cfg.capital = new
-            cfg.save(update_fields=["capital"])
+            fields = ["capital"]
+            if relabel:
+                cfg.base_currency = label
+                fields.append("base_currency")
+            cfg.save(update_fields=fields)
             logger.info("broker sync: %s pool follows the account at "
                         "%.1f%%: %s -> %s %s%s", cfg.name, share * 100.0,
                         old, new, currency or "",
                         (f" ({held:,.2f} held back for withdrawals)"
                          if held > 0 else ""))
+            if relabel:
+                logger.warning("broker sync: %s pool relabelled %s -> %s: "
+                               "its figure is the account's reading, in %s",
+                               cfg.name, old_label or "(none)", label, label)
+                relabelled.append(f"{cfg.name}: "
+                                  f"{old_label.strip() or '(none)'} -> "
+                                  f"{label}")
+        if relabelled:
+            _alert_relabelled(user, label, relabelled)
     except Exception as e:  # noqa: BLE001 — the stored reading must stand
         logger.warning("broker sync: pool-follow failed: %s", e)
+
+
+def _alert_relabelled(user, label: str, lines) -> None:
+    """One alert to the pools' owner for a sync that relabelled followers
+    (the review of 2026-11-12): which pools, from what label to `label`.
+    The label is a field the operator types on /asset-bots/, and the sync
+    writes over it on a follower within a minute; a log line in the
+    worker was its only trace. The owner's own system_health alert, as
+    notify_broker_unreachable sends one: the pools are his, and a relabel
+    happens once per label written, so it needs no cooldown."""
+    try:
+        from .notifications import dispatch_notification
+        dispatch_notification(
+            user, "system_health",
+            title=f"Pool label set to {label} by the account sync",
+            body=("; ".join(lines)
+                  + f". A pool that follows the account holds the "
+                    f"account's reading, which is in {label}, so its label "
+                    f"is the reading's currency. To keep a label of your "
+                    f"own, stop the pool following the account."),
+            url="/asset-bots/")
+    except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
+        logger.warning("broker sync: relabel alert failed: %s", e)
+
+
+def _reading_label(currency) -> str:
+    """The label a reading's currency writes on a follower: its code,
+    upper case, or "" when the reading carries none (or one that does not
+    fit the column, AssetBotConfig.base_currency, ten characters)."""
+    code = str(currency or "").strip().upper()
+    return code if 0 < len(code) <= 10 else ""
 
 
 def _alert_over_allocation(user, reason: str) -> None:
