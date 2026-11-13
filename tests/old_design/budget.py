@@ -40,7 +40,7 @@ def compare_source(now, budget, hits):
                          else "old design added"))
                 lines = ["    %s:%d %s [%s]  %s" % (h.file, h.line, h.marker, owner(h.file, h.line, h.marker) or "no batch",
                                                    h.text[:150])
-                         for h in sorted(by_key[(f, marker)], key=lambda x: x.line)[:40]]
+                         for h in sorted(by_key[(f, marker)], key=lambda x: x.line)]
                 over.append("\n".join([head] + lines))
             elif got < allowed:
                 under.append("%s: %s %d, budget %d: lower the budget to %d (the ratchet follows the count down;"
