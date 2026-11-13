@@ -194,6 +194,9 @@ TITLES = (
     "Synthetic wire: a chip maker guides higher",
     "Synthetic wire: the euro edges up against the dollar",
 )
+#: The short ticker's one headline: the shortest, which fits the desk v2
+#: board's news lane (a third of the band) with its collapse tab.
+SHORT_TITLE = "Synthetic wire: gold drifts"
 
 #: Ahead of every script: a socket that never connects, a /partials/ticker/
 #: that answers what the test queued, the driver's frame requests counted
@@ -305,14 +308,34 @@ window.__mq = (function () {
     var p = parts(name), c = p.c.getBoundingClientRect(), f = p.f.getBoundingClientRect();
     return [Math.round(c.left + c.width * 0.35), Math.round(f.top + f.height / 2)];
   }
-  /* An item wholly inside the clip, clear of the collapse tab. */
+  /* An item wholly inside the clip, clear of the collapse tab.
+     Updated deliberately (the desk v2 board, approved 2026-11-13: "amazing
+     work, bravo, I need it fast!!"): the news is a lane of a third of the
+     band, so "clear of the tab" is the tab measured (seeRight), not the old
+     120 px, and where no item stands wholly inside at that frame the
+     strip's own position puts the first one that fits 8 px in, as the
+     hand's wheel would, before anything is measured. */
   function inside(name) {
     var p = parts(name), c = p.c.getBoundingClientRect(), its = items(p.t);
+    function find() {
+      var right = seeRight(p, c);
+      for (var i = 0; i < its.length; i++) {
+        var b = its[i].getBoundingClientRect();
+        if (b.left > c.left + 8 && b.right < right - 8) {
+          return { i: i, key: keyOf(its[i]), x: Math.round((b.left + b.right) / 2),
+                   y: Math.round((b.top + b.bottom) / 2) };
+        }
+      }
+      return null;
+    }
+    var at = find();
+    if (at || !window.SVMarquee) return at;
+    var room = seeRight(p, c) - c.left - 16;
     for (var i = 0; i < its.length; i++) {
       var b = its[i].getBoundingClientRect();
-      if (b.left > c.left + 40 && b.right < c.right - 120) {
-        return { i: i, key: keyOf(its[i]), x: Math.round((b.left + b.right) / 2),
-                 y: Math.round((b.top + b.bottom) / 2) };
+      if (b.width < room && b.right > c.left) {
+        SVMarquee.to(p.t, SVMarquee.offset(p.t) + (c.left + 9 - b.left));
+        return find();
       }
     }
     return null;
@@ -882,6 +905,12 @@ def _drag(tab, name):
     try:
         href = tab.js("location.href")
         xy = tab.js("__mq.point('%s')" % name)
+        # Updated deliberately (the desk v2 board, approved 2026-11-13:
+        # "amazing work, bravo, I need it fast!!"): the news is a lane of a
+        # third of the band, so the hand starts far enough right that 150 px
+        # later it is still on the strip, as it was on the full-width one.
+        left = tab.js("Math.round(document.getElementById('%s').getBoundingClientRect().left)" % FRAME[name])
+        xy = [max(xy[0], left + 150 + 24), xy[1]]
         tab.sample([name])
         tab.move(xy)
         tab.wait(0.4)
@@ -978,8 +1007,16 @@ def _tab_end(tab, name):
 
 def _watch(tab):
     """The rail's watchlist card (.dh-pop.wl-pop: the headband's look, not
-    its card): hovered open, then pinned with the hand away."""
+    its card): hovered open, then pinned with the hand away.
+
+    Updated deliberately (the desk v2 board, approved 2026-11-13: "amazing
+    work, bravo, I need it fast!!"): the rail is a column that is either
+    open, pushing the page, or not on the screen at all, so the hand opens
+    it first (its Signals button in the dock does the same) and shuts it
+    after."""
     tab.beat(True)
+    tab.js("var r = document.getElementById('signalsRail'); if (r) r.classList.add('open'); 0")
+    tab.wait(0.6)
     at = tab.js("""(function(){
       var body = document.getElementById('railWatchBody');
       if (!body) return null;
@@ -1016,8 +1053,11 @@ def _watch(tab):
     tab.key("Escape", "Escape", 27)
     closed = tab.js("window.__mqGone")
     tab.wait(0.5)
+    samples = tab.stop()["dh"]
+    tab.js("var r = document.getElementById('signalsRail'); if (r) r.classList.remove('open'); 0")
+    tab.wait(0.3)
     return {"opened": opened, "pinned": pinned, "holds": holds, "closed": closed,
-            "samples": tab.stop()["dh"]}
+            "samples": samples}
 
 
 def _fresh(tab, answer, fresh_id):
@@ -1038,9 +1078,18 @@ def _fresh(tab, answer, fresh_id):
     try:
         tab.move(xy)
         tab.wait(0.2)
-        # the nearer copy, brought 60 px inside the clip's left edge
-        near = min(tab.js("__mq.glow('%s')" % fresh_id), key=lambda c: abs(c["left"] - 60))
-        tab.wheel(xy, 0, near["left"] - 60)
+        # the nearer copy, brought 60 px inside the clip's left edge, or
+        # less where the lane is narrow: updated deliberately (the desk v2
+        # board, approved 2026-11-13: "amazing work, bravo, I need it
+        # fast!!"), the news lane is a third of the band, and the copy must
+        # come wholly into view, clear of the collapse tab
+        room = tab.js("(function(){ var f = document.getElementById('tickerBar'), c = f.getBoundingClientRect(),"
+                      " b = f.querySelector('.hb-collapse-btn');"
+                      " return (b && b.offsetWidth ? b.getBoundingClientRect().left : c.right) - c.left; })()")
+        copies = tab.js("__mq.glow('%s')" % fresh_id)
+        inset = max(4, min(60, int((room - (copies[0]["right"] - copies[0]["left"])) // 2)))
+        near = min(copies, key=lambda c: abs(c["left"] - inset))
+        tab.wheel(xy, 0, near["left"] - inset)
         tab.wait(0.4)
         seen = tab.js("__mq.glow('%s')" % fresh_id)
         tab.move(tab.js("__mq.away()"))
@@ -1050,15 +1099,15 @@ def _fresh(tab, answer, fresh_id):
 
 
 def _short(tab, short):
-    """A ticker with too few headlines to fill its strip (two): it has
-    nothing to reveal. Then the wheel over it, and over the headband, which
+    """A ticker with too few headlines to fill its strip (one, in the desk
+    v2 board's news lane): it has nothing to reveal. Then the wheel over it, and over the headband, which
     loops, with the page scrolled."""
     tab.js("window.__mqAnswers = %s; document.body.style.minHeight = '3200px';"
            " window.scrollTo(0, 400); 0" % json.dumps([short]))
     tab.js("document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
     for _ in range(40):
         tab.wait(0.1)
-        if tab.js("__mq.items('ticker')") == 4:
+        if tab.js("__mq.items('ticker')") == 2:
             break
     tab.wait(0.6)
     out = {"state": tab.js("SVMarquee.state(document.getElementById('tickerTrack'))"),
@@ -1302,8 +1351,11 @@ class TheStripsMeasuredTests(TestCase):
         tick = {"type": "quote_stream", "data": {
             "symbol": "USD_JPY", "last": 100.012, "bid": 100.010, "ask": 100.014,
             "source": "oanda_stream", "ts": (timezone.now() + timedelta(seconds=60)).isoformat()}}
-        # A ticker too short to loop: two headlines left.
-        NewsArticle.objects.exclude(title__in=TITLES[:2]).delete()
+        # A ticker too short to loop: one headline left. Updated deliberately
+        # (the desk v2 board, approved 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"): the news is a lane of a third of the band, where
+        # two of these headlines no longer fit; the shortest one does.
+        NewsArticle.objects.exclude(title=SHORT_TITLE).delete()
         cache.clear()
         short = _get(client, "/partials/ticker/")
 
@@ -1771,9 +1823,12 @@ class TheStripsMeasuredTests(TestCase):
         self.assertFalse(other["glowing"], "the copy out of view glowed too: %r" % other)
 
     def test_a_short_ticker_shows_each_headline_once_and_the_page_has_the_wheel(self):
-        """Two headlines fit in the strip: nothing to reveal, so it stands at
-        its start and shows each headline once (e4e8a2d showed the loop's
-        copy beside them). With nothing to reveal it is an end, and the wheel
+        """A headline that fits in the strip: nothing to reveal, so it stands
+        at its start and shows each headline once (e4e8a2d showed the loop's
+        copy beside them). Updated deliberately (the desk v2 board, approved
+        2026-11-13: "amazing work, bravo, I need it fast!!"): the news is a
+        lane of a third of the band, so the short ticker holds one headline,
+        not two; the copy is still there and still hidden. With nothing to reveal it is an end, and the wheel
         goes to the page. A strip that loops has no end (2026-11-13, the
         operator's decision that they scroll continuously): over the
         headband the wheel moves the strip, as the hand asks."""
@@ -1781,7 +1836,7 @@ class TheStripsMeasuredTests(TestCase):
         self.assertFalse(got["state"]["loop"])
         self.assertEqual(got["x"], 0)
         shown = got["shown"]
-        self.assertEqual(len(shown), 4)
+        self.assertEqual(len(shown), 2)
         self.assertEqual(sorted(k for k, copy, painted in shown if painted),
                          sorted({k for k, copy, painted in shown}), shown)
         self.assertGreater(got["y1"], got["y0"], "the wheel did not reach the page")

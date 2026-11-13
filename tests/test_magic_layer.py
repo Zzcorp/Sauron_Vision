@@ -2389,11 +2389,18 @@ class KitMagicMeasuredTests(TestCase):
             cls.buttons = b.js(sid, "__sv.boxes('button, .btn')")
             # Where a moment's light is, at this instant: the row's light,
             # the flare at its widest, the card's edge, the icon's light.
+            # Updated deliberately (the desk v2 board, approved 2026-11-13:
+            # "amazing work, bravo, I need it fast!!"): the flare's box is
+            # its own circle at its largest scale (1.08, the kit's
+            # sv-eye-flare) plus 2 px, as it computes on the page, not the
+            # 70 px circle at the 1.9 it no longer reaches; in the 44 px
+            # head the menu's first fold button sits 6 px under the head.
             lights = ("(function () { var out = []; function box(e, pad) { var r = e.getBoundingClientRect();"
                       " return [r.left - pad, r.top - pad, r.width + 2 * pad, r.height + 2 * pad]; }"
                       " Array.prototype.forEach.call(document.querySelectorAll('.sv-row-light'), function (e) { out.push(box(e, 0)); });"
                       " var w = document.querySelector('.brand-eye-wrap.sv-flare');"
-                      " if (w) { var r = w.getBoundingClientRect(), R = 70 * 1.9 / 2; out.push([r.left + r.width / 2 - R, r.top + r.height / 2 - R, 2 * R, 2 * R]); }"
+                      " if (w) { var r = w.getBoundingClientRect(), R = (parseFloat(getComputedStyle(w, '::after').width) || 70) * 1.08 / 2 + 2;"
+                      " out.push([r.left + r.width / 2 - R, r.top + r.height / 2 - R, 2 * R, 2 * R]); }"
                       " Array.prototype.forEach.call(document.querySelectorAll('.sv-moment-arrive'), function (e) { var q = box(e, 0); out.push([q[0], q[1], q[2], 2]); });"
                       " Array.prototype.forEach.call(document.querySelectorAll('.sv-moment-icon'), function (e) { out.push(box(e, 4)); });"
                       " return out; })()")
@@ -2528,10 +2535,21 @@ class EmbersMeasuredTests(TestCase):
     text call; under Calm and Off, and on a page that has not opted in, the
     canvas is not displayed and no frame is drawn in 2 s."""
 
+    #: Updated deliberately (the desk v2 board, approved 2026-11-13: "amazing
+    #: work, bravo, I need it fast!!"): its frame keeps 16 px gutters, so at
+    #: 1440 x 900 /command/ shows no void of its own any more (no gutter of
+    #: 24 px, the field's own rule) and rightly draws nothing. The measure
+    #: hides the page's hero, at the top, to give the field a void there:
+    #: every count below still runs on that page's shell and the script as
+    #: it ships.
+    VOID_FOR = {COMMAND: "<style>.oc-hero { visibility: hidden !important; }</style>"}
+
     @classmethod
     def setUpTestData(cls):
         pages = {u: _file_page(m, scripts=("sv-embers.js",), before=EMBER_COUNTER)
                  for u, m in _pages(_book("magic_embers"), (POSITIONS, COMMAND)).items()}
+        for u, style in cls.VOID_FOR.items():
+            pages[u] = pages[u].replace("</head>", style + "</head>", 1)
         b = _Browser(pages, "sv-magic-embers-")
         try:
             sid = b.tab()

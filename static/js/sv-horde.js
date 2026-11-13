@@ -599,6 +599,40 @@
     if (compact) return fill(W('tab_compact'), { n: n });
     return n === 1 ? fill(W('tab_seat'), { n: n }) : fill(W('tab_seats'), { n: n });
   }
+  /* The status bar's AT STOPS (the desk v2 board, 2026-11-13): the real-
+     money side's open risk at the stops against its limit, as the entry
+     gate measures it (this answer's sides.live), and the seats in alarm
+     said in words beside the Horde's standards. Unmeasured: a dash. */
+  function paintBar(t) {
+    var box = document.getElementById('svBarRisk');
+    if (box) {
+      var live = (t.sides || {}).live || {};
+      box.textContent = '';
+      if (live.risk_pct_t) {
+        var v = document.createElement('span');
+        v.className = 'sv-bar-fig sv-tone-' + (live.risk_tone || 'ok');
+        v.textContent = live.risk_pct_t;
+        box.appendChild(v);
+        var of = document.createElement('span');
+        of.className = 'sbsub';
+        of.textContent = 'of ' + (live.limit_pct_t || DASH);
+        box.appendChild(of);
+        if (live.risk_why) box.title = live.risk_why;
+      } else {
+        var d = document.createElement('span');
+        d.className = 'sv-unknown';
+        d.title = live.risk_why || 'The real-money side\'s risk at the stops is not measured';
+        d.textContent = DASH;
+        box.appendChild(d);
+      }
+    }
+    var alarms = document.getElementById('svBarAlarms');
+    if (alarms) {
+      var n = t.alarms || 0;
+      alarms.textContent = n ? (n === 1 ? fill(W('tab_alarm'), { n: 1 }) : fill(W('tab_alarms'), { n: n })) : '';
+      alarms.hidden = !n;
+    }
+  }
   function paintTab(t) {
     var n = t.seats || 0;
     state.seatN = n;
@@ -611,6 +645,7 @@
     seg(segs.r, lead.r_t || '', 'hd-tab-r ' + (lead.r_v > 0 ? 'up' : lead.r_v < 0 ? 'down' : ''));
     seg(segs.risk, lead.risk_pct_t ? fill(W('tab_risk'), { x: lead.risk_pct_t, limit: lead.limit_pct_t || DASH }) : '',
         'hd-tab-risk ' + (lead.risk_tone || ''));
+    paintBar(t);
     var flag = t.flag === 'elite' ? W('flag_elite') : t.flag === 'shut' ? W('flag_shut')
              : t.flag === 'unreadable' ? W('flag_unreadable') : '';
     seg(segs.flag, flag, 'hd-tab-flag ' + (t.flag || ''));

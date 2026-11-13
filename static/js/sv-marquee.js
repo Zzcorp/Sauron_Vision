@@ -334,9 +334,13 @@
         var c = s.clip.getBoundingClientRect(), r = el.getBoundingClientRect();
         var right = c.right, tab = s.frame.querySelector('.hb-collapse-btn');
         if (tab && tab.offsetWidth) right = Math.min(right, tab.getBoundingClientRect().left);
+        /* SHOW_PX inside, or less where the lane is narrow (the desk v2
+           board's news lane, a third of the band, 2026-11-13): an item that
+           fits between the clip's left edge and the tab is shown whole. */
+        var inset = Math.max(0, Math.min(SHOW_PX, (right - c.left - r.width) / 2));
         var to;
-        if (r.left < c.left) to = s.pos - (c.left - r.left) - SHOW_PX;
-        else if (r.right > right) to = s.pos + (r.right - right) + SHOW_PX;
+        if (r.left < c.left) to = s.pos - (c.left - r.left) - inset;
+        else if (r.right > right) to = s.pos + (r.right - right) + inset;
         else return;
         s.pos = within(s, to);
         paint(s);

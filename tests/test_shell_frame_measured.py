@@ -321,6 +321,8 @@ MENU_PROBE = r"""
                 iconVis: vis(ico), iconBox: ico ? [ico.getBoundingClientRect().left, ico.getBoundingClientRect().width] : null,
                 stroke: ics ? ics.stroke : null, color: ics ? ics.color : null, sw: ics ? ics.strokeWidth : null, fill: ics ? ics.fill : null,
                 labelVis: label ? vis(label) : false,
+                labelBox: label ? [label.getBoundingClientRect().width, label.getBoundingClientRect().height] : null,
+                labelShown: label ? getComputedStyle(label).display !== 'none' && getComputedStyle(label).visibility !== 'hidden' : false,
                 iconText: a.querySelector('.icon') ? a.querySelector('.icon').textContent.trim() : null,
                 sec: (function () { var n = a.previousElementSibling; while (n && !n.classList.contains('nav-section')) n = n.previousElementSibling; return n ? n.getAttribute('data-nav-sec') : null; })(),
                 active: a.classList.contains('active') });
@@ -611,7 +613,12 @@ class FrameGeometryTests(TestCase):
             if not r["vis"]:
                 continue
             with self.subTest(row=r["text"]):
-                self.assertFalse(r["labelVis"])
+                # The word leaves the eye (a box of at most 1 px) but never
+                # the row: it stays rendered, the link's name for a screen
+                # reader and the hover tip's text.
+                self.assertLessEqual(max(r["labelBox"]), 1)
+                self.assertTrue(r["labelShown"])
+                self.assertTrue(r["text"])
                 self.assertTrue(r["iconVis"])
                 left, w = r["iconBox"]
                 self.assertAlmostEqual(left + w / 2, MINI_W / 2, delta=1)

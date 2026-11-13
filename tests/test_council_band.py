@@ -1534,19 +1534,33 @@ class TheChromeTests(SimpleTestCase):
         self.assertGreater(self.base.index(rows), self.base.index("Toggle the Horde"))
 
     def test_the_sidebar_row_is_staff_only_under_what_is_measured(self):
+        """Updated deliberately (UI redo B2, the desk v2 board, approved
+        2026-11-13: "amazing work, bravo, I need it fast!!"): the row's mark
+        is the one icon family's crown (#svi-council), never a glyph, and a
+        section head is a fold button that names its section."""
         row = ('{% if request.user.is_staff %}<a href="{% url \'council_dashboard\' %}" '
                'class="nav-link {% if page_id == \'council\' %}active{% endif %}">'
-               '<span class="icon">♔</span> <span class="label-text">The Council'
+               '<span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false">'
+               '<use href="#svi-council"/></svg></span> <span class="label-text">The Council'
                '</span></a>{% endif %}')
         self.assertIn(row, self.base)
-        measured = self.base.index('<div class="nav-section">What is measured</div>')
-        invented = self.base.index('<div class="nav-section">What is invented</div>')
+        measured = self.base.index('<span class="nav-fold-name">What is measured</span>')
+        invented = self.base.index('<span class="nav-fold-name">What is invented</span>')
         at = self.base.index(row)
         self.assertTrue(measured < at < invented)
         self.assertGreater(at, self.base.index("Agent Calibration"))
+        # The crown is the Council's alone: the row and the dock's Council
+        # button wear its symbol, nothing else does, and no template draws
+        # the glyph any more (the desk v2 board, see the docstring).
+        uses = [line for p in (BASE / "templates").rglob("*.html")
+                for line in p.read_text(encoding="utf-8").splitlines()
+                if 'href="#svi-council"' in line]
+        self.assertEqual(len(uses), 2, uses)
+        for line in uses:
+            self.assertTrue("council_dashboard" in line or 'data-sv-dock="council"' in line, line)
         count = sum(p.read_text(encoding="utf-8").count("♔")
                     for p in (BASE / "templates").rglob("*.html"))
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 0)
 
     def test_the_ask_kinds_and_the_shared_facts_label(self):
         kinds = self.base[self.base.index("var ASK_KINDS = {"):

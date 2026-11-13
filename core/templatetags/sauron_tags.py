@@ -54,6 +54,20 @@ def sign_class(value):
         return "flat"
 
 
+@register.filter
+def currency_sign(code):
+    """The glyph to print before a figure in currency `code` ("USD" → "$"),
+    from the one table the book's own figures use
+    (portfolio.services.CURRENCY_SYMBOLS); an unknown code is printed as
+    itself and a space, no code at all as nothing. Display only: the status
+    bar's PORTFOLIO prints eToro's equity in eToro's currency (2026-11-13),
+    never a sign written into the template."""
+    from portfolio.services import CURRENCY_SYMBOLS
+
+    code = (code or "").strip().upper()
+    return CURRENCY_SYMBOLS.get(code, f"{code} " if code else "")
+
+
 @register.simple_tag(takes_context=True)
 def static_abs(context, path):
     """An ABSOLUTE URL for a static file — scheme, host and all.
