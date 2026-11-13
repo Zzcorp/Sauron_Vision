@@ -25,12 +25,18 @@
    armed, sauron.css). Both stop under reduced motion. (A third under
    Ambience Magic only, the Eye's breath: the last block.) Every other infinite
    animation of the shell stops here: the brand eye's float and glow, the
-   news and quote marquees (the wheel over them still moves them, and every
-   quote is in the watchlist and the rail too), the idle Eye's ripples and
+   news and quote marquees' keyframes (the two strips scroll again, by
+   script: below), the idle Eye's ripples and
    clouds, Gollum's idle face, the unseen-section dot, the restore tab, the
    loading dots, the alarm pulses (their state keeps its colour and its
    words). The Eye still works visibly while Sauron answers (.working):
-   the operator asked. The lock's atmosphere is the lock's. */
+   the operator asked. The lock's atmosphere is the lock's.
+
+   THE TWO STRIPS SCROLL AGAIN (2026-11-13, the operator's decision): the
+   price headband and the news ticker were standing still here since S1a;
+   he asked that they scroll continuously, not too fast, and stop on hover.
+   It overrides this section for those two strips, and only for them. They
+   are content, not the magic layer: every Ambience, both themes. */
 
 @keyframes sv-heartbeat {
     0%, 100% { opacity: 1; }
@@ -50,9 +56,16 @@
 .brand-eye-wrap::before { animation: none; opacity: 0; }
 .sidebar-brand .brand-eye { animation: none; filter: none; }
 
-/* The marquees stand still; the wheel driver (svWheelMarquee) still moves
-   a strip while the pointer is on it. */
-.ticker-track, .dh-track { animation: none; }
+/* The two strips (2026-11-13, the operator's decision, above): moved by one
+   script, static/js/sv-marquee.js, never by keyframes. One position per
+   strip at its frame's data-sv-marquee-speed (px per second: prices 40,
+   news 30) on a seamless loop; still under the hand, on a card it opened,
+   with focus or a finger in it, while the hand drags it, in a hidden tab,
+   collapsed, and under reduced motion (where the wheel and the drag still
+   move it); never a jump when a refetch, a sweep or the painter changes
+   its items. The transform alone moves, on the track's own layer, rounded
+   to device pixels: the figures stay crisp. */
+.ticker-track, .dh-track { animation: none; will-change: transform; }
 
 /* The idle Eye (Ask Sauron) and its send button: still until asked. An
    unread answer keeps its ring, settled once, without the breathing. */
