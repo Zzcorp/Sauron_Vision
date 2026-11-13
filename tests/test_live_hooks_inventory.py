@@ -27,6 +27,15 @@ optional MARKET SHUT section) merged into this branch: four hooks, named
 with their readers in DATA_ATTRS, and four counts that rose with main's
 markup, written above RECORDED.
 
+ONE PRICE EVERYWHERE (#105, merged 2026-11-12 after S1a) joined on
+2026-11-13 (the old-design redo's B0, plan §11: "the inventory takes them
+in when it merges"), counted on origin/main 1b94a50: the cells the one
+painter finds by attribute (the data-q family), its quote blocks
+(data-sv-quotes) and its clock (data-sv-now), and the chart handle's
+methods it calls (svCharts[id].setNow, .caption, .series, .bars), with
+the handle's own refresh and tick that §11 already named. A shell or page
+rewrite that dropped one would leave a price that simply stops moving.
+
 How each kind is counted, per file (templates, scripts, the template tags):
   * a data attribute: every occurrence of the attribute's name, as a whole
     token (data-sv-live is not counted inside data-sv-live-key);
@@ -37,7 +46,11 @@ How each kind is counted, per file (templates, scripts, the template tags):
     selector inside a quoted string, or a quoted string that is the class
     alone (a classList argument is one). A class family (sv-flash--*,
     sv-world--*) counts its prefix;
-  * a window global: its definition (window.X =, w.X =, SV.x =, w.SV.x =).
+  * a window global: its definition (window.X =, w.X =, SV.x =, w.SV.x =);
+  * a method of a chart's handle (svCharts[id].x): its key in the object
+    the widget sets svCharts[id] to. Its readers are the feed's own
+    scripts (sv-venue.js, sv-instrument-live.js), which no display stage
+    edits; the widget is (S4).
 
 Display only: nothing here reads or writes data. Run with:
     python manage.py test tests.test_live_hooks_inventory
@@ -71,6 +84,31 @@ DATA_ATTRS = (
     # them (data-f-toggle), and the host's own state that shows or hides
     # the section (data-f-gone). Counted on origin/main ede54d0.
     "data-sv-gone", "data-f-toggle", "data-f-gone",
+    # ONE PRICE EVERYWHERE (#105), joined on 2026-11-13 (counted on
+    # origin/main 1b94a50). static/js/sv-venue.js, the one painter, finds
+    # every price cell by attribute, never by text:
+    #   data-q          the symbol of a cell the painter writes;
+    #   data-q-f        the field it prints (price, bid, ask, spread, chg,
+    #                   words, age, since, away, rr…);
+    #   data-q-side     a position's closing side;
+    #   data-q-title    a cell whose hover is painted too (its own tail);
+    #   data-q-spark    a sparkline keyed to a symbol (drawn, not written);
+    #   data-q-fam, data-q-bars   whose bars a spark draws;
+    #   data-q-dot      the spark's "now" dot, which the painter adds;
+    #   data-q-state    the cell's state the painter writes (stale, shut,
+    #                   none), which sv-venue.css reads;
+    #   data-q-ref, data-q-below  the figures beside a price: the level a
+    #                   "since" or "away" counts from, and on which side;
+    #   data-q-o, data-q-stop, data-q-target, data-q-max  the rail card's
+    #                   live R:R (the order, its levels, the bound);
+    #   data-sv-quotes  the quote blocks a response carries ({% q_json %}),
+    #                   ingested before the cells are painted;
+    #   data-sv-now     the server's clock, so ages count from it.
+    "data-q", "data-q-f", "data-q-side", "data-q-title", "data-q-spark",
+    "data-q-fam", "data-q-bars", "data-q-dot", "data-q-state",
+    "data-q-ref", "data-q-below", "data-q-o", "data-q-stop",
+    "data-q-target", "data-q-max", "data-sv-quotes", "data-sv-now",
+
     # MARKET SHUT (main's #99, #100 and #101), joined at their merge into
     # this branch (2026-11-12, counted on origin/main 4c1ebcc). Each is
     # read by the rail's sheet, by its script or by main's own tests:
@@ -106,6 +144,13 @@ IDS = (
 
 #: The widget's reader of those blocks (chart_widget.html, pageJson()).
 CHART_JSON_SUFFIXES = ("-positions", "-signals")
+
+#: The chart handle's methods (svCharts[id], set by chart_widget.html):
+#: §11's refresh and tick, and #105's for the one painter (joined
+#: 2026-11-13): series() and bars() it draws the "now" line on and reads,
+#: caption() the line under the chart it writes, setNow(v) the value the
+#: scale must hold.
+CHART_HANDLE = ("refresh", "tick", "series", "bars", "caption", "setNow")
 
 CLASSES = (
     "sv-unknown", "sv-age", "up", "down", "tk-stale", "sv-row--live",
@@ -215,6 +260,47 @@ def count_sv(text, name):
                           % re.escape(name), text))
 
 
+_HANDLE = re.compile(r"\bsvCharts\s*\[[^\]\n]+\]\s*=\s*\{")
+
+
+def count_handle_method(text, name):
+    """How many times `name` is a key of the object a chart's handle is
+    set to (svCharts[id] = {...}): keys at the literal's own depth only,
+    strings and comments read through."""
+    n = 0
+    key = re.compile(r"(?<![\w$.])%s\s*:" % re.escape(name))
+    for m in _HANDLE.finditer(text):
+        i, depth, own = m.end(), 1, []
+        while i < len(text) and depth:
+            ch = text[i]
+            if ch in "'\"`":
+                j = i + 1
+                while j < len(text) and text[j] != ch:
+                    j += 2 if text[j] == "\\" else 1
+                i = j + 1
+                own.append(" ")
+                continue
+            if text.startswith("//", i):
+                j = text.find("\n", i)
+                i = len(text) if j < 0 else j
+                own.append(" ")
+                continue
+            if text.startswith("/*", i):
+                j = text.find("*/", i + 2)
+                i = len(text) if j < 0 else j + 2
+                own.append(" ")
+                continue
+            if ch in "{([":
+                depth += 1
+            elif ch in "})]":
+                depth -= 1
+            elif depth == 1:
+                own.append(ch)
+            i += 1
+        n += len(key.findall("".join(own)))
+    return n
+
+
 def inventory():
     """{hook: {file: count}} for the tree as it stands."""
     inv = {}
@@ -233,6 +319,8 @@ def inventory():
         for suffix in CHART_JSON_SUFFIXES:
             put("json:" + suffix, rel,
                 len(re.findall(r"""pageJson\(\s*['"]%s['"]\s*\)""" % re.escape(suffix), text)))
+        for name in CHART_HANDLE:
+            put("svCharts[id]." + name, rel, count_handle_method(text, name))
         for name in CLASSES:
             put("." + name, rel, count_class(text, name))
         for name in CLASS_FAMILIES:
@@ -269,6 +357,11 @@ def inventory():
 # that day the merged tree held every hook of main's in every file, and
 # more only where the magic's own files read one (sv-moments.js, the kit
 # page).
+# ONE PRICE EVERYWHERE (#105, merged after S1a) joined on 2026-11-13, at
+# the old-design redo's B0: its twenty-three hooks (the data-q family,
+# data-sv-quotes, data-sv-now, and the chart handle's six methods, §11's
+# refresh and tick among them) from inventory() on origin/main 1b94a50,
+# each at main's own count. Every count recorded before stands unchanged.
 # A file may gain a hook; it may not lose one. Each hook below must also be
 # found somewhere (no hook is recorded at zero), so a hook renamed
 # everywhere at once fails too.
@@ -589,6 +682,116 @@ RECORDED = {
         'static/js/sv-nav-activity.js': 2,
         'templates/base.html': 1,
     },
+    # ONE PRICE EVERYWHERE (#105), joined on 2026-11-13: counted by
+    # inventory() on origin/main 1b94a50, the main the old-design redo's B0
+    # branches from, so every later display stage is held to them.
+    'data-q': {
+        'core/templatetags/quote_tags.py': 3,
+        'static/js/sv-horde.js': 7,
+        'static/js/sv-position-card.js': 2,
+        'static/js/sv-venue.js': 11,
+        'templates/_partials/deal_ticket.html': 3,
+        'templates/_partials/dh_item.html': 9,
+        'templates/_partials/signal_rail_items.html': 2,
+        'templates/base.html': 16,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 2,
+        'templates/dashboard/instrument_detail.html': 9,
+        'templates/dashboard/instruments_list.html': 10,
+        'templates/dashboard/news_detail.html': 2,
+        'templates/dashboard/portfolio_overview.html': 2,
+        'templates/dashboard/positions_list.html': 3,
+    },
+    'data-q-bars': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 2,
+        'templates/_partials/dh_item.html': 1,
+        'templates/base.html': 2,
+    },
+    'data-q-below': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 1,
+    },
+    'data-q-dot': {
+        'static/js/sv-venue.js': 3,
+    },
+    'data-q-f': {
+        'core/templatetags/quote_tags.py': 2,
+        'static/js/sv-horde.js': 3,
+        'static/js/sv-overlay.js': 1,
+        'static/js/sv-position-card.js': 2,
+        'static/js/sv-venue.js': 6,
+        'templates/_partials/deal_ticket.html': 3,
+        'templates/_partials/dh_item.html': 6,
+        'templates/_partials/signal_rail_items.html': 1,
+        'templates/base.html': 5,
+        'templates/dashboard/_position_summary.html': 1,
+        'templates/dashboard/instrument_detail.html': 7,
+        'templates/dashboard/instruments_list.html': 8,
+        'templates/dashboard/news_detail.html': 1,
+        'templates/dashboard/portfolio_overview.html': 1,
+        'templates/dashboard/positions_list.html': 2,
+    },
+    'data-q-fam': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/dh_item.html': 1,
+        'templates/base.html': 2,
+    },
+    'data-q-max': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-o': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-ref': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 1,
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-q-side': {
+        'core/templatetags/quote_tags.py': 2,
+        'static/js/sv-horde.js': 7,
+        'static/js/sv-position-card.js': 2,
+        'static/js/sv-venue.js': 2,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 2,
+        'templates/dashboard/portfolio_overview.html': 2,
+        'templates/dashboard/positions_list.html': 3,
+    },
+    'data-q-spark': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 11,
+        'templates/_partials/dh_item.html': 1,
+        'templates/base.html': 2,
+    },
+    'data-q-state': {
+        'static/js/sv-venue.js': 2,
+    },
+    'data-q-stop': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-target': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-title': {
+        'core/templatetags/quote_tags.py': 1,
+        'static/js/sv-horde.js': 1,
+        'static/js/sv-venue.js': 7,
+        'templates/_partials/dh_item.html': 2,
+        'templates/_partials/signal_rail_items.html': 1,
+        'templates/base.html': 4,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 1,
+        'templates/dashboard/instrument_detail.html': 1,
+        'templates/dashboard/instruments_list.html': 2,
+        'templates/dashboard/portfolio_overview.html': 1,
+        'templates/dashboard/positions_list.html': 1,
+    },
     'data-sv-at': {
         'static/js/sv-overlay.js': 3,
         'templates/_partials/broker_account.html': 1,
@@ -687,6 +890,11 @@ RECORDED = {
     'data-sv-noflash': {
         'static/js/sv-flash.js': 1,
     },
+    'data-sv-now': {
+        'core/templatetags/quote_tags.py': 1,
+        'static/js/sv-venue.js': 3,
+        'templates/_partials/sv_venue.html': 1,
+    },
     'data-sv-open': {
         'static/js/sv-motion.js': 1,
         'static/js/sv-overlay.js': 3,
@@ -709,6 +917,10 @@ RECORDED = {
         'static/js/sv-overlay.js': 6,
         'templates/base.html': 3,
     },
+    'data-sv-quotes': {
+        'core/templatetags/quote_tags.py': 1,
+        'static/js/sv-venue.js': 4,
+    },
     'data-sv-rail-n': {
         'templates/_partials/rail_sig_chips.html': 6,
         'templates/_partials/signal_rail_items.html': 1,
@@ -725,6 +937,24 @@ RECORDED = {
         'templates/_partials/chart_widget.html': 1,
     },
     'json:-signals': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].bars': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].caption': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].refresh': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].series': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].setNow': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].tick': {
         'templates/_partials/chart_widget.html': 1,
     },
     'window.SAURON_CHART_COLORS': {
@@ -778,6 +1008,7 @@ class LiveHooksInventoryTests(SimpleTestCase):
         at least one file: the scanner sees them all today."""
         expected = (set(DATA_ATTRS) | {"#" + i for i in IDS}
                     | {"json:" + s for s in CHART_JSON_SUFFIXES}
+                    | {"svCharts[id]." + m for m in CHART_HANDLE}
                     | {"." + c for c in CLASSES}
                     | {"." + c + "*" for c in CLASS_FAMILIES}
                     | {"window." + g for g in GLOBALS}
@@ -840,6 +1071,31 @@ class LiveHooksInventoryTests(SimpleTestCase):
         self.assertEqual(count_data_attr('<div data-sv-row data-market="shut">', "data-market"), 1)
         self.assertEqual(count_data_attr(rail, "data-sv-shut"), 1)
         self.assertEqual(count_data_attr(rail.replace("data-sv-shut ", "data-sv-held "), "data-sv-shut"), 0)
+
+    def test_the_one_price_hooks_are_counted_alone(self):
+        """#105's hooks (2026-11-13): data-q is a whole token, never counted
+        inside data-q-f or data-q-side; a cell that loses its data-q is
+        seen as fewer; the chart handle's methods are its own keys, never a
+        key of a nested object nor a word in a comment or a string."""
+        dh = (ROOT / "templates/_partials/dh_item.html").read_text(encoding="utf-8")
+        before = count_data_attr(dh, "data-q")
+        self.assertGreater(before, 0)
+        self.assertEqual(count_data_attr(dh.replace('data-q="', 'data-x="', 1), "data-q"), before - 1)
+        self.assertEqual(count_data_attr('<b data-q-f="price" data-q-side="bid">', "data-q"), 0)
+        self.assertEqual(count_data_attr('<b data-q-f="price" data-q-side="bid">', "data-q-f"), 1)
+        self.assertEqual(count_data_attr('<script type="application/json" data-sv-quotes>', "data-sv-quotes"), 1)
+        widget = (ROOT / "templates/_partials/chart_widget.html").read_text(encoding="utf-8")
+        for name in CHART_HANDLE:
+            self.assertEqual(count_handle_method(widget, name), 1, name)
+        renamed = widget.replace("setNow: function", "setNowValue: function", 1)
+        self.assertEqual(count_handle_method(renamed, "setNow"), 0)
+        js = ("window.svCharts[ID] = { /* setNow: no */ series: function () { return {bars: 1}; },"
+              " caption: 'tick: no', tick: function () {} };")
+        self.assertEqual(count_handle_method(js, "series"), 1)
+        self.assertEqual(count_handle_method(js, "bars"), 0)
+        self.assertEqual(count_handle_method(js, "setNow"), 0)
+        self.assertEqual(count_handle_method(js, "tick"), 1)
+        self.assertEqual(count_handle_method("other[ID] = { tick: function () {} };", "tick"), 0)
 
     def test_counting_reads_through_django_tags_in_a_class(self):
         html = ('<span class="ip-x {% if a > 0 %}up{% elif a < 0 %}down{% endif %}">'
