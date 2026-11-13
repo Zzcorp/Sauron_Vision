@@ -71,17 +71,24 @@ jobs:
 
   # The zero-old-design guard's measured half (tests/test_zero_old_design.py,
   # B0 of the old-design redo, 2026-11-13): every routed page and the shell's
-  # states laid out in Chromium (the runner's Google Chrome, which the tests
-  # find on the PATH), each held to its budget. Four shards, one per worker.
-  # Inter and JetBrains Mono are installed so the glyph census reads which
-  # face drew each glyph as it does where the budgets were taken; without
-  # them it is skipped, never failed. Its source half runs in the suite
-  # above. Measured on a 4-vCPU machine another suite kept busy: about 4
-  # minutes in four workers, 5.5 held to two CPUs as on the private runner,
-  # all of it beside the suite's job, not after it.
+  # states laid out in Chromium, each held to its budget, in four shards.
+  # Its source half runs in the suite above. The budgets were measured in one
+  # browser with one set of faces, and are exact: this job installs the same
+  # (Playwright 1.63.0's Chromium 1243, Chrome for Testing 153.0.8010.12, with
+  # its font packages; Inter and JetBrains Mono; the fontconfig preference
+  # for Inter in tests/old_design/fonts/), and the tests compare the machine
+  # with the one the budget records before the counts. SV_OLD_DESIGN_REQUIRE
+  # turns a missing browser or face into a failure: this job never passes by
+  # skipping. Every run keeps its counts for a week (the old-design-census
+  # artifact), to compare with the budgets scene by scene. Measured on a
+  # 4-vCPU machine another agent's suite kept busy (load 7-15): 4 to 6
+  # minutes held to two CPUs as on the private runner, beside the suite's
+  # 46-minute job, not after it.
   old-design-measured:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SV_OLD_DESIGN_REQUIRE: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -96,28 +103,36 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-ci.txt
 
-      - name: Install the two faces the census reads (Inter, JetBrains Mono)
+      - name: The browser and the faces the budgets were measured with
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-inter fonts-jetbrains-mono
-          fc-list : family | grep -E "^(Inter|JetBrains Mono)" | sort -u
+          set -euo pipefail
+          npx --yes playwright@1.63.0 install --with-deps chromium
+          sudo apt-get install -y -qq fonts-inter fonts-jetbrains-mono fonts-dejavu-core fonts-dejavu-mono \
+            fonts-liberation2 fonts-opensymbol fonts-crosextra-carlito fonts-crosextra-caladea
+          sudo cp tests/old_design/fonts/56-prefer-inter.conf /etc/fonts/conf.d/
+          sudo fc-cache -f > /dev/null
+          chrome="$HOME/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+          test -x "$chrome"
+          echo "SV_CHROME=$chrome" >> "$GITHUB_ENV"
+          fc-list : family > "$RUNNER_TEMP/faces.txt"
+          grep -q "^Inter" "$RUNNER_TEMP/faces.txt"
+          grep -q "^JetBrains Mono" "$RUNNER_TEMP/faces.txt"
+          echo "sans-serif: $(fc-match -f '%{family[0]}' sans-serif)"
 
       - name: Collect static assets
         env:
           DB_ENGINE: sqlite
         run: python manage.py collectstatic --noinput
 
-      # Each shard writes its counts beside the run (SV_OLD_DESIGN_DUMP); a
-      # failed run keeps them for a week, to compare with the budgets
-      # scene by scene.
       - name: Run the measured half of the old-design guard
         env:
           DB_ENGINE: sqlite
           SV_OLD_DESIGN_DUMP: ${{ runner.temp }}/old_design_census
         run: python manage.py test tests.test_zero_old_design --tag=old_design_measured --parallel auto --verbosity=1
 
-      - name: Keep the measured counts of a failed run
-        if: failure()
+      - name: Keep the measured counts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: old-design-census
