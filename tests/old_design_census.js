@@ -322,7 +322,10 @@ function census(opts) {
     if (bg && bg.a > 0 && !el.matches(SPECIMEN)) {
       if (isEye(bg) && !el.matches(EYE_FILL_OK)) F(eyeShare(bg) >= 0.6 ? 'eye_fill' : 'eye_wash', el, 'background-color', cs.backgroundColor, shown);
       else if (bg.k === 'off') F('bg_off', el, 'background-color', cs.backgroundColor, shown);
-      if (bg.a < 0.97 && cardish && !((bg.k === 'tok@a') && ['up', 'down', 'ink-2', 'ink-3', 'warn', 'demo', 'ai', 'black'].indexOf(bg.n) >= 0 && area < 12000)) F('see_through', el, 'background-color', cs.backgroundColor, shown);
+      /* A side at a dose on a shape smaller than a card is a data mark, not
+         a see-through surface: its hue, or its fill at the volume dose the
+         tokens give bars and volume (B7's exposure by side, 2026-11-14). */
+      if (bg.a < 0.97 && cardish && !((bg.k === 'tok@a') && ['up', 'down', 'up-fill', 'down-fill', 'ink-2', 'ink-3', 'warn', 'demo', 'ai', 'black'].indexOf(bg.n) >= 0 && area < 12000)) F('see_through', el, 'background-color', cs.backgroundColor, shown);
       var pbg = parseColor(cs.backgroundColor);
       if (pbg && pbg[3] >= 0.85 && (bg.k === 'tok' && REDS[bg.n] || (bg.k === 'off' && pbg[0] >= 150 && pbg[1] <= 110 && pbg[2] <= 110 && pbg[0] - pbg[1] >= 90)) && !el.matches(WORLD)) {
         F('red_fill', el, 'background-color', cs.backgroundColor, shown);

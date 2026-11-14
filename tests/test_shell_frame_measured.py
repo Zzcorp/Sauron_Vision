@@ -1469,10 +1469,34 @@ class FrameLookDetailTests(TestCase):
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class FrameLightTests(TestCase):
-    """F3 and F4: the Eye's light never lifts the dark behind an amount on
-    the void (/positions/' eToro split line, Magic against Off: no lift),
-    and where a page wears it, it falls from the Eye: brightest in the top
-    gutter at the left, fading to nothing at the right, as on the board."""
+    """F3 and F4: the Eye's light never lifts the dark behind an amount
+    (/positions/' eToro split line, Magic against Off: no lift), and where
+    a page wears it, it falls from the Eye: brightest in the top gutter at
+    the left, fading to nothing at the right, as on the board.
+
+    Updated deliberately (stacked on B7, the desk v2 board approved
+    2026-11-13: "amazing work, bravo, I need it fast!!"): B7 gives the
+    split line its own ground, the popover the book card's equity opens
+    (#pdEtoro, --sv-bg-2, in the top layer), so the frame no longer holds
+    the light off /positions/ (its rule for a figure on the void said "until
+    its page gives it a ground (B7)"). The line is read where it now is:
+    the popover opened as a click opens it, its ground opaque, no light
+    behind its amounts; the page wears the light."""
+
+    #: The split line's ground: its nearest box (itself or up) that paints
+    #: a background, whether that box is an open popover, and its alpha.
+    GROUND = r"""(function () {
+      var e = document.querySelector('[data-sv-live-key="pos.etoro.split"]');
+      if (!e) return 'null';
+      for (var n = e; n && n !== document.body; n = n.parentElement) {
+        var cs = getComputedStyle(n), m = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor), p = m ? m[1].split(',') : [];
+        var a = m ? (p.length > 3 ? parseFloat(p[3]) : 1) : 0;
+        if (a > 0 || (cs.backgroundImage && cs.backgroundImage !== 'none'))
+          return JSON.stringify({ id: n.id, popover: n.hasAttribute('popover'), open: n.matches(':popover-open'),
+                                  alpha: a, color: cs.backgroundColor });
+      }
+      return JSON.stringify(null);
+    })()"""
 
     @classmethod
     def setUpTestData(cls):
@@ -1499,10 +1523,18 @@ class FrameLightTests(TestCase):
             off = b.shot(sid, clip)
             g = [max(0, a[1] - o[1]) for a, o in zip(magic.getdata(), off.getdata())]
             return max(g) if g else 0
+        two_frames = ("new Promise(function (r) { requestAnimationFrame(function () {"
+                      " requestAnimationFrame(function () { r(0); }); }); })")
         try:
             sid = b.tab(1440, 900)
             b.open(sid, POSITIONS)
             b.js(sid, still)
+            # The line on its own ground (B7): the popover opened as the
+            # book card's equity opens it (popovertarget="pdEtoro").
+            b.js(sid, "(function () { var p = document.getElementById('pdEtoro');"
+                      " if (p && !p.matches(':popover-open')) p.showPopover(); return 0; })()")
+            b.js(sid, two_frames)
+            cls.got["ground"] = json.loads(b.js(sid, cls.GROUND))
             r = json.loads(b.js(sid, "(function () { var e = document.querySelector('[data-sv-live-key=\"pos.etoro.split\"]');"
                                      " if (!e) return 'null'; var r = e.getBoundingClientRect();"
                                      " return JSON.stringify([Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]); })()"))
@@ -1520,10 +1552,12 @@ class FrameLightTests(TestCase):
             b.js(sid, "(function () { var e = document.querySelector('[data-sv-live-key=\"pos.etoro.split\"]'); if (!e) return 0;"
                       " [e].concat(Array.prototype.slice.call(e.querySelectorAll('*'))).forEach(function (n) {"
                       " n.style.setProperty('color', 'transparent', 'important'); }); return 0; })()")
-            cls.got["split"] = lift(sid, r) if r else None
-            # Without the figure on the void, the page wears the light:
-            # sampled in the top gutter, left to right.
-            b.js(sid, "(function () { var e = document.querySelector('[data-sv-live-key=\"pos.etoro.split\"]'); if (e) e.remove(); return 0; })()")
+            cls.got["split"] = lift(sid, r) if r and r[2] > 0 and r[3] > 0 else None
+            # The page wears the light (nothing of its sits on the void):
+            # the popover shut again, sampled in the top gutter, left to right.
+            b.js(sid, "(function () { var p = document.getElementById('pdEtoro');"
+                      " if (p && p.matches(':popover-open')) p.hidePopover(); return 0; })()")
+            b.js(sid, two_frames)
             top = json.loads(b.js(sid, "JSON.stringify([document.querySelector('.sv-band').getBoundingClientRect().bottom,"
                                        " document.querySelector('.page-content').getBoundingClientRect().left])"))
             y = int(top[0]) + 4
@@ -1531,10 +1565,13 @@ class FrameLightTests(TestCase):
         finally:
             b.close()
 
-    def test_the_fixture_prints_the_split_line_on_the_void(self):
+    def test_the_fixture_prints_the_split_line_on_its_own_ground(self):
         self.assertTrue(self.split)
+        g = self.got["ground"]
+        self.assertIsNotNone(g)
+        self.assertEqual((g["id"], g["popover"], g["open"], g["alpha"]), ("pdEtoro", True, True, 1), g)
 
-    def test_no_light_behind_the_amounts_on_the_void(self):
+    def test_no_light_behind_the_split_line_s_amounts(self):
         self.assertIsNotNone(self.got["split"])
         self.assertLessEqual(self.got["split"], 1)
 
@@ -1554,7 +1591,17 @@ class FrameEmbersOffTheFiguresTests(TestCase):
     derrière un montant"): on and within 8 px of every figure on the void,
     no free ember or ash is drawn (the field's own rule for a card: gone
     within 12 px, whole again at 24 px), and no gutter channel comes within
-    12 px of one, while the field still draws on the page."""
+    12 px of one, while the field still draws on the page.
+
+    Updated deliberately (stacked on B7, the desk v2 board approved
+    2026-11-13: "amazing work, bravo, I need it fast!!"): B7 gives the line
+    its own ground (the popover the book card opens), so the page prints no
+    figure on the void of its own any more, which is held here too: every
+    figure found on the void is the fixture's line. The fixture prints the
+    line as #115 measured it, straight on the void at the head of the page
+    where the embers drift whole, in the words the book renders, so
+    sv-embers.js's rule for figures on the void is still read on this
+    page."""
 
     #: Every figure on the void (a text with a digit and no ground of any
     #: kind under it, up to <body>), the alpha a free ember of alpha 1 is
@@ -1598,6 +1645,15 @@ class FrameEmbersOffTheFiguresTests(TestCase):
         client = _book("frame_embers")
         page = _get(client, POSITIONS)
         cls.split = 'data-sv-live-key="pos.etoro.split"' in page
+        # The line as #115 measured it: on no ground, where the embers drift
+        # whole (32 px clear of the band and the first card, beyond the
+        # field's 24 px), at the head of the page, in the words of the split
+        # line B7 now prints in its popover.
+        words = re.search(r'data-sv-live-key="pos\.etoro\.split">(.*?)</p>', page, re.S)
+        if words:
+            at = page.index(">", page.index('<div class="page-content')) + 1
+            page = (page[:at] + '<p class="sv-void-line" style="margin: 32px 0;"'
+                    ' data-sv-live-key="pos.etoro.split">%s</p>' % words.group(1) + page[at:])
         pages = {POSITIONS: _file_page(page, scripts=("sv-embers.js",), before=EMBER_COUNTER)}
         b = _Browser(pages, "sv-frame-embers-")
         try:
@@ -1615,6 +1671,9 @@ class FrameEmbersOffTheFiguresTests(TestCase):
         self.assertTrue(self.split)
         self.assertGreaterEqual(self.got["maps"], 1, self.got)
         self.assertGreaterEqual(self.got["split"], 1, self.got)
+        # The page's own figures all sit on a ground (B7): the fixture's
+        # line is the only one on the void.
+        self.assertEqual(self.got["onVoid"], self.got["split"], self.got["texts"])
 
     def test_no_ember_on_or_near_a_figure_on_the_void(self):
         self.assertEqual(self.got["lit"], [], self.got["texts"])

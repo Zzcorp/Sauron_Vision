@@ -215,7 +215,13 @@ class BothBooksTests(TestCase):
         pos = cells(self.client.get(
             "/positions/", HTTP_HOST="127.0.0.1").content.decode())
         self.assertEqual(pf["pf.unrealized"], "+10.00")
-        self.assertEqual(pos["pos.unrealized"], "+10.00")
+        # The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+        # "amazing work, bravo, I need it fast!!") prints the open P&L by
+        # world, never summed: this paper book's figure is PAPER's, and the
+        # two pages still quote one P&L.
+        self.assertEqual(pos["pos.pnl.paper"], "+10.00")
+        self.assertEqual(pos["pos.pnl.live"], DASH)
+        self.assertEqual(pos["pos.pnl.demo"], DASH)
 
 
 # ── 3. R against the risk the trade was taken with ───────────────────────
@@ -309,11 +315,22 @@ class EmDashNotZeroTests(TestCase):
 
     def test_win_rate_and_profit_factor_start_unmeasured(self):
         """0.0% over zero closed trades claims every trade lost."""
-        for url, prefix in (("/portfolio/", "pf"), ("/positions/", "pos")):
+        # The desk v2 (S2.2, 2026-11-13, the operator: "amazing work, bravo,
+        # I need it fast!!"): the open tab grades each world apart (CLOSED ·
+        # 30 D), and the closed book's strip stands on the history tab.
+        # Every one of them starts unmeasured.
+        for url, prefix in (("/portfolio/", "pf"),
+                            ("/positions/?tab=history", "pos")):
             got = cells(self.client.get(
                 url, HTTP_HOST="127.0.0.1").content.decode())
             self.assertEqual(got[f"{prefix}.win_rate"], DASH, url)
             self.assertEqual(got[f"{prefix}.profit_factor"], DASH, url)
+        got = cells(self.client.get(
+            "/positions/", HTTP_HOST="127.0.0.1").content.decode())
+        for world in ("live", "demo", "paper"):
+            self.assertEqual(got[f"pos.c30.{world}.won"], DASH, world)
+            self.assertEqual(got[f"pos.c30.{world}.pf"], DASH, world)
+            self.assertEqual(got[f"pos.c30.{world}.r"], DASH, world)
 
     def test_drawdown_without_a_snapshot_is_not_zero(self):
         body = self.client.get("/portfolio/", HTTP_HOST="127.0.0.1").content.decode()
