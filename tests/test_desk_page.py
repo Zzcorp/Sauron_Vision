@@ -292,8 +292,12 @@ class NoJavascriptTests(TestCase):
                 ).read_text(encoding="utf-8")
         self.assertIn("desk_dashboard", base)
         self.assertIn("Capital Desk", base)
-        # One mark, one meaning: the desk's glyph is used nowhere else.
-        self.assertEqual(base.count("▩"), 1)
+        # One mark, one meaning: the desk's mark is used nowhere else.
+        # Updated deliberately (UI redo B2, the desk v2 board, approved
+        # 2026-11-13: "amazing work, bravo, I need it fast!!"): the mark is
+        # the one icon family's symbol (#svi-capital-desk), not the glyph ▩.
+        self.assertEqual(base.count('href="#svi-capital-desk"'), 1)
+        self.assertEqual(base.count("▩"), 0)
         # No data-nav-id: the activity-dot payload and the rail must stay
         # the same seven sections (tests/test_nothing_unseen.py).
         row = base[base.index("desk_dashboard") - 200:

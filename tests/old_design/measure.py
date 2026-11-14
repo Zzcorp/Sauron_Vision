@@ -1331,9 +1331,14 @@ def build_scenes(details, live_id, paper_id):
       shows="#signalsRail.open #railSignals.collapsed")
     S("quote_card", act=_then(_hover(".data-headband .dh-item"), _click(".data-headband .dh-item")), shows=".dh-pop")
     S("news_card", act=_hover(".ticker-bar .ticker-item"), shows=".ticker-popup")
-    for name in ("PORTFOLIO", "POSITIONS", "SIGNALS"):
-        # The bar's dropdowns are portalled to <body> (base.html), pinned on a click.
-        S("bar_" + name.lower(), act=_click(".info-panel-wrap .ip-cat", text=name), shows=".ip-dropdown.sv-pinned")
+    # The bar's dropdowns are portalled to <body> (base.html), pinned on a
+    # click. B1 (the desk v2 board, 2026-11-13): POSITIONS waits in "N more"
+    # (the Horde stands in its place), which opens first; SIGNALS left the
+    # bar for the dock and the rail (its cell waits unseen, .sv-more-gone),
+    # whose states are measured above, so the bar has no SIGNALS state.
+    S("bar_portfolio", act=_click(".info-panel-wrap .ip-cat", text="PORTFOLIO"), shows=".ip-dropdown.sv-pinned")
+    S("bar_positions", act=_then(_click("#svMoreBtn"), _click(".info-panel-wrap .ip-cat", text="POSITIONS")),
+      shows=".ip-dropdown.sv-pinned")
     S("bell", act=_click("#notifBell"), shows="#notifPanel")
     S("bell_offline", ws="drop", act=_click("#notifBell"), shows="#notifBell.is-offline")
     S("user_menu", act=_click("#userMenuTrigger"), shows=".user-menu-dropdown")
@@ -1342,17 +1347,21 @@ def build_scenes(details, live_id, paper_id):
     S("instrument_preview", "/instruments/", act=_hover(".page-content [data-instrument]"), shows=".instrument-preview")
     S("fill_banner", act="window.svBanner('fill_open', {symbol: 'BTCUSD', side: 'BUY', qty: '0.05', entry: '64,200.00',"
                          " asset_class: 'crypto', rule_name: 'census_up', paper: true}) || 1", shows="#svBannerStack > *")
-    S("horde", "/positions/", act=_click("#svHordeTab"), shows=".sv-horde-panel")
-    S("council", act=_click("#svCouncilBandTab"), shows=".sv-council-band-panel")
-    S("activity", act=_click("#svActivityTab"), shows=".sv-activity-panel")
+    # B1 (the desk v2 board): the Horde opens from its cell in the bar, the
+    # Council and the activity from the dock on the right edge; the old
+    # edge tabs are gone from 769 px up.
+    S("horde", "/positions/", act=_click("#svHordeCell"), shows=".sv-horde-panel")
+    S("council", act=_click('.sv-dock-btn[data-sv-dock="council"]'), shows=".sv-council-band-panel")
+    S("activity", act=_click('.sv-dock-btn[data-sv-dock="activity"]'), shows=".sv-activity-panel")
     S("ask_sauron", act=_click("#seEyeFab"), shows="#seChatPanel")
     S("gollum", act=_click("#gollumFab"), shows="#gollumDialog")
     S("tour", act="(window.SV && SV.tour && SV.tour.start(), 1)", shows="#svTourCard")
     S("kbd_help", act=_key("?", "Slash", 191, text="?", shift=True), shows="#kbdModalOverlay.open")
     S("idle_lock", act="(window.svIdleLock && window.svIdleLock.engage(false), 1)", shows="#idleLockOverlay")
     S("sidebar_mini", sidebar="mini", act=_hover(".sidebar .nav-link:not(.active)"), shows="#navMiniTip")
+    # The bar is always shown from 769 px up (B1, the desk v2 board): no
+    # minimise tab, no restore pill, so no minimised state.
     S("bands_hidden", bands=True, shows=".hb-restore-tab")
-    S("bar_minimised", act=_click("#ipMinTab"), shows="#ipRestorePill")
     S("take_trade_paper", "/instruments/BTCUSD/", act=_click(".tk-side.tk-long"), shows=".sz-dialog",
       real_post=(r"^/instruments/BTCUSD/take-trade/preview/$",))
     # Made from the paper preview at run time ("@live", "@short").

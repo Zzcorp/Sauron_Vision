@@ -636,9 +636,15 @@ class RenderedPhoneMarkupTests(TestCase):
         self.assertIsNotNone(lock)
         self.assertIn("getElementById('lockNowBtn')", lock.group(1))
         self.assertIn(".click()", lock.group(1))
-        self.assertIn('<a class="um-link sv-phone-only" href="%s" '
+        # Updated deliberately (the desk v2 board, approved 2026-11-13:
+        # "amazing work, bravo, I need it fast!!"): the board's top bar
+        # carries no theme button, so the theme item is the menu's on every
+        # screen, not the phone's alone (sv-um-theme, not sv-phone-only).
+        self.assertIn('<a class="um-link sv-um-theme" href="%s" '
                       'role="menuitem">' % reverse("toggle_theme"), menu)
-        # The real controls stay in the topbar for a wide screen.
+        # The real controls stay in the topbar's markup for a wide screen
+        # (the theme button hidden there since the desk v2 board, its hooks
+        # kept).
         self.assertIn('id="lockNowBtn"', body)
         self.assertIn('class="theme-toggle-btn"', body)
 

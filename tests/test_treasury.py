@@ -524,7 +524,10 @@ class ThePageTests(TestCase):
         base = (Path(settings.BASE_DIR) / "templates" / "base.html").read_text(
             encoding="utf-8")
         self.assertIn("treasury_page", base)
-        self.assertEqual(base.count("⛁"), 1)
+        # Updated deliberately (UI redo B2, the desk v2 board, approved 2026-11-13: "amazing work, bravo, I need it fast!!"):
+        # the row's mark is the one icon family's symbol, used nowhere else.
+        self.assertEqual(base.count('href="#svi-treasury"'), 1)
+        self.assertEqual(base.count("⛁"), 0)
 
     def test_a_user_with_no_broker_sees_the_blocker_not_a_crash(self):
         self.client.login(username="tr_page", password="x")

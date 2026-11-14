@@ -104,8 +104,14 @@ written there is read like any sheet's), the kit page's specimens (a swatch,
 the type scale, the wordmark), and in sv-kit.css the rules the magic scopes
 to its ambience (data-sv-ambience: the wordmark, the Eye, the
 active row, live dots, the selected tab, a live hero card's edge, a side's
-inset light, the moments). A var() fallback behind a token is inert and is
-not counted either.
+inset light, the moments). In the frame's sheet (sv-frame.css, B1, the
+desk v2 board), the seven lights the board draws, each named by its
+selector, its property and its value (rules.FRAME_LIGHT, FRAME_EMBER): the
+Eye's halo, the feed pill's live dot and the docked Eye's glow under Magic
+and Calm, the docked Eye's sphere, ring and core in every ambience, the
+tower's ember in the menu's foot; nothing else written there (the review
+of #115's guard rules, FrameLightHolesTests). A var() fallback behind a
+token is inert and is not counted either.
 
 THE FILE:LINE -> BATCH MAP (the critic's hole 5): OWNERS below names, for
 every scanned file (and for the stretches of the shared files: base.html,
@@ -138,8 +144,9 @@ from tests.old_design.measure import (CENSUS_JS, DETAIL_LINKS, IN_HOST, MEASURED
                                       held_clock_trace, instant, live_previews, machine, machine_clock,
                                       missed_reader, resolve_details, shard_of)
 from tests.old_design.owners import ANCHORED, BATCHES, FILE_OWNER, STRETCHES, anchored_stretches, batch_map, owner
-from tests.old_design.rules import (KIT_SHEET, MARKERS, ROOT, TOKENS_SHEET, census, counts, css_hits, file_hits,
-                                    js_hits, python_hits, source_files, template_hits)
+from tests.old_design.rules import (FRAME_EMBER, FRAME_LIGHT, FRAME_SHEET, KIT_SHEET, MARKERS, ROOT, TOKENS_SHEET,
+                                    census, counts, css_hits, css_rules, file_hits, js_hits, python_hits, source_files,
+                                    template_hits)
 from tests.test_close_advice import CHROME, HOST, _Chrome
 
 #: Set on the CI job: a measured class that cannot run (no browser, no
@@ -444,6 +451,366 @@ class MarkerRuleTests(SimpleTestCase):
                                    '<div class="dk-scale-row"><span style="color: var(--sv-eye);">SAURON</span></div>', kit),
                          [])
         self.assertEqual(self.page('<style>.dk-icon { color: var(--sv-eye); }</style>'), ["accent_role"])
+
+    #: The frame's seven lights as sv-frame.css writes them (B1, the desk v2
+    #: board): the Eye's halo in the 44 px head and the feed pill's live dot
+    #: under Magic and Calm; the docked Eye's sphere, ring and core in every
+    #: ambience (Desk2's .orb, and .amb-off .orb); its glow under Magic and
+    #: Calm; the tower's ember. Each with the markers it carries in another
+    #: sheet.
+    LIT = 'html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])'
+    FRAME_LIGHTS = (
+        (LIT + " .sidebar .sidebar-brand .brand-eye-wrap::before { background: radial-gradient(circle,"
+         " rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%); }", ["eye_literal", "gradient"]),
+        (LIT + " .live-status-pill .lsp-green { box-shadow: var(--sv-glow-dot); }", ["glow"]),
+        ("html body .se-eye-fab:not(.open) { background: radial-gradient(circle at 38% 34%, rgba(220,255,235,.55) 0 8%,"
+         " rgba(0,232,104,.35) 22%, rgba(4,30,16,.95) 62%, var(--sv-bg-0) 100%); }", ["eye_literal", "gradient"]),
+        ("html body .se-eye-fab:not(.open) { box-shadow: inset 0 0 0 1px rgba(0,232,104,.55); }", ["eye_literal"]),
+        ("html body .se-eye-fab:not(.open)::after { background: radial-gradient(circle, rgba(0,232,104,.95),"
+         " rgba(0,232,104,0) 70%); }", ["eye_literal", "gradient"]),
+        (LIT + " .se-eye-fab:not(.open) { box-shadow: inset 0 0 0 1px rgba(0,232,104,.55),"
+         " 0 0 10px rgba(0,232,104,.28); }", ["eye_literal", "glow"]),
+        (".sv-tower .sv-tower-eye { fill: var(--sv-eye); fill-opacity: .35; }", ["accent_role"]),
+    )
+
+    def test_the_frame_s_lights_are_named_one_by_one(self):
+        """B1 (the desk v2 board, approved 2026-11-13), as tightened after the
+        review of its two guard rules (#115): in the frame's sheet the seven
+        lights the board draws pass, each named by its selector, its
+        property and its value (rules.FRAME_LIGHT, FRAME_EMBER). The same
+        declaration in another sheet is counted, and so it is there with one
+        thing changed: its value, its ambience, its property or its
+        selector (a list with one more item, another state, the orb's
+        other pseudo-element, a descendant)."""
+        frame = FRAME_SHEET
+        for rule, markers in self.FRAME_LIGHTS:
+            with self.subTest(rule=rule[:90]):
+                self.assertEqual(self.css(rule, frame), [])
+                self.assertEqual(self.css(rule), markers)
+        halo, dot, sphere, ring, core, glow, ember = (r for r, _m in self.FRAME_LIGHTS)
+        changed = [
+            # its value
+            (halo.replace(".34) 0%", ".7) 0%"), ["eye_literal", "gradient"]),
+            (dot.replace("var(--sv-glow-dot)", "0 0 12px var(--sv-eye)"), ["glow"]),
+            (ring.replace(".55)", ".9)"), ["eye_literal"]),
+            (glow.replace("0 0 10px", "0 0 40px 12px"), ["eye_literal", "glow"]),
+            (ember.replace("fill-opacity: .35", "fill-opacity: 1"), ["accent_role"]),
+            (ember.replace(" fill-opacity: .35;", ""), ["accent_role"]),
+            # its ambience: Off, or none
+            (halo.replace(':is([data-sv-ambience="magic"], [data-sv-ambience="calm"])', '[data-sv-ambience="off"]'),
+             ["eye_literal", "gradient"]),
+            (dot.replace(':is([data-sv-ambience="magic"], [data-sv-ambience="calm"])', ""), ["glow"]),
+            (glow.replace(':is([data-sv-ambience="magic"], [data-sv-ambience="calm"])', ""), ["eye_literal", "glow"]),
+            # its property
+            (sphere.replace("background:", "border-image:"), ["eye_literal", "gradient"]),
+            (dot.replace("box-shadow:", "text-shadow:"), ["glow"]),
+            (ember.replace("fill:", "stroke:"), ["accent_role"]),
+            # its selector
+            (sphere.replace("html body .se-eye-fab:not(.open)", "html body .se-eye-fab:not(.open), html body .card"),
+             ["eye_literal", "gradient"]),
+            (ring.replace(".se-eye-fab:not(.open)", ".se-eye-fab.working"), ["eye_literal"]),
+            (core.replace("::after", "::before"), ["eye_literal", "gradient"]),
+            (ring.replace(":not(.open)", ":not(.open) .se-fab-label"), ["eye_literal"]),
+            (ember.replace(".sv-tower .sv-tower-eye", ".sidebar .sv-tower .sv-tower-eye"), ["accent_role"]),
+        ]
+        for rule, markers in changed:
+            with self.subTest(changed=rule[:90]):
+                self.assertEqual(self.css(rule, frame), markers)
+        # The tower is no place of the brand: what sits under it is read like
+        # anything in a template.
+        self.assertEqual(self.page('<div class="sv-tower"><svg><ellipse fill="var(--sv-eye)"/></svg></div>'),
+                         ["accent_role"])
+        # A lane's fade painted over its ends is a gradient, even there.
+        self.assertEqual(self.css("html body .sv-band .ticker-bar::after { right: 0;"
+                                  " background: linear-gradient(270deg, var(--sv-bg-1), transparent); }", frame),
+                         ["gradient"])
+
+    def test_the_frame_s_named_lights_are_its_own(self):
+        """Every light rules.py names for the frame is a declaration the
+        frame's sheet makes, exactly as named (a name the sheet stops using
+        goes with it, never left behind for a look to come back under), and
+        the sheet, read with them, holds no marker."""
+        sheet = (ROOT / FRAME_SHEET).read_text(encoding="utf-8")
+        rules = [(" ".join(selector.split()), {p.lower(): " ".join(v.split()) for p, v, _l in decls})
+                 for selector, _line, decls in css_rules(sheet)]
+        self.assertEqual(len(FRAME_LIGHT), 6)
+        for selector, prop, value in FRAME_LIGHT:
+            with self.subTest(light="%s { %s }" % (selector, prop)):
+                self.assertTrue(any(s == selector and d.get(prop) == value for s, d in rules))
+        named, fill, token, (dose_prop, dose) = FRAME_EMBER
+        self.assertTrue(any(s == named and d.get(fill) == token and d.get(dose_prop) == dose for s, d in rules))
+        self.assertEqual(css_hits(sheet, FRAME_SHEET), [])
+
+
+class FrameLightHolesTests(SimpleTestCase):
+    """The review of B1's two guard rules (#115, on a0a6b7a: a scope lens
+    and a mutation lens). B1 had read the frame's sheet like the kit's (a
+    rule whose selector named the ambience anywhere, or whose every item's
+    subject named the docked Eye's class, was the magic's light), and made
+    the tower a place of the brand in every sheet and template. Each hole
+    the lenses found is planted here as they planted it, in a temp copy of
+    a file at zero, and fails the guard's source half with that file, a
+    line of the planted text and its markers: red on 1b51023, where each
+    passed the source half (and six of them the whole guard), green once
+    the frame's lights are named one by one (rules.FRAME_LIGHT,
+    FRAME_EMBER). The lenses' ids are in the names: the mutation lens's a3
+    to h1, the scope lens's E1 to E13, T1 to T3 and M1."""
+
+    FRAME = FRAME_SHEET
+    #: The mutation lens planted its rules at the end of the frame's 769 px
+    #: block, before its tiers note.
+    ANCHOR = "/* ── The tiers "
+    SCOPE = 'html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])'
+    MAGIC = 'html body:not(.light-mode)[data-sv-ambience="magic"]'
+    EYE_GLOW = "0 0 18px rgba(0, 232, 104, .45)"
+    TEXT_GLOW = "0 0 8px rgba(0, 232, 104, .6)"
+    LANE_FADE = ("content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 24px; z-index: 1;"
+                 " pointer-events: none; background: linear-gradient(270deg, var(--sv-bg-1), transparent);")
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.budget = load_budget()["source"]
+
+    def setUp(self):
+        import shutil as _shutil
+        import tempfile
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="sv-guard-holes-"))
+        self.addCleanup(_shutil.rmtree, self.tmp, True)
+
+    def guard(self, plant, rel=FRAME, over=None):
+        """The guard's source half on a temp copy of `rel` (a file at zero)
+        with `plant` added (in the frame's sheet before its tiers note,
+        elsewhere at the end), or with `over` = (old, new) written over one
+        of its rules: the markers it finds above the budget, each on a line
+        of the planted text."""
+        self.assertNotIn(rel, self.budget)
+        path = ROOT / rel
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        if over:
+            old, new = over
+            self.assertEqual(text.count(old), 1, "the reviewed rule is no longer in %s: %r" % (rel, old))
+            at = text.index(old)
+            text = text.replace(old, new)
+            planted = text[at:text.index("}", at)]          # the rule written over, to its end
+        else:
+            at = text.index(self.ANCHOR) if rel == self.FRAME else len(text)
+            planted = plant + "\n"
+            text = text[:at] + planted + text[at:]
+        first = text.count("\n", 0, at) + 1
+        last = first + planted.count("\n")
+        copy = self.tmp / pathlib.Path(rel).name
+        copy.write_text(text, encoding="utf-8")
+        hits = file_hits(copy, rel)
+        over_budget, _under = compare_source(counts(hits), {f: m for f, m in self.budget.items() if f == rel}, hits)
+        found = re.findall(r"^    (\S+):(\d+) (\w+) \[", "\n".join(over_budget), re.M)
+        for f, line, marker in found:
+            self.assertEqual(f, rel)
+            self.assertTrue(first <= int(line) <= last,
+                            "%s:%s %s is off the planted lines %d-%d" % (f, line, marker, first, last))
+        return sorted(marker for _f, _line, marker in found)
+
+    # ── The mutation lens: seventeen the source half let through ────────
+
+    def test_a3_a_card_glows_in_the_eye_s_green_under_magic_and_calm(self):
+        self.assertEqual(self.guard("%s .page-content .card { box-shadow: %s; }" % (self.SCOPE, self.EYE_GLOW)),
+                         ["eye_literal", "glow"])
+
+    def test_a4_a_card_glows_behind_a_not_of_the_docked_eye(self):
+        self.assertEqual(self.guard("html body .page-content .card:not(.se-eye-fab) { box-shadow: %s; }"
+                                    % self.EYE_GLOW),
+                         ["eye_literal", "glow"])
+
+    def test_a5_the_dock_s_buttons_glow_on_a_hover_under_magic(self):
+        """One of the six the whole guard let through: the measured half's
+        forced pass hovers no dock button."""
+        self.assertEqual(self.guard("%s .sv-dock-btn:hover { box-shadow: 0 0 10px rgba(0, 232, 104, .6); }"
+                                    % self.MAGIC),
+                         ["eye_literal", "glow"])
+
+    def test_b2_a_menu_label_in_the_eye_s_literal_under_magic(self):
+        self.assertEqual(self.guard("%s .sidebar .nav-link .label-text { color: #00e868; }" % self.MAGIC),
+                         ["eye_literal"])
+
+    def test_b3_a_menu_label_in_the_eye_under_a_has_of_the_tower(self):
+        self.assertEqual(self.guard("html body .sidebar:has(.sv-tower) .nav-link .label-text"
+                                    " { color: var(--sv-eye); }"),
+                         ["accent_role"])
+
+    def test_c2_a_glow_behind_a_bar_figure_under_magic_and_calm(self):
+        self.assertEqual(self.guard("%s .info-panel-bar .ip-cat .ip-v { text-shadow: %s; }"
+                                    % (self.SCOPE, self.TEXT_GLOW)),
+                         ["eye_literal", "glow"])
+
+    def test_c4_a_pool_of_the_eye_s_light_behind_the_real_book_s_figure_under_magic(self):
+        """One of the six the whole guard let through: the measured half saw
+        one gradient more on /positions/, inside that page's room (17 of
+        18)."""
+        cell = '%s .info-panel-bar [data-sv-cell="portfolio"] .ip-v' % self.MAGIC
+        self.assertEqual(self.guard("%s { position: relative; }\n%s::before { content: ''; position: absolute;"
+                                    " inset: -6px -10px; z-index: -1; pointer-events: none;"
+                                    " background: radial-gradient(closest-side, rgba(0, 232, 104, .35), transparent); }"
+                                    % (cell, cell)),
+                         ["eye_literal", "gradient"])
+
+    def test_d2_the_docked_eye_s_before_draws_a_glowing_number(self):
+        number = ("html body .se-eye-fab:not(.open)::before { content: '3'; position: absolute; top: -8px; right: -6px;"
+                  "%s font: 600 11px/1 var(--sv-font-mono); color: var(--sv-ink-1); text-shadow: %s; }")
+        self.assertEqual(self.guard(number % ("", self.TEXT_GLOW)), ["eye_literal", "glow"])
+        # Drawn for real (the old tooltip's own paint put back to none).
+        shown = " left: auto; transform: none; opacity: 1; padding: 0; border: 0; background: none; box-shadow: none;"
+        self.assertEqual(self.guard(number % (shown, self.TEXT_GLOW)), ["eye_literal", "glow"])
+
+    def test_d3_the_docked_eye_s_label_glows_through_an_is(self):
+        self.assertEqual(self.guard("html body :is(.se-eye-fab:not(.open) .se-fab-label) { display: inline-block;"
+                                    " text-shadow: %s; }" % self.TEXT_GLOW),
+                         ["eye_literal", "glow"])
+
+    def test_e1_an_eye_border_on_the_tower(self):
+        self.assertEqual(self.guard("html body .sidebar .sv-tower { border-top: 1px solid var(--sv-eye); }"),
+                         ["accent_role"])
+
+    def test_e2_an_eye_border_on_the_menu_beside_the_tower(self):
+        self.assertEqual(self.guard("html body .sidebar .sidebar-nav:has(~ .sv-tower)"
+                                    " { border-bottom: 1px solid var(--sv-eye); }"),
+                         ["accent_role"])
+
+    def test_f2_the_docked_eye_s_glow_in_every_ambience(self):
+        """One of the six the whole guard let through: no measured scene
+        runs Off."""
+        scoped = self.SCOPE + " .se-eye-fab:not(.open) {"
+        self.assertEqual(self.guard(None, over=(scoped, "html body:not(.light-mode) .se-eye-fab:not(.open) {")),
+                         ["eye_literal", "glow"])
+
+    def test_f4_the_eye_s_halo_drawn_again_under_off(self):
+        """One of the six the whole guard let through: no measured scene
+        runs Off."""
+        self.assertEqual(self.guard('html body:not(.light-mode)[data-sv-ambience="off"] .sidebar .sidebar-brand'
+                                    " .brand-eye-wrap::before { opacity: .7; width: 38px; height: 38px;"
+                                    " background: radial-gradient(circle, rgba(0,232,104,.34) 0%,"
+                                    " rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%); }"),
+                         ["eye_literal", "gradient"])
+
+    def test_g2_both_lanes_painted_fades_back_under_magic(self):
+        self.assertEqual(self.guard("%s .sv-band .ticker-bar::after, %s .sv-band .data-headband::after { %s }"
+                                    % (self.MAGIC, self.MAGIC, self.LANE_FADE)),
+                         ["gradient"])
+
+    def test_g3_the_whole_old_fade_back_under_magic(self):
+        left = self.LANE_FADE.replace("right: 0;", "left: 0;").replace("270deg", "90deg")
+        self.assertEqual(self.guard("%s .sv-band .ticker-bar::after, %s .sv-band .data-headband::after { %s }\n"
+                                    "%s .sv-band .ticker-bar::before, %s .sv-band .data-headband::before { %s }"
+                                    % (self.MAGIC, self.MAGIC, self.LANE_FADE, self.MAGIC, self.MAGIC, left)),
+                         ["gradient", "gradient"])
+
+    def test_g4_one_lane_end_s_painted_fade_back_under_magic(self):
+        """One of the six the whole guard let through: the measured half saw
+        one gradient more on the pages at rest, each inside its page's
+        room."""
+        self.assertEqual(self.guard("%s .sv-band .ticker-bar::after { %s }" % (self.MAGIC, self.LANE_FADE)),
+                         ["gradient"])
+
+    def test_h1_an_eye_edge_on_a_card_by_border_image_under_magic_and_calm(self):
+        """One of the six the whole guard let through: the measured half
+        reads a gradient in a background only."""
+        self.assertEqual(self.guard("%s .page-content .card { border-image: linear-gradient(90deg, var(--sv-eye),"
+                                    " transparent 60%%) 1; }" % self.SCOPE),
+                         ["gradient"])
+
+    # ── The scope lens: the docked Eye's class read as text ─────────────
+
+    def test_E1_eye_text_and_a_glow_on_a_bar_figure_behind_a_not(self):
+        self.assertEqual(self.guard("html body .info-panel-bar .ip-cat .ip-v:not(.se-eye-fab) { color: #00E868;"
+                                    " text-shadow: 0 0 12px rgba(0,232,104,.8); }"),
+                         ["eye_literal", "eye_literal", "glow"])
+
+    def test_E2_neon_on_every_button_through_an_is(self):
+        self.assertEqual(self.guard("html body :is(.se-eye-fab, .btn-primary, .tk-long) { box-shadow: 0 0 18px"
+                                    " rgba(0,232,104,.6); border: 1px solid #00E868; }"),
+                         ["eye_literal", "eye_literal", "glow"])
+
+    def test_E3_the_fill_banners_lit_as_the_docked_eye_s_sibling(self):
+        self.assertEqual(self.guard("html body .se-eye-fab ~ #svBannerStack { box-shadow: 0 0 24px #00E868;"
+                                    " background: linear-gradient(90deg, rgba(0,232,104,.3), transparent); }"),
+                         ["eye_literal", "eye_literal", "glow", "gradient"])
+
+    def test_E4_the_old_palette_on_the_pin_lock_as_the_docked_eye_s_sibling(self):
+        self.assertEqual(self.guard("html body .se-eye-fab ~ .il-overlay { background: radial-gradient(circle, #0A5028,"
+                                    " #030806); box-shadow: inset 0 0 80px #40FF90; }"),
+                         ["glow", "gradient", "old_literal", "old_literal"])
+
+    def test_E5_the_docked_eye_in_the_old_neon(self):
+        self.assertEqual(self.guard("html body .se-eye-fab:not(.open) { background: radial-gradient(circle, #40FF90 0%,"
+                                    " rgba(0,232,104,.9) 30%, #0A5028 100%); box-shadow: 0 0 40px 12px"
+                                    " rgba(64,255,144,.9), 0 0 90px rgba(0,232,104,.8); }"),
+                         ["eye_literal", "eye_literal", "glow", "glow", "gradient", "old_literal", "old_literal"])
+
+    def test_E6_the_docked_eye_s_old_hover_label(self):
+        self.assertEqual(self.guard('html body .se-eye-fab::before { content: "ASK SAURON"; color: #00E868;'
+                                    " border: 1px solid rgba(0,232,104,.4); text-shadow: 0 0 8px #00E868;"
+                                    " background: linear-gradient(180deg, rgba(8,22,14,.95), rgba(4,12,8,.95)); }"),
+                         ["eye_literal", "eye_literal", "eye_literal", "glow", "gradient"])
+
+    def test_E11_an_old_neon_kept_in_a_property_set_where_the_docked_eye_is(self):
+        """The glow it carries through var() is the measured half's to see;
+        the source half counts the old literal it is written with."""
+        self.assertEqual(self.guard("html body:has(.se-eye-fab) { --x-neon: 0 0 24px #40FF90; }\n"
+                                    "html body .info-panel-bar .ip-cat .ip-v { text-shadow: var(--x-neon); }"),
+                         ["old_literal"])
+
+    def test_E12_a_gradient_on_every_panel_through_a_where(self):
+        self.assertEqual(self.guard("html body :where(.se-eye-fab, .sv-panel) { background: linear-gradient(180deg,"
+                                    " rgba(0,232,104,.25), transparent); }"),
+                         ["eye_literal", "gradient"])
+
+    def test_E13_the_docked_eye_s_working_state_in_the_old_neon(self):
+        self.assertEqual(self.guard("html body .se-eye-fab.working { box-shadow: 0 0 30px #00E868,"
+                                    " 0 0 60px #40FF90; }"),
+                         ["eye_literal", "glow", "glow", "old_literal"])
+
+    # ── The scope lens: the ambience read as text ───────────────────────
+
+    def test_E7_a_glow_on_a_bar_figure_under_calm_alone(self):
+        self.assertEqual(self.guard('html body[data-sv-ambience="calm"] .info-panel-bar .ip-cat .ip-v'
+                                    " { text-shadow: 0 0 12px #00E868; }"),
+                         ["eye_literal", "glow"])
+
+    def test_E8_real_armed_glowing_under_off(self):
+        self.assertEqual(self.guard('html body[data-sv-ambience="off"] .sv-armed-pill { box-shadow: 0 0 14px'
+                                    " rgba(232,48,48,.8); background: linear-gradient(#E83030, #8a1010); }"),
+                         ["glow", "gradient", "old_literal", "old_literal"])
+
+    def test_E9_a_glow_on_every_band_price_behind_a_not_of_the_ambience(self):
+        self.assertEqual(self.guard("html body .sv-band .dh-item .dh-val:not([data-sv-ambience])"
+                                    " { text-shadow: 0 0 10px rgba(0,232,104,.7); }"),
+                         ["eye_literal", "glow"])
+
+    def test_E10_one_scoped_item_frees_a_card_in_its_list(self):
+        self.assertEqual(self.guard('html body[data-sv-ambience="magic"] .sidebar-brand h1, html body .card'
+                                    " { box-shadow: 0 0 20px #00E868; }"),
+                         ["eye_literal", "glow"])
+
+    # ── The scope lens: the tower, a place in every sheet and template ──
+
+    def test_T1_the_eye_on_a_button_under_a_has_of_the_tower_in_another_sheet(self):
+        self.assertEqual(self.guard("body:has(.sv-tower) .btn-primary { color: var(--sv-eye);"
+                                    " border-color: var(--sv-eye); }", rel=KIT_SHEET),
+                         ["accent_role", "accent_role"])
+
+    def test_T2_an_eye_edge_on_a_card_behind_a_not_of_the_tower_in_another_sheet(self):
+        self.assertEqual(self.guard(".card:not(.sv-tower) { border-left: 2px solid var(--sv-eye); }", rel=KIT_SHEET),
+                         ["accent_role"])
+
+    def test_T3_the_eye_on_a_link_as_the_tower_s_sibling_in_another_sheet(self):
+        self.assertEqual(self.guard(".sv-tower ~ .sidebar-footer a { color: var(--accent); }", rel=KIT_SHEET),
+                         ["accent_role"])
+
+    def test_M1_a_chart_in_the_eye_under_a_box_named_tower_in_a_template(self):
+        self.assertEqual(self.guard('<div class="sv-panel sv-tower"><svg>'
+                                    '<polyline stroke="var(--sv-eye)" points="0,0 9,9"/>'
+                                    '<text fill="var(--sv-eye)">1,234.50</text></svg></div>',
+                                    rel="templates/dashboard/new_page.html"),
+                         ["accent_role", "accent_role"])
 
 
 class _MeasuredShard:

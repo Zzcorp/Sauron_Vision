@@ -630,7 +630,16 @@ class ThePagesWordsTests(_Words):
             "o2a_words_staff", password="x", is_staff=True)
         self.client.force_login(staff)
         html = self.client.get(reverse("orcs_list")).content.decode()
-        self.assertIn("ORCS · IN SHADOW", html)
+        # The list's title, its words whole. Updated deliberately (the desk
+        # v2 board, approved 2026-11-13: "amazing work, bravo, I need it
+        # fast!!"): the top bar writes the page's name plain and the words
+        # after its " · " in a quieter span of their own, which the frame
+        # lets go first when the bar runs short (sauron_tags.sv_bar_title,
+        # static/js/sv-frame.js), so the title reads "ORCS · IN SHADOW" as
+        # the bar's text, no longer as one run of its markup.
+        bar = re.search(r'<span class="topbar-title">((?:[^<]|<span class="sv-ttl-sub">[^<]*</span>)*)</span>', html)
+        self.assertIsNotNone(bar, "no title in the top bar")
+        self.assertEqual(re.sub(r"<[^>]+>", "", bar.group(1)), "ORCS · IN SHADOW")
         self.assertNotIn("JOURNALS BY CODE", html)
         self.assertIn("Orcs line: off (ORC_DAILY_BUDGET_USD=0).", html)
         self.assertNotIn("in this release", html)

@@ -1690,18 +1690,23 @@ class OrbUnreadSignTests(TestCase):
         self.assertIn("fab.setAttribute('title', FAB_TITLE);", script)
 
     def test_opening_the_panel_by_any_path_clears_it(self):
-        """Every way in — the orb, ?, Ctrl+K, askSauronAbout,
+        """Every way in — the orb, Ctrl+K, askSauronAbout,
         [data-ask-sauron], the banner — goes through openPanel, so that is
         where it clears. It used to clear on the orb's click alone and come
-        back the moment the panel closed over an answer already read."""
+        back the moment the panel closed over an answer already read.
+
+        Updated deliberately (the desk v2 board, approved 2026-11-13:
+        "amazing work, bravo, I need it fast!!"): "?" is the keys sheet's
+        now ("? Keys" at the status bar's end), no longer a way into the
+        panel; Ctrl+K comes in through openEyeWithQuery, checked here."""
         script = self._script()
         opener = script.split("function openPanel() {", 1)[1].split("function closePanel()", 1)[0]
         self.assertIn("clearUnread();", opener)
         # The Horde (2026-10-08) gave it a third argument, the seat's facts.
         for entry in ("window.askSauronAbout = function (subject, kind, facts) {\n        openPanel();",
-                      "window.openEyeWithQuery = function(q) {\n        openPanel();",
-                      "e.preventDefault(); openPanel();"):
+                      "window.openEyeWithQuery = function(q) {\n        openPanel();"):
             self.assertIn(entry, script)
+        self.assertNotIn("e.key === '?'", script)
         self.assertNotIn("fab.classList.remove('answered'); });", script)
 
     def test_it_survives_navigation_within_the_tab(self):
