@@ -76,11 +76,19 @@ class TheMapTests(TestCase):
 class TheColumnsTests(SimpleTestCase):
 
     def test_positions_prints_it_beside_capital(self):
+        """Updated deliberately (S2.2, the desk v2 the operator approved,
+        2026-11-13: "amazing work, bravo, I need it fast!!"): one line a
+        position, so the leverage moved from its own column into the row's
+        disclosure, beside the capital, where one click shows it; the table
+        has 13 columns (the chevron leads the symbol's cell)."""
         html = _read("templates", "dashboard", "positions_list.html")
-        self.assertIn(">Lev</th>", html)
-        self.assertIn('data-label="Lev"', html)
-        self.assertIn("{{ d.leverage }}x", html)
-        self.assertIn('cols=16 scope="pos"', html)
+        det = html[html.index('<tr class="pd-det'):]
+        det = det[:det.index("</tr>")]
+        cap = det.index("capital ")
+        lev = det.index("leverage ")
+        self.assertLess(cap, lev)
+        self.assertIn("{{ d.leverage }}x", det[lev:lev + 200])
+        self.assertIn('cols=13 scope="pos"', html)
 
     def test_portfolio_prints_it_beside_qty(self):
         html = _read("templates", "dashboard", "portfolio_overview.html")

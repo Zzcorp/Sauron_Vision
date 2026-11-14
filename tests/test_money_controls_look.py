@@ -386,7 +386,12 @@ class ProtectiveButtonsLookTests(SimpleTestCase):
         self.assertIn('class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">'
                       "{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}",
                       positions)
-        self.assertIn('class="btn btn-sm btn-danger" id="svCloseAll"', positions)
+        # CLOSE ALL takes the kit's stop variant with its square (S2.2, the
+        # desk v2 the operator approved, 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"): S1a left it on the neutral .btn-danger "for
+        # S2.2". Its words, its script, its preview and its PIN are main's
+        # (tests/test_positions_desk.py diffs them).
+        self.assertIn('class="btn btn-sm btn-stop" id="svCloseAll"', positions)
         self.assertIn("whole book", positions)
         ops = read("templates/dashboard/ops.html")
         self.assertIn('{% if r.comp.is_enabled %}btn-danger{% else %}btn-primary{% endif %}">'

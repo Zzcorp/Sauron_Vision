@@ -60,7 +60,12 @@ class TableTests(TestCase):
         return dict(re.findall(r'data-pos-([a-z-]+)="([^"]*)"', body))
 
     def test_the_table_has_a_capital_column(self):
-        self.assertIn("<th class=\"num\">Capital</th>", self._body())
+        # The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+        # "amazing work, bravo, I need it fast!!"): one line a position; the
+        # capital it ties up stands first in the row's disclosure.
+        body = self._body()
+        self.assertRegex(body, r'(?s)<tr class="pd-det[^"]*" id="pd-det-bot-\d+"[^>]*>'
+                               r'.*?<span>capital <span class="pd-m">4,800\.00</span>')
 
     def test_the_position_shows_what_it_ties_up(self):
         body = self._body()
@@ -89,7 +94,14 @@ class TableTests(TestCase):
     def test_the_entry_is_labelled_the_reference_not_given_a_zero(self):
         """0.00% would be a measurement; "entry" is the truth."""
         body = self._body()
-        self.assertIn(">entry<", body)
+        # The desk v2 (2026-11-13, the operator: "amazing work, bravo, I
+        # need it fast!!") prints no percentage under the prices: the entry
+        # is the price alone, and the move is said against it, in words.
+        entry = re.search(r'<td data-label="Entry"[^>]*>(.*?)</td>', body, re.S)
+        self.assertIsNotNone(entry)
+        self.assertNotIn("%", entry.group(1))
+        self.assertRegex(entry.group(1), r"2,?400")
+        self.assertIn("% since entry", body)
 
     def test_a_level_that_has_been_crossed_says_so(self):
         body = self._body(mark="2650")

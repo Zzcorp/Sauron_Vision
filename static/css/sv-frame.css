@@ -150,16 +150,6 @@ html body .page-content {
     padding-bottom: calc(var(--sv-frame-foot) + var(--sv-frame-gutter)) !important;
     transition: none;
 }
-/* A page that prints a figure straight on the void keeps the light above
-   only (the review of the desk v2 build, 2026-11-13): /positions/' eToro
-   split ("At that read: opened by Sauron 1,326.70 · outside Sauron …")
-   sits on no ground of its own, and the Eye's light must never lift the
-   dark behind an amount. Until its page gives it a ground (B7), that page
-   does not wear the light reaching the page; its embers keep their own
-   rules (sv-embers.js). */
-html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]):is([data-sv-embers], [data-sv-light]):has(.page-content [data-sv-live-key="pos.etoro.split"])::before {
-    background: var(--sv-void-light), var(--sv-void-vignette);
-}
 /* The row of small cards of the pages with the selection bar (/positions/,
    /portfolio/, a position's page; sv-close-advice.css lays them out, at
    least 300 px a card) under the frame (#115's CI, 2026-11-14). The frame

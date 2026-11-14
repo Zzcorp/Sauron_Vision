@@ -26,28 +26,7 @@ This fragment lands INSIDE the page's "Position Analytics" card, so it uses
 plain sections rather than cards of its own: a .card here would draw a second
 border, a second accent line and a second 22px of padding inside the first.
 {% endcomment %}
-<style>
-/* The section rule. The sibling metrics fragments inherit this typography
-   from the shared chart-asset include, which is also the Chart.js loader —
-   and this panel no longer loads Chart.js, so it carries the two
-   declarations it actually uses rather than pulling in a charting library
-   for a font size. Tokens only: a raw colour here would not follow
-   body.light-mode.
-
-   The include's filename is deliberately not written out: a guard test
-   asserts that name appears nowhere in this fragment, and it does not read
-   comments any more than a browser does. Naming it here failed the test
-   that exists to keep Chart.js out — on the strength of a sentence
-   explaining that Chart.js had been removed. */
-.pa-panel .pa-section {
-    margin: 22px 0 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
-    text-transform: uppercase; color: var(--text-muted);
-}
-.pa-panel .pa-col > .pa-section:first-child { margin-top: 0; }
-</style>
+{# Its section rule and its spacing are the desk's (static/css/sv-positions.css, .pd-analytics, the review of 2026-11-13): this fragment lands only inside /positions/' "Position Analytics" card, and a page block of its own was old design. #}
 {% if error %}
     <p class="oc-empty sv-error">{{ error }}</p>
 {% elif not n_open %}
@@ -69,7 +48,7 @@ border, a second accent line and a second 22px of padding inside the first.
     </div>
 
     {# ── Where the money is, and how the book sits against its risk ── #}
-    <div class="grid grid-2" style="gap:18px;">
+    <div class="grid grid-2 pa-grid">
         <div class="pa-col">
             <div class="pa-section">Unrealized P&amp;L by symbol</div>
             {# Signed: the zero line is the whole point of this chart, so it #}
@@ -91,7 +70,7 @@ border, a second accent line and a second 22px of padding inside the first.
     </div>
 
     {# ── Exposure, split two ways, by VALUE ───────────────────────── #}
-    <div class="grid grid-2" style="gap:18px;">
+    <div class="grid grid-2 pa-grid">
         <div class="pa-col">
             <div class="pa-section">Exposure by direction</div>
             {% if dir_rows %}
@@ -109,7 +88,7 @@ border, a second accent line and a second 22px of padding inside the first.
             {% else %}
                 <p class="oc-empty">Nothing in the book carries both a size and a price, so there is no exposure to divide.</p>
             {% endif %}
-            <p class="sv-bars-cap">Shares of the same notional the asset-class table at the top of this page prints in currency.</p>
+            <p class="sv-bars-cap">Shares of the open notional by asset class, every world together; the REAL exposure card above gives the real book alone, in currency.</p>
         </div>
     </div>
 
@@ -119,14 +98,15 @@ border, a second accent line and a second 22px of padding inside the first.
     <p class="sv-bars-cap">{{ age_note }}</p>
 
     {% if oldest %}
-    <div style="margin-top:12px;">
+    <div class="pa-oldest">
         {% for p in oldest %}
         <div class="oc-mini-row">
             <span class="oc-mini-sym">{{ p.symbol }}</span>
             {# `direction` is the field both books normalise onto. The old #}
             {# copy of this panel bound its side column to a name Position #}
             {# does not have, so the column was permanently blank. #}
-            <span class="oc-mini-side {% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction|upper }}</span>
+            {# The side as a word with its arrow, in ink (the review of 2026-11-13): the side colours stay on the controls. #}
+            <span class="oc-mini-side">{% if p.direction == 'long' %}▲ LONG{% else %}▼ SHORT{% endif %}</span>
             <span class="oc-mini-meta">held {{ p.age_text }} &middot; {{ p.asset_class|upper }}</span>
             {# R against the stop this position OPENED with, and an em-dash #}
             {# when no stop was ever recorded or nothing could mark it — #}

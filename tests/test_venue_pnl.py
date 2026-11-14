@@ -344,13 +344,19 @@ class TheSurfacesTests(_Case):
         return r.content.decode()
 
     def test_the_positions_page_row_strip_card_and_live_region(self):
+        # The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+        # "amazing work, bravo, I need it fast!!"): the row's P&L carries
+        # its arrow, its percent moved into the row's disclosure, and the
+        # strip prints the open P&L by world, never summed, so this REAL
+        # row's figure is the REAL world's. The same figure, eToro's own,
+        # in every place.
         for url in ("/positions/", "/positions/live/"):
             body = self._get(url)
             key = f"bot-{self.t.id}"
-            self.assertEqual(_td(body, f"{key}.pnl"), "-1.15", url)
-            self.assertEqual(_td(body, f"{key}.pct"), "-0.05%", url)
+            self.assertEqual(_td(body, f"{key}.pnl"), "-1.15 ▼", url)
+            self.assertEqual(_span(body, f"{key}.pct"), "-0.05%", url)
             self.assertEqual(_td(body, f"{key}.r"), "-0.08R", url)
-            self.assertEqual(_span(body, "pos.unrealized"), "-1.15", url)
+            self.assertEqual(_span(body, "pos.pnl.live"), "-1.15", url)
             self.assertIn('data-pos-pnl="-1.15"', body, url)
             self.assertIn('data-pos-net-now="-1.15"', body, url)
             self.assertIn('data-pos-value-now="2,158.85"', body, url)
@@ -359,10 +365,29 @@ class TheSurfacesTests(_Case):
     def test_an_estimate_says_so_on_the_positions_page(self):
         _held(self.user, [_holding()], age_s=3600)
         body = self._get("/positions/")
+        # The desk v2 (S2.2, 2026-11-13, the operator: "amazing work,
+        # bravo, I need it fast!!"): one line a position. The cell marks the
+        # estimate (≈, read "estimate") and its title says whose figure it
+        # is not; the words themselves stand in the row's disclosure, live;
+        # the strip's REAL figure is marked ≈ too.
         cell = _td(body, f"bot-{self.t.id}.pnl")
-        self.assertTrue(cell.startswith("+12.96 estimate: Yahoo Finance "
-                                        "quote, "), cell)
-        self.assertEqual(_span(body, "pos.unrealized"), "+12.96")
+        # Updated deliberately (the review of 2026-11-13, the board the
+        # operator approved: "amazing work, bravo, I need it fast!!"): an
+        # estimate is drawn "≈ +12.96" in ink with its arrow slot empty, so
+        # it never reads as a measured gain; the ≈, its words and the title
+        # still say whose figure it is not.
+        self.assertEqual(cell, "≈ +12.96")
+        self.assertRegex(body, r'<span class="pd-est" aria-label="estimate">≈</span>\+12\.96<')
+        title = re.search(r'data-sv-live-key="bot-%d\.pnl" title="([^"]*)"'
+                          % self.t.id, body)
+        self.assertIsNotNone(title, "the cell says whose figure it is")
+        self.assertIn("Not eToro's own figure", html.unescape(title.group(1)))
+        self.assertIn("Yahoo Finance quote", html.unescape(title.group(1)))
+        self.assertTrue(_span(body, f"bot-{self.t.id}.pnlsrc").startswith(
+            "estimate: Yahoo Finance quote, "), body)
+        self.assertEqual(_span(body, "pos.pnl.live"), "+12.96")
+        self.assertRegex(body, r'(?s)data-pd-world="live".*?<span class="pd-est"[^>]*>≈</span>'
+                               r'<span data-sv-live-key="pos\.pnl\.live">')
 
     def test_the_at_the_broker_panel_prints_etoros_net_profit(self):
         _held(self.user, [_holding()], keys=True, primary=True)
