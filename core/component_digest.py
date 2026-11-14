@@ -323,7 +323,9 @@ def silent_window_hours(key, periods):
 
 def _cadence_words(hours) -> str:
     """The beat in the operator's words, so a "stopped" line shows the
-    rhythm it was judged against."""
+    rhythm it was judged against. A beat under a minute is said in seconds
+    (2026-11-13: the eToro walk beats every 30 s, which whole minutes
+    rounded to "every minute")."""
     if hours >= 24 * 28:
         return "monthly"
     if hours >= 168 * 0.9:
@@ -333,6 +335,8 @@ def _cadence_words(hours) -> str:
     if hours >= 1:
         n = round(hours)
         return "hourly" if n == 1 else f"every {n} hours"
+    if hours * 3600 < 59.5:
+        return f"every {max(1, round(hours * 3600))} s"
     n = max(1, round(hours * 60))
     return "every minute" if n == 1 else f"every {n} minutes"
 

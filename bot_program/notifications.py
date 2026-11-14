@@ -2612,6 +2612,15 @@ BROKER_REMEDY = {
 }
 
 
+def _silent_minutes(misses, broker: str) -> int:
+    """The minutes `misses` missed syncs of `broker`'s walk stand for, from
+    its beat's seconds (broker_vision.sync_seconds, 2026-11-13): thirty
+    misses of the eToro walk's 30 s are fifteen minutes, three of IBKR's
+    900 s forty-five."""
+    from bot_program.broker_vision import sync_seconds
+    return max(1, int(round(int(misses) * sync_seconds(broker) / 60.0)))
+
+
 def notify_broker_unreachable(user, *, label: str, host: str, port: int,
                               misses: int, broker: str = "ibkr") -> bool:
     """The interfaced broker has not answered for several syncs running.
@@ -2622,16 +2631,17 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
     not a Gateway that is logged in, and nothing on the platform said so.
     The sync task is the one thing that asks on a beat, so it is the one
     thing that can. The minutes are that broker's own walk's
-    (broker_vision.sync_minutes, 2026-10-31): eToro's walks every 5
+    (broker_vision.sync_seconds, 2026-10-31): eToro's walks every 5
     minutes, IBKR's and Saxo's every 15, and three eToro misses are fifteen
-    minutes, not forty-five. eToro's every minute since 2026-11-06, and the
-    alert waits fifteen of its misses (tasks.broker_miss_alert_after):
-    fifteen minutes still.
+    minutes, not forty-five. eToro's every minute from 2026-11-06, and the
+    alert waited fifteen of its misses (tasks.broker_miss_alert_after):
+    fifteen minutes still. Every 30 s since 2026-11-13, thirty of its
+    beats: the minutes are counted from the beat's SECONDS, which whole
+    minutes rounded to one (thirty misses read "about 30 minutes").
     """
     remedy, url = BROKER_REMEDY.get(broker or "ibkr",
                                     BROKER_REMEDY["ibkr"])
-    from bot_program.broker_vision import sync_minutes
-    silent_min = misses * sync_minutes(broker or "ibkr")
+    silent_min = _silent_minutes(misses, broker or "ibkr")
     # A socket only where there is one. Saxo and eToro have no host and no
     # port, and "api:0 has not answered" is a fact about nothing.
     where = f"{host}:{port}" if (broker or "ibkr") == "ibkr" else label
@@ -2672,8 +2682,7 @@ def notify_broker_cells_unanswered(user, *, label: str, misses: int,
     """
     from django.utils import timezone
 
-    from bot_program.broker_vision import sync_minutes
-    silent_min = misses * sync_minutes(broker or "etoro")
+    silent_min = _silent_minutes(misses, broker or "etoro")
     if cells_at is None:
         age, cells = "never read", "have never been read"
     else:

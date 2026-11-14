@@ -1,3 +1,5 @@
+import re
+
 from django import template
 register = template.Library()
 
@@ -52,6 +54,65 @@ def sign_class(value):
         return "up" if float(value) >= 0 else "down"
     except (TypeError, ValueError):
         return "flat"
+
+
+@register.filter
+def currency_sign(code):
+    """The glyph to print before a figure in currency `code` ("USD" → "$"),
+    from the one table the book's own figures use
+    (portfolio.services.CURRENCY_SYMBOLS); an unknown code is printed as
+    itself and a space, no code at all as nothing. Display only: the status
+    bar's PORTFOLIO prints eToro's equity in eToro's currency (2026-11-13),
+    never a sign written into the template."""
+    from portfolio.services import CURRENCY_SYMBOLS
+
+    code = (code or "").strip().upper()
+    return CURRENCY_SYMBOLS.get(code, f"{code} " if code else "")
+
+
+#: A glyph that opens a page's title (⦿ ◉ ◎ ⌁ ⇩ ▦ …, or one written as an
+#: entity), and the space after it.
+_TITLE_GLYPH = re.compile(r"^\s*(?:&#x?[0-9a-fA-F]+;|[^\w\s<&'\"(])+\s*")
+#: The words that follow a page's name in its title (" · every cycle…").
+_TITLE_SEP = " · "
+
+
+@register.filter(is_safe=True)
+def sv_bar_title(markup):
+    """A page's title as the top bar writes it (the desk v2 board, approved
+    2026-11-13: "amazing work, bravo, I need it fast!!"): the page's name,
+    plain, then what follows its first " · " in its own quieter span, which
+    the frame lets go first when the bar runs short (static/js/sv-frame.js);
+    never a cut name.
+
+    The glyph a title opens with (⦿ OCULUS, ◎ PORTFOLIO) goes: the board's
+    titles are words, and a glyph was drawn by a fallback face. The split
+    happens only on a " · " the title writes outside any tag of its own, so
+    a title that wraps its words in a span (the position page's, the demo
+    proofs') keeps its markup as it is. Display only."""
+    from django.utils.safestring import mark_safe
+
+    html = _TITLE_GLYPH.sub("", str(markup or ""), count=1).strip()
+    depth, i = 0, 0
+    while i < len(html):
+        if html[i] == "<":
+            end = html.find(">", i)
+            if end < 0:
+                break
+            tag = html[i:end + 1]
+            if tag.startswith("</"):
+                depth -= 1
+            elif not tag.endswith("/>"):
+                depth += 1
+            i = end + 1
+            continue
+        if depth == 0 and html.startswith(_TITLE_SEP, i):
+            name, rest = html[:i].rstrip(), html[i:]
+            if name:
+                return mark_safe('%s<span class="sv-ttl-sub">%s</span>' % (name, rest))
+            break
+        i += 1
+    return mark_safe(html)
 
 
 @register.simple_tag(takes_context=True)
@@ -663,3 +724,24 @@ def src_name(value):
     if low in FEED_NAME:
         return FEED_NAME[low]
     return tag.replace("_", " ")
+
+
+#: An age as the plan's §4.4 prints it ("40 s", "12 min", "3 h", "2 days"),
+#: from a moment: the signal rail's cards (the desk v2's review, F2), where
+#: timesince's "1 hour, 3 minutes" was cut to "1 hour,…". The same words as
+#: a stale venue mark's (bot_program.venue_mark.age_words). Display only.
+@register.filter
+def short_age(value, until=""):
+    """`{{ s.created_at|short_age }}` -> "12 min"; `{{ t|short_age:"until" }}`
+    the time left to a moment ahead. Unknown is the em-dash; a moment on the
+    wrong side of now reads as "0 s"."""
+    if not value:
+        return DASH
+    from django.utils import timezone
+    from bot_program.venue_mark import age_words
+    try:
+        delta = (value - timezone.now()) if until else (timezone.now() - value)
+        secs = max(0.0, delta.total_seconds())
+    except (TypeError, ValueError):
+        return DASH
+    return age_words(secs) or DASH

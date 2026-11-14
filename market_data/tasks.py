@@ -164,7 +164,7 @@ RELAY_KEEP_S = 3600
 def relay_held_quotes():
     """ONE PRICE EVERYWHERE (2026-11-12): the held relay, display only.
 
-    A held instrument's eToro price is read every 30 s by the quote beat
+    A held instrument's eToro price is read every 15 s by the quote beat
     (bot_program.etoro_quotes) or every 5-10 min for a stand-in (the
     manage tick, the candle pass), and reached no browser by push: each
     surface caught up on its own clock (the headband's 60 s sweep, the

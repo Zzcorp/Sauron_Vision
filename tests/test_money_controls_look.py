@@ -408,7 +408,12 @@ class ProtectiveButtonsLookTests(SimpleTestCase):
         self.assertIn('class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">'
                       "{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}",
                       positions)
-        self.assertIn('class="btn btn-sm btn-danger" id="svCloseAll"', positions)
+        # CLOSE ALL takes the kit's stop variant with its square (S2.2, the
+        # desk v2 the operator approved, 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"): S1a left it on the neutral .btn-danger "for
+        # S2.2". Its words, its script, its preview and its PIN are main's
+        # (tests/test_positions_desk.py diffs them).
+        self.assertIn('class="btn btn-sm btn-stop" id="svCloseAll"', positions)
         self.assertIn("whole book", positions)
         ops = read("templates/dashboard/ops.html")
         self.assertIn('{% if r.comp.is_enabled %}btn-danger{% else %}btn-primary{% endif %}">'
@@ -1319,8 +1324,12 @@ class MarketShutMeasuredTests(TestCase):
         pressed, rest = cards["els"]["chip"][0], section["els"]["chip"][0]
         self.assertDrawnLike(pressed, cards["refs"]["chipPressed"])
         self.assertDrawnLike(rest, section["refs"]["chipRest"])
+        # Pressed as the board's filter chips are (the review of B10, F2: the
+        # raised ground, the ink-3 edge and the Eye's line under it; the
+        # operator approved the board: "amazing work, bravo, I need it
+        # fast!!"), still drawn like ALL pressed (above).
         self.assertEqual((pressed["bg"], pressed["border"], pressed["color"]),
-                         (rgb_of(PALETTE["--sv-bg-3"]), EYE, INK1))
+                         (rgb_of(PALETTE["--sv-bg-4"]), rgb_of(PALETTE["--sv-ink-3"]), INK1))
         self.assertEqual((rest["bg"], rest["border"], rest["color"]),
                          (CLEAR, LINE3, rgb_of(PALETTE["--sv-ink-2"])))
         self.assertDrawnLike(section["els"]["chipCount"][0], section["refs"]["chipCount"])
@@ -1524,18 +1533,34 @@ class MoneyControlsLightMeasuredTests(TestCase):
                                    ("/command/", (".sr-popup:has(.sr-pop-dir-bullish) .sr-pop-btn-act",
                                                   ".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn-act"))):
                 b.open(sid, url, PROBES)
+                if any(".sr-popup" in s for s in selectors):
+                    # Updated deliberately (the desk v2 board, approved
+                    # 2026-11-13: "amazing work, bravo, I need it fast!!"):
+                    # the signal rail is a column that is open, pushing the
+                    # page, or not on the screen at all; its cards open from
+                    # the open rail, so the rail is opened first (its Signals
+                    # button in the dock does the same).
+                    b.js(sid, "(function () { var r = document.getElementById('signalsRail');"
+                              " if (r) r.classList.add('open'); return 0; })()")
                 b.js(sid, "__sv.settle()")      # the page has landed before a box is read
                 for sel in selectors:
                     # A rail card is opened as a click opens it (a hover card
                     # is not displayed where the browser reports no hover),
                     # one at a time, and set where the page's script would
-                    # set it: inside the viewport.
+                    # set it: inside the viewport. A card pinned in the open
+                    # rail docks there, in its card's place (the desk v2
+                    # board's pinned card, B10: static/css/sv-chart.css),
+                    # inside the rail's scrolling Signals body, where its
+                    # TAKE TRADE can sit below the body's fold: its control
+                    # is brought into view there, as the operator scrolls the
+                    # rail to reach it.
                     box = b.js(sid, "(function () { var e = document.querySelector(%s); if (!e) return null;"
                                     " Array.prototype.forEach.call(document.querySelectorAll('.sr-popup'), function (p) {"
                                     "   p.classList.remove('sv-pinned', 'show'); });"
                                     " var pop = e.closest('.sr-popup');"
                                     " if (pop) { pop.classList.add('sv-pinned', 'show'); pop.style.top = '90px'; pop.style.left = '420px';"
-                                    "   pop.style.right = 'auto'; pop.style.bottom = 'auto'; pop.style.transform = 'none'; }"
+                                    "   pop.style.right = 'auto'; pop.style.bottom = 'auto'; pop.style.transform = 'none';"
+                                    "   if (getComputedStyle(pop).position === 'static') e.scrollIntoView({ block: 'center' }); }"
                                     " else e.scrollIntoView({ block: 'center' });"
                                     " var r = e.getBoundingClientRect();"
                                     " return r.width && r.top >= 24 && r.bottom <= innerHeight - 24 ? [r.left, r.top, r.width, r.height] : null; })()"

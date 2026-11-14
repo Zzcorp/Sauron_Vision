@@ -40,11 +40,14 @@ def _rail() -> str:
 
 
 def _sections():
-    """[(section title, [row labels])] in rail order."""
+    """[(section title, [row labels])] in rail order. Updated deliberately
+    (the desk v2 board, approved 2026-11-13: "amazing work, bravo, I need it
+    fast!!"): a section head is a button that folds its rows, its name in
+    .nav-fold-name."""
     rail = _rail()
     out, current = [], None
     token = re.compile(
-        r'nav-section">(?P<sec>[^<]*)<'
+        r'nav-fold-name">(?P<sec>[^<]*)<'
         r'|label-text">(?P<row>[^<]*)<')
     for m in token.finditer(rail):
         if m.group("sec") is not None:
@@ -59,19 +62,22 @@ def _url_names():
     return re.findall(r"\{%\s*url '([a-z_]+)'\s*%\}", _rail())
 
 
-def _rows_with_glyphs():
-    """[(url name, glyph)] for every row, entity-encoded ones decoded.
-
-    Two rows wrote their glyph as `&#x25C9;` rather than as the character,
-    which is why four rows sharing one circle was not obvious from reading
-    the file.
-    """
-    import html
+def _rows_with_icons():
+    """[(url name, the icon span's content)] for every row. Updated
+    deliberately (UI plan §9, redo B2, the desk v2 board approved
+    2026-11-13): a row's mark is a symbol of the one sprite
+    (templates/_partials/sv_icons.html), named by <use href="#svi-…">,
+    never a glyph."""
     rows = re.findall(
         r'<a\b[^>]*href="\{%\s*url\s+\'([a-z0-9_]+)\'[^}]*%\}"[^>]*>'
         r'.*?<span class="icon">(.*?)</span>',
         _rail(), re.S)
-    return [(name, html.unescape(glyph).strip()) for name, glyph in rows]
+    return [(name, icon) for name, icon in rows]
+
+
+def _sprite_ids():
+    sprite = (Path(settings.BASE_DIR) / "templates" / "_partials" / "sv_icons.html").read_text(encoding="utf-8")
+    return set(re.findall(r'<symbol id="(svi-[\w-]+)"', sprite))
 
 
 class TheRailIsNavigableTests(SimpleTestCase):
@@ -80,7 +86,7 @@ class TheRailIsNavigableTests(SimpleTestCase):
         """A row above the first section header is unreachable by scanning:
         the eye looks for the header first."""
         rail = _rail()
-        first_section = rail.index('nav-section">')
+        first_section = rail.index('class="nav-section"')
         before = re.findall(r'label-text">([^<]*)<', rail[:first_section])
         self.assertEqual(before, [],
                          f"rows sit above the first section header: {before}")
@@ -141,7 +147,7 @@ class TheRailIsNavigableTests(SimpleTestCase):
 
 
 class TheRailIsReadableByShapeTests(SimpleTestCase):
-    """A 55-row rail is scanned by glyph before it is read by word.
+    """A 55-row rail is scanned by shape before it is read by word.
 
     Six glyphs carried fifteen rows between them: Operations Center,
     Sauron's Mind, Profile and Notifications were the same filled circle,
@@ -149,77 +155,68 @@ class TheRailIsReadableByShapeTests(SimpleTestCase):
     A repeated shape costs exactly what a repeated label costs — the eye
     stops distinguishing rows and starts reading every word instead, which
     is the browsing the regrouping exists to end.
+
+    Updated deliberately (UI plan §9, redo B2; the desk v2 board, approved
+    2026-11-13: "amazing work, bravo, I need it fast!!"): the shapes are the
+    one icon family's symbols now, not Unicode glyphs, so a glyph rule
+    becomes "every row names an icon that exists in the sprite". The
+    meanings stay: every row has its mark, no two rows share one, and no
+    row draws a picture a font may or may not have.
     """
 
-    def test_every_row_carries_a_glyph(self):
-        rows = _rows_with_glyphs()
+    def test_every_row_names_an_icon_the_sprite_has(self):
+        rows = _rows_with_icons()
         self.assertEqual(
             len(rows), len(_url_names()),
             "a rail row has no <span class=\"icon\"> — it will sit in the "
             "column of shapes as a hole")
-        blank = [name for name, glyph in rows if not glyph]
-        self.assertEqual(blank, [], f"rows with an empty glyph: {blank}")
+        ids = _sprite_ids()
+        for name, icon in rows:
+            used = re.findall(r'<use href="#(svi-[\w-]+)"', icon)
+            with self.subTest(row=name):
+                self.assertEqual(len(used), 1, f"{name} names no icon: {icon!r}")
+                self.assertIn(used[0], ids, f"{name} names {used[0]}, which the sprite does not have")
 
-    def test_no_two_rows_carry_the_same_glyph(self):
-        rows = _rows_with_glyphs()
+    def test_no_two_rows_carry_the_same_icon(self):
         seen = {}
-        for name, glyph in rows:
-            seen.setdefault(glyph, []).append(name)
-        clashes = {glyph: names for glyph, names in seen.items()
-                   if len(names) > 1}
+        for name, icon in _rows_with_icons():
+            for ref in re.findall(r'<use href="#(svi-[\w-]+)"', icon):
+                seen.setdefault(ref, []).append(name)
+        clashes = {ref: names for ref, names in seen.items() if len(names) > 1}
         self.assertEqual(
             clashes, {},
-            f"rail rows share a glyph: "
-            f"{ {g: n for g, n in clashes.items()} }. Pick an unused shape "
-            f"for the newer row; there are three geometric blocks of them "
-            f"and the rail is what a duplicate makes unreadable.")
+            f"rail rows share an icon: {clashes}. Draw the newer row its own "
+            f"symbol in the sprite; the rail is what a duplicate makes "
+            f"unreadable.")
 
-    def test_the_glyphs_are_text_not_pictures(self):
-        """An emoji renders in colour, at a different size, on some platforms
-        and not others. The rail is a monospace column of shapes; one picture
-        in it breaks the column on the machines where it renders."""
-        for name, glyph in _rows_with_glyphs():
-            for ch in glyph:
-                self.assertLess(
-                    ord(ch), 0x1F000,
-                    f"{name} uses {ch!r} (U+{ord(ch):04X}), which is an "
-                    f"emoji codepoint and will not render as a text glyph "
-                    f"everywhere")
+    def test_no_row_draws_a_glyph(self):
+        """An emoji or a Unicode glyph renders in colour, at another size or
+        not at all depending on the machine; the sprite renders the same
+        everywhere. The icon span holds the symbol and nothing else."""
+        for name, icon in _rows_with_icons():
+            with self.subTest(row=name):
+                self.assertEqual(re.sub(r"<[^>]+>", "", icon).strip(), "",
+                                 f"{name} draws text in its icon: {icon!r}")
 
-    def test_the_glyphs_come_from_blocks_the_font_stack_already_renders(self):
-        """`--font-heading` is Inter now (UI plan S1a, 2026-11-06; it was
-        Rajdhani), and the Latin subset Google Fonts serves of it carries
-        none of these but the up and down arrows. Every one of them arrives
-        by font fallback, as it did under Rajdhani, and fallback is
-        per-BLOCK on the platforms this runs on: a glyph from a block no
-        other row uses is a glyph that may render as a tofu box on the
-        operator's machine and as a shape on mine.
-
-        So a new glyph must come from a block already proven by a row that
-        renders today. That is a real constraint and the cheapest possible
-        check — it is satisfied by picking a neighbour of an existing shape,
-        which is also what keeps the column visually coherent.
-        """
-        allowed = {
-            (0x2190, 0x21FF): "Arrows",
-            (0x2200, 0x22FF): "Mathematical Operators",
-            (0x2300, 0x23FF): "Miscellaneous Technical",
-            (0x25A0, 0x25FF): "Geometric Shapes",
-            (0x2600, 0x26FF): "Miscellaneous Symbols",
-            (0x2700, 0x27BF): "Dingbats",
-            (0x27C0, 0x27FF): "Misc Mathematical Symbols-A",
-            (0x2900, 0x29FF): "Supplemental Mathematical Operators",
-            (0x2B00, 0x2BFF): "Misc Symbols and Arrows",
-        }
-        for name, glyph in _rows_with_glyphs():
-            for ch in glyph:
-                point = ord(ch)
-                if point < 0x80:      # '$' on Earnings, '?' on Ask Sauron
-                    continue
-                block = next((label for (lo, hi), label in allowed.items()
-                              if lo <= point <= hi), None)
-                self.assertIsNotNone(
-                    block,
-                    f"{name} uses {ch!r} (U+{point:04X}), which is outside "
-                    f"every Unicode block the rail already renders. Pick a "
-                    f"neighbour of a shape that is already there.")
+    def test_the_marks_come_from_the_one_family_every_machine_draws(self):
+        """Was "the glyphs come from blocks the font stack already
+        renders": a glyph from a Unicode block no other row used could be a
+        tofu box on the operator's machine and a shape on mine. Updated
+        deliberately (UI plan §9, redo B2; the desk v2 board, approved
+        2026-11-13: "amazing work, bravo, I need it fast!!"): every mark a
+        row names is a symbol of the one inline family, 24 x 24, stroked in
+        the row's own colour at 1.5 with no fill, so it draws the same on
+        every machine with no font in the way, and its children carry no
+        stroke or fill of their own."""
+        sprite = (Path(settings.BASE_DIR) / "templates" / "_partials" / "sv_icons.html").read_text(encoding="utf-8")
+        symbols = dict(re.findall(r'<symbol id="(svi-[\w-]+)"([^>]*)>', sprite))
+        bodies = dict(re.findall(r'<symbol id="(svi-[\w-]+)"[^>]*>(.*?)</symbol>', sprite, re.S))
+        used = {ref for _name, icon in _rows_with_icons()
+                for ref in re.findall(r'<use href="#(svi-[\w-]+)"', icon)}
+        self.assertTrue(used)
+        for ref in sorted(used):
+            with self.subTest(symbol=ref):
+                attrs = symbols[ref]
+                for want in ('viewBox="0 0 24 24"', 'fill="none"', 'stroke="currentColor"', 'stroke-width="1.5"'):
+                    self.assertIn(want, attrs)
+                self.assertNotRegex(bodies[ref], r'\s(stroke|fill)(-width)?="')

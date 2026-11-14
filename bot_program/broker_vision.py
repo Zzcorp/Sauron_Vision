@@ -50,7 +50,7 @@ ROUTABLE_CLASSES = ("stock", "etf", "forex", "commodity", "crypto")
 
 #: Past this, a reading is old enough that the page says so. Not a limit —
 #: the IBKR and Saxo walks run every 900 s, so anything past two cycles has
-#: missed one (the eToro walk, every 60 s since 2026-11-06, thirty-one).
+#: missed one (the eToro walk, every 30 s since 2026-11-13, sixty-three).
 STALE_AFTER_S = 1900
 
 #: Each broker's account walk, by its beat entry (config/celery.py).
@@ -59,21 +59,35 @@ SYNC_BEATS = {"ibkr": "sync-broker-account",
               "etoro": "sync-etoro-accounts"}
 
 
-def sync_minutes(kind: str) -> int:
-    """How often `kind`'s account walk runs, in whole minutes, read off the
-    beat itself (2026-10-31: the eToro walk moved to 300 s, the others
-    kept 900 s, and "every 15" written once for all three became false for
-    one). 15 when the beat cannot be read."""
+def sync_seconds(kind: str) -> float:
+    """How often `kind`'s account walk runs, in seconds, read off the beat
+    itself (2026-10-31: the eToro walk moved to 300 s, the others kept
+    900 s, and "every 15" written once for all three became false for one).
+    900 (fifteen minutes) when the beat cannot be read.
+
+    SECONDS, NOT WHOLE MINUTES (2026-11-13): the eToro walk beats every
+    30 s ("je suggère 20-30 secondes non?"), which whole minutes rounded to
+    one, so thirty missed beats read "about 30 minutes" for fifteen."""
     try:
         from config.celery import app
         from core.day_of_sauron import schedule_words
         entry = app.conf.beat_schedule.get(SYNC_BEATS.get(str(kind), ""))
         seconds = schedule_words(entry["schedule"])[1] if entry else None
         if seconds and seconds > 0:
-            return max(1, int(round(seconds / 60.0)))
+            return float(seconds)
     except Exception:  # noqa: BLE001 — a sentence, never a failure
         pass
-    return 15
+    return 900.0
+
+
+def sync_every(kind: str) -> str:
+    """`kind`'s walk's beat in the operator's words ("30 s", "15 min"),
+    from the same beat (core.day_of_sauron.interval_words)."""
+    try:
+        from core.day_of_sauron import interval_words
+        return interval_words(sync_seconds(kind))
+    except Exception:  # noqa: BLE001 — a sentence, never a failure
+        return "15 min"
 
 
 def _age(when) -> "int | None":
@@ -576,7 +590,7 @@ def vision(user) -> dict:
                 blockers.append(
                     f"{r['name']}: {_live} live position(s) are attributed to "
                     f"it and its last reading is {_age_min} minutes old — "
-                    f"the sync runs every {sync_minutes(r['kind'])}, so the "
+                    f"the sync runs every {sync_every(r['kind'])}, so the "
                     f"platform has been "
                     f"blind to that money for {_age_min // 60} hours. "
                     f"Whatever section 6 says it agrees with is a snapshot, "
@@ -584,7 +598,7 @@ def vision(user) -> dict:
             else:
                 notes.append(f"{r['name']}: the equity reading is "
                              f"{_age_min} minutes old; the sync runs "
-                             f"every {sync_minutes(r['kind'])}.")
+                             f"every {sync_every(r['kind'])}.")
     for d in div:
         if not d["known"] and d["platform_n"]:
             blockers.append(

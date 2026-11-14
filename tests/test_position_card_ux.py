@@ -51,14 +51,16 @@ def _template():
 
 
 def _style_block():
-    """Everything between the template's <style> tags.
+    """The page's own sheet: static/css/sv-positions.css.
 
     The slice matters: the assertions below are about what THIS page ships,
     and a rule that only exists in the shared sheet is a rule another agent
-    can move out from under it.
+    can move out from under it. The page's <style> block moved into the
+    desk's own sheet, linked by this template alone (S2.2, the desk v2 the
+    operator approved on 2026-11-13: "amazing work, bravo, I need it
+    fast!!"); the rules these tests read moved with it.
     """
-    markup = _template()
-    return markup[markup.index("<style>"):markup.rindex("</style>")]
+    return _static("css", "sv-positions.css")
 
 
 def _instrument(symbol="BTCUSD", asset_class="crypto"):
@@ -122,6 +124,11 @@ def _symbol_cell(html):
     return match.group(0) if match else ""
 
 
+def _symbol_cell_with_chevron(html):
+    match = re.search(r'<td data-label="Symbol"[^>]*>.*?</td>', html, flags=re.S)
+    return match.group(0) if match else ""
+
+
 class SymbolLeadsToTheInstrumentTests(TestCase):
     """The gesture the table did not have."""
 
@@ -153,9 +160,17 @@ class SymbolLeadsToTheInstrumentTests(TestCase):
         """The dwell card is aria-hidden and opens on a pointer it does not
         assume exists. Without this anchor the detail page would be
         unreachable for anyone driving the book from the keyboard."""
-        cell = _symbol_cell(self.html)
-        self.assertIn('href="/forensics/%d/"' % self.trade.id, cell)
-        self.assertIn("pos-row-detail", cell)
+        # The desk v2 (S2.2, 2026-11-13, the operator: "amazing work,
+        # bravo, I need it fast!!"): one line a position; the anchor stands
+        # in the row's own disclosure, which the row's chevron (or Enter)
+        # opens, the second row of the same position.
+        detail = re.search(r'<tr class="pd-det[^"]*" id="pd-det-bot-%d"[^>]*>'
+                           r'(.*?)</tr>' % self.trade.id, self.html, re.S)
+        self.assertIsNotNone(detail, "the row has no disclosure")
+        self.assertIn('href="/forensics/%d/"' % self.trade.id, detail.group(1))
+        self.assertIn("pos-row-detail", detail.group(1))
+        self.assertIn('aria-controls="pd-det-bot-%d"' % self.trade.id,
+                      _symbol_cell_with_chevron(self.html))
 
     def test_the_row_hands_the_card_the_instrument_it_belongs_to(self):
         """The card's own title is that link, so it needs the destination on
@@ -318,11 +333,18 @@ class TheStylingShipsWithThisPageTests(SimpleTestCase):
         block = self.css.split(".pos-sym-cell .pos-sym-link {", 1)[1] \
                         .split("}", 1)[0]
         self.assertIn("text-decoration: underline", block)
-        self.assertIn("var(--accent)", block)
+        # The desk v2 (2026-11-13, the operator: "amazing work, bravo, I
+        # need it fast!!"): the Eye's green is kept for the live dot, the
+        # chosen tab and a ticked box; the link's rule is the line ink.
+        self.assertIn("text-decoration-color: var(--sv-line-3)", block)
 
     def test_the_keyboard_can_see_where_it_is(self):
         self.assertIn(":focus-visible", self.css)
-        self.assertIn("outline: 1px solid var(--accent)", self.css)
+        # Updated deliberately (the review of 2026-11-13): the board the
+        # operator approved ("amazing work, bravo, I need it fast!!")
+        # frames the keyboard's row in ink, and a money control never takes
+        # the Eye's green, so the desk's ring is ink-1, 2 px at 2 px.
+        self.assertIn("outline: 2px solid var(--sv-ink-1)", self.css)
 
     def test_only_a_row_with_a_destination_behaves_like_one(self):
         """data-pos-href is empty on a row from the shared book. A pointer

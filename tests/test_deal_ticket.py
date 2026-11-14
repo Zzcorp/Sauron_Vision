@@ -119,7 +119,12 @@ class TheExpandedChartCarriesOneTooTests(TestCase):
     def test_it_shows_only_in_the_expanded_states(self):
         """At normal size the header's own ticket is inches away; a
         second one there is clutter."""
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, which the widget links; the operator
+        # approved the board: "amazing work, bravo, I need it fast!!".
         html = widget(ticket=True, asset_class="forex", decimals=5)
+        self.assertIn('href="/static/css/sv-chart.css"', html)
+        html += (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         self.assertIn(".sv-chart-ticket {\n    display: none;", html)
         self.assertIn(".sv-candle-container.sv-chart-tall .sv-chart-ticket",
                       html)

@@ -509,9 +509,10 @@ class MoneyTripwireTests(_AlarmCase):
                       last_used_margin=Decimal("6000.50"),
                       last_margin_at=NOW, last_margin_world="live")
         _component("broker_account_sync")
-        # past the eToro walk's own threshold (fifteen since 2026-11-06,
-        # tasks.broker_miss_alert_after; 4 passed the old three), so its
-        # alarm is among the texts the tripwire reads
+        # past the eToro walk's own threshold (fifteen from 2026-11-06,
+        # thirty at its 30 s beat since 2026-11-13: "je suggère 20-30
+        # secondes non?"; tasks.broker_miss_alert_after; 4 passed the old
+        # three), so its alarm is among the texts the tripwire reads
         from bot_program.tasks import broker_miss_alert_after
         cache.set(f"broker_sync:miss:etoro:{acct.pk}",
                   broker_miss_alert_after("etoro") + 1, 3600)
@@ -1076,8 +1077,9 @@ class PauseTests(_AlarmCase):
         gone = _trade(cfg, "MSFT", paper=False, status="ERROR")
         acct = _etoro(user, demo=False)
         _component("broker_account_sync")
-        # past the eToro walk's own threshold (fifteen since 2026-11-06;
-        # 5 passed the old three): the pause is what keeps it unsaid
+        # past the eToro walk's own threshold (fifteen from 2026-11-06,
+        # thirty since 2026-11-13; 5 passed the old three): the pause is
+        # what keeps it unsaid
         from bot_program.tasks import broker_miss_alert_after
         cache.set(f"broker_sync:miss:etoro:{acct.pk}",
                   broker_miss_alert_after("etoro") + 2, 3600)
@@ -1191,9 +1193,11 @@ class BrokerTests(_AlarmCase):
         _component("broker_account_sync")
 
     def test_a_live_account_past_the_miss_threshold_by_broker_and_number(self):
-        # the eToro walk's own threshold since 2026-11-06: fifteen passes of
-        # its 60 s beat, fifteen minutes (tasks.broker_miss_alert_after);
-        # it was BROKER_MISS_ALERT_AFTER, three passes of its 300 s
+        # the eToro walk's own threshold: fifteen passes of its 60 s beat
+        # from 2026-11-06, thirty of its 30 s since 2026-11-13 ("je suggère
+        # 20-30 secondes non?"), fifteen minutes either way
+        # (tasks.broker_miss_alert_after); it was BROKER_MISS_ALERT_AFTER,
+        # three passes of its 300 s
         from bot_program.tasks import broker_miss_alert_after
         after = broker_miss_alert_after("etoro")
         user = _staff("gandalf_senior")
@@ -1215,8 +1219,9 @@ class BrokerTests(_AlarmCase):
         b = _staff("b")
         c = _staff("c")
         live = _etoro(a, demo=False)
-        # just below the eToro walk's own threshold (fifteen since
-        # 2026-11-06); its old three is below it too
+        # just below the eToro walk's own threshold (fifteen from
+        # 2026-11-06, thirty since 2026-11-13); its old three is below it
+        # too
         from bot_program.tasks import broker_miss_alert_after
         self.assertGreater(broker_miss_alert_after("etoro"),
                            BROKER_MISS_ALERT_AFTER)
@@ -1253,8 +1258,9 @@ class BrokerTests(_AlarmCase):
         says nothing about the broker now."""
         user = _staff()
         acct = _etoro(user, demo=False)
-        # past the eToro walk's own threshold (fifteen since 2026-11-06; 9
-        # passed the old three): the switch is what keeps it unsaid
+        # past the eToro walk's own threshold (fifteen from 2026-11-06,
+        # thirty since 2026-11-13; 9 passed the old three): the switch is
+        # what keeps it unsaid
         from bot_program.tasks import broker_miss_alert_after
         cache.set(f"broker_sync:miss:etoro:{acct.pk}",
                   broker_miss_alert_after("etoro") + 6, 3600)

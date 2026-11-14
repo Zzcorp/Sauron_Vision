@@ -599,6 +599,69 @@
     if (compact) return fill(W('tab_compact'), { n: n });
     return n === 1 ? fill(W('tab_seat'), { n: n }) : fill(W('tab_seats'), { n: n });
   }
+  /* The status bar's AT STOPS (the desk v2 board, 2026-11-13): the real-
+     money side's open risk at the stops against its limit, as the entry
+     gate measures it (this answer's sides.live), and the seats in alarm
+     said in words beside the Horde's standards. Unmeasured: a dash. */
+  function paintBar(t) {
+    var box = document.getElementById('svBarRisk');
+    if (box) {
+      var live = (t.sides || {}).live || {};
+      box.textContent = '';
+      if (live.risk_pct_t) {
+        var v = document.createElement('span');
+        v.className = 'sv-bar-fig sv-tone-' + (live.risk_tone || 'ok');
+        v.textContent = live.risk_pct_t;
+        box.appendChild(v);
+        var of = document.createElement('span');
+        of.className = 'sbsub';
+        of.textContent = 'of ' + (live.limit_pct_t || DASH);
+        box.appendChild(of);
+        if (live.risk_why) box.title = live.risk_why;
+      } else {
+        var d = document.createElement('span');
+        d.className = 'sv-unknown';
+        d.title = live.risk_why || 'The real-money side\'s risk at the stops is not measured';
+        d.textContent = DASH;
+        box.appendChild(d);
+      }
+    }
+    var alarms = document.getElementById('svBarAlarms');
+    var n = t.alarms || 0;
+    var said = n ? (n === 1 ? fill(W('tab_alarm'), { n: 1 }) : fill(W('tab_alarms'), { n: n })) : '';
+    if (alarms) {
+      /* Kept as data, never shown: the bar shows the mark, and the cell's
+         name and title say the words (review of the desk v2 build,
+         2026-11-13). */
+      alarms.textContent = said;
+      alarms.hidden = true;
+    }
+    state.barAlarm = { n: n, real: !!t.alarm_real, said: said };
+    markSeats();
+  }
+  /* The amber mark over a standard in alarm (Twist2 "alarme · marque
+     ambre"): a real seat's when a real seat is in alarm, else the first
+     seat of the other worlds; the count goes into the cell's name and
+     title. The standards are swapped by the sweep (hb-horde): marked again
+     after each swap. */
+  function markSeats() {
+    var cell = document.getElementById('svHordeCell');
+    var a = state.barAlarm;
+    if (!cell || !a) return;
+    var seats = cell.querySelectorAll('.sv-seat');
+    Array.prototype.forEach.call(seats, function (s) { s.classList.remove('is-alarm'); });
+    if (a.n) {
+      var pick = a.real ? cell.querySelector('.sv-seat[data-world="live"]')
+                        : cell.querySelector('.sv-seat:not([data-world="live"])');
+      var target = pick || seats[0];
+      if (target) target.classList.add('is-alarm');
+    }
+    if (!cell.hasAttribute('data-sv-label')) cell.setAttribute('data-sv-label', cell.getAttribute('aria-label') || '');
+    var base = cell.getAttribute('data-sv-label');
+    cell.setAttribute('aria-label', a.n ? base.replace(/\. Key h$/, '') + '; ' + a.said + '. Key h' : base);
+    cell.title = a.n ? a.said : '';
+  }
+  document.addEventListener('sv:live-swapped', function () { markSeats(); });
   function paintTab(t) {
     var n = t.seats || 0;
     state.seatN = n;
@@ -611,6 +674,7 @@
     seg(segs.r, lead.r_t || '', 'hd-tab-r ' + (lead.r_v > 0 ? 'up' : lead.r_v < 0 ? 'down' : ''));
     seg(segs.risk, lead.risk_pct_t ? fill(W('tab_risk'), { x: lead.risk_pct_t, limit: lead.limit_pct_t || DASH }) : '',
         'hd-tab-risk ' + (lead.risk_tone || ''));
+    paintBar(t);
     var flag = t.flag === 'elite' ? W('flag_elite') : t.flag === 'shut' ? W('flag_shut')
              : t.flag === 'unreadable' ? W('flag_unreadable') : '';
     seg(segs.flag, flag, 'hd-tab-flag ' + (t.flag || ''));

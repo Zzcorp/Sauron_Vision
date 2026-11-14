@@ -250,7 +250,9 @@ class PageGetTests(_Fixture):
         body = resp.content.decode()
         nav_line = [l for l in body.splitlines() if "label-text\">Ops<" in l][0]
         self.assertNotIn("data-nav-id", nav_line)
-        self.assertIn("⌘", nav_line)
+        # Updated deliberately (UI redo B2, the desk v2 board, approved 2026-11-13: "amazing work, bravo, I need it fast!!"):
+        # the row's mark is the one icon family's symbol, not the glyph.
+        self.assertIn('<use href="#svi-ops"/>', nav_line)
         # the catalogue: every title, every usage line, the mirrors link
         from core import ops_commands
         from django.utils.html import escape

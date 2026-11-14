@@ -3356,11 +3356,13 @@ def _render_positions(request, live_only, *, deep_link=None):
                                         orcs=True, venues=open_venues,
                                         quotes=for_request(request)))),
         keep={"tab": "open"}, base_url=positions_url)
+    closed_pairs = list(zip(
+        closed_positions,
+        _position_card_details(request.user, closed_positions)))
     closed_view = build_view(
         request.GET if tab == "history" else {},
-        list(zip(closed_positions,
-                 _position_card_details(request.user, closed_positions))),
-        history=True, keep={"tab": "history"}, base_url=positions_url)
+        closed_pairs, history=True, keep={"tab": "history"},
+        base_url=positions_url)
 
     # eToro's OWN used figure heads the strip (2026-10-31): see
     # _etoro_cell; the split rides under the strip.
@@ -3368,6 +3370,32 @@ def _render_positions(request, live_only, *, deep_link=None):
     etoro = (capital or {}).get("etoro")
     if etoro:
         strip["etoro"] = _etoro_cell(etoro)
+    # THE DESK (2026-11-13, the desk v2 the operator approved: "amazing
+    # work, bravo, I need it fast!!"): the figures the board draws around
+    # the open table, read off the rows above (dashboard.positions_desk).
+    # Display only; the open tab and its refresh only.
+    # Guarded (the review of 2026-11-13): this is the page the operator
+    # closes from, so a figure that cannot be read prints dashes and the
+    # rows and their CLOSE stand, never a 500.
+    from . import positions_desk
+    desk = closed_book = None
+    if tab == "open":
+        try:
+            desk = positions_desk.desk(request.user, open_objects, open_rows,
+                                       closed_pairs, etoro)
+        except Exception:  # noqa: BLE001 — never the page for a figure
+            logger.warning("[positions] the desk's figures could not be read",
+                           exc_info=True)
+            desk = positions_desk.empty_desk(open_rows)
+    else:
+        # The closed book by world, never summed (the review, F5): the
+        # history tab's strip and its refresh.
+        try:
+            closed_book = positions_desk.closed_book(closed_pairs)
+        except Exception:  # noqa: BLE001 — never the page for a figure
+            logger.warning("[positions] the closed book could not be read",
+                           exc_info=True)
+            closed_book = []
 
     context = {
         "page_id": "positions",
@@ -3404,6 +3432,8 @@ def _render_positions(request, live_only, *, deep_link=None):
         # A "Close position" link's note and dialog (2026-10-24): the full
         # page only, so the live refresh never opens it a second time.
         "deep_link": None if live_only else deep_link,
+        "desk": desk,
+        "closed_book": closed_book,
     }
 
     if not live_only:
@@ -3456,11 +3486,17 @@ def _render_positions(request, live_only, *, deep_link=None):
             p.bar_pct = (round(abs(float(pct)) / peak * 100, 1)
                          if pct is not None and peak > 0 else None)
 
+        # Best and worst are picked across the worlds: each names its own
+        # (the review of 2026-11-13, F5), the REAL chip solid.
+        world_of = {id(p): (d or {}).get("world") or ""
+                    for p, d in closed_pairs}
         context.update({
             "closed_positions": closed_positions,
             "total_closed": stats["n_closed"],
             "best_trade": best_trade,
             "worst_trade": worst_trade,
+            "best_world": world_of.get(id(best_trade), ""),
+            "worst_world": world_of.get(id(worst_trade), ""),
             # With ONE graded close, best and worst are the same row, and the
             # page showed it twice — once in a green "Best Trade" card that
             # hardcoded a + in front of the number. A single losing short read
@@ -4813,6 +4849,7 @@ def _chart_positions(user, instrument):
     or an ISO string would need a second parse in the browser.
     """
     from bot_program.models import AssetBotTrade
+    from dashboard.position_summary import world_of
     from portfolio.models import Position
     from portfolio.risk_gate import _position_books
     from portfolio.services import PNL_ESTIMATE, value_per_unit, venue_pnls
@@ -4898,6 +4935,10 @@ def _chart_positions(user, instrument):
             # is not recorded.
             "venue": "",
         })
+        # Whose money (the desk v2, its review M5): the book's row reads as
+        # main always read it ({% money_world %} on paper=False: REAL), so
+        # the header, the table and the chart's entry chip say the same.
+        out[-1]["world"] = world_of(out[-1])
     bot_rows = list(AssetBotTrade.objects.filter(
         config__user=user, symbol=instrument.symbol,
         status__in=("OPEN", "CLOSE_PENDING")))
@@ -4960,6 +5001,15 @@ def _chart_positions(user, instrument):
             "mark_source": mk.source, "mark_word": words.get("mark_word", ""),
             "mark_wait": words.get("mark_wait", ""),
             "mark_title": words.get("mark_title", ""),
+            # The side the venue's mark was read at (the desk v2, its
+            # review F10): the row's closing side when the venue's stamp
+            # carries it (venue_mark.resolve), so the header can say "P&L
+            # at the ask"; "" otherwise, and the header names the mark.
+            "mark_side": (("bid" if side == "long" else "ask")
+                          if mk.source == "venue"
+                          and (meta.get("venue_mark") or {}).get(
+                              "bid" if side == "long" else "ask") is not None
+                          else ""),
             "rule": tag, "entry_text": _txt(entry), "stop_text": _txt(stop),
             "tp_text": _txt(tp), "r_now": r_now,
             # whose figure the P&L is, where it is not eToro's own
@@ -4974,6 +5024,10 @@ def _chart_positions(user, instrument):
             # skeptic M4): the chart's legend says so when they sit over
             # candles of another feed (dashboard.chart_source).
             "venue": str(meta.get("broker") or ""),
+            # Whose money (2026-11-13, the desk v2): REAL, DEMO or PAPER, as
+            # the row's own stamps say (position_summary.world_of), for the
+            # header's and the chart's world chip. A read; display only.
+            "world": world_of(t),
         })
     return out
 
@@ -5298,6 +5352,12 @@ def _instrument_page(request, instrument, *, deep_link=None):
         # it built from separate reads drift the moment one of them gains
         # a filter the other does not.
         "chart_positions_rows": chart_positions,
+        # The header's one position (the desk v2, its review M5): his REAL
+        # money first, whatever the book lists before it; the table under
+        # the chart has every row. A read; display only.
+        "chart_positions_head": next(
+            (p for p in chart_positions if p.get("world") == "live"),
+            chart_positions[0] if chart_positions else None),
         "chart_signals": chart_signals,
         # A Telegram "Prepare ticket" link's note and ticket (2026-10-24);
         # None on every other visit.

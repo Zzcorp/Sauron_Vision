@@ -1958,8 +1958,11 @@ class TheWiringTests(SimpleTestCase):
     def test_the_key_markup(self):
         html = widget()
         sig, lvl, pos = (html.index('id="t-%s-legend"' % k) for k in ("sig", "lvl", "pos"))
-        self.assertLess(sig, lvl)
-        self.assertLess(lvl, pos)
+        # The desk v2 (B10, 2026-11-13): the levels' key is the foot's
+        # first row, the captions under it (the dots' key, the crowd); the
+        # operator approved the board: "amazing work, bravo, I need it fast!!".
+        self.assertLess(lvl, sig)
+        self.assertLess(sig, pos)
         tag = re.search(r'<div class="sv-lvl-legend"[^>]*>', html).group(0)
         self.assertIn(' role="group"', tag)
         self.assertIn(" hidden", tag, "hidden until the first level data")
@@ -1970,14 +1973,19 @@ class TheWiringTests(SimpleTestCase):
         for button in re.findall(r"<button[^>]*>", block):
             self.assertIn('aria-pressed="', button)
             self.assertIn('type="button"', button)
-        self.assertIn("Levels (4h):", block)
+        # The board's strip title, "Levels · 4h" (the desk v2's review, F3;
+        # the operator approved the board: "amazing work, bravo, I need it fast!!").
+        self.assertIn('Levels · <span class="sv-lvl-tf">4h</span>', block)
         self.assertIn("activeInds.levels === undefined) activeInds.levels = true", html)
         self.assertIn("var lvlLegendEl = document.getElementById(CHART_ID + '-lvl-legend');",
                       self.src)
 
     # C-5
     def test_new_css_has_no_bare_hex(self):
-        css = self.src.split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         own = re.compile(r"\.sv-lvl|\.sv-sig-card--(pool|swing|asia|round)\b")
         offenders, seen = [], 0
@@ -1996,7 +2004,10 @@ class TheWiringTests(SimpleTestCase):
         focused), so the key's strike and dim made '▼ ① HUNT 1.08226' read
         as cancelled, and Show all too. Strike and dim are the kind
         switches' 'hidden'; the answer and Show all take neither."""
-        css = self.src.split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         rules = [(sel.strip(), body.strip()) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)]
 
@@ -2020,7 +2031,10 @@ class TheWiringTests(SimpleTestCase):
         """outline: none took the platform's focus ring, and a pressed
         chip's currentColor border hid the border-colour cue: a focused
         pressed chip looked exactly like an unfocused one (WCAG 2.4.7)."""
-        css = self.src.split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         rules = [(sel.strip(), body.strip()) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)]
         for sel, body in rules:
@@ -2030,7 +2044,10 @@ class TheWiringTests(SimpleTestCase):
         ring = ".sv-lvl-legend .sv-lvl-key:focus-visible"
         self.assertIn(ring, idx)
         body = rules[idx[ring]][1]
-        self.assertIn("outline: 2px solid var(--accent, #00e868)", body)
+        # The desk v2 (B10, 2026-11-13): the ring is the Eye's token, the
+        # sheet names no hex; the operator approved the board: "amazing
+        # work, bravo, I need it fast!!".
+        self.assertIn("outline: 2px solid var(--sv-eye)", body)
         self.assertIn("outline-offset: 2px", body)
         for pressed in ('.sv-lvl-key--answer[aria-pressed="true"]', '.sv-lvl-key--all[aria-pressed="true"]'):
             self.assertLess(idx[pressed], idx[ring], pressed)
@@ -2038,7 +2055,9 @@ class TheWiringTests(SimpleTestCase):
     # C-6
     def test_signal_and_hline_inks(self):
         sig = self._fn("drawSignalLevels")
-        self.assertIn("[['entry', 'Entry', c.ink]", sig)
+        # named by their owner (the desk v2's review, F5: "Signal entry"
+        # against his "Your stop"; the operator approved the board)
+        self.assertIn("[['entry', 'Signal entry', c.ink]", sig)
         self.assertIn("axisLabelColor: c.bg, axisLabelTextColor: lv[2],", sig)
         self.assertIn("LightweightCharts.LineStyle.Dashed", sig)
         self.assertNotIn("c.gold", sig)
@@ -2048,13 +2067,18 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn("title: 'H'", hl)
         # both H-line paths: the click and the restore after a load
         self.assertEqual(self.src.count("createPriceLine(hlineOptions(price, c))"), 2)
-        self.assertIn("ink:          token('--text-primary', isDark ? '#daf0e6' : '#1a2a1a'),",
+        # The desk v2 (B10, 2026-11-13): the chart's ink is the desk's
+        # ink-1 token; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        self.assertIn("var ink1 = token('--sv-ink-1', isDark ? '#E6F1EA' : '#1a2a1a');",
                       self.src)
+        self.assertIn("ink:          ink1,", self.src)
         self.assertIn("swing:        token('--lvl-swing'", self.src)
         self.assertIn("session:      token('--lvl-session'", self.src)
-        # The signal card's entry price is never gold either.
-        self.assertIn(".sv-sig-level--entry > b { color: var(--text-primary, #daf0e6); }",
-                      self.src)
+        # The signal card's entry price is never gold either (its style is
+        # in static/css/sv-chart.css since the desk v2, B10, 2026-11-13;
+        # the operator approved the board: "amazing work, bravo, I need it fast!!").
+        self.assertIn(".sv-sig-level--entry > b { color: var(--sv-ink-1); }",
+                      (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8"))
 
     # C-7
     def test_tokens_exist_in_both_themes(self):

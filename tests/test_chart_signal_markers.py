@@ -380,18 +380,18 @@ class TheInstrumentsDecimalsTests(TestCase):
 class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
 
     def test_the_key_is_rendered_under_the_chart_in_words_and_colours(self):
+        # The board's one-row strip (the desk v2's review, F3): the key is the
+        # strip's Signals switch, its scale in its title; the operator approved
+        # the board: "amazing work, bravo, I need it fast!!"
         html = widget()
         i = html.index('id="t-sig-legend"')
         block = html[i:html.index("</div>", i)]
-        self.assertIn(
-            "Signal strength: weak · medium · strong · very strong",
-            _visible(block))
-        self.assertIn("green buy", _visible(block))
-        self.assertIn("red sell", _visible(block))
-        for n in range(4):
-            self.assertIn('class="sv-sig-sw sv-sig-s%d"' % n, block)
-            self.assertIn('class="sv-sig-sw sv-sig-sw--bear sv-sig-s%d"' % n,
-                          block)
+        self.assertEqual(_visible(block[block.index(">") + 1:]), "Signals")
+        self.assertIn('data-sig-toggle aria-pressed="true"', block)
+        self.assertIn("weak · medium · strong · very strong", block)
+        self.assertIn("▲ a long under its bar, ▼ a short over it", block)
+        self.assertIn('class="sv-sig-sw sv-sig-s2"', block)
+        self.assertIn('class="sv-sig-sw sv-sig-sw--bear sv-sig-s2"', block)
 
     def test_the_key_waits_for_a_dot(self):
         """Hidden until the widget draws a dot: a chart with no signals
@@ -418,22 +418,30 @@ class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
         self.assertLess(key, first_script)
 
     def test_the_card_is_the_sites_card_in_both_themes(self):
-        src = widget_source()
+        # The desk v2 (B10, 2026-11-13): the card's style lives in
+        # static/css/sv-chart.css and names the kit's tokens (a raised
+        # surface, its line, the card radius, the popover shadow, ink-1),
+        # its tone the data's up and down; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        src = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         rule = re.search(r"\n\.sv-sig-card \{([^}]*)\}", src).group(1)
-        for token in ("var(--bg-card", "var(--border", "var(--radius-md",
-                      "var(--shadow-card", "var(--text-primary",
-                      "var(--font-mono"):
+        for token in ("var(--sv-bg-2", "var(--sv-line-3", "var(--sv-radius-card",
+                      "var(--sv-shadow-pop", "var(--sv-ink-1",
+                      "var(--sv-font-sans"):
             self.assertIn(token, rule)
         # It can never outgrow the chart's box.
         self.assertIn("max-width: calc(100% - 12px);", rule)
         self.assertIn("max-height: calc(100% - var(--sv-toolbar-h, 36px) - 12px);",
                       rule)
-        self.assertIn(".sv-sig-card--bull { --sv-sig-tone: var(--accent", src)
-        self.assertIn(".sv-sig-card--bear { --sv-sig-tone: var(--accent-red",
+        self.assertIn(".sv-sig-card--bull { --sv-sig-tone: var(--sv-up", src)
+        self.assertIn(".sv-sig-card--bear { --sv-sig-tone: var(--sv-down",
                       src)
 
     def test_no_signal_rule_paints_a_colour_the_theme_cannot_move(self):
-        css = widget_source().split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         offenders = []
         for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
@@ -444,7 +452,9 @@ class TheKeyAndTheCardAreOnThePageTests(SimpleTestCase):
         self.assertEqual(offenders, [])
 
     def test_the_card_stills_for_reduced_motion(self):
-        src = widget_source()
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        src = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         self.assertRegex(
             src, r"@media \(prefers-reduced-motion: reduce\) \{\s*"
                  r"\.sv-sig-card \{ transition: none; transform: none; \}")
@@ -517,7 +527,8 @@ class TheWiringTests(SimpleTestCase):
     def test_the_levels_are_dashed_and_titled_in_words(self):
         body = self._fn("drawSignalLevels")
         self.assertIn("LightweightCharts.LineStyle.Dashed", body)
-        for title in ("'Entry'", "'Stop'", "'Target'"):
+        # named by their owner (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        for title in ("'Signal entry'", "'Signal stop'", "'Signal target'"):
             self.assertIn(title, body)
         self.assertIn("clearSignalLevels();", body)
 
@@ -548,9 +559,15 @@ class TheWiringTests(SimpleTestCase):
                       self.src)
         # The SL is 2 px SOLID (2026-10-07): solid is the operator's money,
         # dashed a signal's idea — it no longer reads like the pinned Stop.
+        # The desk v2 (B10, 2026-11-13): its axis label on the chart's raised
+        # surface in its tone, beside the board's chips; the operator
+        # approved the board: "amazing work, bravo, I need it fast!!".
         self.assertIn("price: p.stop, color: c.red, lineWidth: 2,\n"
                       "                        lineStyle: LightweightCharts.LineStyle.Solid,\n"
-                      "                        axisLabelVisible: true, title: 'SL',",
+                      "                        axisLabelVisible: true, axisLabelColor: c.bg2, axisLabelTextColor: c.red,\n"
+                      # its title the owner's words, the line itself drawn by
+                      # the chart's layer from his entry (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+                      "                        title: 'Your stop', lineVisible: false,",
                       self.src.replace("\r\n", "\n"))
 
 
@@ -808,8 +825,11 @@ class ThePureHalfUnderNodeTests(SimpleTestCase):
             self.assertIn(escaped, card)
 
     def test_the_card_says_side_score_strength_and_state(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         card = self.out["cardPinned"]
-        self.assertIn('<span class="sv-sig-side">SELL</span>', card)
+        self.assertIn('<span class="sv-sig-side">▼ SHORT</span>', card)
         self.assertIn('class="sv-sig-score sv-sig-s2"', card)
         self.assertIn('style="width:83%"', card)
         self.assertIn('<b class="sv-sig-pct">83%</b>', card)
@@ -835,9 +855,12 @@ class ThePureHalfUnderNodeTests(SimpleTestCase):
             "sv-sig-card sv-sig-card--neutral"])
 
     def test_a_graded_signal_shows_its_outcome(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         self.assertIn("sv-sig-chip--win", self.out["won"])
         self.assertIn("Target reached · +2.00R", self.out["won"])
-        self.assertIn(">BUY<", self.out["won"])
+        self.assertIn(">▲ LONG<", self.out["won"])
         self.assertIn("very strong", self.out["won"])
         self.assertIn("sv-sig-chip--loss", self.out["lost"])
         self.assertIn("Stop loss hit · -1.00R", self.out["lost"])
@@ -1027,7 +1050,8 @@ sandbox.window = sandbox;
 vm.createContext(sandbox);
 
 const flush = function () { return new Promise(function (r) { setImmediate(r); }); };
-const SIG_TITLES = ['Entry', 'Stop', 'Target'];
+/* named by their owner (the desk v2's review, F5: a line says whose it is; the operator approved the board: 'amazing work, bravo, I need it fast!!') */
+const SIG_TITLES = ['Signal entry', 'Signal stop', 'Signal target'];
 /* The main series: the candles, or whatever a type switch put in their
    place (the volume histogram is the only other series on this chart). */
 const candle = function () { return chart.series.find(function (s) { return s.kind !== 'hist'; }); };
@@ -1266,6 +1290,9 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
                 if str(m.get("id", "")).startswith("sv-sig-")}
 
     def test_each_signal_is_a_dot_on_the_bar_that_contains_it(self):
+        # The desk v2 (B10, 2026-11-13): a buy's dot in the desk's up token
+        # (#24B582), a sell's in its down token (#FF6B6E), where the Eye and
+        # the old #e83030 were; the operator approved the board: "amazing work, bravo, I need it fast!!".
         first = self.r["first"]
         dots = self._sig_markers(first["markers"])
         self.assertEqual(sorted(dots), ["sv-sig-11", "sv-sig-12", "sv-sig-14"])
@@ -1274,15 +1301,15 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         self.assertEqual((shared["time"], shared["position"], shared["size"],
                           shared["color"], shared["text"]),
                          ("2026-08-10", "aboveBar", 0.9,
-                          "rgba(232,48,48,0.65)", "▼"))
+                          "rgba(255,107,110,0.65)", "▼"))
         self.assertEqual((s1["time"], s1["position"], s1["shape"], s1["size"],
                           s1["color"], s1["text"]),
                          ("2026-08-10", "belowBar", "circle", 1.25,
-                          "rgba(0,232,104,0.85)", "▲"))
+                          "rgba(36,181,130,0.85)", "▲"))
         self.assertEqual((s2["time"], s2["position"], s2["size"],
                           s2["color"], s2["text"]),
                          ("2026-08-25", "aboveBar", 1.7,
-                          "rgba(232,48,48,1)", "▼"))
+                          "rgba(255,107,110,1)", "▼"))
         self.assertFalse(first["legendHidden"])
         self.assertTrue(first["card"]["hidden"])
 
@@ -1292,8 +1319,9 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         self.assertEqual(len(arrows), 1)
         self.assertEqual((arrows[0]["shape"], arrows[0]["text"]),
                          ("arrowUp", "LONG @ 1.08000"))
-        self.assertEqual(first["others"], ["LONG 1000", "SL", "TP"])
-        self.assertEqual(self.r["cleared"]["others"], ["LONG 1000", "SL", "TP"])
+        # his lines in his words (the desk v2's review, F5: a line says whose it is; the operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertEqual(first["others"], ["▲ LONG 1000", "Your stop", "Your target"])
+        self.assertEqual(self.r["cleared"]["others"], ["▲ LONG 1000", "Your stop", "Your target"])
 
     def test_a_signal_after_the_last_bars_close_is_not_drawn_on_that_bar(self):
         """On the daily default the newest bar is the previous session's
@@ -1320,10 +1348,13 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     def test_hover_shows_the_card_beside_the_dot(self):
         """On a DAILY bar, whose string date the legend's handler cannot
         format: the harness runs the listeners the way the library does."""
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         hover = self.r["hover"]
         self.assertFalse(hover["hidden"])
         self.assertEqual(hover["cls"], "sv-sig-card sv-sig-card--bull")
-        for text in ("Golden cross", ">BUY<", "82%", "1.08420", "1.08120",
+        for text in ("Golden cross", ">▲ LONG<", "82%", "1.08420", "1.08120",
                      "1.09020", "2.00 : 1", "2026-08-10 15:30 UTC",
                      "Active", "+1 more signal on this bar"):
             self.assertIn(text, hover["html"])
@@ -1332,19 +1363,25 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         self.assertTrue(self.r["away"]["hidden"])
 
     def test_a_click_pins_the_card_and_draws_dashed_levels(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         pinned = self.r["pinned"]
         self.assertIn("is-pinned", pinned["card"]["cls"])
         self.assertIn("data-sv-sig-close", pinned["card"]["html"])
         self.assertEqual(pinned["lines"], [
-            {"title": "Entry", "price": 1.0842, "style": 2},
-            {"title": "Stop", "price": 1.0812, "style": 2},
-            {"title": "Target", "price": 1.0902, "style": 2}])
+            {"title": "Signal entry", "price": 1.0842, "style": 2},
+            {"title": "Signal stop", "price": 1.0812, "style": 2},
+            {"title": "Signal target", "price": 1.0902, "style": 2}])
         # The pointer leaves: the pinned card stays, at its own dot.
         after = self.r["pinnedAfterLeave"]
         self.assertFalse(after["hidden"])
         self.assertEqual((after["left"], after["top"]), ("124px", "141px"))
 
     def test_the_dots_and_the_levels_survive_every_set_data(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         ref = self.r["refreshed"]
         self.assertEqual(ref["fetches"], 2)
         self.assertEqual(ref["setData"], self.r["first"]["setData"] + 1)
@@ -1352,16 +1389,19 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
                          ["sv-sig-11", "sv-sig-12", "sv-sig-14"])
         # Redrawn once, not stacked on the first copy.
         self.assertEqual([l["title"] for l in ref["lines"]],
-                         ["Entry", "Stop", "Target"])
+                         ["Signal entry", "Signal stop", "Signal target"])
         self.assertFalse(ref["card"]["hidden"])
         self.assertIn("is-pinned", ref["card"]["cls"])
 
     def test_another_dot_moves_the_levels_and_the_card(self):
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         other = self.r["other"]
         self.assertEqual([(l["title"], l["price"]) for l in other["lines"]],
-                         [("Entry", 1.09), ("Stop", 1.095), ("Target", 1.08)])
+                         [("Signal entry", 1.09), ("Signal stop", 1.095), ("Signal target", 1.08)])
         self.assertIn("sv-sig-card--bear", other["card"]["cls"])
-        self.assertIn(">SELL<", other["card"]["html"])
+        self.assertIn(">▼ SHORT<", other["card"]["html"])
         self.assertIn("Stop loss hit", other["card"]["html"])
         self.assertIn("RSI &lt;b&gt;reversal&lt;/b&gt;", other["card"]["html"])
         self.assertNotIn("<b>reversal", other["card"]["html"])
@@ -1381,7 +1421,9 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
             self.assertEqual(len(self.r[step]["lines"]), 3, step)
         self.assertTrue(self.r["tapThrough"]["card"]["hidden"])
         self.assertEqual(self.r["tapThrough"]["lines"], [])
-        src = widget_source()
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        src = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8") + widget_source()
         pinned = re.search(r"\n\.sv-sig-card\.is-pinned \{([^}]*)\}", src).group(1)
         self.assertNotIn("pointer-events", pinned)
         self.assertIn("\n.sv-sig-card.is-pinned .sv-sig-close { pointer-events: auto; }",
@@ -1394,11 +1436,14 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     def test_each_click_on_a_shared_bar_pins_the_next_signal(self):
         """No marker id (a phone's tap): BUY 0.82 first, then SELL 0.62,
         then round again; the hover on that bar shows the pinned one."""
-        buy = [("Entry", 1.0842), ("Stop", 1.0812), ("Target", 1.0902)]
-        sell = [("Entry", 1.0855), ("Stop", 1.0885), ("Target", 1.0795)]
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
+        buy = [("Signal entry", 1.0842), ("Signal stop", 1.0812), ("Signal target", 1.0902)]
+        sell = [("Signal entry", 1.0855), ("Signal stop", 1.0885), ("Signal target", 1.0795)]
         levels = lambda k: [(l["title"], l["price"]) for l in self.r[k]["lines"]]
         self.assertEqual(levels("cycle1"), buy)
-        self.assertIn(">BUY<", self.r["cycle1"]["card"]["html"])
+        self.assertIn(">▲ LONG<", self.r["cycle1"]["card"]["html"])
         self.assertIn("+1 more signal on this bar: click or tap the bar again "
                       "for the next", self.r["cycle1"]["card"]["html"])
         self.assertEqual(levels("cycle2"), sell)
@@ -1417,22 +1462,27 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         bar with a stronger BUY could never be opened, and a click on it
         drew the BUY's levels. Now nothing throws, the legend reads the
         date, and the named dot is the one opened and pinned."""
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         named = self.r["named"]
         self.assertEqual(named["moveErrors"], 0)
-        self.assertIn("2026-08-10", named["legend"])
-        self.assertIn("2026-08-10", self.r["legend"])
+        # the board's date, "10 Aug 2026" (the desk v2's review, F10; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!")
+        self.assertIn("10 Aug 2026", named["legend"])
+        self.assertIn("10 Aug 2026", self.r["legend"])
         self.assertFalse(named["card"]["hidden"])
-        self.assertIn(">SELL<", named["card"]["html"])
+        self.assertIn(">▼ SHORT<", named["card"]["html"])
         self.assertIn("RSI reversal 4h", named["card"]["html"])
-        sell = [("Entry", 1.0855), ("Stop", 1.0885), ("Target", 1.0795)]
+        sell = [("Signal entry", 1.0855), ("Signal stop", 1.0885), ("Signal target", 1.0795)]
         levels = lambda k: [(l["title"], l["price"]) for l in self.r[k]["lines"]]
         self.assertEqual(levels("namedPin"), sell)
         self.assertIn("sv-sig-card--bear is-pinned", self.r["namedPin"]["card"]["cls"])
         # Named again: that dot again, never the next one of the bar.
         self.assertEqual(levels("namedAgain"), sell)
         self.assertEqual(levels("namedOther"),
-                         [("Entry", 1.0842), ("Stop", 1.0812), ("Target", 1.0902)])
-        self.assertIn(">BUY<", self.r["namedOther"]["card"]["html"])
+                         [("Signal entry", 1.0842), ("Signal stop", 1.0812), ("Signal target", 1.0902)])
+        self.assertIn(">▲ LONG<", self.r["namedOther"]["card"]["html"])
 
     def test_a_drawing_tool_keeps_its_click(self):
         drawing = self.r["drawing"]
@@ -1445,12 +1495,15 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     def test_a_chart_type_switch_redraws_the_levels_on_the_new_series(self):
         """removeSeries takes a series' price lines with it: the pinned
         levels are drawn again on the series that replaced it, once."""
+        # The desk v2's review (F5, F13): a signal's lines and its side named by
+        # their owner, "Signal entry" / "▲ LONG"; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!"
         swapped = self.r["swapped"]
         self.assertEqual(swapped["kind"], "line")
         self.assertNotIn("candle", swapped["series"])
         self.assertEqual([(l["title"], l["price"], l["style"]) for l in swapped["lines"]],
-                         [("Entry", 1.0842, 2), ("Stop", 1.0812, 2),
-                          ("Target", 1.0902, 2)])
+                         [("Signal entry", 1.0842, 2), ("Signal stop", 1.0812, 2),
+                          ("Signal target", 1.0902, 2)])
         self.assertIn("is-pinned", swapped["card"]["cls"])
         self.assertFalse(swapped["card"]["hidden"])
 
