@@ -21,7 +21,8 @@
      * A constant speed, independent of the content: each frame moves a
        strip its speed times the display's frame interval, times the
        whole frames since the last one (the interval measured while
-       running, snapped to the display's own rate). The same distance
+       running, snapped to the display's own rate; the frames a busy
+       machine drops do not lengthen it). The same distance
        every frame, so the device-pixel steps keep one even rhythm: news
        at 30 px/s on a 60 Hz screen is half a pixel a frame, and the
        frame clock's jitter (coarsened to 0.1 ms) decided each rounding
@@ -247,7 +248,14 @@
     /* The display's frame interval (ms), from the gaps between frames while
        running: the mean of the last ones near their median, snapped to the
        display's own rate when that close, and kept until it moves by more
-       than 3% (another screen). */
+       than 3% (another screen).
+       Unless the median is two, three or four times a gap that still
+       recurs (five of the last ones near it): then it is frames the machine
+       dropped, and that shorter gap is the screen's (2026-11-14). A busy
+       machine draws every other frame for a second: the median became
+       33.3 ms on a 60 Hz screen, the frames that came at 16.7 ms were no
+       longer whole frames and moved by their own time, and the news stood
+       two frames and stepped two, as before whole frames. */
     function interval(gap) {
         if (gap > 3 && gap < 60) {
             gaps.push(gap);
@@ -255,8 +263,14 @@
         }
         if (gaps.length < 20) return frameMs;
         var med = gaps.slice().sort(function (a, b) { return a - b; })[gaps.length >> 1];
-        var sum = 0, k = 0;
-        for (var i = 0; i < gaps.length; i++) {
+        var sum, k, i, d;
+        for (d = 4; d > 1; d--) {
+            for (i = 0, k = 0; i < gaps.length; i++) {
+                if (Math.abs(gaps[i] - med / d) < med / d * 0.25) k++;
+            }
+            if (k >= 5) { med = med / d; break; }
+        }
+        for (i = 0, sum = 0, k = 0; i < gaps.length; i++) {
             if (Math.abs(gaps[i] - med) < med * 0.25) { sum += gaps[i]; k++; }
         }
         var mean = sum / k;
@@ -277,11 +291,11 @@
             any = true;
             if (s.last) {
                 /* Whole frames at the speed: the same distance every frame,
-                   one rhythm of device pixels. A gap that is not whole
-                   frames (the interval still being learnt, a loaded
-                   machine whose frames come at 16.7 and 33.3 ms in turn)
-                   moves by its own time. A late frame catches up DT_MAX
-                   at most. */
+                   one rhythm of device pixels (a busy machine's frames at
+                   16.7 and 33.3 ms in turn are one and two frames). A gap
+                   that is not whole frames (the interval still being
+                   learnt, another screen not yet taken) moves by its own
+                   time. A late frame catches up DT_MAX at most. */
                 var due = now - s.last, n = f ? Math.round(due / f) : 0;
                 if (n && Math.abs(due - n * f) > f / 4) n = 0;
                 var ms = Math.min(n ? n * f : due, DT_MAX * 1000);

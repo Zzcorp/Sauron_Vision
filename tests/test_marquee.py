@@ -38,6 +38,22 @@ answering what the test queued). It moves a real pointer, wheel, keyboard
 and finger through the DevTools and samples each track's transform and the
 item at its left edge every frame. On main 349b1ca they fail: nothing moves.
 
+Measured on the clock the driver moves by (2026-11-13: on a loaded machine
+the measure, not the strips, failed). A step between two samples is timed by
+the timestamp of the frame the driver moved the strip at (each sample's f),
+not by the sampler's own performance.now() (its t): on a busy computer a
+frame's callbacks run late (up to 0.38 s measured) and the next frame's a few
+ms after, carrying the whole 50 ms catch-up, so by the wall clock a strip read
+66.7 px/s that moved 40 on its frames and 16.9 on the screen. Each measured
+window holds as many frames as it does at 60 Hz (a starved renderer gives it
+more time, never fewer frames); a phase starts where the hand's input reaches
+the page (an input landed up to 150 ms after it was sent). The wall clock
+stays the hand's: the marks, the waits, the finger's three seconds, and what
+the eye sees (never faster than the speed). One fault under load was the
+driver's (2026-11-14): when the machine drew every other frame for a second
+it took 33.3 ms for the screen's interval, and the news lost its rhythm; a
+busy machine's frame clock is replayed on the driver (CLOCK).
+
 The review of the first build (2026-11-13), each point measured here, red on
 e4e8a2d: Shift+Tab into a strip left the focus off screen (the clip's scroll
 was wrapped on the loop, trading the focused item for its twin); the loop's
@@ -55,6 +71,7 @@ synthetic. Skipped without Chromium.
 Run with:  python manage.py test tests.test_marquee
 """
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -197,8 +214,11 @@ TITLES = (
 
 #: Ahead of every script: a socket that never connects, a /partials/ticker/
 #: that answers what the test queued, the driver's frame requests counted
-#: by its file, and a tab whose visibility the test sets (headless
-#: Chromium is always visible).
+#: by its file, the timestamp each of its frames moved the strips by (the
+#: samples' clock) and how many it ran, and a tab whose visibility the test
+#: sets (headless Chromium is always visible). A tab opened with #mq-clock
+#: runs the driver's frames on the test's clock instead: each frame it asks
+#: for waits until __mqClock.step(t) runs it with the timestamp t.
 STUBS = r"""<script>
 (function () {
   window.WebSocket = function (u) { this.url = u; this.readyState = 0; };
@@ -214,11 +234,32 @@ STUBS = r"""<script>
     }
     return Promise.reject(new TypeError('offline'));
   };
-  var raf = window.requestAnimationFrame.bind(window);
+  var raf = window.requestAnimationFrame.bind(window), caf = window.cancelAnimationFrame.bind(window);
   window.__mqRaf = 0;
+  window.__mqTick = null;
+  window.__mqTicks = 0;
+  window.__mqClock = location.hash === '#mq-clock' ? { held: [], n: 0 } : null;
   window.requestAnimationFrame = function (cb) {
-    if (String((new Error()).stack || '').indexOf('sv-marquee.js') >= 0) window.__mqRaf++;
+    if (String((new Error()).stack || '').indexOf('sv-marquee.js') >= 0) {
+      window.__mqRaf++;
+      var run = function (t) { window.__mqTick = t; window.__mqTicks++; return cb(t); };
+      var c = window.__mqClock;
+      if (!c) return raf(run);
+      c.held.push({ id: --c.n, run: run });
+      return c.n;
+    }
     return raf(cb);
+  };
+  window.cancelAnimationFrame = function (id) {
+    var c = window.__mqClock;
+    if (c && id < 0) c.held = c.held.filter(function (h) { return h.id !== id; });
+    else caf(id);
+  };
+  if (window.__mqClock) window.__mqClock.step = function (t) {
+    var due = this.held;
+    this.held = [];
+    due.forEach(function (h) { h.run(t); });
+    return due.length;
   };
   window.__mqHidden = false;
   Object.defineProperty(Document.prototype, 'hidden', { configurable: true,
@@ -286,20 +327,126 @@ window.__mq = (function () {
     return out;
   }
   var rec = null;
+  /* One sample a frame, taken AFTER the frame: a message posted from the
+     frame's callback runs once its style, layout, ResizeObserver (where the
+     driver re-anchors a strip whose items changed width) and paint are
+     done, so a sample is the frame the eye sees. Read in the callback, a
+     width change made in a task (the painter's age tick repaints a price
+     whose state turned) showed for one sample before the re-anchor that
+     the screen never showed.
+     Each sample's f (ms): the frame time of the position it shows. The
+     driver moves a strip by its frames' timestamps, so a step is timed by
+     them, not by when the sampler ran (t): on a loaded machine a frame's
+     callbacks run late and the next frame's a few ms after, with a whole
+     catch-up. A driver frame since the last sample: its timestamp; none:
+     the sampled frame's own (the driver did not move the strip, which
+     stands at any time). */
   function start(names, vis) {
     marks = [];
-    var me = { names: names, out: {}, vis: !!vis };
+    var me = { names: names, out: {}, vis: !!vis, ticks: -1, f: -Infinity, ch: new MessageChannel() };
     names.forEach(function (n) { me.out[n] = []; });
-    rec = me;
-    (function loop() {
+    function take(ft) {
       if (rec !== me) return;
-      me.names.forEach(function (n) { me.out[n].push(snap(n, me.vis)); });
+      var f = window.__mqTicks !== me.ticks && window.__mqTick !== null ? window.__mqTick
+        : ft !== undefined ? ft : performance.now();
+      me.ticks = window.__mqTicks;
+      me.f = f = Math.max(f, me.f);
+      me.names.forEach(function (n) { var s = snap(n, me.vis); s.f = f; me.out[n].push(s); });
+    }
+    me.ch.port1.onmessage = function (e) { take(e.data); };
+    rec = me;
+    take();
+    requestAnimationFrame(function loop(ft) {
+      if (rec !== me) return;
+      me.ch.port2.postMessage(ft);
       requestAnimationFrame(loop);
-    })();
+    });
     return names.length;
   }
   function mark() { marks.push(performance.now()); return marks.length; }
   function stop() { var r = rec; rec = null; return JSON.stringify(r ? r.out : {}); }
+  /* A window by frames: once the current phase (the samples since the last
+     mark; with since, those since ms after its first) holds n frames of
+     every strip sampled, or after ms. A loaded machine gives fewer frames a
+     second: the window gets longer, never fewer frames. */
+  function frames(n, ms, since) {
+    var me = rec, t0 = performance.now();
+    return new Promise(function (resolve) {
+      (function poll() {
+        var k = me && rec === me ? Infinity : -1;
+        if (k > 0) {
+          me.names.forEach(function (nm) {
+            var o = me.out[nm], m = marks.length, c = 0, first = null;
+            for (var i = 0; i < o.length; i++) {
+              if (o[i].m !== m) continue;
+              if (first === null) first = o[i].t;
+              if (o[i].t - first >= (since || 0)) c++;
+            }
+            k = Math.min(k, c);
+          });
+        }
+        if (k < 0 || k >= n || performance.now() - t0 > ms) return resolve(k);
+        setTimeout(poll, 25);
+      })();
+    });
+  }
+  /* The same for the driver's own frames, nothing sampled. */
+  function ticks(n, ms) {
+    var t0 = performance.now();
+    return new Promise(function (resolve) {
+      (function poll() {
+        if (window.__mqTicks >= n || performance.now() - t0 > ms) return resolve(window.__mqTicks);
+        setTimeout(poll, 25);
+      })();
+    });
+  }
+  /* The driver's frames on the test's clock (a tab opened with #mq-clock):
+     each [t, phase, to] of seq runs the frame the driver asked for with the
+     timestamp t (phase: a new phase starts; to: both strips first put at
+     that offset), then each strip is read as the sampler reads it, with how
+     many frames ran and the frame interval the driver holds. */
+  function clock(seq) {
+    var out = { dh: [], ticker: [] }, m = -1;
+    seq.forEach(function (s) {
+      if (s[1]) m++;
+      if (s[2] !== null) {
+        ['dh', 'ticker'].forEach(function (n) { SVMarquee.to(parts(n).t, -s[2]); });
+      }
+      var ran = window.__mqClock.step(s[0]);
+      ['dh', 'ticker'].forEach(function (n) {
+        var p = parts(n);
+        out[n].push({ t: s[0], f: s[0], x: tx(p.t), P: period(p.t), m: m, ran: ran,
+                      fm: SVMarquee.state(p.t).frameMs });
+      });
+    });
+    return JSON.stringify(out);
+  }
+  /* Armed before the hand acts: the next event of `types` (one or more,
+     space-separated) on a strip's frame (or 'window', or 'reduced': the
+     reduced-motion query), heard after the page's own listeners there
+     (registered first) in the same dispatch, before any frame; with markIt
+     the next mark is set right there, where the hand's effect is.
+     window.__mqArmed resolves true, or false when none came in ms (marked
+     then all the same). */
+  function arm(on, types, markIt, ms, capture) {
+    var target = on === 'window' ? window
+      : on === 'reduced' ? matchMedia('(prefers-reduced-motion: reduce)') : parts(on).f;
+    types = types.split(' ');
+    window.__mqArmed = new Promise(function (resolve) {
+      var done = false;
+      function end(came) {
+        if (done) return;
+        done = true;
+        types.forEach(function (k) { target.removeEventListener(k, heard, !!capture); });
+        if (markIt) mark();
+        resolve(came);
+      }
+      function heard() { end(true); }
+      types.forEach(function (k) { target.addEventListener(k, heard, !!capture); });
+      setTimeout(function () { end(false); }, ms);
+    });
+    return 0;
+  }
   /* A point on the strip, left of its middle (the collapse tab is right). */
   function point(name) {
     var p = parts(name), c = p.c.getBoundingClientRect(), f = p.f.getBoundingClientRect();
@@ -428,7 +575,7 @@ window.__mq = (function () {
     return Array.prototype.map.call(document.querySelectorAll(sel), function (e) { return e.textContent.trim(); });
   }
   return { start: start, stop: stop, mark: mark, point: point, inside: inside, card: card,
-           waitCard: waitCard, armGone: armGone,
+           waitCard: waitCard, armGone: armGone, frames: frames, ticks: ticks, arm: arm, clock: clock,
            away: away, at: at, x: x, items: function (n) { return items(parts(n).t).length; },
            period: function (n) { return period(parts(n).t); }, focusInside: focusInside,
            activeIn: activeIn, stops: stops, glow: glow, shown: shown, text: text, writes: writes,
@@ -543,6 +690,29 @@ class _Tab:
     def wait(seconds):
         time.sleep(seconds)
 
+    def hold(self, seconds, since=0.0):
+        """A measured window: `seconds` of the hand's time, then until the
+        phase holds the frames a 60 Hz display gives in them (those `since`
+        seconds or more into the phase), up to a ceiling. A starved renderer
+        gave 5 to 21 frames a second under load: its windows get longer and
+        hold as many frames as anywhere, so the checks read as many steps."""
+        time.sleep(seconds)
+        self.js("__mq.frames(%d, %d, %d)" % (round((seconds - since) * 60),
+                                               1000 * max(3.0, 3 * (seconds - since)), 1000 * since))
+
+    def on(self, where, kind, act, mark=True, capture=False):
+        """The hand's act, and the next mark where its effect is: in the
+        dispatch of the `kind` event it causes on the page (after the page's
+        own listeners), not before the act is sent. On a loaded machine an
+        input reached the page up to 150 ms after it was sent."""
+        self.js("__mq.arm(%s, %s, %s, 5000, %s)" % (json.dumps(where), json.dumps(kind),
+                                                    "true" if mark else "false",
+                                                    "true" if capture else "false"))
+        act()
+        if not self.js("window.__mqArmed"):
+            self.js("__mq.stop(), 0")         # the tab left quiet for the scenarios after
+            raise AssertionError("no %s reached the page (%s)" % (kind, where))
+
 
 def _guard(got, name, fn):
     """Each scenario on its own: one that throws records why and the rest
@@ -558,7 +728,7 @@ def _guard(got, name, fn):
 def _run(tab):
     """Both strips, two seconds, as they come."""
     tab.sample(["dh", "ticker"])
-    tab.wait(2.0)
+    tab.hold(2.0)
     return tab.stop()
 
 
@@ -570,7 +740,7 @@ def _ambience(tab):
                    " document.body.classList.toggle('light-mode', %s); 0" % (mode, "true" if light else "false"))
             tab.wait(0.15)
             tab.sample(["dh", "ticker"])
-            tab.wait(0.8)
+            tab.hold(0.8)
             out["%s/%s" % (mode, "light" if light else "dark")] = tab.stop()
     tab.js("document.body.setAttribute('data-sv-ambience', 'magic'); document.body.classList.remove('light-mode'); 0")
     return out
@@ -582,7 +752,7 @@ def _dpr2(tab):
     try:
         tab.wait(0.4)
         tab.sample(["dh", "ticker"])
-        tab.wait(0.9)
+        tab.hold(0.9)
         return tab.stop()
     finally:
         tab.call("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 900,
@@ -591,7 +761,9 @@ def _dpr2(tab):
 
 
 def _cost(tab):
-    """A second of motion, nothing sampled: what the frames cost."""
+    """A second of motion and the 60 frames of the driver it gives at 60 Hz
+    (more time on a loaded machine), nothing sampled: what the frames
+    cost."""
     tab.call("Performance.enable", {})
 
     def metrics():
@@ -599,7 +771,9 @@ def _cost(tab):
         return {m["name"]: m["value"] for m in got}
     x0 = {n: tab.js("__mq.x('%s')" % n) for n in ("dh", "ticker")}
     m0 = metrics()
+    k0 = tab.js("window.__mqTicks")
     tab.wait(1.0)
+    tab.js("__mq.ticks(%d, 3000)" % (k0 + 60))
     m1 = metrics()
     x1 = {n: tab.js("__mq.x('%s')" % n) for n in ("dh", "ticker")}
     return {"layouts": m1["LayoutCount"] - m0["LayoutCount"],
@@ -611,13 +785,13 @@ def _hover(tab, name):
     tab.beat(False)
     try:
         tab.sample([name])
-        tab.wait(0.5)
-        tab.mark()
-        tab.move(tab.js("__mq.point('%s')" % name))
-        tab.wait(1.0)
-        tab.mark()
-        tab.move(tab.js("__mq.away()"))
-        tab.wait(1.0)
+        tab.hold(0.5)
+        point = tab.js("__mq.point('%s')" % name)
+        tab.on(name, "pointerenter", lambda: tab.move(point))       # 1: on it
+        tab.hold(1.0)
+        away = tab.js("__mq.away()")
+        tab.on(name, "pointerleave", lambda: tab.move(away))        # 2: left
+        tab.hold(1.0)
         return tab.stop()[name]
     finally:
         tab.beat(True)
@@ -626,18 +800,18 @@ def _hover(tab, name):
 def _wheel(tab, name):
     tab.beat(False)
     try:
+        point = tab.js("__mq.point('%s')" % name)
+        # the pointer on it, the strip held, before the first frame sampled
+        tab.on(name, "pointerenter", lambda: tab.move(point), mark=False)
         tab.sample([name])
-        tab.move(tab.js("__mq.point('%s')" % name))
-        tab.wait(0.4)
-        tab.mark()
-        tab.wheel(tab.js("__mq.point('%s')" % name), 0, 120)
-        tab.wait(0.4)
-        tab.mark()
-        tab.wheel(tab.js("__mq.point('%s')" % name), -80, 0)      # a trackpad's sideways swipe
-        tab.wait(0.4)
-        tab.mark()
-        tab.move(tab.js("__mq.away()"))
-        tab.wait(1.0)
+        tab.hold(0.4)
+        tab.on(name, "wheel", lambda: tab.wheel(point, 0, 120))                # 1: a notch
+        tab.hold(0.4)
+        tab.on(name, "wheel", lambda: tab.wheel(point, -80, 0))                # 2: a trackpad's sideways swipe
+        tab.hold(0.4)
+        away = tab.js("__mq.away()")
+        tab.on(name, "pointerleave", lambda: tab.move(away))                   # 3: away
+        tab.hold(1.0)
         return tab.stop()[name]
     finally:
         tab.beat(True)
@@ -657,9 +831,10 @@ def _seam(tab, name):
         tab.wait(0.2)
         before = -tab.js("__mq.x('%s')" % name)
         tab.sample([name], vis=True)
-        tab.mark()
-        tab.move(tab.js("__mq.away()"))
-        tab.wait(1.8)
+        away = tab.js("__mq.away()")
+        tab.on(name, "pointerleave", lambda: tab.move(away))
+        # 1.8 s and its 108 frames: at least 54 px however late the frames
+        tab.hold(1.8)
         return {"period": period, "placed": before, "order": tab.js("__mq.order('%s')" % name),
                 "samples": tab.stop()[name]}
     finally:
@@ -668,13 +843,11 @@ def _seam(tab, name):
 
 def _focus(tab, name):
     tab.sample([name])
-    tab.wait(0.5)
-    tab.mark()
-    key = tab.js("__mq.focusInside('%s')" % name)
-    tab.wait(1.0)
-    tab.mark()
-    tab.js("document.activeElement && document.activeElement.blur(); 0")
-    tab.wait(1.0)
+    tab.hold(0.5)
+    key = tab.js("__mq.mark(), __mq.focusInside('%s')" % name)
+    tab.hold(1.0)
+    tab.js("__mq.mark(); document.activeElement && document.activeElement.blur(); 0")
+    tab.hold(1.0)
     return {"key": key, "samples": tab.stop()[name]}
 
 
@@ -682,16 +855,14 @@ def _tab_key(tab):
     """The keyboard: Tab from the headband's collapse button reaches its
     first item, which the strip shows, and the strip holds."""
     tab.sample(["dh"])
-    tab.wait(0.4)
+    tab.hold(0.4)
     tab.js("document.querySelector('#dataHeadband .hb-collapse-btn').focus(); 0")
-    tab.mark()
-    tab.key("Tab", "Tab", 9)
+    tab.on("dh", "focusin", lambda: tab.key("Tab", "Tab", 9))        # 1: on the first item
     tab.wait(0.15)
     active = tab.js("__mq.activeIn('dh')")
-    tab.wait(1.0)
-    tab.mark()
-    tab.js("document.activeElement && document.activeElement.blur(); 0")
-    tab.wait(1.0)
+    tab.hold(1.0)
+    tab.js("__mq.mark(); document.activeElement && document.activeElement.blur(); 0")
+    tab.hold(1.0)
     return {"active": active, "samples": tab.stop()["dh"]}
 
 
@@ -701,20 +872,19 @@ def _card(tab, name, sel):
     tab.sample([name])
     tab.wait(0.4)
     at = tab.js("__mq.inside('%s')" % name)
-    tab.mark()                                   # 1: on the item, until its card opens
-    tab.move((at["x"], at["y"]))
+    tab.on(name, "pointerenter", lambda: tab.move((at["x"], at["y"])))   # 1: on the item, until its card opens
     opened = tab.js("__mq.waitCard('%s', 3000)" % sel)
-    tab.wait(0.3)
+    tab.hold(0.3)
     tab.mark()                                   # 2: on the card
     if opened:
         tab.move((opened["x"], opened["y"]))
-    tab.wait(0.9)
+    tab.hold(0.9)
     still_open = tab.js("__mq.card('%s')" % sel)
     tab.mark()                                   # 3: away, the card on its grace
     tab.js("__mq.armGone('%s', 3000, true)" % sel)   # 4: marked as the card closes
     tab.move(tab.js("__mq.away()"))
     closed = tab.js("window.__mqGone")
-    tab.wait(1.0)
+    tab.hold(1.0)
     return {"opened": opened, "stillOpen": still_open, "closed": closed,
             "samples": tab.stop()[name]}
 
@@ -732,13 +902,12 @@ def _pinned(tab):
     pinned = tab.js("__mq.waitCard('.dh-pop', 3000)")
     tab.mark()                                   # 1: hand away, card pinned
     tab.move(tab.js("__mq.away()"))
-    tab.wait(1.0)
+    tab.hold(1.0)
     held = tab.js("__mq.card('.dh-pop')")
-    tab.mark()                                   # 2: Escape
-    tab.js("__mq.armGone('.dh-pop', 3000, false)")
+    tab.js("__mq.armGone('.dh-pop', 3000, true)")    # 2: Escape, marked as the card closes
     tab.key("Escape", "Escape", 27)
     closed = tab.js("window.__mqGone")
-    tab.wait(1.0)
+    tab.hold(1.0)
     return {"pinned": pinned, "held": held, "closed": closed, "samples": tab.stop()["dh"]}
 
 
@@ -747,13 +916,11 @@ def _refetch(tab, answers, fresh_ids):
     driver (a headline at the front, then five more)."""
     tab.js("window.__mqAnswers = %s; 0" % json.dumps(answers))
     tab.sample(["ticker"])
-    tab.wait(0.6)
-    tab.mark()
-    tab.js("document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
-    tab.wait(2.0)
-    tab.mark()
-    tab.js("document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
-    tab.wait(2.0)
+    tab.hold(0.6)
+    tab.js("__mq.mark(); document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
+    tab.hold(2.0)
+    tab.js("__mq.mark(); document.dispatchEvent(new CustomEvent('sv:pin-unlocked')); 0")
+    tab.hold(2.0)
     present = tab.js("(function(){ var t = document.getElementById('tickerTrack');"
                      " return %s.map(function (id) { return t.querySelectorAll("
                      "'.ticker-item[data-news-id=\"' + id + '\"]').length; }); })()" % json.dumps(fresh_ids))
@@ -772,33 +939,31 @@ def _changes(tab, sweep, tick):
         target = tab.js("__mq.at('dh', 25)") + 10
         tab.wheel(xy, 0, target + tab.js("__mq.x('dh')"))
         tab.wait(0.2)
-        tab.move(tab.js("__mq.away()"))
+        away = tab.js("__mq.away()")
+        tab.on("dh", "pointerleave", lambda: tab.move(away), mark=False)   # running before it is sampled
         before = {"spx": tab.js("__mq.text('#dhTrack .dh-item[data-symbol=\"SPX500\"] .dh-val')"),
                   "jpy": tab.js("__mq.text('#dhTrack .dh-item[data-symbol=\"USDJPY\"] .dh-val')"),
                   "P": tab.js("__mq.period('dh')")}
         tab.sample(["dh"])
-        tab.wait(0.6)
-        tab.mark()                                     # 1: the region sweep
-        tab.js("window.__mqSweep = %s; window.svDhIngest(new DOMParser().parseFromString("
-               "window.__mqSweep, 'text/html')); 0" % json.dumps(sweep))
-        tab.wait(1.0)
-        tab.mark()                                     # 2: the painter's tick
-        tab.js("window.SVVenue.tick(%s); 0" % json.dumps(tick))
-        tab.wait(1.0)
+        tab.hold(0.6)
+        tab.js("__mq.mark(); window.__mqSweep = %s; window.svDhIngest(new DOMParser().parseFromString("
+               "window.__mqSweep, 'text/html')); 0" % json.dumps(sweep))        # 1: the region sweep
+        tab.hold(1.0)
+        tab.js("__mq.mark(); window.SVVenue.tick(%s); 0" % json.dumps(tick))    # 2: the painter's tick
+        tab.hold(1.0)
         after = {"spx": tab.js("__mq.text('#dhTrack .dh-item[data-symbol=\"SPX500\"] .dh-val')"),
                  "jpy": tab.js("__mq.text('#dhTrack .dh-item[data-symbol=\"USDJPY\"] .dh-val')"),
                  "P": tab.js("__mq.period('dh')")}
-        tab.mark()                                     # 3: two items out
-        tab.js("(function(){ var t = document.getElementById('dhTrack');"
+        tab.js("__mq.mark(); (function(){ var t = document.getElementById('dhTrack');"     # 3: two items out
                " var its = Array.prototype.filter.call(t.children, function (n) { return n.matches('.dh-item'); });"
                " var h = its.length / 2;"
                " window.__mqOut = [[its[1], its[2], its[3]], [its[h + 1], its[h + 2], its[h + 3]]];"
                " its[h + 1].remove(); its[h + 2].remove(); its[1].remove(); its[2].remove(); })(); 0")
-        tab.wait(1.0)
+        tab.hold(1.0)
         removed = tab.js("__mq.items('dh')")
-        tab.mark()                                     # 4: put back
-        tab.js("(function(){ window.__mqOut.forEach(function (o) { o[2].before(o[0], o[1]); }); })(); 0")
-        tab.wait(1.0)
+        tab.js("__mq.mark(); (function(){ window.__mqOut.forEach(function (o) { o[2].before(o[0], o[1]); });"
+               " })(); 0")                                                         # 4: put back
+        tab.hold(1.0)
         return {"before": before, "after": after, "removed": removed,
                 "restored": tab.js("__mq.items('dh')"), "samples": tab.stop()["dh"]}
     finally:
@@ -807,72 +972,70 @@ def _changes(tab, sweep, tick):
 
 def _hidden(tab):
     tab.sample(["dh", "ticker"])
-    tab.wait(0.5)
-    tab.mark()
-    tab.js("window.__mqHidden = true; document.dispatchEvent(new Event('visibilitychange')); 0")
+    tab.hold(0.5)
+    tab.js("__mq.mark(); window.__mqHidden = true; document.dispatchEvent(new Event('visibilitychange')); 0")
     tab.wait(0.15)
     r0 = tab.js("window.__mqRaf")
-    tab.wait(1.2)
+    tab.hold(1.2)
     r1 = tab.js("window.__mqRaf")
-    tab.mark()
-    tab.js("window.__mqHidden = false; document.dispatchEvent(new Event('visibilitychange')); 0")
-    tab.wait(1.0)
+    tab.js("__mq.mark(); window.__mqHidden = false; document.dispatchEvent(new Event('visibilitychange')); 0")
+    tab.hold(1.0)
     return {"frames": r1 - r0, "samples": tab.stop()}
 
 
 def _collapse(tab):
     tab.sample(["dh", "ticker"])
-    tab.wait(0.5)
-    tab.mark()
-    tab.js("document.querySelector('#dataHeadband .hb-collapse-btn').click(); 0")
+    tab.hold(0.5)
+    tab.js("__mq.mark(); document.querySelector('#dataHeadband .hb-collapse-btn').click(); 0")
     tab.wait(0.15)
     w0 = tab.js("__mq.writes.dh")
-    tab.wait(1.2)
+    tab.hold(1.2)
     w1 = tab.js("__mq.writes.dh")
-    tab.mark()
-    tab.js("document.querySelector('.hb-restore-tab.data').click(); 0")
-    tab.wait(1.2)
+    tab.js("__mq.mark(); document.querySelector('.hb-restore-tab.data').click(); 0")
+    tab.hold(1.2)
     return {"writes": w1 - w0, "samples": tab.stop()}
 
 
 def _reduced(tab):
     tab.sample(["dh", "ticker"])
     r0 = tab.js("window.__mqRaf")
-    tab.wait(1.2)
+    tab.hold(1.2)
     r1 = tab.js("window.__mqRaf")
-    tab.mark()                                     # 1: the wheel, under reduced motion
     xy = tab.js("__mq.point('dh')")
     tab.beat(False)
     tab.move(xy)
     tab.wait(0.2)
-    tab.wheel(xy, 0, 120)
-    tab.wait(0.4)
+    tab.on("dh", "wheel", lambda: tab.wheel(xy, 0, 120))              # 1: the wheel, under reduced motion
+    tab.hold(0.6)
     tab.mark()                                     # 2: the hand leaves
     tab.move(tab.js("__mq.away()"))
-    tab.wait(1.0)
-    tab.mark()                                     # 3: motion allowed again
-    tab.media(False)
-    tab.wait(1.2)
-    tab.mark()                                     # 4: reduced again
-    tab.media(True)
-    tab.wait(1.0)
+    tab.hold(1.0)
+    tab.on("reduced", "change", lambda: tab.media(False))             # 3: motion allowed again
+    tab.hold(1.2)
+    tab.on("reduced", "change", lambda: tab.media(True))              # 4: reduced again
+    tab.hold(1.0)
     tab.beat(True)
     return {"framesAtRest": r1 - r0, "samples": tab.stop()}
 
 
 def _touch(tab):
     tab.sample(["dh"])
-    tab.wait(0.6)
+    tab.hold(0.6)
     xy = tab.js("__mq.point('dh')")
-    tab.mark()                                     # 1: a finger down
-    tab.touch("touchStart", xy)
-    tab.wait(0.8)
-    tab.touch("touchMove", (xy[0] - 20, xy[1]))
-    tab.touch("touchMove", (xy[0] - 40, xy[1]))
-    tab.wait(0.2)
-    tab.mark()                                     # 2: lifted
-    tab.touch("touchEnd")
-    tab.wait(TOUCH_RESUME_S + 1.6)
+    tab.on("dh", "pointerdown", lambda: tab.touch("touchStart", xy))   # 1: a finger down
+    tab.hold(0.8)
+
+    def lift():
+        tab.touch("touchMove", (xy[0] - 20, xy[1]))
+        tab.touch("touchMove", (xy[0] - 40, xy[1]))
+        tab.wait(0.2)
+        tab.touch("touchEnd")
+    # 2: lifted, where the driver hears it (on the window, capturing): a
+    # pointerup, or the pointercancel the browser sends when it takes the
+    # moving finger for a pan. The frames counted are those after the
+    # finger's three seconds and 0.4 s more.
+    tab.on("window", "pointerup pointercancel", lift, capture=True)
+    tab.hold(TOUCH_RESUME_S + 1.6, since=TOUCH_RESUME_S + 0.4)
     return tab.stop()["dh"]
 
 
@@ -882,23 +1045,23 @@ def _drag(tab, name):
     try:
         href = tab.js("location.href")
         xy = tab.js("__mq.point('%s')" % name)
+        # the pointer on it, the strip held, before the first frame sampled
+        tab.on(name, "pointerenter", lambda: tab.move(xy), mark=False)
         tab.sample([name])
-        tab.move(xy)
-        tab.wait(0.4)
+        tab.hold(0.4)
         tab.mark()                                     # 1: pressed and dragged
         tab.press(xy)
         for k in range(1, 6):
             tab.move((xy[0] - 30 * k, xy[1]), buttons=1)
             tab.wait(0.03)
-        tab.release((xy[0] - 150, xy[1]))
-        tab.mark()                                     # 2: let go, the pointer on it
-        tab.wait(0.4)
-        tab.mark()                                     # 3: a wheel notch after the drag
-        tab.wheel((xy[0] - 150, xy[1]), 0, 100)
-        tab.wait(0.4)
-        tab.mark()                                     # 4: away
-        tab.move(tab.js("__mq.away()"))
-        tab.wait(1.0)
+        # 2: let go, the pointer on it (the drag lets go on the window's mouseup)
+        tab.on("window", "mouseup", lambda: tab.release((xy[0] - 150, xy[1])))
+        tab.hold(0.4)
+        tab.on(name, "wheel", lambda: tab.wheel((xy[0] - 150, xy[1]), 0, 100))   # 3: a wheel notch after the drag
+        tab.hold(0.4)
+        away = tab.js("__mq.away()")
+        tab.on(name, "pointerleave", lambda: tab.move(away))                     # 4: away
+        tab.hold(1.0)
         samples = tab.stop()[name]
         return {"samples": samples, "pinned": tab.js("!!document.querySelector('.sv-pinned')"),
                 "stayed": tab.js("location.href") == href}
@@ -919,18 +1082,18 @@ def _rhythm(tab):
         # the mark and the move in one task: the move is the phase's first step
         tab.js("__mq.mark(); SVMarquee.to(document.getElementById('dhTrack'), -%d);"
                " SVMarquee.to(document.getElementById('tickerTrack'), -%d); 0" % (1000 + 200 * k, 1000 + 200 * k))
-        tab.wait(1.5)
+        tab.hold(1.5)
     return tab.stop()
 
 
 def _stall(tab):
     """A long task on the page's main thread (300 ms): the strips freeze
-    with it, then go on from where they froze."""
+    with it, then go on from where they froze. The mark and the task in one
+    task: the phase's first frames are the stall's."""
     tab.sample(["dh", "ticker"])
-    tab.wait(0.6)
-    tab.mark()
-    tab.js("(function(){ var t = performance.now(); while (performance.now() - t < 300) {} })(); 0")
-    tab.wait(0.6)
+    tab.hold(0.6)
+    tab.js("__mq.mark(); (function(){ var t = performance.now(); while (performance.now() - t < 300) {} })(); 0")
+    tab.hold(0.6)
     return tab.stop()
 
 
@@ -945,9 +1108,9 @@ def _shift_tab(tab, name):
     tab.wait(0.1)
     stops = []
     for _ in range(3):
-        tab.mark()
-        tab.key("Tab", "Tab", 9, modifiers=SHIFT)
-        tab.wait(0.35)
+        # each stop marked where the focus lands in the strip
+        tab.on(name, "focusin", lambda: tab.key("Tab", "Tab", 9, modifiers=SHIFT))
+        tab.hold(0.35)
         stops.append(tab.js("__mq.activeIn('%s')" % name))
     keys = tab.js("__mq.stops('%s')" % name)
     tab.mark()                                   # 4: blurred
@@ -1002,14 +1165,14 @@ def _watch(tab):
     tab.mark()                                   # 1: on the watchlist item, its card opening
     tab.move((at["x"], at["y"]))
     opened = tab.js("__mq.waitCard('.wl-pop', 3000)")
-    tab.wait(1.0)
+    tab.hold(1.0)
     tab.mark()                                   # 2: pinned by a click, the hand away
     tab.press((at["x"], at["y"]))
     tab.release((at["x"], at["y"]))
     tab.move(tab.js("__mq.away()"))
     tab.wait(0.3)
     pinned = tab.js("__mq.card('.wl-pop')")
-    tab.wait(0.9)
+    tab.hold(0.9)
     holds = tab.js("SVMarquee.state(document.getElementById('dhTrack')).holds")
     tab.mark()                                   # 3: Escape
     tab.js("__mq.armGone('.wl-pop', 3000, false)")
@@ -1108,11 +1271,48 @@ def _shaky(tab):
     return out
 
 
+# ── a loaded machine's frame clock (2026-11-14) ──────────────────────────
+
+#: The frame clock of a loaded machine, replayed on the driver: each part is
+#: (the screen's Hz, its frames, one drawn in every, the offset both strips
+#: are first put at). A second at 60 Hz (the driver learns the screen's
+#: interval); a second in which the machine draws every other frame, the
+#: strips first put on a whole pixel as at page load (measured under load:
+#: frames 33 to 67 ms apart for a second); two seconds at 60 Hz again; then
+#: another screen, at 50 Hz, for a second and a half. Each part a phase.
+CLOCK = ((60, 60, 1, None), (60, 60, 2, 1000), (60, 120, 1, None), (50, 75, 1, None))
+
+
+def _frames(spec, t0=5000.0):
+    """[timestamp ms, a phase starts, offset or None] per frame drawn: on
+    the screen's grid, at 0.1 ms as Chromium hands them."""
+    out, start = [], t0
+    for hz, n, every, to in spec:
+        first = True
+        for k in range(1, n + 1):
+            if k % every:
+                continue
+            out.append([math.floor((start + k * 1000.0 / hz) * 10 + 0.5) / 10, 1 if first else 0,
+                        to if first else None])
+            first = False
+        start += n * 1000.0 / hz
+    return out
+
+
+def _clock(tab):
+    """The driver's own frames on CLOCK, nothing else moving it."""
+    return json.loads(tab.js("__mq.clock(%s)" % json.dumps(_frames(CLOCK))))
+
+
 # ── reading the samples ──────────────────────────────────────────────────
 
 def _steps(samples):
     """Each step between two frames: its time (s) and its move (px), a step
-    across the loop's seam unwrapped by the period."""
+    across the loop's seam unwrapped by the period. The time is the frame
+    clock (f), the one the driver moves the strip by: by the sampler's own
+    clock a frame that ran late and the next one a few ms after are a long
+    step that moved one frame and a short one that caught up 50 ms (2 px in
+    4 ms, "66.7 px/s"); on the frame clock each step is what it moved by."""
     out = []
     for a, b in zip(samples, samples[1:]):
         dx = b["x"] - a["x"]
@@ -1124,18 +1324,20 @@ def _steps(samples):
         elif period and dx < -period / 2:
             dx += period
             wrapped = True
-        out.append({"dt": (b["t"] - a["t"]) / 1000.0, "dx": dx, "wrapped": wrapped,
+        out.append({"dt": (b["f"] - a["f"]) / 1000.0, "dx": dx, "wrapped": wrapped,
                     "x": b["x"], "m": b["m"]})
     return out
 
 
 def _speed(samples):
-    """px per second, right to left positive. A step longer than the
-    driver's catch-up (CATCH_UP_S: the machine stalled the page, and the
-    strip goes on from where it froze) is left out: that is the machine's
-    time, not the strip's speed."""
-    st = [s for s in _steps(samples) if s["dt"] <= CATCH_UP_S]
-    total = sum(s["dt"] for s in st)
+    """px per second, right to left positive, on the frame clock. Every
+    step counts, each for no more than the driver's catch-up (CATCH_UP_S: a
+    frame later than that moves the strip that much, and it goes on from
+    where it froze): the time beyond is the machine's, not the strip's.
+    (Leaving the long steps out, by the sampler's clock, kept exactly the
+    short steps that follow a late frame and carry a whole catch-up.)"""
+    st = _steps(samples)
+    total = sum(min(s["dt"], CATCH_UP_S) for s in st)
     return sum(-s["dx"] for s in st) / total if total else 0.0
 
 
@@ -1144,15 +1346,22 @@ def _edge_speed(samples):
     to frame, while it stays the same item. Where the items change under
     the strip (a refetch, a sweep, the painter, rows in or out), the
     transform jumps by design to keep that item where it was; this is the
-    speed of what is shown."""
+    speed of what is shown. Timed as _speed is."""
     moved = total = 0.0
     for a, b in zip(samples, samples[1:]):
-        dt = (b["t"] - a["t"]) / 1000.0
-        if dt > CATCH_UP_S or not a["edge"] or not b["edge"] or a["edge"]["key"] != b["edge"]["key"]:
+        if not a["edge"] or not b["edge"] or a["edge"]["key"] != b["edge"]["key"]:
             continue
         moved += a["edge"]["left"] - b["edge"]["left"]
-        total += dt
+        total += min((b["f"] - a["f"]) / 1000.0, CATCH_UP_S)
     return moved / total if total else 0.0
+
+
+def _wall_speed(samples):
+    """px per second on the wall clock (t), over the whole window: what the
+    eye sees on the screen. A loaded machine makes it slower (frames far
+    apart catch up CATCH_UP_S each, no more); it cannot make it faster."""
+    span = (samples[-1]["t"] - samples[0]["t"]) / 1000.0
+    return sum(-s["dx"] for s in _steps(samples)) / span if span else 0.0
 
 
 def _span(samples):
@@ -1172,10 +1381,10 @@ def _phase(samples, m, skip=0.12):
 
 def _allow(speed, dt, lag=0.0):
     """The most a step between two samples may move: the speed for its
-    time and for one frame more (the sampler's frame callback and the
-    driver's take turns, so a sample can show the frame before), half again
-    for a late frame, and a device pixel and a half for the rounding. A
-    jump (a width change of one figure, a headline put in front) is more."""
+    time (frame time) and for one step more (the step before it, up to
+    0.1 s), half again for a late frame, and a device pixel and a half for
+    the rounding. A jump (a width change of one figure, a headline put in
+    front) is more."""
     return speed * (dt + min(lag, 0.1)) * 1.5 + 1.5
 
 
@@ -1195,7 +1404,7 @@ def _edge_jumps(samples, speed):
     bad, lag = [], 0.0
     for a, b in zip(samples, samples[1:]):
         ea, eb = a["edge"], b["edge"]
-        dt = (b["t"] - a["t"]) / 1000.0
+        dt = (b["f"] - a["f"]) / 1000.0
         if not ea or not eb:
             bad.append({"missing": True, "m": b["m"]})
             continue
@@ -1347,6 +1556,7 @@ class TheStripsMeasuredTests(TestCase):
             _guard(got, "fresh", lambda: _fresh(_Tab(chrome, uri), first, str(fresh[0].id)))
             _guard(got, "short", lambda: _short(_Tab(chrome, uri), short))
             _guard(got, "shaky", lambda: _shaky(_Tab(chrome, uri)))
+            _guard(got, "clock", lambda: _clock(_Tab(chrome, uri + "#mq-clock")))
         finally:
             chrome.close()
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1374,7 +1584,7 @@ class TheStripsMeasuredTests(TestCase):
         self.assertTrue(held and resumed, label)
         last = held[-1]
         first = resumed[0]
-        dt = (first["t"] - last["t"]) / 1000.0
+        dt = (first["f"] - last["f"]) / 1000.0
         self.assertLessEqual(abs(first["x"] - last["x"]), _allow(SPEED[name], dt),
                              "%s: a jump from %.1f to %.1f in %.3f s" % (label, last["x"], first["x"], dt))
         self.assertEqual(_jumps(resumed, SPEED[name]), [], label)
@@ -1388,6 +1598,11 @@ class TheStripsMeasuredTests(TestCase):
         for name in ("dh", "ticker"):
             with self.subTest(strip=name):
                 self.assertSpeed(run[name], name)
+                # What the eye sees, on the wall clock: never faster than its
+                # speed. A busy computer only makes it slower (measured: down
+                # to 10 px/s for a while; never above 41 / 30.8 over 0.5 s).
+                v = _wall_speed(run[name])
+                self.assertLessEqual(v, SPEED[name] * 1.15, "%s on the screen: %.1f px/s" % (name, v))
 
     def test_the_motion_is_continuous(self):
         run = self.scenario("run")
@@ -1669,6 +1884,36 @@ class TheStripsMeasuredTests(TestCase):
                 for m in range(1, 5):
                     self.assertSpeed(_phase(got[name], m, skip=0.05), name, label="phase %d" % m)
 
+    def test_frames_a_busy_machine_drops_leave_the_rhythm_even(self):
+        """A busy machine draws every other frame for a while (measured
+        with every core busy: frames 33 to 67 ms apart for a second). Those
+        gaps are two frames of the same screen, not a slower screen: the
+        driver keeps the screen's interval, so the frames that follow at
+        16.7 ms are still one frame each (half a pixel of news) and the
+        steps keep their rhythm. On 82e74c9 the median of the last 40 gaps
+        became 33.3 ms and the driver took it for the screen's interval:
+        the frames at 16.7 ms were then not whole frames, moved by their own
+        time, and the news stood two frames and stepped two, the frame
+        clock's 0.1 ms jitter deciding each rounding (the review's defect of
+        e4e8a2d, back under load: with every core busy the rhythm above
+        failed on it, read on the frame clock). Another screen is still
+        taken: at 50 Hz the strips keep their speed. The driver's own
+        frames, on a clock the test replays (CLOCK): no load needed, the
+        same answer every run."""
+        got = self.scenario("clock")
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                samples = got[name]
+                self.assertEqual({s["ran"] for s in samples}, {1}, "not one frame asked for a frame")
+                dropped = [s for s in samples if s["m"] in (1, 2)]
+                self.assertEqual(_rhythm_faults(dropped, SPEED[name]), [])
+                self.assertEqual(sorted({round(s["fm"], 3) for s in dropped}), [16.667],
+                                 "the screen's interval lost to dropped frames")
+                # A driver that never took a longer interval would run at
+                # 16.7 ms a frame of 20: five sixths of its speed.
+                other = [s for s in samples if s["m"] == 3]
+                self.assertSpeed(other[len(other) // 2:], name, label="a 50 Hz screen")
+
     def test_a_long_task_freezes_it_and_it_goes_on_without_a_skip(self):
         """A 300 ms task on the main thread freezes a strip moved by script;
         after it the strip catches up one frame at most (CATCH_UP_S), it
@@ -1678,11 +1923,15 @@ class TheStripsMeasuredTests(TestCase):
             with self.subTest(strip=name):
                 samples = got[name]
                 st = _steps(samples)
-                at = max(range(len(st)), key=lambda i: st[i]["dt"])
+                # The task began with the mark. On the frame clock the stall
+                # is the step into the phase or, the first frame after the
+                # task carrying the stale timestamp of the frame then due
+                # (one frame moved), one of the next: the longest of those.
+                first = next(i for i, s in enumerate(st) if s["m"] == 1)
+                at = max(range(first, min(first + 4, len(st))), key=lambda i: st[i]["dt"])
                 self.assertGreaterEqual(st[at]["dt"], 0.25, "no stall seen")
-                # The frame that ends the stall can carry a stale clock, and
-                # the catch-up lands a frame or two after it: the stall's
-                # step and every step in the 60 ms after it.
+                # The stall's step and every step in the 60 ms after it (a
+                # catch-up a frame late is counted too).
                 after, spent = [st[at]], 0.0
                 for s in st[at + 1:]:
                     if spent + s["dt"] > 0.06:
