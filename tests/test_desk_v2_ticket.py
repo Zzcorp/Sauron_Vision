@@ -1023,8 +1023,14 @@ class DealTicketMeasuredTests(_Desk):
         self.assertFalse([d for d in drawn if re.search(r"\d\.\d", d)], drawn)
         # a stale ticket keeps its geometry: no box changes size or place
         # within the ticket when it goes stale (the page's entrance may
-        # still be easing it down, so its own top is not compared)
-        rel = lambda boxes: [[b[0] - boxes[0][0], b[1] - boxes[0][1], b[2], b[3]] for b in boxes]
+        # still be easing it down, so its own top is not compared). Read to
+        # a hundredth of a pixel, under the 1/64 px layout unit: the
+        # entrance's transform hands back a 42 px box as 42 +- 2^-17 from
+        # one read to the next (float32 noise; #113's CI on 76d44cb read
+        # 41.99999237 against 42.00000763), while any real move or resize
+        # is at least one layout unit.
+        rel = lambda boxes: [[round(v, 2) for v in (b[0] - boxes[0][0], b[1] - boxes[0][1], b[2], b[3])]
+                             for b in boxes]
         self.assertEqual(rel(stale["ticked"]), rel(self.got["ticked"]["after"]))
 
     def test_a_shut_market_or_no_price_reads_muted(self):
