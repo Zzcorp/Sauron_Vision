@@ -685,7 +685,16 @@ def _spend_the_turns_behind_the_lock(c, at=None) -> None:
     the running pass had taken it 25 s or more before: a turn taken late
     left the old beat's next one unspent, and with beats late inside their
     10 s expiry a price-read stall made eToro sick up to about 60 s sooner
-    than the old beat (the recheck: 57.3 s).
+    than the old beat (the recheck: 57.3 s). On the grid (the fifth round,
+    2026-11-14), what this rule cannot do: a half minute's first beat that
+    starts late, after the long pass has ended, finds no lock to stand
+    behind, takes its turn and notes, so late first beats can note in
+    three half minutes running where the old beat's lock lost one (a
+    price-read stall up to 45.2 s sooner than the old beat at some
+    phases; 16.2 s at most at the recheck's); and where the beat's drift
+    leaves a half minute with one beat inside such a stall, that beat
+    spends its turn here and the next half minute's first, finding the
+    lock free, notes 45 s after the last note, once (the old beat: 60 s).
 
     NOT THE TURN OF A QUIET PASS: one between two old beats that runs over
     an old beat leaves that beat's turn to the next pass, as before.

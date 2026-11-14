@@ -54,7 +54,17 @@ change. Two tests pin what the words now say: the beat's own drift (each
 run dated from the instant the beat sent the last one) brings, each time
 its phase crosses a window's edge, two turns half a window apart, in two
 windows, never two in one; and by the clock two shock asks can come 6 s
-apart, each from its own minute's beats.
+apart, each from its own minute's beats (as close as 5 s inside the 25 s
+expiry).
+
+THE FIFTH ROUND (the recheck of the fourth, 2026-11-14): no behaviour
+change. Two tests pin what a price-read stall does on the grid where the
+words had said less: on time, a drift crossing inside the stall brings two
+notes 45 s apart, once (the old 30 s beat: never under 60 s behind such
+passes); and with beats late inside their expiry, the first beats of three
+half minutes running can each start after the pass before them has ended
+and note, so eToro turns sick 45.2 s sooner than the old beat would have:
+past one old beat on the sooner side too.
 
 Fakes only: no network, broker or model call.
 
@@ -313,13 +323,16 @@ class AQuotesBeatTheLockHoldsSpendsTheOldBeatsTurnTests(_QuotesCase):
 
 # ── The quotes' turns on the grid ─────────────────────────────────────────
 
-def _quotes_beats(case, beats, *, base, trouble=None):
+def _quotes_beats(case, beats, *, base, trouble=None, sent=None):
     """eq.refresh() at each of `beats` (seconds after `base`, ascending) on
     a clock the test moves. `trouble(t)` gives (wait_s, status) for a
     rates GET sent t seconds after `base`, or None (answered at once,
     200): the GET waits `wait_s` and answers `status`, and a beat that
     comes during the wait is served inside it, as the worker serves it
     beside the running pass (refresh() then meets that pass's own lock).
+    Each run's turns are keyed on its start, or, with `sent` ({beat:
+    seconds after `base` its beat sent it}), on the instant its beat sent
+    it, as the worker's runs are (refresh's `at`).
     Returns ({beat: out}, [seconds after `base` of each noted failure],
     [seconds after `base` of each pass that held its account's turn])."""
     clock = _Clock(base)
@@ -328,11 +341,16 @@ def _quotes_beats(case, beats, *, base, trouble=None):
     wire_get = case.wire.get
     quiet = eq._quiet_between_noting_passes
 
+    def run(b):
+        if sent is None:
+            return eq.refresh()
+        return eq.refresh(at=base + sent[b])
+
     def serve(until):
         for b in beats:
             if b not in outs and clock.t < base + b <= until:
                 clock.t = base + b
-                outs[b] = eq.refresh()
+                outs[b] = run(b)
         clock.t = until
 
     def get(url, **kw):
@@ -360,7 +378,7 @@ def _quotes_beats(case, beats, *, base, trouble=None):
             if b in outs:
                 continue
             clock.t = base + b
-            outs[b] = eq.refresh()
+            outs[b] = run(b)
     noted = [(parse_datetime(f["at"]) - t0).total_seconds()
              for f in _failures()]
     return outs, noted, held
@@ -452,6 +470,79 @@ class TheQuotesTurnsSitOnTheGridTests(_QuotesCase):
         self.assertEqual(held, [19.4, 92.4])
         self.assertIsNone(vh.sick("etoro", "live", now=datetime.fromtimestamp(
             ON_THE_MINUTE + 126.2, tz=UTC)))
+
+    def test_a_drift_crossing_inside_a_stall_brings_two_notes_45_s_apart(
+            self):
+        """THE BEAT'S DRIFT INSIDE A PRICE-READ STALL (the fifth round,
+        2026-11-14). Every rates read sent in the first 100 s waits 16.85 s
+        and answers 503 (passes of 33.7 s), every beat on time. The beat
+        dates each run from the instant it sent the last one, here 2 ms
+        late a run, so its phase crosses a half minute's edge: the beats at
+        14.996 and 29.998 share the first half minute, the one at 45.000 is
+        alone in the second, those at 60.002 and 75.004 share the third.
+        The pass at 14.996 takes its half minute's turn as its first beat
+        and notes at 48.7. Behind it the lone beat of the second half
+        minute finds the lock held and spends that half minute's turn, as
+        the old beat behind a long pass lost its own (F2). The beat at
+        60.002, first of the third, finds the lock free, takes the turn and
+        notes at 93.7: 45 s after the first note, once. Without the
+        crossing the next note comes 90 s after the first (test_a_pass_
+        outliving_30_s_notes_no_closer_than_the_old_beat), and the old
+        30 s beat noted 60 s apart behind such passes, never closer. One
+        turn per half minute still, never two: the gap by the clock is
+        what shrinks."""
+        beats = [round(14.996 + 15.002 * k, 3) for k in range(11)]
+        outs, noted, held = _quotes_beats(
+            self, beats, base=ON_THE_MINUTE,
+            trouble=lambda t: (16.85, 503) if t < 100 else None)
+        self.assertEqual(beats[:5], [14.996, 29.998, 45.0, 60.002, 75.004])
+        self.assertEqual([round(n, 1) for n in noted], [48.7, 93.7])
+        self.assertEqual(held, [14.996, 60.002, 120.01, 150.014])
+        for s in (29.998, 45.0, 75.004, 90.006):
+            self.assertEqual(outs[s].get("skipped"), "a pass is running", s)
+        windows = [vh.old_beat_window(eq.TURN_S, ON_THE_MINUTE + s)
+                   for s in held]
+        self.assertEqual(len(set(windows)), len(windows))
+
+    def test_late_beats_in_a_stall_can_note_three_half_minutes_running(
+            self):
+        """THE SOONER SIDE PAST ONE OLD BEAT (the fifth round, 2026-11-14:
+        one of the recheck's runs, moved to this clock). Every rates read
+        waits 16.85 s and answers 503 (passes of 33.7 s). The 15 s beat
+        sends at 14.938 s past each half minute and 15 s later; the worker
+        starts each run up to 10 s late (inside the expiry), each keyed on
+        the instant its beat sent it. Each half minute's first beat (sent
+        at 14.938, 44.938, 74.938) starts just after the pass before it
+        ended (at 15.5, 50.1, 84.7): it finds the lock free, takes its half
+        minute's turn and notes, at 49.2, 83.8 and 118.4, so eToro is sick
+        at 118.4. The second beats, and the first beat of the fourth half
+        minute (sent at 104.938), find the lock held. The old 30 s beat,
+        whose beats are this beat's second ones with the same lateness
+        (sent at 29.938, 59.938, 89.938 and 119.938, started at 34.2, 69.7,
+        95.0 and 129.9), ran passes at 34.2, 69.7 and 129.9 (its beat at
+        95.0 found the lock held, and was gone) and noted at 67.9, 103.4
+        and 163.6: sick at 163.6, 45.2 s later. One note per half minute,
+        never two, but in three half minutes running where the old beat's
+        lock lost one: per incident sooner than the old beat by more than
+        its 30 s (the recheck: 1 run of 1314 past 30 s, 21 past 16.2 s).
+        Sick sooner holds new real entries sooner; closes and stop moves
+        are never held."""
+        runs = [(14.938, 15.5), (29.938, 34.2), (44.938, 50.1),
+                (59.938, 69.7), (74.938, 84.7), (89.938, 95.0),
+                (104.938, 110.0), (119.938, 129.9)]
+        outs, noted, held = _quotes_beats(
+            self, [start for _sent, start in runs], base=ON_THE_MINUTE,
+            trouble=lambda t: (16.85, 503),
+            sent={start: sent for sent, start in runs})
+        self.assertEqual([round(n, 1) for n in noted], [49.2, 83.8, 118.4])
+        self.assertEqual(held, [15.5, 50.1, 84.7])
+        for s in (34.2, 69.7, 95.0, 110.0):
+            self.assertEqual(outs[s].get("skipped"), "a pass is running", s)
+        self.assertIn("eToro is sick", outs[129.9].get("skipped", ""))
+        self.assertIsNotNone(vh.sick("etoro", "live", now=datetime.fromtimestamp(
+            ON_THE_MINUTE + 118.5, tz=UTC)))
+        self.assertTrue(all(round(b - a, 1) == 34.6
+                            for a, b in zip(noted, noted[1:])), noted)
 
     def test_a_pass_etoro_being_sick_skips_still_spends_its_window(self):
         """The pass at 0 finds eToro sick and reads nothing: it spends its

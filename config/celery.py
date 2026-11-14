@@ -781,8 +781,10 @@ app.conf.beat_schedule = {
     # late moves every later one: at 5 ms a run, about every 50 h; the fourth
     # round, 2026-11-14). Late, they keep their minute and come no closer than
     # 60 s less the lateness, as at 60 s, but 30 s less after a minute whose
-    # first beat was idle or dropped (6 s by the clock), where the 60 s beat's
-    # came no closer than 36 s. WHEN A HICCUP TURNS eTORO SICK, measured on the
+    # first beat was idle or dropped: by the clock their passes can start as
+    # close as 5 s apart (30 s less a lateness under the 25 s expiry; 6.7 s
+    # measured with passes 0 to 24 s late, where the 60 s beat's came no
+    # closer than 36 s). WHEN A HICCUP TURNS eTORO SICK, measured on the
     # real code (the PR's third round): with every pass on time and REAL read
     # first, a 5xx or 429 hiccup of 10 to 90 s with exactly the 60 s beat's
     # odds over the clock's phases (5.6, 22.2, 50.0, 75.0, 100 and 100 %), each
@@ -858,11 +860,23 @@ app.conf.beat_schedule = {
     # over all five stall shapes (864 runs), where the 30 s beat was sick
     # (290) later (by up to 60 s, two old beats) or not at all in 187,
     # sooner by at most 15 s in 47, and sick only here in 9; with beats up
-    # to 10 s late behind 34 s passes (216 runs), sooner in 6, by at most
-    # 16.2 s, later by up to 64.7 s, never sick where the 30 s beat was not
-    # (until the third round: up to 57.3 s sooner), and two notes as close
-    # as 34.0 s (the 30 s beat: 33.8 s). The passes between grant no 429
-    # pause.
+    # to 10 s late behind 34 s passes (216 runs at the PR's phases), sooner
+    # in 6, by up to 16.2 s there, later by up to 64.7 s, never sick where
+    # the 30 s beat was not (until the third round: up to 57.3 s sooner),
+    # and two notes as close as 34.0 s (the 30 s beat: 33.8 s). Not bounds
+    # (the fifth round, 2026-11-14): a late beat can start after a long pass
+    # has ended where on time the lock would have held it, so late first
+    # beats can note in three half minutes running where the 30 s beat's
+    # lock lost one, and at other phases such a stall made eToro sick up to
+    # 45.2 s sooner than the 30 s beat, past its one old beat (1 of 1314
+    # runs; 21 past 16.2 s), and, with the beat's drift too, sick where the
+    # 30 s beat was not in 3 of 198 (sick sooner holds new real entries
+    # sooner, the cautious way). On time, where the drift's crossing (a half
+    # minute left with one beat) falls inside a stall behind passes of 30 to
+    # 45 s, that lone beat finds the lock held and spends its half minute's
+    # turn (F2), and the next half minute's first finds it free and notes:
+    # two notes 45 s apart, once (the 30 s beat never under 60 s there).
+    # The passes between grant no 429 pause.
     # The cap judges a pass at the instant it starts (etoro_quotes.
     # _note_sent), so a steady pass is never blank.
     "refresh-etoro-quotes": {

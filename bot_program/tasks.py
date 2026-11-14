@@ -1497,8 +1497,8 @@ def sync_etoro_accounts():
                 # dip shorter than a minute caught exactly as often as at
                 # 60 s at every phase; with passes 0 to 24 s late one a
                 # minute, 36 to 84 s apart from the third minute on (at
-                # 60 s 37 to 84 s; the first two after a cold start as
-                # close as 7 s), a 10, 30
+                # 60 s 37 to 84 s; the first two after a cold start 6.8 s
+                # apart at the closest), a 10, 30
                 # and 59 s dip caught 18.9, 48.3 and 90.0 % of the time
                 # over the clock's phases against 17.8, 43.3 and 88.9 %, as
                 # often within sampling (the 60 s beat's very runs in half
@@ -1509,13 +1509,15 @@ def sync_etoro_accounts():
                 # read every third beat), asks 30 to 90 s apart, a 59 s dip
                 # caught 83.3 % against 100 %, and with passes also 0 to
                 # 24 s late both beats of a minute can find the lock held,
-                # that minute unasked: asks 7 to 142 s apart (two under
+                # that minute unasked: asks 6.7 to 142 s apart (two under
                 # 30 s apart in most runs; at 60 s never under 36 s),
                 # 80.0 % against 91.1 %. Never two from one minute's
-                # beats; by the clock as close as 6 s where a minute's
-                # first beat was idle or dropped and its second ran late
-                # (the fourth round, 2026-11-14). The operator decides any
-                # change to it.
+                # beats; by the clock, where a minute's first beat was
+                # idle or dropped (or at a cold start) and its second ran
+                # late, the next minute's first may ask on time: their
+                # passes as close as 5 s apart (30 s less a lateness under
+                # the 25 s expiry; the fourth round, 2026-11-14, and the
+                # fifth). The operator decides any change to it.
                 # The pools above are still resized from every pass.
                 if holds_turn:
                     _shock_trigger(user, now)

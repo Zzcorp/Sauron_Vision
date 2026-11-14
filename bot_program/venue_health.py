@@ -268,8 +268,19 @@ def old_beat_turn(key: str, beat_s: float, *, at: float) -> bool:
         made it: two never closer than an old beat less the lateness, as
         the old beat's own late passes, but half a beat less after a
         window whose first beat was idle or dropped, its second holding
-        the turn: by the clock two sync turns as close as 6 s, each in its
-        own window. A run that carries no send instant is keyed on its start: a
+        the turn: by the clock two sync turns' passes as close as 5 s
+        apart (30 s less a lateness under the 25 s expiry; 6.7 s measured
+        with passes 0 to 24 s late), each in its own window. Lateness also
+        decides which beats a long pass's lock idles: a late beat can
+        start after that pass has ended where on time the lock would have
+        held it, so behind passes that outlive their beat late beats can
+        hold their windows' turns in consecutive windows where the old
+        beat's lock lost one, and per incident the instant eToro turns
+        sick can then come sooner than the old beat's by more than one old
+        beat (the fifth round, 2026-11-14: a price-read stall up to 45.2 s
+        sooner than the 30 s beat; config/celery.py), as the lock already
+        made it later by more than one (its caller says). A run that
+        carries no send instant is keyed on its start: a
         window's second beat started late enough to fall in the next
         window would take that window's turn ahead of its first beat
         (measured in the third round before keying on the send instant,
