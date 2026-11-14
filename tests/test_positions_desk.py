@@ -566,6 +566,11 @@ MAIN_SHA = {
 MAIN_FORMS = [("post", ["csrfmiddlewaretoken"]), ("post", ["csrfmiddlewaretoken"]),
               ("get", ["class", "group", "side", "sort", "symbol", "tab", "venue"]),
               ("post", ["csrfmiddlewaretoken"])]
+#: The desk v2 frame (B1, #115) adds one form to the shell, second on the
+#: page: the top bar's command bar (form.sv-cmd), a GET search with q alone
+#: that goes to an instrument or the instruments list. No money moves
+#: through it; tests/test_shell_frame_measured.py holds its behaviour.
+FRAME_COMMAND_BAR = ("get", ["q"])
 
 
 class MoneyControlsUnchangedTests(SimpleTestCase):
@@ -598,14 +603,21 @@ class MoneyControlsUnchangedTests(SimpleTestCase):
 class PageFormsTests(TestCase):
 
     def test_the_page_s_forms_are_main_s(self):
+        """Updated deliberately (stacked on the desk v2 frame, B1 #115, the
+        board approved 2026-11-13: "amazing work, bravo, I need it fast!!"):
+        the frame's command bar is read apart, exactly one, second on the
+        page, a GET with q alone; every other form is main's, in main's
+        order, as before."""
         _user, client = desk_client("desk_forms")
         page = _get(client, "/positions/")
         forms = []
         for m in re.finditer(r"<form\b([^>]*)>(.*?)</form>", page, re.S):
             method = (re.search(r'method="([^"]*)"', m.group(1)) or [None, "get"])[1]
             names = sorted(set(re.findall(r'name="([^"]+)"', m.group(2))))
-            forms.append((method.lower(), names))
-        self.assertEqual(forms, MAIN_FORMS)
+            forms.append((method.lower(), names, bool(re.search(r'class="sv-cmd"', m.group(1)))))
+        self.assertEqual([i for i, form in enumerate(forms) if form[2]], [1], forms)
+        self.assertEqual(forms[1][:2], FRAME_COMMAND_BAR)
+        self.assertEqual([form[:2] for form in forms if not form[2]], MAIN_FORMS)
 
 
 # ══════════════════════════════════════════════════════════════════════════
