@@ -33,16 +33,46 @@ SPECIMEN_CLASS = re.compile(r"(?<![\w-])(dk-icon|dk-chip-sample|dk-scale-row)(?!
 #: and the moments draw the Eye's light, which is theirs to draw.
 MAGIC_SCRIPTS = ("static/js/sv-embers.js", "static/js/sv-moments.js")
 #: The frame's sheet (B1, the desk v2 board the operator approved on
-#: 2026-11-13): it sizes the magic's light to the board's frame, and that
-#: light is read as the kit's is (magic_rule()): the rules it scopes to the
-#: ambience (the Eye's breath in the 44 px head, the feed pill's live dot,
-#: the docked Eye's glow under Magic and Calm), and the docked Eye itself,
-#: Ask Sauron's orb at the bar's end, a sphere of the Eye's light the board
-#: draws in every ambience (Desk2's .orb). Every other rule written there is
-#: read like any sheet's, and the old floating Eye's rules (sauron.css,
-#: sv-overlay.css) are still counted under the same class.
+#: 2026-11-13) draws the magic's light where the board draws it, and its
+#: lights are named here one by one (frame_light()): each by its selector,
+#: its property and its value as the sheet writes them (white space aside).
+#: Only those are read as the magic's own, their Eye literal, glow and
+#: gradient not counted:
+#:   under Magic and Calm, the Eye's halo in the 44 px head and the feed
+#:   pill's live dot (Desk2's .dot.live);
+#:   the docked Eye, Ask Sauron's orb at the bar's end (Desk2's .orb): its
+#:   sphere, ring and core in every ambience (.amb-off .orb keeps them),
+#:   its glow under Magic and Calm.
+#: Anything else written there is read like any sheet's: another selector
+#: (one that only names the orb's class or the ambience, in :not(), :is(),
+#: :where() or :has(), or before a sibling; a descendant of the orb; a
+#: list with one more item), another property, another value, another
+#: ambience. The review of #115's guard rules (on a0a6b7a) found the sheet
+#: read like the kit's (any rule naming the ambience, any rule whose items'
+#: subjects named the orb's class), which let a glow, an Eye literal or a
+#: gradient onto any element there. The old floating Eye's rules
+#: (sauron.css, sv-overlay.css) are counted under the same class.
 FRAME_SHEET = "static/css/sv-frame.css"
-FRAME_EYE = re.compile(r"\.se-eye-fab(?![\w-])")
+_FRAME_LIT = 'html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"])'
+FRAME_LIGHT = (
+    (_FRAME_LIT + " .sidebar .sidebar-brand .brand-eye-wrap::before", "background",
+     "radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%)"),
+    (_FRAME_LIT + " .live-status-pill .lsp-green", "box-shadow", "var(--sv-glow-dot)"),
+    ("html body .se-eye-fab:not(.open)", "background",
+     "radial-gradient(circle at 38% 34%, rgba(220,255,235,.55) 0 8%, rgba(0,232,104,.35) 22%, "
+     "rgba(4,30,16,.95) 62%, var(--sv-bg-0) 100%)"),
+    ("html body .se-eye-fab:not(.open)", "box-shadow", "inset 0 0 0 1px rgba(0,232,104,.55)"),
+    ("html body .se-eye-fab:not(.open)::after", "background",
+     "radial-gradient(circle, rgba(0,232,104,.95), rgba(0,232,104,0) 70%)"),
+    (_FRAME_LIT + " .se-eye-fab:not(.open)", "box-shadow",
+     "inset 0 0 0 1px rgba(0,232,104,.55), 0 0 10px rgba(0,232,104,.28)"),
+)
+#: The tower's Eye (B1, the desk v2 board: Barad-dûr's silhouette in the
+#: menu's empty foot, Twist2's "la tour en filigrane"): one fill of the
+#: Eye's token, in the frame's sheet, a faint ember at its dose in the same
+#: rule (frame_ember()). The tower is no place of the brand: a rule or a
+#: template that names it is read like any other.
+FRAME_EMBER = (".sv-tower .sv-tower-eye", "fill", "var(--sv-eye)", ("fill-opacity", ".35"))
 #: The files whose hex colours must be token values (emails, PDF, tags).
 PALETTE_FILES = re.compile(r"^(templates/email/|templates/newsletter/|core/templatetags/|"
                            r"dashboard/reports\.py$|dashboard/views_bot_charts\.py$)")
@@ -175,13 +205,10 @@ TEXT_OR_BORDER = re.compile(r"^(color|-webkit-text-fill-color|caret-color|text-d
 #: Where the Eye may draw text or a border (plan §3.3): focus, selection,
 #: the brand, the active nav row, the empty-state mark. Read per item of a
 #: selector list: the role is the item's subject's (its last compound), or
-#: an ancestor that is one of the named places. The brand's places include
-#: its tower (B1, the desk v2 board: Barad-dûr's silhouette, drawn only in
-#: an empty space, the menu's foot; its Eye a faint ember of the brand's
-#: green, Twist2's "la tour en filigrane").
+#: an ancestor that is one of the named places.
 EYE_ROLE = re.compile(r":focus|:checked|\[aria-(selected|pressed|current|checked|expanded)|\.is-(active|selected|on)\b|"
                       r"\.active\b|\.selected\b|\.sv-pinned\b|::selection")
-EYE_PLACE = re.compile(r"\.sidebar-brand\b|\.brand\b|empty-state|\.nav-link\.active\b|\.sv-tower(?![\w-])")
+EYE_PLACE = re.compile(r"\.sidebar-brand\b|\.brand\b|empty-state|\.nav-link\.active\b")
 VISUAL = re.compile(r"^(color|background(-[a-z]+)?|border(-[a-z]+)*|outline(-[a-z]+)?|font(-[a-z]+)?|"
                     r"letter-spacing|text-transform|text-shadow|box-shadow|filter|-webkit-text-fill-color|"
                     r"fill|stroke|text-decoration(-color)?|accent-color|caret-color|backdrop-filter)$")
@@ -298,17 +325,24 @@ def eye_role(selector):
     return all(EYE_ROLE.search(subject(item)) or EYE_PLACE.search(item) for item in selector_items(selector))
 
 
-def magic_rule(selector, where):
-    """Whether a rule is the magic's own light, whose Eye literals, glows and
-    gradients are not counted: in the kit's sheet, a rule the magic scopes
-    to its ambience; in the frame's (B1), that, or a rule whose every item
-    is the docked Eye's own (FRAME_EYE on its subject)."""
-    if where == KIT_SHEET:
-        return "data-sv-ambience" in selector
-    if where == FRAME_SHEET:
-        return "data-sv-ambience" in selector or (
-            bool(selector) and all(FRAME_EYE.search(subject(item)) for item in selector_items(selector)))
-    return False
+def _words(text):
+    """A selector or a value with its white space run together."""
+    return " ".join(text.split())
+
+
+def frame_light(selector, prop, value, where):
+    """Whether a declaration is one of the frame's named lights
+    (FRAME_LIGHT): in that sheet, that selector, that property, that
+    value."""
+    return where == FRAME_SHEET and (_words(selector), prop, _words(value)) in FRAME_LIGHT
+
+
+def frame_ember(selector, prop, value, rule_decls, where):
+    """Whether a declaration is the tower's ember (FRAME_EMBER): in the
+    frame's sheet, that selector and that fill, its dose in the same rule."""
+    named, fill, token, (dose_prop, dose) = FRAME_EMBER
+    return (where == FRAME_SHEET and (_words(selector), prop, _words(value)) == (named, fill, token)
+            and _words(dict(rule_decls).get(dose_prop, "")) == dose)
 
 
 #: Colour functions whose lightness is read directly (oklch, oklab, lab,
@@ -498,7 +532,7 @@ def declaration_markers(prop, raw, selector="", rule_decls=(), where=""):
     out = []
     if where == KIT_PAGE and selector and all(SPECIMEN_CLASS.search(i) for i in selector_items(selector)):
         return out          # a specimen of the kit's page
-    magic = magic_rule(selector, where)
+    magic = (where == KIT_SHEET and "data-sv-ambience" in selector) or frame_light(selector, prop, value, where)
     if not magic:
         if has_eye_literal(value):
             out.append(("eye_literal", value))
@@ -506,7 +540,8 @@ def declaration_markers(prop, raw, selector="", rule_decls=(), where=""):
             out.append(("old_literal", value))
     if OLD_TOKEN.search(value):
         out.append(("old_token", value))
-    if TEXT_OR_BORDER.match(prop) and ACCENT.search(value) and not eye_role(selector):
+    if (TEXT_OR_BORDER.match(prop) and ACCENT.search(value) and not eye_role(selector)
+            and not frame_ember(selector, prop, value, rule_decls, where)):
         out.append(("accent_role", "%s: %s" % (prop, value)))
     if prop == "font-size":
         px = font_px(value)
