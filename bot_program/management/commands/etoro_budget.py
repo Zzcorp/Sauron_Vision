@@ -17,8 +17,9 @@ key: a key is named by its short hash only (etoro_budget.key_hash), the
 same twelve characters every budget log line carries. A key appears once
 a process has counted one of its requests within two days.
 
-And the 30 s beat of eToro's own quotes (bot_program/etoro_quotes.py,
-2026-11-06, the eToro feed spec's P-c.1), whose reads the budget counts at
+And the beat of eToro's own quotes (bot_program/etoro_quotes.py,
+2026-11-06, every 15 s since 2026-11-13; the eToro feed spec's P-c.1),
+whose reads the budget counts at
 P3: its last pass (asked, written, and the writes a higher-ranked feed's
 hold refused, with the feed that held each row) and the UTC day's counts
 (etoro_quotes.report). Counts and feed names only.

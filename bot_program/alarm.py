@@ -43,8 +43,9 @@ WHAT IT SAYS (each an Alarm: a stable key, a title, a few lines)
      FLOOD_AT or more stopped at once is the scheduler, said once.
   E  A live-world broker account that has not answered its walk's
      count of syncs in a row (the sync's own miss count and threshold,
-     tasks.broker_miss_alert_after: fifteen on the eToro walk's 60 s
-     beat, three on the others', 2026-11-06), and a live Saxo account
+     tasks.broker_miss_alert_after: thirty beats of the eToro walk's 30 s
+     since 2026-11-13, fifteen minutes, as fifteen of its 60 s were from
+     2026-11-06; three on the others'), and a live Saxo account
      whose session died (the walk skips it
      before it can count a miss), named by broker and number, never by
      username.
@@ -763,8 +764,9 @@ def read_brokers(now) -> list:
                  "Sign in again on /brokers/."]))
             continue
         misses = int(cache.get(f"broker_sync:miss:{kind}:{acct.pk}") or 0)
-        # the stall alert's own count: fifteen on the eToro walk's 60 s
-        # beat, three on the others' 900 s (2026-11-06)
+        # the stall alert's own count: thirty beats of the eToro walk's
+        # 30 s (2026-11-13; fifteen of its 60 s from 2026-11-06), three on
+        # the others' 900 s
         if misses < broker_miss_alert_after(kind):
             continue
         out.append(Alarm(

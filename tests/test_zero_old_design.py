@@ -140,8 +140,9 @@ from tests.old_design.budget import (CEILING, CEILING_SHA256, above_ceiling, com
                                      strict_measured_breaches, strict_source_breaches, why_unread)
 from tests.old_design.measure import (CENSUS_JS, DETAIL_LINKS, IN_HOST, MEASURED, PAGES, PARTIAL_SCENES,
                                       REGIONS, SETTLE, SHARDS, CensusRun, _RUN, build_scenes, census_book,
-                                      census_clients, census_opts, faces_present, freeze_patches, live_previews,
-                                      machine, resolve_details, shard_of)
+                                      census_clients, census_opts, coming, faces_present, freeze_patches,
+                                      held_clock_trace, instant, live_previews, machine, machine_clock,
+                                      missed_reader, resolve_details, shard_of)
 from tests.old_design.owners import ANCHORED, BATCHES, FILE_OWNER, STRETCHES, anchored_stretches, batch_map, owner
 from tests.old_design.rules import (FRAME_EMBER, FRAME_LIGHT, FRAME_SHEET, KIT_SHEET, MARKERS, ROOT, TOKENS_SHEET,
                                     census, counts, css_hits, css_rules, file_hits, js_hits, python_hits, source_files,
@@ -818,7 +819,10 @@ class _MeasuredShard:
     light mode's §10 check, each held to its budget. Set SV_OLD_DESIGN_ONLY
     to a comma list of scene keys (or their beginnings) to measure only
     those while a batch works; SV_OLD_DESIGN_DUMP=<path> writes the run;
-    SV_OLD_DESIGN_LOWER=1 lowers the budgets a full run went under."""
+    SV_OLD_DESIGN_LOWER=1 lowers the budgets a full run went under;
+    SV_OLD_DESIGN_MACHINE_CLOCK=<ISO instant> moves the machine's clock
+    there for the run (the census holds every clock at T: it reads the
+    same, MeasuredClockTests)."""
 
     SHARD = 0
     maxDiff = None
@@ -831,6 +835,10 @@ class _MeasuredShard:
         cls.glyphs = faces_present()
         if REQUIRE and not cls.glyphs:
             raise AssertionError("Inter and JetBrains Mono are not installed (SV_OLD_DESIGN_REQUIRE is set)")
+        moved = os.environ.get("SV_OLD_DESIGN_MACHINE_CLOCK")
+        if moved:
+            swap = machine_clock(instant(moved)).start()
+            cls.addClassCleanup(swap.stop)
         cls._patches = freeze_patches()
         for p in cls._patches:
             p.start()
@@ -864,8 +872,8 @@ class _MeasuredShard:
         if dump:
             path = pathlib.Path(dump.replace(".json", "") + "_shard%d.json" % cls.SHARD)
             path.write_text(json.dumps({"results": run.results, "timing": run.timing, "details": details,
-                                        "glyphs": cls.glyphs, "previews": previews, "machine": cls.machine},
-                                       indent=1, default=str))
+                                        "glyphs": cls.glyphs, "previews": previews, "machine": cls.machine,
+                                        "machine_clock": moved or None}, indent=1, default=str))
 
     def test_the_machine_is_the_budget_s(self):
         """The budgets were taken in one browser with one set of faces (the
@@ -1007,6 +1015,159 @@ class MeasuredShard3Tests(_MeasuredShard, TestCase):
 @_measured
 class MeasuredShard4Tests(_MeasuredShard, TestCase):
     SHARD = 3
+
+
+class CensusClockTests(SimpleTestCase):
+    """The measured half's server clock, without a browser (freeze_patches,
+    2026-11-14): under the hold every reader of the machine's clock the
+    census reads is at T, the six it always named and the ones it missed
+    until then (time.time, which the idle lock's gap reads; Django's
+    timesince, which the "... ago" words read; a model's default stamp; a
+    module loaded while the census runs). The datetime module itself keeps
+    the machine's types, which a C extension (pandas) reads by name while
+    it imports. The swapped classes answer isinstance as the real ones do
+    and make real datetimes. The hold wins over a move of the machine's
+    clock, which reaches only what the hold missed; afterwards every name
+    is back."""
+
+    def test_every_clock_the_server_reads_is_held_at_t(self):
+        import datetime as dtm
+        import sys
+        import time as tm
+        import types
+
+        import pytz
+        from django.utils import timesince as timesince_module
+        from django.utils import timezone, translation
+        from django.utils.timesince import timesince
+
+        from bot_program.models import BotTrade
+        from core import exchange_status, idle_lock
+        from tests.one_quote_fixture import T
+        held = exchange_status        # a module of this project's, as every page's
+
+        def names():
+            return (tm.time, tm.time_ns, dtm.datetime, dtm.date, held.datetime, held.date,
+                    timesince_module.datetime)
+
+        before = names()
+        saturday = coming(5, 12)
+        patches = freeze_patches()
+        for p in patches:
+            p.start()
+        try:
+            self.assertEqual(tm.time(), T.timestamp())
+            self.assertEqual(tm.time_ns() // 10 ** 9, int(T.timestamp()))
+            self.assertEqual(int(idle_lock.time.time()) - int(T.timestamp()), 0)    # the idle lock's gap
+            self.assertEqual(tm.strftime("%Y-%m-%d %H:%M:%S"), "2026-11-12 19:13:56")
+            self.assertEqual(held.datetime.now(pytz.UTC), T)                       # one the hold always held
+            self.assertEqual(held.datetime.utcnow(), T.replace(tzinfo=None))
+            self.assertEqual(held.date.today(), T.date())
+            self.assertEqual(timezone.now(), T)
+            with translation.override("en"):
+                self.assertEqual(timesince(T - dtm.timedelta(hours=2)), "2\xa0hours")
+            self.assertEqual(BotTrade._meta.get_field("opened_at").get_default(), T)
+            self.assertIs(dtm.datetime, before[2])          # the datetime module keeps the machine's types
+            self.assertIs(dtm.date, before[3])
+            late = types.ModuleType("tests.old_design.sv_clock_late")     # a module loaded while the census runs
+            late.__file__ = str(ROOT / "tests" / "old_design" / "sv_clock_late.py")
+            late.datetime = before[2]
+            sys.modules[late.__name__] = late
+            try:
+                import json  # noqa: F401  (the end of an import: the hold looks at what was loaded)
+                self.assertEqual(late.datetime.now(dtm.timezone.utc), T)
+            finally:
+                sys.modules.pop(late.__name__, None)
+            made = held.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dtm.timezone.utc)
+            self.assertIs(type(made), before[2])
+            self.assertIsInstance(made, held.datetime)
+            self.assertIsInstance(T.date(), held.date)
+            self.assertNotIsInstance(T.date(), held.datetime)
+            self.assertIs(type(held.datetime.fromisoformat("2026-11-12T19:13:56+00:00")), before[2])
+            with missed_reader() as missed, machine_clock(saturday):
+                self.assertEqual(tm.time(), T.timestamp())                           # the hold wins
+                self.assertEqual(held.datetime.now(dtm.timezone.utc), T)
+                self.assertAlmostEqual(missed.time(), saturday.timestamp(), delta=60)  # a missed reader moves
+                self.assertEqual(missed.datetime.now(dtm.timezone.utc).date(), saturday.date())
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        self.assertEqual(names(), before)
+
+
+@_measured
+class MeasuredClockTests(TestCase):
+    """The census reads one instant, whatever the machine's clock says (the
+    failure of 2026-11-14: /ai-journal/ read eye_text 13 against its 12 on
+    PR #109, on a runner too busy to idle; the Horde's first tab read rides
+    on a requestIdleCallback, which Chromium ran on the real clock, after
+    the census). Three scenes that read clocks (/ai-journal/ and its Horde
+    tab; the instrument page's market badge and ages; the Market Sessions
+    menu, open and shut by the hour) are measured with the machine's clock
+    moved to the coming Saturday noon, then to the coming Tuesday 14:30
+    (UTC): the same counts and element groups both times, and the budget's.
+    The move does reach a reader the hold missed. And the page's timer and
+    idle callbacks wait for the held clock: none runs on the real one."""
+
+    SCENES = ("/ai-journal/", "/instruments/EURUSD/", "state:sessions_menu")
+    maxDiff = None
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.cache import cache
+        if not CHROME:
+            raise AssertionError("no headless Chromium on this machine (SV_OLD_DESIGN_REQUIRE is set)")
+        cls.glyphs = faces_present()
+        for p in freeze_patches():
+            p.start()
+            cls.addClassCleanup(p.stop)
+        cache.clear()
+        user, held, paper = census_book()
+        clients = census_clients(user)
+        details = resolve_details(clients["main"], user)
+        scenes = [s for s in build_scenes(details, held["EURUSD"].id, paper.id) if s["key"] in cls.SCENES]
+        cls.instants = {"Saturday": coming(5, 12), "Tuesday": coming(1, 14, 30)}
+        cls.results, cls.missed = {}, {}
+        with missed_reader() as missed:
+            for day, at in cls.instants.items():
+                with machine_clock(at):
+                    cls.missed[day] = missed.time() - at.timestamp()
+                    run = CensusRun(clients, scenes, glyphs=cls.glyphs)
+                    run.run()
+                cls.results[day] = run.results
+        cls.trace = held_clock_trace()
+
+    def test_the_census_reads_the_same_at_two_machine_clocks(self):
+        sat, tue = self.results["Saturday"], self.results["Tuesday"]
+        self.assertEqual(sorted(sat), sorted(self.SCENES))
+        for key in self.SCENES:
+            with self.subTest(scene=key):
+                self.assertIsNone(why_unread(key, sat[key]), sat[key].get("error"))
+                self.assertIsNone(why_unread(key, tue[key]), tue[key].get("error"))
+                self.assertEqual(sat[key]["counts"], tue[key]["counts"],
+                                 "%s reads a clock the census does not hold (%s against %s)"
+                                 % (key, self.instants["Saturday"], self.instants["Tuesday"]))
+                self.assertEqual(sat[key]["examples"], tue[key]["examples"])
+        for day, results in self.results.items():
+            with self.subTest(budget=day):
+                self.assertEqual(compare_measured(results, load_budget()["measured"], glyphs=self.glyphs), ([], []))
+
+    def test_the_move_reaches_a_reader_the_hold_missed(self):
+        """The two clocks differ where nothing holds them: the comparison
+        above is not two readings of one clock."""
+        for day, off in self.missed.items():
+            with self.subTest(day=day):
+                self.assertLess(abs(off), 60)
+
+    def test_the_page_s_timer_and_idle_callbacks_wait_for_the_held_clock(self):
+        """Two seconds of the real clock run nothing; the held clock runs
+        the untimed idle callback first, the 500 ms timer, then the idle
+        callback at its 1.5 s timeout (timed out, as an idle period that
+        never came); the cancelled one never."""
+        self.assertEqual(self.trace["real"], [])
+        self.assertEqual(self.trace["held 1000"], [["idle", 1, True], ["timer 500", 500, None]])
+        self.assertEqual(self.trace["held 2000"], [["idle", 1, True], ["timer 500", 500, None],
+                                                   ["idle 1500", 1500, True]])
 
 
 class MeasuredSceneListTests(SimpleTestCase):
