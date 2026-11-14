@@ -31,6 +31,11 @@ in the loop's other half. Every test that reads a value fails on 3994ffc;
 the three guards (the page runs clean, the page load's card is the
 baseline, nothing is bound per item) hold on both.
 
+THE WALL CLOCK IS NOT AN INPUT (2026-11-14). The card of an open market
+is read with the market pinned open, so a run on a weekend reads what a
+weekday run reads (it went red every Saturday and Sunday); the card of a
+shut market is read at a fixed Saturday, with the market clock's gate on.
+
 Run with:  python manage.py test tests.test_data_headband_popups_fresh
 """
 import asyncio
@@ -710,6 +715,17 @@ class TheCardSaysWhenTests(TestCase):
             bid=Decimal("1.08420"), ask=Decimal("1.08430"),
             change_pct=Decimal("0.4200"), volume=1234, source="oanda",
             change_source="oanda")
+        # THE MARKET IS PINNED OPEN (2026-11-14): these tests read the card
+        # of an open market, whose time is the record's own. Unpinned, a
+        # run between Friday's close and Sunday's open found the FX week
+        # shut, and the one price (market_data.one_quote._outside_at) dated
+        # the record by the venues' Friday close, so the suite went red
+        # every weekend. TheCardSaysWhenTheMarketIsShutTests below reads
+        # the shut market's card, at a fixed Saturday.
+        pin = mock.patch("core.exchange_status.market_status_for",
+                         return_value={"is_open": True})
+        pin.start()
+        self.addCleanup(pin.stop)
 
     def _band(self):
         from core.context_ui import ui_extras
@@ -748,6 +764,60 @@ class TheCardSaysWhenTests(TestCase):
         self.assertNotIn("data-sv-at", html)
         self.assertIn('<span data-dh-f="asof">—</span>', html)
         self.assertIn('<span class="v" data-dh-f="bidask">—</span>', html)
+
+
+#: A Saturday of the FX week's shut, and the close before it: the venues
+#: trade the week to 17:00 New York, 22:00 UTC in November.
+SHUT_SATURDAY = datetime(2026, 11, 14, 12, 0, tzinfo=dt_timezone.utc)
+FRIDAY_CLOSE = datetime(2026, 11, 13, 22, 0, tzinfo=dt_timezone.utc)
+
+
+class TheCardSaysWhenTheMarketIsShutTests(TestCase):
+    """The card's time on a shut market (2026-11-14). TheCardSaysWhenTests
+    reads it with the market pinned open; here the wall clock is held on a
+    Saturday and the market clock's gate is on, as in production. A
+    weekend re-stamp of Friday's price (a stream's reconnect, a poller) is
+    dated by the venues' close, never by its write; a price read before
+    the close keeps its own time (the card's "As of" row says so)."""
+
+    def setUp(self):
+        from instruments.models import Instrument
+        from market_data.models import LiveQuote
+        inst = Instrument.objects.create(
+            symbol="EURUSD", name="Euro / Dollar", asset_class="forex",
+            is_active=True)
+        self.q = LiveQuote.objects.create(
+            instrument=inst, last=Decimal("1.08425"),
+            bid=Decimal("1.08420"), ask=Decimal("1.08430"),
+            change_pct=Decimal("0.4200"), volume=1234, source="oanda",
+            change_source="oanda")
+        for p in (mock.patch("django.utils.timezone.now",
+                             return_value=SHUT_SATURDAY),
+                  mock.patch("signals.market_hold.GATE", True)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _card(self, written):
+        from core.context_ui import ui_extras
+        from market_data.models import LiveQuote
+        # updated_at is auto_now: only a queryset update can date it.
+        LiveQuote.objects.filter(pk=self.q.pk).update(updated_at=written)
+        band = ui_extras(RequestFactory().get("/"))["ui_headband"]
+        return {m["symbol"]: m for m in band}["EURUSD"]
+
+    def test_a_weekend_restamp_is_dated_by_the_venues_close(self):
+        m = self._card(SHUT_SATURDAY - timedelta(minutes=5))
+        self.assertEqual(m["updated"], FRIDAY_CLOSE.isoformat())
+        self.assertEqual(m["updated_utc"], "22:00:00")
+        self.assertEqual(m["q_asof"], "22:00:00 UTC ·")
+        self.assertEqual(m["q_age"], "closed · opens Sun 22:00 UTC")
+
+    def test_a_price_read_before_the_close_keeps_its_own_time(self):
+        read = datetime(2026, 11, 13, 21, 58, 30, tzinfo=dt_timezone.utc)
+        m = self._card(read)
+        self.assertEqual(m["updated"], read.isoformat())
+        self.assertEqual(m["updated_utc"], "21:58:30")
+        self.assertEqual(m["q_asof"], "21:58:30 UTC ·")
 
 
 class TheStreamsSayWhenAndFromWhereTests(SimpleTestCase):
