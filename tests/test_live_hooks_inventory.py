@@ -27,6 +27,23 @@ optional MARKET SHUT section) merged into this branch: four hooks, named
 with their readers in DATA_ATTRS, and four counts that rose with main's
 markup, written above RECORDED.
 
+ONE PRICE EVERYWHERE (#105, merged 2026-11-13, just before S1a's #106)
+joined on 2026-11-13 (the old-design redo's B0, plan §11: "the inventory
+takes them in when it merges"), counted on origin/main 1b94a50: the cells
+the one painter finds by attribute (the data-q family; the cells of a
+price apart from Ask Sauron's suggestion buttons, which share data-q), the
+position row's attributes its card copies into them (data-pos-q...,
+data-pos-spark-...), its quote blocks (data-sv-quotes, printed by
+{% q_json %}) and its clock (data-sv-now, in _partials/sv_venue.html,
+which base.html includes), the painter itself (window.SVVenue) and every
+call a display file makes to it, and the chart handle's keys it reads and
+calls (svCharts[id].symbol, .source, .setNow, .caption, .series, .bars),
+with the handle's own refresh and tick that §11 already named. A shell or
+page rewrite that dropped one would leave a price that simply stops
+moving. Two of #105's lines raised counts recorded before (the review of
+B0): .tk-stale in sv-instrument-live.js (1 -> 2), .up and .down in
+sv-venue.js (0 -> 2 each).
+
 How each kind is counted, per file (templates, scripts, the template tags):
   * a data attribute: every occurrence of the attribute's name, as a whole
     token (data-sv-live is not counted inside data-sv-live-key);
@@ -37,7 +54,19 @@ How each kind is counted, per file (templates, scripts, the template tags):
     selector inside a quoted string, or a quoted string that is the class
     alone (a classList argument is one). A class family (sv-flash--*,
     sv-world--*) counts its prefix;
-  * a window global: its definition (window.X =, w.X =, SV.x =, w.SV.x =).
+  * a window global: its definition (window.X =, w.X =, root.X =, SV.x =,
+    w.SV.x =);
+  * a call to the painter (SVVenue.x(...)): per file, so a display file
+    that stops calling it is seen (base.html's socket, the preview, the
+    sparks; the widget, the live region, the Horde, the instrument page,
+    the position card);
+  * a template tag or an include the painter needs ({% q_json %}, the
+    sv_venue.html include): per template;
+  * a key of a chart's handle (svCharts[id].x): its key in the object the
+    widget sets svCharts[id] to. Its readers are the feed's own scripts
+    (sv-venue.js, sv-instrument-live.js): a display stage that restyles
+    them (B3's sheet, B9's "now" line, B6's instrument page) keeps every
+    call; the widget is S4's (B10).
 
 Display only: nothing here reads or writes data. Run with:
     python manage.py test tests.test_live_hooks_inventory
@@ -71,6 +100,36 @@ DATA_ATTRS = (
     # them (data-f-toggle), and the host's own state that shows or hides
     # the section (data-f-gone). Counted on origin/main ede54d0.
     "data-sv-gone", "data-f-toggle", "data-f-gone",
+    # ONE PRICE EVERYWHERE (#105), joined on 2026-11-13 (counted on
+    # origin/main 1b94a50). static/js/sv-venue.js, the one painter, finds
+    # every price cell by attribute, never by text:
+    #   data-q          the symbol of a cell the painter writes;
+    #   data-q-f        the field it prints (price, bid, ask, spread, chg,
+    #                   words, age, since, away, rr…);
+    #   data-q-side     a position's closing side;
+    #   data-q-title    a cell whose hover is painted too (its own tail);
+    #   data-q-spark    a sparkline keyed to a symbol (drawn, not written);
+    #   data-q-fam, data-q-bars   whose bars a spark draws;
+    #   data-q-dot      the spark's "now" dot, which the painter adds;
+    #   data-q-state    the cell's state the painter writes (stale, shut,
+    #                   none), which sv-venue.css reads;
+    #   data-q-ref, data-q-below  the figures beside a price: the level a
+    #                   "since" or "away" counts from, and on which side;
+    #   data-q-o, data-q-stop, data-q-target, data-q-max  the rail card's
+    #                   live R:R (the order, its levels, the bound);
+    #   data-sv-quotes  the quote blocks a response carries ({% q_json %}),
+    #                   ingested before the cells are painted;
+    #   data-sv-now     the server's clock, so ages count from it.
+    "data-q", "data-q-f", "data-q-side", "data-q-title", "data-q-spark",
+    "data-q-fam", "data-q-bars", "data-q-dot", "data-q-state",
+    "data-q-ref", "data-q-below", "data-q-o", "data-q-stop",
+    "data-q-target", "data-q-max", "data-sv-quotes", "data-sv-now",
+    # The position row's (positions_list.html), which sv-position-card.js
+    # reads by key (val(row, "q-side")) and copies into the data-q cells of
+    # the card it paints (the review of B0).
+    "data-pos-q", "data-pos-q-side", "data-pos-q-entry", "data-pos-q-stop",
+    "data-pos-q-target", "data-pos-spark-fam", "data-pos-spark-bars",
+
     # MARKET SHUT (main's #99, #100 and #101), joined at their merge into
     # this branch (2026-11-12, counted on origin/main 4c1ebcc). Each is
     # read by the rail's sheet, by its script or by main's own tests:
@@ -112,6 +171,17 @@ IDS = (
 #: The widget's reader of those blocks (chart_widget.html, pageJson()).
 CHART_JSON_SUFFIXES = ("-positions", "-signals")
 
+#: The chart handle's methods (svCharts[id], set by chart_widget.html):
+#: §11's refresh and tick, and #105's for the one painter (joined
+#: 2026-11-13): series() and bars() it draws the "now" line on and reads,
+#: caption() the line under the chart it writes, setNow(v) the value the
+#: scale must hold.
+CHART_HANDLE = ("refresh", "tick", "series", "bars", "caption", "setNow",
+                # what the painter reads off the handle (the review of B0):
+                # without its symbol chart() returns at once, its caption
+                # names the source.
+                "symbol", "source")
+
 CLASSES = (
     "sv-unknown", "sv-age", "up", "down", "tk-stale", "sv-row--live",
     "sv-sel-bar",
@@ -132,6 +202,13 @@ GLOBALS = (
     "SVMarquee",
 )
 SV_NAMESPACE = ("overlay", "ages", "flash", "dwell", "popup", "tour", "council")
+
+#: The one painter (#105): defined in sv-venue.js (root.SVVenue =), called
+#: from the display files; each file's calls are counted.
+PAINTERS = ("SVVenue",)
+#: The template tags and includes the painter needs, per template.
+TEMPLATE_TAGS = ("q_json",)
+INCLUDES = ("_partials/sv_venue.html",)
 
 
 def _files():
@@ -216,12 +293,74 @@ def count_class(text, name, family=False):
 
 
 def count_global(text, name):
-    return len(re.findall(r"(?:\bwindow|\bw)\.%s\s*=(?!=)" % re.escape(name), text))
+    return len(re.findall(r"(?:\bwindow|\bw|\broot)\.%s\s*=(?!=)" % re.escape(name), text))
+
+
+def count_price_cells(text):
+    """data-q cells whose symbol is the data's ({{ x }} in a template,
+    ${x} in a script's markup): a price the painter writes. Ask Sauron's
+    suggestion buttons share data-q with a question for its value, and a
+    lost price cell must not hide behind an added question."""
+    return len(re.findall(r"""(?<![\w-])data-q=\\?["'](?:\{\{|\$\{)""", text))
+
+
+def count_calls(text, name):
+    """Calls to a global's methods: name.method( (the definition is not)."""
+    return len(re.findall(r"(?<![\w$])%s\s*\.\s*[A-Za-z_$][\w$]*\s*\(" % re.escape(name), text))
+
+
+def count_tag(text, name):
+    return len(re.findall(r"{%%\s*%s\b" % re.escape(name), text))
+
+
+def count_include(text, name):
+    return len(re.findall(r"""{%%\s*include\s+["']%s["']""" % re.escape(name), text))
 
 
 def count_sv(text, name):
     return len(re.findall(r"(?:\bwindow\.SV|\bw\.SV|(?<![\w.])SV)\.%s\s*=(?!=)"
                           % re.escape(name), text))
+
+
+_HANDLE = re.compile(r"\bsvCharts\s*\[[^\]\n]+\]\s*=\s*\{")
+
+
+def count_handle_method(text, name):
+    """How many times `name` is a key of the object a chart's handle is
+    set to (svCharts[id] = {...}): keys at the literal's own depth only,
+    strings and comments read through."""
+    n = 0
+    key = re.compile(r"(?<![\w$.])%s\s*:" % re.escape(name))
+    for m in _HANDLE.finditer(text):
+        i, depth, own = m.end(), 1, []
+        while i < len(text) and depth:
+            ch = text[i]
+            if ch in "'\"`":
+                j = i + 1
+                while j < len(text) and text[j] != ch:
+                    j += 2 if text[j] == "\\" else 1
+                i = j + 1
+                own.append(" ")
+                continue
+            if text.startswith("//", i):
+                j = text.find("\n", i)
+                i = len(text) if j < 0 else j
+                own.append(" ")
+                continue
+            if text.startswith("/*", i):
+                j = text.find("*/", i + 2)
+                i = len(text) if j < 0 else j + 2
+                own.append(" ")
+                continue
+            if ch in "{([":
+                depth += 1
+            elif ch in "})]":
+                depth -= 1
+            elif depth == 1:
+                own.append(ch)
+            i += 1
+        n += len(key.findall("".join(own)))
+    return n
 
 
 def inventory():
@@ -242,14 +381,24 @@ def inventory():
         for suffix in CHART_JSON_SUFFIXES:
             put("json:" + suffix, rel,
                 len(re.findall(r"""pageJson\(\s*['"]%s['"]\s*\)""" % re.escape(suffix), text)))
+        for name in CHART_HANDLE:
+            put("svCharts[id]." + name, rel, count_handle_method(text, name))
         for name in CLASSES:
             put("." + name, rel, count_class(text, name))
         for name in CLASS_FAMILIES:
             put("." + name + "*", rel, count_class(text, name, family=True))
-        for name in GLOBALS:
+        for name in GLOBALS + PAINTERS:
             put("window." + name, rel, count_global(text, name))
         for name in SV_NAMESPACE:
             put("SV." + name, rel, count_sv(text, name))
+        put("data-q (price cell)", rel, count_price_cells(text))
+        for name in PAINTERS:
+            put(name + ".*()", rel, count_calls(text, name))
+        if rel.endswith(".html"):
+            for name in TEMPLATE_TAGS:
+                put("{% " + name + " %}", rel, count_tag(text, name))
+            for name in INCLUDES:
+                put("include " + name, rel, count_include(text, name))
     return inv
 
 
@@ -278,10 +427,79 @@ def inventory():
 # that day the merged tree held every hook of main's in every file, and
 # more only where the magic's own files read one (sv-moments.js, the kit
 # page).
+# ONE PRICE EVERYWHERE (#105, merged after S1a) joined on 2026-11-13, at
+# the old-design redo's B0: its twenty-three hooks (the data-q family,
+# data-sv-quotes, data-sv-now, and the chart handle's six methods, §11's
+# refresh and tick among them) from inventory() on origin/main 1b94a50,
+# each at main's own count. Every count recorded before stands unchanged.
 # A file may gain a hook; it may not lose one. Each hook below must also be
 # found somewhere (no hook is recorded at zero), so a hook renamed
 # everywhere at once fails too.
 RECORDED = {
+    # THE REVIEW OF B0 (2026-11-13): #105's hooks the first count missed,
+    # counted by inventory() on origin/main 1b94a50 (see DATA_ATTRS,
+    # CHART_HANDLE, PAINTERS, TEMPLATE_TAGS, INCLUDES, count_price_cells).
+    'data-pos-q': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-pos-q-entry': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-pos-q-side': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-pos-q-stop': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-pos-q-target': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-pos-spark-bars': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-pos-spark-fam': {
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'svCharts[id].source': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].symbol': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'window.SVVenue': {
+        'static/js/sv-venue.js': 1,
+    },
+    'data-q (price cell)': {
+        'core/templatetags/quote_tags.py': 2,
+        'templates/_partials/deal_ticket.html': 3,
+        'templates/_partials/dh_item.html': 8,
+        'templates/_partials/signal_rail_items.html': 2,
+        'templates/base.html': 9,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 2,
+        'templates/dashboard/instrument_detail.html': 9,
+        'templates/dashboard/instruments_list.html': 10,
+        'templates/dashboard/news_detail.html': 2,
+        'templates/dashboard/portfolio_overview.html': 2,
+        'templates/dashboard/positions_list.html': 3,
+    },
+    'SVVenue.*()': {
+        'static/js/sv-horde.js': 2,
+        'static/js/sv-instrument-live.js': 2,
+        'static/js/sv-position-card.js': 1,
+        'templates/_partials/chart_widget.html': 1,
+        'templates/_partials/live_region.html': 1,
+        'templates/base.html': 8,
+    },
+    '{% q_json %}': {
+        'templates/_partials/signal_rail_items.html': 1,
+        'templates/_partials/sv_venue.html': 1,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_live_shell.html': 1,
+    },
+    'include _partials/sv_venue.html': {
+        'templates/base.html': 1,
+    },
     '#clock': {
         'static/js/sv-flash.js': 1,
         'templates/base.html': 2,
@@ -321,6 +539,7 @@ RECORDED = {
         'static/js/sv-instrument-live.js': 2,
         'static/js/sv-news-dwell.js': 1,
         'static/js/sv-position-card.js': 5,
+        'static/js/sv-venue.js': 2,
         'templates/_partials/capital_card.html': 3,
         'templates/_partials/chart_widget.html': 9,
         'templates/_partials/dh_item.html': 4,
@@ -445,7 +664,7 @@ RECORDED = {
         'templates/_partials/the_horde.html': 1,
     },
     '.tk-stale': {
-        'static/js/sv-instrument-live.js': 1,
+        'static/js/sv-instrument-live.js': 2,
     },
     '.up': {
         'core/templatetags/sauron_tags.py': 1,
@@ -455,6 +674,7 @@ RECORDED = {
         'static/js/sv-instrument-live.js': 2,
         'static/js/sv-news-dwell.js': 1,
         'static/js/sv-position-card.js': 4,
+        'static/js/sv-venue.js': 2,
         'templates/_partials/chart_widget.html': 15,
         'templates/_partials/dh_item.html': 4,
         'templates/_partials/signal_rail_items.html': 3,
@@ -598,6 +818,116 @@ RECORDED = {
         'static/js/sv-nav-activity.js': 2,
         'templates/base.html': 1,
     },
+    # ONE PRICE EVERYWHERE (#105), joined on 2026-11-13: counted by
+    # inventory() on origin/main 1b94a50, the main the old-design redo's B0
+    # branches from, so every later display stage is held to them.
+    'data-q': {
+        'core/templatetags/quote_tags.py': 3,
+        'static/js/sv-horde.js': 7,
+        'static/js/sv-position-card.js': 2,
+        'static/js/sv-venue.js': 11,
+        'templates/_partials/deal_ticket.html': 3,
+        'templates/_partials/dh_item.html': 9,
+        'templates/_partials/signal_rail_items.html': 2,
+        'templates/base.html': 16,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 2,
+        'templates/dashboard/instrument_detail.html': 9,
+        'templates/dashboard/instruments_list.html': 10,
+        'templates/dashboard/news_detail.html': 2,
+        'templates/dashboard/portfolio_overview.html': 2,
+        'templates/dashboard/positions_list.html': 3,
+    },
+    'data-q-bars': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 2,
+        'templates/_partials/dh_item.html': 1,
+        'templates/base.html': 2,
+    },
+    'data-q-below': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 1,
+    },
+    'data-q-dot': {
+        'static/js/sv-venue.js': 3,
+    },
+    'data-q-f': {
+        'core/templatetags/quote_tags.py': 2,
+        'static/js/sv-horde.js': 3,
+        'static/js/sv-overlay.js': 1,
+        'static/js/sv-position-card.js': 2,
+        'static/js/sv-venue.js': 6,
+        'templates/_partials/deal_ticket.html': 3,
+        'templates/_partials/dh_item.html': 6,
+        'templates/_partials/signal_rail_items.html': 1,
+        'templates/base.html': 5,
+        'templates/dashboard/_position_summary.html': 1,
+        'templates/dashboard/instrument_detail.html': 7,
+        'templates/dashboard/instruments_list.html': 8,
+        'templates/dashboard/news_detail.html': 1,
+        'templates/dashboard/portfolio_overview.html': 1,
+        'templates/dashboard/positions_list.html': 2,
+    },
+    'data-q-fam': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/dh_item.html': 1,
+        'templates/base.html': 2,
+    },
+    'data-q-max': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-o': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-ref': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 1,
+        'templates/dashboard/positions_list.html': 1,
+    },
+    'data-q-side': {
+        'core/templatetags/quote_tags.py': 2,
+        'static/js/sv-horde.js': 7,
+        'static/js/sv-position-card.js': 2,
+        'static/js/sv-venue.js': 2,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 2,
+        'templates/dashboard/portfolio_overview.html': 2,
+        'templates/dashboard/positions_list.html': 3,
+    },
+    'data-q-spark': {
+        'static/js/sv-position-card.js': 1,
+        'static/js/sv-venue.js': 11,
+        'templates/_partials/dh_item.html': 1,
+        'templates/base.html': 2,
+    },
+    'data-q-state': {
+        'static/js/sv-venue.js': 2,
+    },
+    'data-q-stop': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-target': {
+        'static/js/sv-venue.js': 1,
+        'templates/_partials/signal_rail_items.html': 1,
+    },
+    'data-q-title': {
+        'core/templatetags/quote_tags.py': 1,
+        'static/js/sv-horde.js': 1,
+        'static/js/sv-venue.js': 7,
+        'templates/_partials/dh_item.html': 2,
+        'templates/_partials/signal_rail_items.html': 1,
+        'templates/base.html': 4,
+        'templates/dashboard/_command_portfolio.html': 1,
+        'templates/dashboard/_position_summary.html': 1,
+        'templates/dashboard/instrument_detail.html': 1,
+        'templates/dashboard/instruments_list.html': 2,
+        'templates/dashboard/portfolio_overview.html': 1,
+        'templates/dashboard/positions_list.html': 1,
+    },
     'data-sv-at': {
         'static/js/sv-overlay.js': 3,
         'templates/_partials/broker_account.html': 1,
@@ -696,6 +1026,11 @@ RECORDED = {
     'data-sv-noflash': {
         'static/js/sv-flash.js': 1,
     },
+    'data-sv-now': {
+        'core/templatetags/quote_tags.py': 1,
+        'static/js/sv-venue.js': 3,
+        'templates/_partials/sv_venue.html': 1,
+    },
     'data-sv-open': {
         'static/js/sv-motion.js': 1,
         'static/js/sv-overlay.js': 3,
@@ -718,6 +1053,10 @@ RECORDED = {
         'static/js/sv-overlay.js': 6,
         'templates/base.html': 3,
     },
+    'data-sv-quotes': {
+        'core/templatetags/quote_tags.py': 1,
+        'static/js/sv-venue.js': 4,
+    },
     'data-sv-rail-n': {
         'templates/_partials/rail_sig_chips.html': 6,
         'templates/_partials/signal_rail_items.html': 1,
@@ -734,6 +1073,24 @@ RECORDED = {
         'templates/_partials/chart_widget.html': 1,
     },
     'json:-signals': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].bars': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].caption': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].refresh': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].series': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].setNow': {
+        'templates/_partials/chart_widget.html': 1,
+    },
+    'svCharts[id].tick': {
         'templates/_partials/chart_widget.html': 1,
     },
     'window.SAURON_CHART_COLORS': {
@@ -800,10 +1157,15 @@ class LiveHooksInventoryTests(SimpleTestCase):
         at least one file: the scanner sees them all today."""
         expected = (set(DATA_ATTRS) | {"#" + i for i in IDS}
                     | {"json:" + s for s in CHART_JSON_SUFFIXES}
+                    | {"svCharts[id]." + m for m in CHART_HANDLE}
                     | {"." + c for c in CLASSES}
                     | {"." + c + "*" for c in CLASS_FAMILIES}
-                    | {"window." + g for g in GLOBALS}
-                    | {"SV." + s for s in SV_NAMESPACE})
+                    | {"window." + g for g in GLOBALS + PAINTERS}
+                    | {"SV." + s for s in SV_NAMESPACE}
+                    | {"data-q (price cell)"}
+                    | {p + ".*()" for p in PAINTERS}
+                    | {"{% " + n + " %}" for n in TEMPLATE_TAGS}
+                    | {"include " + n for n in INCLUDES})
         self.assertEqual(set(RECORDED), expected)
         for hook, files in RECORDED.items():
             self.assertTrue(files, "%s is recorded nowhere" % hook)
@@ -862,6 +1224,50 @@ class LiveHooksInventoryTests(SimpleTestCase):
         self.assertEqual(count_data_attr('<div data-sv-row data-market="shut">', "data-market"), 1)
         self.assertEqual(count_data_attr(rail, "data-sv-shut"), 1)
         self.assertEqual(count_data_attr(rail.replace("data-sv-shut ", "data-sv-held "), "data-sv-shut"), 0)
+
+    def test_the_one_price_hooks_are_counted_alone(self):
+        """#105's hooks (2026-11-13): data-q is a whole token, never counted
+        inside data-q-f or data-q-side; a cell that loses its data-q is
+        seen as fewer; the chart handle's methods are its own keys, never a
+        key of a nested object nor a word in a comment or a string."""
+        dh = (ROOT / "templates/_partials/dh_item.html").read_text(encoding="utf-8")
+        before = count_data_attr(dh, "data-q")
+        self.assertGreater(before, 0)
+        self.assertEqual(count_data_attr(dh.replace('data-q="', 'data-x="', 1), "data-q"), before - 1)
+        self.assertEqual(count_data_attr('<b data-q-f="price" data-q-side="bid">', "data-q"), 0)
+        self.assertEqual(count_data_attr('<b data-q-f="price" data-q-side="bid">', "data-q-f"), 1)
+        self.assertEqual(count_data_attr('<script type="application/json" data-sv-quotes>', "data-sv-quotes"), 1)
+        widget = (ROOT / "templates/_partials/chart_widget.html").read_text(encoding="utf-8")
+        for name in CHART_HANDLE:
+            self.assertEqual(count_handle_method(widget, name), 1, name)
+        renamed = widget.replace("setNow: function", "setNowValue: function", 1)
+        self.assertEqual(count_handle_method(renamed, "setNow"), 0)
+        js = ("window.svCharts[ID] = { /* setNow: no */ series: function () { return {bars: 1}; },"
+              " caption: 'tick: no', tick: function () {} };")
+        self.assertEqual(count_handle_method(js, "series"), 1)
+        self.assertEqual(count_handle_method(js, "bars"), 0)
+        self.assertEqual(count_handle_method(js, "setNow"), 0)
+        self.assertEqual(count_handle_method(js, "tick"), 1)
+        self.assertEqual(count_handle_method("other[ID] = { tick: function () {} };", "tick"), 0)
+
+    def test_the_painter_s_other_hooks_are_counted(self):
+        """The review of B0: a price cell is told from a suggestion button,
+        the painter's definition and every call to it are seen, and so are
+        the tag and the include that feed it, and the handle's symbol."""
+        self.assertEqual(count_price_cells('<b data-q="{{ w.symbol }}"></b><i data-q="${d.symbol}"></i>'
+                                           '<button class="se-suggest" data-q="Why is the gate shut?">'), 2)
+        self.assertEqual(count_data_attr('<button data-q="Why?">', "data-q"), 1)
+        self.assertEqual(count_global("root.SVVenue = api;", "SVVenue"), 1)
+        self.assertEqual(count_calls("if (window.SVVenue) SVVenue.ingest(q, t); w.SVVenue.paint(el);"
+                                     " var SVVenue = 1;", "SVVenue"), 2)
+        self.assertEqual(count_tag('{% q_json quotes %}{%q_json x%}', "q_json"), 2)
+        self.assertEqual(count_include('{% include "_partials/sv_venue.html" %}', "_partials/sv_venue.html"), 1)
+        widget = (ROOT / "templates/_partials/chart_widget.html").read_text(encoding="utf-8")
+        self.assertEqual(count_handle_method(widget, "symbol"), 1)
+        self.assertEqual(count_handle_method(widget.replace("symbol:", "sym:", 1), "symbol"), 0)
+        rows = (ROOT / "templates/dashboard/positions_list.html").read_text(encoding="utf-8")
+        self.assertEqual(count_data_attr(rows, "data-pos-q"), 1)
+        self.assertEqual(count_data_attr(rows.replace("data-pos-q-side", "data-pos-qside"), "data-pos-q-side"), 0)
 
     def test_counting_reads_through_django_tags_in_a_class(self):
         html = ('<span class="ip-x {% if a > 0 %}up{% elif a < 0 %}down{% endif %}">'
