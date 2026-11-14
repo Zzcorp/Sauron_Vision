@@ -9,6 +9,10 @@ What this file pins:
   * the summary in words, for an open paper row, an open real-money row, a
     row closed by hand and a row closed by its stop: the headline, the
     chips from the row's own stamps, the P&L or the result, the ending;
+  * the wall clock is not an input (2026-11-14): the open paper row is read
+    with its market pinned open (it went red every weekend), and the same
+    row on a shut market at a fixed Saturday, the market clock's gate on:
+    "Price now" says closed, when its price is from and when it opens;
   * no raw key, no "None", no "Decimal(" anywhere in it;
   * the live endpoint returns the fragment alone and never reaches a
     broker (the router and the clients are patched and must stay uncalled);
@@ -177,6 +181,19 @@ class OpenPaperForexTests(_Base):
 
     def setUp(self):
         super().setUp()
+        # THE MARKET IS PINNED OPEN (2026-11-14): these tests read the
+        # summary of a position on an open market ("Price now 1.61030 test
+        # · 25 s"). Unpinned, a run between Friday's close and Sunday's
+        # open found the FX week shut: the one price dated the quote by the
+        # venues' Friday close ("test · 12 h") and the shut-market note
+        # joined the summary, so the suite went red every weekend.
+        # OpenPaperForexShutMarketTests below reads the same position on a
+        # shut market, at a fixed Saturday; MarketAndStaleTests reads the
+        # notes.
+        pin = mock.patch("core.exchange_status.market_status_for",
+                         return_value={"is_open": True})
+        pin.start()
+        self.addCleanup(pin.stop)
         sig = _signal(self.inst)
         self.trade = _trade(self.user, metadata={"manual": True,
                                                  "signal_id": sig.id},
@@ -234,6 +251,46 @@ class OpenPaperForexTests(_Base):
         self.assertIn('data-pd-live-url="%s"' % (LIVE % self.trade.id),
                       self.section)
         self.assertIn("Refreshes by itself every 15 seconds.", self.text)
+
+
+class OpenPaperForexShutMarketTests(_Base):
+    """OpenPaperForexTests' position on a shut market (2026-11-14): there
+    the market is pinned open; here the wall clock is held on a Saturday
+    and the market clock's gate is on, as in production. The quote was
+    re-stamped on Saturday morning (a stream's reconnect, a poller): "Price
+    now" says the market is closed, dates the price by the venues' Friday
+    close (22:00 UTC in November) and says when the market opens; the
+    entry, the size and the levels read as on an open market."""
+    username = "pp_open_paper_shut"
+    SATURDAY = datetime(2026, 11, 14, 12, 0, tzinfo=dt_timezone.utc)
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch("django.utils.timezone.now",
+                             return_value=self.SATURDAY),
+                  mock.patch("signals.market_hold.GATE", True)):
+            p.start()
+            self.addCleanup(p.stop)
+        _quote(self.inst, "1.61030", at=self.SATURDAY - timedelta(hours=2))
+        sig = _signal(self.inst)
+        self.trade = _trade(self.user, metadata={"manual": True,
+                                                 "signal_id": sig.id},
+                            reason="TAKE TRADE · signal #%d · golden_cross"
+                                   % sig.id)
+        self.page, self.section = self.get(self.trade)
+        self.text = self.assertClean(self.section)
+
+    def test_the_prices_the_size_and_the_levels_in_plain_words(self):
+        self.assertIn("Entry price 1.59030", self.text)
+        self.assertIn("Price now 1.61030 closed · test Fri 13 Nov 22:00 · "
+                      "opens Sun 22:00 UTC", self.text)
+        self.assertIn("Position size 1,159.42 USD 1,000 units at the current "
+                      "price", self.text)
+        self.assertIn("Stop 1.52670 5.2% away", self.text)
+        self.assertIn("Target 1.76780 9.8% away", self.text)
+        self.assertIn("It closes by itself at the stop 1.52670 (5.2% away) "
+                      "or the target 1.76780 (9.8% away).", self.text)
+        self.assertIn("The market for EURCAD is shut right now", self.text)
 
 
 class OpenLiveTests(_Base):
