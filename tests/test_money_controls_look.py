@@ -1486,13 +1486,20 @@ class MoneyControlsLightMeasuredTests(TestCase):
                     # A rail card is opened as a click opens it (a hover card
                     # is not displayed where the browser reports no hover),
                     # one at a time, and set where the page's script would
-                    # set it: inside the viewport.
+                    # set it: inside the viewport. A card pinned in the open
+                    # rail docks there, in its card's place (the desk v2
+                    # board's pinned card, B10: static/css/sv-chart.css),
+                    # inside the rail's scrolling Signals body, where its
+                    # TAKE TRADE can sit below the body's fold: its control
+                    # is brought into view there, as the operator scrolls the
+                    # rail to reach it.
                     box = b.js(sid, "(function () { var e = document.querySelector(%s); if (!e) return null;"
                                     " Array.prototype.forEach.call(document.querySelectorAll('.sr-popup'), function (p) {"
                                     "   p.classList.remove('sv-pinned', 'show'); });"
                                     " var pop = e.closest('.sr-popup');"
                                     " if (pop) { pop.classList.add('sv-pinned', 'show'); pop.style.top = '90px'; pop.style.left = '420px';"
-                                    "   pop.style.right = 'auto'; pop.style.bottom = 'auto'; pop.style.transform = 'none'; }"
+                                    "   pop.style.right = 'auto'; pop.style.bottom = 'auto'; pop.style.transform = 'none';"
+                                    "   if (getComputedStyle(pop).position === 'static') e.scrollIntoView({ block: 'center' }); }"
                                     " else e.scrollIntoView({ block: 'center' });"
                                     " var r = e.getBoundingClientRect();"
                                     " return r.width && r.top >= 24 && r.bottom <= innerHeight - 24 ? [r.left, r.top, r.width, r.height] : null; })()"
