@@ -1478,6 +1478,88 @@ class FrameLightTests(TestCase):
         self.assertLessEqual(g[-1], 1, g)
 
 
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class FrameEmbersOffTheFiguresTests(TestCase):
+    """F3, its embers half: /positions/ opted into the embers, and its eToro
+    split line ("At that read: opened by Sauron … · P&L …") prints amounts
+    straight on the void, where the embers drift. The magic's first rule
+    holds there too (never on a figure; Twist2: "aucune lueur ni reflet
+    derrière un montant"): on and within 8 px of every figure on the void,
+    no free ember or ash is drawn (the field's own rule for a card: gone
+    within 12 px, whole again at 24 px), and no gutter channel comes within
+    12 px of one, while the field still draws on the page."""
+
+    #: Every figure on the void (a text with a digit and no ground of any
+    #: kind under it, up to <body>), the alpha a free ember of alpha 1 is
+    #: drawn at on and around each, and how near a channel comes to one.
+    PROBE = r"""(function () {
+      var s = window.__svEmberStats, boxes = [];
+      __sv.figureNodes().forEach(function (f) {
+        for (var n = f[1]; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+          var cs = getComputedStyle(n), c = __sv.rgba(cs.backgroundColor);
+          if ((cs.backgroundImage && cs.backgroundImage !== 'none') || (c && c.a > 0)) return;
+        }
+        var rg = document.createRange(); rg.selectNodeContents(f[0]);
+        var r = rg.getBoundingClientRect();
+        if (r.width && r.height && r.bottom > 0 && r.top < innerHeight)
+          boxes.push([r.left, r.top, r.right, r.bottom, f[2].slice(0, 32),
+                      !!f[1].closest('[data-sv-live-key="pos.etoro.split"]')]);
+      });
+      var lit = [];
+      boxes.forEach(function (b) {
+        var cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+        [[cx, cy], [b[0] + 1, cy], [b[2] - 1, cy], [b[0] - 6, b[1] - 6], [b[2] + 6, b[3] + 6],
+         [cx, b[1] - 8], [cx, b[3] + 8]].forEach(function (p) {
+          var a = s.groundAt(p[0], p[1], 1);
+          if (a > 0) lit.push([b[4], Math.round(p[0]), Math.round(p[1]), Math.round(a * 100) / 100]);
+        });
+      });
+      var near = [];
+      s.channels().forEach(function (c) {
+        boxes.forEach(function (b) {
+          var dx = Math.max(b[0] - c[2], c[0] - b[2], 0), dy = Math.max(b[1] - c[3], c[1] - b[3], 0);
+          if (Math.sqrt(dx * dx + dy * dy) < 12) near.push([b[4], c.map(Math.round)]);
+        });
+      });
+      return JSON.stringify({ maps: s.maps, onVoid: boxes.length, split: boxes.filter(function (b) { return b[5]; }).length,
+                              texts: boxes.map(function (b) { return b[4]; }), lit: lit, near: near });
+    })()"""
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.test_magic_layer import EMBER_COUNTER, EMBER_WINDOW, PROBES
+        client = _book("frame_embers")
+        page = _get(client, POSITIONS)
+        cls.split = 'data-sv-live-key="pos.etoro.split"' in page
+        pages = {POSITIONS: _file_page(page, scripts=("sv-embers.js",), before=EMBER_COUNTER)}
+        b = _Browser(pages, "sv-frame-embers-")
+        try:
+            sid = b.tab(1440, 900)
+            b.open(sid, POSITIONS, PROBES)
+            b.js(sid, "(function () { return new Promise(function (r) { var n = 0, t = setInterval(function () {"
+                      " if ((window.__svEmberStats && __svEmberStats.maps) || ++n > 100) { clearInterval(t); r(0); } }, 50); }); })()")
+            b.js(sid, "new Promise(function (r) { setTimeout(function () { r(0); }, 900); })")
+            cls.got = json.loads(b.js(sid, cls.PROBE))
+            cls.window = b.js(sid, EMBER_WINDOW + "(1000)")
+        finally:
+            b.close()
+
+    def test_the_fixture_prints_figures_on_the_void(self):
+        self.assertTrue(self.split)
+        self.assertGreaterEqual(self.got["maps"], 1, self.got)
+        self.assertGreaterEqual(self.got["split"], 1, self.got)
+
+    def test_no_ember_on_or_near_a_figure_on_the_void(self):
+        self.assertEqual(self.got["lit"], [], self.got["texts"])
+
+    def test_no_channel_runs_by_a_figure_on_the_void(self):
+        self.assertEqual(self.got["near"], [])
+
+    def test_the_field_still_draws_on_the_page(self):
+        self.assertGreater(self.window["embers"], 0, self.window)
+        self.assertGreater(self.window["frames"], 0, self.window)
+
+
 class RealGroupWordsTests(SimpleTestCase):
     """Contract F2: the REAL chip and its group claim only what each cell
     is. PORTFOLIO, OPEN P&L and MARGIN are eToro's own figures for the real

@@ -33,7 +33,14 @@
        of at most 11 px drift along it, at most one per 280 px of it
        (about one per 7 cm), each drawn CLIPPED to its channel, so none can
        ever cross a panel or sit on one. A channel is let go the moment the
-       page scrolls or changes shape, and found again with the map.
+       page scrolls or changes shape, and found again with the map;
+     - and never on a figure a page prints straight on the void (a text
+       with a digit and nothing painted under it up to <body>, as
+       /positions/' eToro split line is until its page grounds it): the map
+       counts it as covering the void, as a card does, so no ember or ash is
+       drawn within 12 px of it, and no channel runs within 24 px of it
+       (the review of the desk v2 build, 2026-11-13; Twist2: "aucune lueur
+       ni reflet derrière un montant").
 
    It runs under Ambience Magic, in the dark theme, on a page that opted
    in, and nowhere else: there it maps nothing and asks for no frame. Where
@@ -77,6 +84,9 @@
     /* What covers the void as the last map found it: an ember fades out
        as it nears one, gone within HUG px of its edge, whole at FAR px. */
     var HUG = 12, FAR = 24, ground = [], grounds = [];
+    /* The figures printed straight on the void, as the last map found them
+       (their text nodes), and their boxes now: they cover the void too. */
+    var FIG_CAP = 200, FIG_SCAN = 20000, figs = [], figBoxes = [];
     /* The gutters' channels and their embers (the desk v2 board). */
     var CH_MIN = 6, CH_MAX = 40, CH_LEN = 96, CH_GAP = 280, CH_STEP = 20, CH_CAP = 20, CH_SAMPLES = 1600;
     var chans = [], cembers = [], chanOff = false;
@@ -135,6 +145,19 @@
             var q = g.box;
             if (q && q[3] > -FAR && q[1] < H + FAR && q[2] > -FAR && q[0] < W + FAR) grounds.push(q);
         }
+        /* A figure on the void covers it as a card does (never on a figure). */
+        figBoxes = [];
+        for (var f = 0; f < figs.length; f++) {
+            var fg = figs[f];
+            if (fg.n.isConnected !== false) {           /* a swap that kept the page's shape keeps its box */
+                var rg = d.createRange(); rg.selectNodeContents(fg.n);
+                var fr = rg.getBoundingClientRect();
+                fg.box = fr.width && fr.height ? [fr.left, fr.top, fr.right, fr.bottom] : null;
+            }
+            var fq = fg.box;
+            if (fq && fq[3] > -FAR && fq[1] < H + FAR && fq[2] > -FAR && fq[0] < W + FAR) { figBoxes.push(fq); grounds.push(fq); }
+        }
+        stats.figures = figBoxes.length;
         stats.grounds = grounds.length;
     }
     /* An ember near what covers the void fades out: 0 within HUG px of
@@ -265,6 +288,7 @@
         }
         ground = [];
         j.cover.forEach(function (el) { ground.push({ el: el, box: null }); });
+        figs = voidFigures(j.memo);
         stats.maps++; stats.mapMs = j.ms; stats.mapSlices = j.slices; stats.voidArea = Math.round(voidArea);
         stats.rows = rows.slice(); stats.ROW = ROW;
         readWords();
@@ -291,9 +315,36 @@
         }
         return true;
     }
+    /* The figures a page prints straight on the void, in the window: a text
+       with a digit whose element, up to <body>, paints nothing (the magic
+       layer's own measure of a figure on the void). Read once per map. */
+    function voidFigures(memo) {
+        var out = [];
+        if (!d.createTreeWalker || !d.createRange) return out;
+        var top = (d.querySelector && d.querySelector('.page-content')) || body;
+        var tw = d.createTreeWalker(top, 4 /* NodeFilter.SHOW_TEXT */, null), n, seen = 0;
+        while ((n = tw.nextNode()) && out.length < FIG_CAP && ++seen < FIG_SCAN) {
+            if (!/\d/.test(n.nodeValue)) continue;
+            var el = n.parentElement;
+            if (!el || el.closest('script, style, noscript, template, textarea') || !el.getClientRects().length) continue;
+            var b = el.getBoundingClientRect();
+            if (b.bottom < -FAR || b.top > H + FAR || b.right < -FAR || b.left > W + FAR) continue;
+            if (painter(el, memo)) continue;            /* on a card: the card covers it already */
+            out.push({ n: n, box: null });
+        }
+        return out;
+    }
+    /* A gutter's cross-section within FAR px of a figure on the void. */
+    function byFigure(x0, y0, x1, y1) {
+        for (var i = 0; i < figBoxes.length; i++) {
+            var q = figBoxes[i];
+            if (x1 > q[0] - FAR && x0 < q[2] + FAR && y1 > q[1] - FAR && y0 < q[3] + FAR) return true;
+        }
+        return false;
+    }
     /* Where two of the map's panels face each other across 6 to 40 px, the
        gap between them is walked every CH_STEP px; each run of void long
-       enough is a channel. */
+       enough, never by a figure on the void, is a channel. */
     function findChannels(memo) {
         chans = []; chanOff = false;
         var boxes = [];
@@ -339,7 +390,8 @@
             for (var u = CH_STEP / 2; u <= len; u += CH_STEP) {
                 samples++;
                 var px = cd.h ? r[0] + u : mid, py = cd.h ? mid : r[1] + u;
-                if (quiet(px, py, memo)) { if (start === null) start = u; last = u; }
+                var clear = !(cd.h ? byFigure(px, r[1], px, r[3]) : byFigure(r[0], py, r[2], py));
+                if (clear && quiet(px, py, memo)) { if (start === null) start = u; last = u; }
                 else { run(cd.h, r, start, last); start = null; }
             }
             run(cd.h, r, start, last);
