@@ -1097,7 +1097,7 @@
    "radius": 20,
    "red_fill": 1,
    "shadow": 6,
-   "tiny": 49
+   "tiny": 46
   },
   "/instruments/EURUSD/": {
    "chrome_over_content": 6,
@@ -1117,7 +1117,7 @@
    "radius": 21,
    "red_fill": 1,
    "shadow": 6,
-   "tiny": 51
+   "tiny": 48
   },
   "/intelligence/": {
    "chrome_over_content": 6,
@@ -2044,7 +2044,7 @@
    "radius": 15,
    "shadow": 6,
    "target_small": 3,
-   "tiny": 46
+   "tiny": 43
   },
   "390:/ops/": {
    "chrome_over_content": 2,
@@ -2235,7 +2235,7 @@
    "red_fill": 2,
    "see_through": 1,
    "shadow": 12,
-   "tiny": 102
+   "tiny": 96
   },
   "hover:/knowledge/": {
    "chrome_over_content": 4,
@@ -2477,7 +2477,7 @@
    "color_off": 2,
    "contrast": 1,
    "eye_border": 68,
-   "eye_fill": 12,
+   "eye_fill": 10,
    "eye_text": 107,
    "eye_wash": 7,
    "figs": 4,
@@ -2487,12 +2487,12 @@
    "glow": 22,
    "gradient": 10,
    "inline_visual": 32,
-   "prose_mono": 24,
+   "prose_mono": 2,
    "radius": 39,
    "red_fill": 2,
-   "see_through": 13,
+   "see_through": 7,
    "shadow": 12,
-   "tiny": 170
+   "tiny": 92
   },
   "light:/command/": {
    "red_fill": 3
@@ -3211,7 +3211,7 @@
    "chrome_over_content": 6,
    "color_off": 1,
    "eye_border": 18,
-   "eye_fill": 6,
+   "eye_fill": 5,
    "eye_text": 27,
    "eye_wash": 2,
    "figs": 2,
@@ -3222,18 +3222,18 @@
    "glyph_face": 58,
    "gradient": 5,
    "inline_visual": 12,
-   "prose_mono": 15,
+   "prose_mono": 4,
    "radius": 21,
    "red_fill": 1,
-   "see_through": 6,
+   "see_through": 4,
    "shadow": 6,
-   "tiny": 89
+   "tiny": 48
   },
   "state:take_trade_paper": {
    "chrome_over_content": 6,
    "color_off": 1,
    "eye_border": 18,
-   "eye_fill": 6,
+   "eye_fill": 5,
    "eye_text": 29,
    "eye_wash": 2,
    "figs": 2,
@@ -3244,35 +3244,34 @@
    "glyph_face": 58,
    "gradient": 5,
    "inline_visual": 16,
-   "prose_mono": 12,
+   "prose_mono": 1,
    "radius": 20,
    "red_fill": 1,
-   "see_through": 6,
+   "see_through": 4,
    "shadow": 6,
-   "tiny": 85
+   "tiny": 46
   },
   "state:take_trade_short": {
-   "border_off": 1,
    "chrome_over_content": 6,
    "color_off": 1,
    "eye_border": 18,
-   "eye_fill": 6,
+   "eye_fill": 5,
    "eye_text": 29,
    "eye_wash": 2,
    "figs": 2,
    "first_line_low": 1,
    "font_other": 1,
    "glass": 1,
-   "glow": 11,
+   "glow": 10,
    "glyph_face": 58,
    "gradient": 6,
    "inline_visual": 16,
-   "prose_mono": 13,
+   "prose_mono": 1,
    "radius": 20,
    "red_fill": 1,
-   "see_through": 6,
+   "see_through": 4,
    "shadow": 6,
-   "tiny": 92
+   "tiny": 46
   },
   "state:tour": {
    "bg_off": 2,
