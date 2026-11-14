@@ -11,8 +11,10 @@ Run with:  python manage.py test tests.test_chart_hover_cards
 """
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase
 
@@ -208,7 +210,9 @@ class TheWiringTests(SimpleTestCase):
 
     def test_the_level_card_takes_the_pools_gold_and_the_map_s_role(self):
         src = widget_source()
-        self.assertIn(".sv-sig-card--level {", src)
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        self.assertIn(".sv-sig-card--level { --sv-sig-tone: var(--sv-demo); }", (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8"))
         # The card gains Formed (2026-10-07): it is handed the time now.
         self.assertIn("api.levelCard(hit.item, POSMAP, Date.now() / 1000)", src)
         # ...and the position card says where the money meets the levels (§4.6).

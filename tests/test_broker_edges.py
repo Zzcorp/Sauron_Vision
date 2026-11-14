@@ -305,6 +305,12 @@ class TheTallStateFillsTheWorkingAreaTests(SimpleTestCase):
     rectangle the fixed furniture leaves behind.
     """
 
+    def _sheet(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
+
     def _src(self):
         from pathlib import Path
 
@@ -370,12 +376,14 @@ class TheTallStateFillsTheWorkingAreaTests(SimpleTestCase):
 
     def test_the_pinned_card_has_a_ground(self):
         """Out of the flow, the page shows through without one."""
-        seg = self._src().split(".sv-candle-container.sv-chart-tall")[1][:1400]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        seg = self._sheet().split(".sv-candle-container.sv-chart-tall")[1][:1400]
         self.assertIn("background:", seg)
 
     def test_it_sits_below_the_veil_and_the_dialogs(self):
         """An expanded chart must never cover a locked screen or a
         confirmation the operator has to answer."""
-        seg = self._src().split(".sv-candle-container.sv-chart-tall")[1][:1400]
+        seg = self._sheet().split(".sv-candle-container.sv-chart-tall")[1][:1400]   # the desk v2's sheet
         self.assertIn("--z-hovercard", seg)
         self.assertNotIn("--z-dialog", seg)

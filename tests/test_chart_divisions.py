@@ -803,11 +803,15 @@ BUTTON = re.compile(r'<button class="sv-tf-btn([^"]*)" data-tf="([^"]+)"'
 class TheToolbarTests(SimpleTestCase):
 
     def test_candle_sizes_then_ranges_in_order(self):
+        # The desk v2 (B10, 2026-11-13): the board's one toolbar row holds
+        # 5m 15m 1H 4H D W, its More menu 1m 10m 30m 2H, its Range menu the
+        # four ranges; the operator approved the board: "amazing work,
+        # bravo, I need it fast!!".
         got = [(tf, label) for _cls, tf, label in BUTTON.findall(_widget())]
         self.assertEqual(got, [
-            ("1min", "1m"), ("5min", "5m"), ("10min", "10m"),
-            ("15min", "15m"), ("30min", "30m"), ("1h", "1H"), ("2h", "2H"),
-            ("4h", "4H"), ("1d", "D"), ("1wk", "W"),
+            ("5min", "5m"), ("15min", "15m"), ("1h", "1H"), ("4h", "4H"),
+            ("1d", "D"), ("1wk", "W"),
+            ("1min", "1m"), ("10min", "10m"), ("30min", "30m"), ("2h", "2H"),
             ("1w", "1W"), ("1mo", "1M"), ("3m", "3M"), ("1y", "1Y")])
 
     def test_each_group_is_named(self):
@@ -815,14 +819,18 @@ class TheToolbarTests(SimpleTestCase):
         sizes = html.split('aria-label="Candle size"', 1)[1].split("</div>", 1)[0]
         ranges = html.split('aria-label="Range of daily candles"', 1)[1] \
             .split("</div>", 1)[0]
+        # The desk v2 (B10, 2026-11-13): the candle sizes are one group, the
+        # four rarer ones in its More menu; the ranges a menu of their own
+        # that says what they are; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
         self.assertEqual([tf for _c, tf, _l in BUTTON.findall(sizes)],
-                         ["1min", "5min", "10min", "15min", "30min", "1h",
-                          "2h", "4h", "1d", "1wk"])
+                         ["5min", "15min", "1h", "4h", "1d", "1wk",
+                          "1min", "10min", "30min", "2h"])
         self.assertEqual([tf for _c, tf, _l in BUTTON.findall(ranges)],
                          ["1w", "1mo", "3m", "1y"])
-        self.assertIn('<span class="sv-tf-cap" aria-hidden="true">Candle</span>',
+        self.assertIn('role="menu" id="t-menu-more" aria-label="More candle sizes"',
                       sizes)
-        self.assertIn('<span class="sv-tf-cap" aria-hidden="true">Range</span>',
+        self.assertIn('<span class="sv-tb-menu-cap" aria-hidden="true">Daily candles over</span>',
                       ranges)
 
     def test_every_button_says_what_it_draws(self):
@@ -868,7 +876,13 @@ class ThePhoneToolbarMeasuredTests(TestCase):
     and 2 px between them the group needed 307 px in the fallback font
     (291 in Share Tech Mono), the toolbar holds 284 at 360 px and 299 at
     375, and W, or D and W, wrapped onto a line of its own directly above
-    RANGE 1W: the W/1W confusion the group names were there to end."""
+    RANGE 1W: the W/1W confusion the group names were there to end.
+
+    The desk v2 (B10, 2026-11-13; the operator approved the board:
+    "amazing work, bravo, I need it fast!!"): the row's six sizes and More
+    keep one line on a phone, the rarer sizes and the ranges sit in their
+    menus (Range names itself, so 1W is never read as W), and the toolbar
+    wraps its other tools under them rather than run past the screen."""
 
     WIDTHS = ((360, 780), (375, 812), (390, 844))
     PROBE = r"""(function () {
@@ -881,9 +895,10 @@ class ThePhoneToolbarMeasuredTests(TestCase):
             var lines = [];
             Array.prototype.forEach.call(c.querySelector(sel).children, function (el) {
                 var r = el.getBoundingClientRect(), mid = (r.top + r.bottom) / 2;
+                if (!r.width || !r.height) return;      /* a shut menu */
                 var line = lines.filter(function (l) { return Math.abs(l.mid - mid) <= 6; })[0];
                 if (!line) lines.push(line = { mid: mid, words: [] });
-                line.words.push((el.textContent || '').trim());
+                line.words.push((el.innerText || '').replace(/\s+/g, ' ').trim());
             });
             return lines.sort(function (a, b) { return a.mid - b.mid; })
                 .map(function (l) { return l.words.join(' '); });
@@ -891,7 +906,9 @@ class ThePhoneToolbarMeasuredTests(TestCase):
         return JSON.stringify({
             width: window.innerWidth,
             candle: rows('.sv-chart-timeframes[aria-label="Candle size"]'),
-            ranges: rows('.sv-chart-timeframes[aria-label="Range of daily candles"]'),
+            ranges: Array.prototype.map.call(
+                c.querySelectorAll('[role="menu"][aria-label="Range of daily candles"] [data-tf]'),
+                function (b) { return b.getAttribute('data-tf'); }),
             toolbarOverflow: bar.scrollWidth - bar.clientWidth,
             pageScroll: document.documentElement.scrollWidth
                         - document.documentElement.clientWidth
@@ -932,9 +949,8 @@ class ThePhoneToolbarMeasuredTests(TestCase):
             got = self.got[width]
             with self.subTest(width=width):
                 self.assertEqual(got["width"], width)
-                self.assertEqual(got["candle"],
-                                 ["Candle 1m 5m 10m 15m 30m 1H 2H 4H D W"], got)
-                self.assertEqual(got["ranges"], ["Range 1W 1M 3M 1Y"], got)
+                self.assertEqual(got["candle"], ["5m 15m 1H 4H D W More"], got)
+                self.assertEqual(got["ranges"], ["1w", "1mo", "3m", "1y"], got)
 
     def test_nothing_runs_past_the_screen(self):
         for width, _height in self.WIDTHS:

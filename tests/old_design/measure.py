@@ -1004,10 +1004,13 @@ def build_scenes(details, live_id, paper_id):
     for path, partial in PARTIAL_SCENES:
         out.append(Scene(partial, path))
     S = lambda key, path="/command/", **kw: out.append(Scene("state:" + key, path, **kw))
+    # A card's side is its row's data-side: the desk v2's card says it in
+    # words, where the old BEAR badge was (the review of B10, F2; the
+    # operator approved the board: "amazing work, bravo, I need it fast!!").
     S("rail_bullish", "/positions/", rail="open", shows=".sr-popup.show, .sr-popup.sv-pinned",
-      act=_click(".signals-rail .sr-signal-wrap:not(:has(.sr-badge-bearish)) .sr-signal"))
+      act=_click('.signals-rail .sr-signal-wrap:not([data-side="short"]) .sr-signal'))
     S("rail_bearish", "/positions/", rail="open", shows=".sr-popup.show, .sr-popup.sv-pinned",
-      act=_click(".signals-rail .sr-signal-wrap:has(.sr-badge-bearish) .sr-signal"))
+      act=_click('.signals-rail .sr-signal-wrap[data-side="short"] .sr-signal'))
     # The closed rail (its dock) is every page's; the open rail with both
     # its sections folded is the rail's other resting state.
     S("rail_folded", rail="open", prefs={"sauron_rail_sig": "1", "sauron_rail_watch": "1"},

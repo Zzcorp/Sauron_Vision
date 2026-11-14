@@ -1076,13 +1076,20 @@ class ThePo3SessionsWiringTests(SimpleTestCase):
         self.assertEqual(re.findall(r'data-lvl="([a-z]+)"', block),
                          ["levels", "below", "above", "pool", "swing", "asia", "round", "all"])
         btn = re.search(r'<button[^>]*data-lvl="asia"[^>]*>.*?</button>', block, re.S).group(0)
-        self.assertIn("Sessions · Power of Three", btn)
+        # The desk v2 (B10, 2026-11-13): the key says "Sessions", as the
+        # board draws it, and its title names the Power of Three; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!".
+        self.assertIn("Sessions <b", btn)
+        self.assertIn("Power of Three", re.search(r'title="([^"]*)"', btn).group(1))
         self.assertIn('<b data-role="phase"></b>', btn)
         self.assertIn('data-role="sessions"', btn)
         title = re.search(r'title="([^"]*)"', btn).group(1)
         for word in ("Asia", "London", "New York", "every day", "1h"):
             self.assertIn(word, title)
-        css = self.src.split("<style>")[1].split("</style>")[0]
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css, tokens only; the operator approved the board:
+        # "amazing work, bravo, I need it fast!!".
+        css = (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         rules = {s.strip(): b for s, b in re.findall(r"([^{}]+)\{([^{}]*)\}", css)}
         sw = rules[".sv-lvl-sw--asia"]

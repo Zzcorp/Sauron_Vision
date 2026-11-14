@@ -663,3 +663,24 @@ def src_name(value):
     if low in FEED_NAME:
         return FEED_NAME[low]
     return tag.replace("_", " ")
+
+
+#: An age as the plan's §4.4 prints it ("40 s", "12 min", "3 h", "2 days"),
+#: from a moment: the signal rail's cards (the desk v2's review, F2), where
+#: timesince's "1 hour, 3 minutes" was cut to "1 hour,…". The same words as
+#: a stale venue mark's (bot_program.venue_mark.age_words). Display only.
+@register.filter
+def short_age(value, until=""):
+    """`{{ s.created_at|short_age }}` -> "12 min"; `{{ t|short_age:"until" }}`
+    the time left to a moment ahead. Unknown is the em-dash; a moment on the
+    wrong side of now reads as "0 s"."""
+    if not value:
+        return DASH
+    from django.utils import timezone
+    from bot_program.venue_mark import age_words
+    try:
+        delta = (value - timezone.now()) if until else (timezone.now() - value)
+        secs = max(0.0, delta.total_seconds())
+    except (TypeError, ValueError):
+        return DASH
+    return age_words(secs) or DASH
