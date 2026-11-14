@@ -1536,11 +1536,13 @@ class TheChromeTests(SimpleTestCase):
     def test_the_sidebar_row_is_staff_only_under_what_is_measured(self):
         """Updated deliberately (UI redo B2, the desk v2 board, approved
         2026-11-13: "amazing work, bravo, I need it fast!!"): the row's mark
-        is the one icon family's crown (#svi-council), never a glyph, and a
-        section head is a fold button that names its section."""
+        is the one icon family's crown (#svi-council), never a glyph, its
+        <svg> carrying the symbol's viewBox (tests/test_chart_surfaces.py,
+        ViewBoxTests), and a section head is a fold button that names its
+        section."""
         row = ('{% if request.user.is_staff %}<a href="{% url \'council_dashboard\' %}" '
                'class="nav-link {% if page_id == \'council\' %}active{% endif %}">'
-               '<span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false">'
+               '<span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
                '<use href="#svi-council"/></svg></span> <span class="label-text">The Council'
                '</span></a>{% endif %}')
         self.assertIn(row, self.base)

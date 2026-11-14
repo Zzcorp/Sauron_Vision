@@ -182,10 +182,12 @@ class PageTests(TestCase):
         a shared shape (tests/test_nav_grouping.py). Updated deliberately
         (UI redo B2, the desk v2 board, approved 2026-11-13: "amazing work,
         bravo, I need it fast!!"): the row's mark is the one icon family's
-        own symbol (#svi-big-money), shared with no other row, not a glyph."""
+        own symbol (#svi-big-money), shared with no other row, not a glyph,
+        and its <svg> carries the symbol's viewBox, its own coordinate space
+        (tests/test_chart_surfaces.py, ViewBoxTests)."""
         body = self.client.get("/big-money/").content.decode()
         self.assertIn('href="/big-money/"', body)
-        self.assertIn('<span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false">'
+        self.assertIn('<span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
                       '<use href="#svi-big-money"/></svg></span> <span class="label-text">'
                       "Big Money</span>", body)
         # The page's title in the bar is its name in words (updated

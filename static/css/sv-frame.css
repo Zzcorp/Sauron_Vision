@@ -160,6 +160,19 @@ html body .page-content {
 html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]):is([data-sv-embers], [data-sv-light]):has(.page-content [data-sv-live-key="pos.etoro.split"])::before {
     background: var(--sv-void-light), var(--sv-void-vignette);
 }
+/* The row of small cards of the pages with the selection bar (/positions/,
+   /portfolio/, a position's page; sv-close-advice.css lays them out, at
+   least 300 px a card) under the frame (#115's CI, 2026-11-14). The frame
+   gives the page 56 px more at 1280 than the old chrome did (232 + 40 +
+   2 x 16 against 260 + 44 + 2 x 28), which put the row three across, 316 px
+   a card, where /positions/' asset-class table no longer fits in the face
+   a machine without Inter draws it in (279 px of table in 266,
+   tests/test_ui_s0_fixes.PositionCardsMeasuredTests). A card here is at
+   least that table and its card's 50 px: two across at 1280, as before the
+   frame, three from 1440. The cards' look is B7's. Display only. */
+html body:has(.sv-sel-bar) .page-content .grid-3 {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+}
 /* The page's own scrollbar, on the tokens (critic #113). */
 html { scrollbar-color: var(--sv-line-3) var(--sv-bg-0); }
 

@@ -9,11 +9,18 @@ distribute this software for any purpose with or without fee is hereby
 granted). The menu's marks for Amon Hen, the book, the markets and the
 dock's are the board's own (canvas_v2/project/Desk2.dc.html and
 Instrument2.dc.html). One inline sprite per page, read by
-<svg class="sv-ico"><use href="#svi-NAME"/></svg>: no font, no CDN, no
-colour emoji on any machine. The tower (Barad-dûr) is the watermark's mark.
-Display only.
+<svg class="sv-ico" viewBox="0 0 24 24"><use href="#svi-NAME"/></svg>: no
+font, no CDN, no colour emoji on any machine. The tower (Barad-dûr) is the
+watermark's mark. Display only.
+
+Each icon's svg element carries the viewBox of the symbol it uses (every
+symbol here is 0 0 24 24), so its geometry is its own coordinate space and
+not whatever its CSS box is that render (tests/test_chart_surfaces.py,
+ViewBoxTests: every inline svg declares one). The sprite itself states the
+same grid: its box is 0 x 0 (sv-frame.css), so it draws nothing; a use
+element draws its symbol in the icon's own viewport.
 {% endcomment %}
-<svg class="sv-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+<svg class="sv-sprite" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
 <symbol id="svi-barad-dur" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21h10"/><path d="M9.2 21l.9-6.4-.7-1.2.8-4.1L8.6 3.8l2.2 2.4L12 4.6l1.2 1.6 2.2-2.4-1.6 5.5.8 4.1-.7 1.2.9 6.4"/><path d="M11.1 8.3h1.8"/></symbol>
 <symbol id="svi-oculus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/></symbol>
 <symbol id="svi-ops-center" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.2"/><rect x="13" y="4" width="7" height="7" rx="1.2"/><rect x="4" y="13" width="7" height="7" rx="1.2"/><rect x="13" y="13" width="7" height="7" rx="1.2"/></symbol>

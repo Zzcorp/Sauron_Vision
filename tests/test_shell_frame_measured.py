@@ -176,6 +176,24 @@ class FrameSourceTests(SimpleTestCase):
                 # Nothing but the icon in it: no glyph, no emoji.
                 self.assertEqual(re.sub(r"<[^>]+>", "", icon.group(1)).strip(), "")
 
+    def test_every_icon_carries_its_symbol_s_view_box(self):
+        """An icon's <svg> states the coordinate space of the symbol it
+        draws, so its geometry is its own and not whatever its CSS box is
+        that render (#115's CI, 2026-11-14: tests/test_chart_surfaces.py's
+        ViewBoxTests found 101 <svg> with no viewBox, the icons and the
+        sprite). It is the symbol's own viewBox, so the drawing maps one to
+        one, as it did; the sprite, a 0 x 0 box, states the same grid."""
+        base = read(BASE)
+        boxes = dict(re.findall(r'<symbol id="(svi-[\w-]+)" viewBox="([^"]+)"', read(ICONS)))
+        icons = re.findall(r'<svg class="sv-ico[^"]*"([^>]*)><use href="#(svi-[\w-]+)"/></svg>', base)
+        self.assertGreaterEqual(len(icons), 90)
+        self.assertEqual(len(icons), base.count('<svg class="sv-ico'))
+        for attrs, ref in icons:
+            with self.subTest(icon=ref):
+                self.assertIn(ref, boxes)
+                self.assertIn(' viewBox="%s"' % boxes[ref], attrs)
+        self.assertRegex(read(ICONS), r'<svg class="sv-sprite"[^>]* viewBox="0 0 24 24"')
+
     def test_the_frame_sheet_is_tokens_only(self):
         css = re.sub(r"/\*.*?\*/", "", read(FRAME_CSS), flags=re.S)
         # No literal colour but the light sources' own rgba(0,232,104,…)
@@ -1488,6 +1506,20 @@ class FrameLightTests(TestCase):
             r = json.loads(b.js(sid, "(function () { var e = document.querySelector('[data-sv-live-key=\"pos.etoro.split\"]');"
                                      " if (!e) return 'null'; var r = e.getBoundingClientRect();"
                                      " return JSON.stringify([Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]); })()"))
+            # What is read is the dark behind the amounts, so their own ink
+            # is taken out of both shots (#115's CI, 2026-11-14). Where the
+            # machine draws sub-pixel text (the stock font rules, sub-pixel
+            # RGB and slight hinting, as the CI has them: DejaVu with those
+            # rules gives the CI's 19 here), the line's glyphs are drawn
+            # with colour fringes on the plain ground under Off and in
+            # grayscale over the void's composited layer under Magic: their
+            # pixels differed by 19 levels of green, read as light, with no
+            # light there. A glow or shadow of the text's own still shows
+            # (a Magic-only glow on the line reads 28, the light reaching
+            # it 6, against 0 as shipped).
+            b.js(sid, "(function () { var e = document.querySelector('[data-sv-live-key=\"pos.etoro.split\"]'); if (!e) return 0;"
+                      " [e].concat(Array.prototype.slice.call(e.querySelectorAll('*'))).forEach(function (n) {"
+                      " n.style.setProperty('color', 'transparent', 'important'); }); return 0; })()")
             cls.got["split"] = lift(sid, r) if r else None
             # Without the figure on the void, the page wears the light:
             # sampled in the top gutter, left to right.

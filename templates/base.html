@@ -468,7 +468,7 @@
             </h1>
             <div class="subtitle">TRADING INTELLIGENCE</div>
             {# The menu folds to its icons from its own head (the desk v2 board, 2026-11-13: the page's edge toggles go); folded, the Eye unfolds it. toggleSidebar() keeps the choice, as before. #}
-            <button type="button" class="sv-side-fold" onclick="toggleSidebar()" aria-label="Fold or unfold the menu" title="Fold the menu to its icons; folded, the Eye opens it again"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-panel-left"/></svg></button>
+            <button type="button" class="sv-side-fold" onclick="toggleSidebar()" aria-label="Fold or unfold the menu" title="Fold the menu to its icons; folded, the Eye opens it again"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-panel-left"/></svg></button>
 <!-- UPGRADE-9: sidebar toggle moved to unified edge button -->
         </div>
         <nav class="sidebar-nav" data-nav-page-id="{{ page_id }}">
@@ -489,127 +489,127 @@
                Glyph duplication is deliberately NOT fixed here: several marks appear on two or three rows, against the
                "one mark, one row" convention other comments claim. Renaming marks and regrouping rows in the same
                change would make both unreviewable.{% endcomment %}
-            <div class="nav-section" data-nav-sec="amon-hen" data-nav-open><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">Amon Hen</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <div class="nav-section" data-nav-sec="amon-hen" data-nav-open><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">Amon Hen</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
             {% comment %}The Oculus sits ABOVE every other row on purpose: it is the only page that answers "is the machine
                turning, and which wheels are engaged" rather than one subsystem's own question. Its mark U+29BF is used nowhere
                else (U+25CE was taken by Trade Forensics). It owns no data and caches nothing (2026-09-13).{% endcomment %}
-            <a href="{% url 'oculus_dashboard' %}" class="nav-link {% if page_id == 'oculus' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-oculus"/></svg></span> <span class="label-text">Oculus</span></a>
-            <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-ops-center"/></svg></span> <span class="label-text">Operations Center</span></a>
+            <a href="{% url 'oculus_dashboard' %}" class="nav-link {% if page_id == 'oculus' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-oculus"/></svg></span> <span class="label-text">Oculus</span></a>
+            <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ops-center"/></svg></span> <span class="label-text">Operations Center</span></a>
 
             {% comment %}THE BOOK — where the money is and what it is exposed to. The four sizing pages sit together because
                they answer one question at four zooms: each pool's share of the ACCOUNT, one TICK's entries against one budget,
                per-RULE multipliers, and the correlation depth behind all three. One row named "allocator" once hid the
                second (2026-09-12), which is why all four are named for what they size.{% endcomment %}
-            <div class="nav-section" data-nav-sec="the-book" data-nav-open><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The book &middot; the money</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
-            <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-portfolio"/></svg></span> <span class="label-text">Portfolio</span></a>
-            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-brokers"/></svg></span> <span class="label-text">Brokers</span></a>
-            <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-treasury"/></svg></span> <span class="label-text">Treasury</span></a>
+            <div class="nav-section" data-nav-sec="the-book" data-nav-open><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The book &middot; the money</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-portfolio"/></svg></span> <span class="label-text">Portfolio</span></a>
+            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-brokers"/></svg></span> <span class="label-text">Brokers</span></a>
+            <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-treasury"/></svg></span> <span class="label-text">Treasury</span></a>
             {% comment %}Withdrawals asked for in advance (2026-09-28): the reserve held back from new sizing, then marked
                withdrawn when the money leaves. Mark U+21E9, the down arrow beside the Promotion Ladder's U+21E7, used nowhere else.{% endcomment %}
-            <a href="{% url 'withdrawals' %}" class="nav-link {% if page_id == 'withdrawals' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-withdrawals"/></svg></span> <span class="label-text">Withdrawals</span></a>
-            <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-positions"/></svg></span> <span class="label-text">Positions</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">P</kbd></span></a>
-            <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-tax-lots"/></svg></span> <span class="label-text">Tax Lots</span></a>
-            <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-bot-program"/></svg></span> <span class="label-text">Bot Program</span></a>
+            <a href="{% url 'withdrawals' %}" class="nav-link {% if page_id == 'withdrawals' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-withdrawals"/></svg></span> <span class="label-text">Withdrawals</span></a>
+            <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-positions"/></svg></span> <span class="label-text">Positions</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">P</kbd></span></a>
+            <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-tax-lots"/></svg></span> <span class="label-text">Tax Lots</span></a>
+            <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bot-program"/></svg></span> <span class="label-text">Bot Program</span></a>
             {% comment %}ROUTED AND IN NO MENU until 2026-09-13, so unreachable by anything but a typed URL — the defect the
                comment beside the ladder pages already names: "a page nobody can find is a page that does not exist". One row per
                bot config with its open count, 24h fills and 24h P&L, and the hand-taken book counted separately. Mark U+25F0,
                used nowhere else.{% endcomment %}
-            <a href="{% url 'asset_bots_dashboard' %}" class="nav-link {% if page_id == 'asset_bots' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-asset-bots"/></svg></span> <span class="label-text">Asset Bots</span></a>
-            <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-share-allocator"/></svg></span> <span class="label-text">Share Allocator</span></a>
+            <a href="{% url 'asset_bots_dashboard' %}" class="nav-link {% if page_id == 'asset_bots' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-asset-bots"/></svg></span> <span class="label-text">Asset Bots</span></a>
+            <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-share-allocator"/></svg></span> <span class="label-text">Share Allocator</span></a>
             {% comment %}The Share Allocator sizes each POOL; the Capital Desk ranks ONE TICK's entries against one risk budget
                and says what it refused and why. Its mark U+25A9 is used nowhere else (2026-09-12).{% endcomment %}
-            <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-capital-desk"/></svg></span> <span class="label-text">Capital Desk</span></a>
-            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-risk-allocator"/></svg></span> <span class="label-text">Risk Allocator</span></a>
-            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-risk-depth"/></svg></span> <span class="label-text">Risk Depth</span></a>
+            <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-capital-desk"/></svg></span> <span class="label-text">Capital Desk</span></a>
+            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-risk-allocator"/></svg></span> <span class="label-text">Risk Allocator</span></a>
+            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-risk-depth"/></svg></span> <span class="label-text">Risk Depth</span></a>
             {% comment %}Read "Bot Performance" until 2026-09-13, indistinguishable in the rail from the per-rule expectancy
                table two sections down. This one is the equity curve and the R-distribution.{% endcomment %}
-            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-equity-curve"/></svg></span> <span class="label-text">Bot Equity Curve</span></a>
+            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-equity-curve"/></svg></span> <span class="label-text">Bot Equity Curve</span></a>
 
             {% comment %}WHAT MAY ACT. A rule's whole life in one section: what it proposes, what stage that puts it on, what the
                admin lane has done to it, and what kind of trader carries it. These pages deep-link into each other and were
                scattered across two sections; four of them were in no menu at all until recently, reachable only from the admin
                dashboard — and a page nobody can find is a page that does not exist.{% endcomment %}
-            <div class="nav-section" data-nav-sec="what-can-act"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What can act</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
-            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg></span> <span class="label-text">Signals</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">S</kbd></span></a>
-            <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-strategies"/></svg></span> <span class="label-text">Strategies</span></a>
+            <div class="nav-section" data-nav-sec="what-can-act"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What can act</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg></span> <span class="label-text">Signals</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">S</kbd></span></a>
+            <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-strategies"/></svg></span> <span class="label-text">Strategies</span></a>
             {# ◧ — the half-filled square: /opportunities/ shows the matches a setup MADE, /setups/ answers for the ones it never made. No data-nav-id: the dot probe's table is the seven sections in tests/test_nothing_unseen.py, and a diagnosis has no "new since your last visit". #}
-            <a href="{% url 'setups_dashboard' %}" class="nav-link {% if page_id == 'setups' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-setups"/></svg></span> <span class="label-text">Setups</span></a>
-            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-opportunities"/></svg></span> <span class="label-text">Opportunities</span></a>
-            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-rule-controls"/></svg></span> <span class="label-text">Rule Controls</span></a>
-            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-ladder"/></svg></span> <span class="label-text">Promotion Ladder</span></a>
+            <a href="{% url 'setups_dashboard' %}" class="nav-link {% if page_id == 'setups' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-setups"/></svg></span> <span class="label-text">Setups</span></a>
+            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-opportunities"/></svg></span> <span class="label-text">Opportunities</span></a>
+            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-rule-controls"/></svg></span> <span class="label-text">Rule Controls</span></a>
+            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ladder"/></svg></span> <span class="label-text">Promotion Ladder</span></a>
             {% comment %}WHAT KIND OF TRADER the pool is — the coherent preset of knobs, its own grading window, its share band and
                its weight on the 5-10 year view. Its mark U+25E8 is used nowhere else, and the leverage correction lives on the
                page: no personality borrows to fund a position, and forex is the exception where the platform does lever, at the
                broker (2026-09-12).{% endcomment %}
-            <a href="{% url 'personas_dashboard' %}" class="nav-link {% if page_id == 'personas' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-personalities"/></svg></span> <span class="label-text">Personalities</span></a>
+            <a href="{% url 'personas_dashboard' %}" class="nav-link {% if page_id == 'personas' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-personalities"/></svg></span> <span class="label-text">Personalities</span></a>
             {% comment %}Also routed and in no menu until 2026-09-13. The real-time fast-rule engine: what fired, how often, how
                fast. It belongs beside the rules it fires, not in a drawer nobody opens. Mark U+25F1, used nowhere else.{% endcomment %}
-            <a href="{% url 'events_dashboard' %}" class="nav-link {% if page_id == 'events' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-events"/></svg></span> <span class="label-text">Event Engine</span></a>
+            <a href="{% url 'events_dashboard' %}" class="nav-link {% if page_id == 'events' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-events"/></svg></span> <span class="label-text">Event Engine</span></a>
 
             {% comment %}WHAT IS MEASURED. Everything that grades something, together — because this platform's recurring failure
                is a count that reads as strength while meaning the opposite, and these are the pages that settle it: the ledger,
                the two levels of self-grading (signal and fill), the one-fill autopsy, the two simulators, and how reliable each
                agent has actually been.{% endcomment %}
-            <div class="nav-section" data-nav-sec="what-is-measured"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What is measured</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
-            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-ledger"/></svg></span> <span class="label-text">Evidence Ledger</span></a>
-            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-performance"/></svg></span> <span class="label-text">Signal Performance</span></a>
-            <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-bot-performance"/></svg></span> <span class="label-text">Bot Performance</span></a>
-            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-forensics"/></svg></span> <span class="label-text">Trade Forensics</span></a>
-            <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-backtest"/></svg></span> <span class="label-text">Backtesting</span></a>
-            <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-bot-backtest"/></svg></span> <span class="label-text">Bot Backtest</span></a>
-            <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-calibration"/></svg></span> <span class="label-text">Agent Calibration</span></a>
+            <div class="nav-section" data-nav-sec="what-is-measured"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What is measured</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ledger"/></svg></span> <span class="label-text">Evidence Ledger</span></a>
+            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-performance"/></svg></span> <span class="label-text">Signal Performance</span></a>
+            <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bot-performance"/></svg></span> <span class="label-text">Bot Performance</span></a>
+            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-forensics"/></svg></span> <span class="label-text">Trade Forensics</span></a>
+            <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-backtest"/></svg></span> <span class="label-text">Backtesting</span></a>
+            <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bot-backtest"/></svg></span> <span class="label-text">Bot Backtest</span></a>
+            <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-calibration"/></svg></span> <span class="label-text">Agent Calibration</span></a>
             {% comment %}THE COUNCIL (2026-10-22): ten voices graded nightly on what the market did next, beside the calibration they run in; it acts on nothing, so it is measured, not "can act". Staff only, as the page is. Mark U+2654, used nowhere else.{% endcomment %}
-            {% if request.user.is_staff %}<a href="{% url 'council_dashboard' %}" class="nav-link {% if page_id == 'council' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg></span> <span class="label-text">The Council</span></a>{% endif %}
+            {% if request.user.is_staff %}<a href="{% url 'council_dashboard' %}" class="nav-link {% if page_id == 'council' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg></span> <span class="label-text">The Council</span></a>{% endif %}
 
             {% comment %}WHAT IS BEING INVENTED. The research half: what the miner proposes, what the generator writes, what the
                brain believes and how long it has believed it. NOTHING in this section can place an order — every path out of it
                runs through the ladder in "What can act" first, which is the whole reason the two are separate sections and
                not one.{% endcomment %}
-            <div class="nav-section" data-nav-sec="what-is-invented"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What is invented</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
-            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-evolution"/></svg></span> <span class="label-text">Strategy Evolution</span></a>
-            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-discoveries"/></svg></span> <span class="label-text">Discoveries</span></a>
-            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-generated"/></svg></span> <span class="label-text">Generated Strategies</span></a>
-            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-hypotheses"/></svg></span> <span class="label-text">Hypothesis Market</span></a>
-            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-mind"/></svg></span> <span class="label-text">Sauron&#39;s Mind</span></a>
-            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-graph"/></svg></span> <span class="label-text">Knowledge Graph</span></a>
+            <div class="nav-section" data-nav-sec="what-is-invented"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What is invented</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-evolution"/></svg></span> <span class="label-text">Strategy Evolution</span></a>
+            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-discoveries"/></svg></span> <span class="label-text">Discoveries</span></a>
+            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-generated"/></svg></span> <span class="label-text">Generated Strategies</span></a>
+            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-hypotheses"/></svg></span> <span class="label-text">Hypothesis Market</span></a>
+            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-mind"/></svg></span> <span class="label-text">Sauron&#39;s Mind</span></a>
+            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-graph"/></svg></span> <span class="label-text">Knowledge Graph</span></a>
             {% comment %}The Lore (2026-10-14): Sauron's staff-only library of strategies, fund playbooks, episodes and concepts, read by cleared agents as reference data. Staff only, so the link shows to staff only.{% endcomment %}
-            {% if request.user.is_staff %}<a href="{% url 'lore:index' %}" class="nav-link {% if page_id == 'lore' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-lore"/></svg></span> <span class="label-text">The Lore</span></a>{% endif %}
-            <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-consolidation"/></svg></span> <span class="label-text">Consolidation</span></a>
+            {% if request.user.is_staff %}<a href="{% url 'lore:index' %}" class="nav-link {% if page_id == 'lore' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-lore"/></svg></span> <span class="label-text">The Lore</span></a>{% endif %}
+            <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-consolidation"/></svg></span> <span class="label-text">Consolidation</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
-            <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-horizon"/></svg></span> <span class="label-text">Horizon</span></a>
-            <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-hub"/></svg></span> <span class="label-text">Intelligence Hub</span></a>
-            <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-briefing"/></svg></span> <span class="label-text">Strategist Briefing</span></a>
-            <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-earnings"/></svg></span> <span class="label-text">Earnings Reviews</span></a>
+            <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-horizon"/></svg></span> <span class="label-text">Horizon</span></a>
+            <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-hub"/></svg></span> <span class="label-text">Intelligence Hub</span></a>
+            <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-briefing"/></svg></span> <span class="label-text">Strategist Briefing</span></a>
+            <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-earnings"/></svg></span> <span class="label-text">Earnings Reviews</span></a>
             {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
-            <a href="{% url 'research_view' %}" class="nav-link {% if page_id == 'research' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></span> <span class="label-text">Ask Sauron</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">A</kbd></span></a>
-            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-journal"/></svg></span> <span class="label-text">AI Journal</span></a>
-            <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-insights"/></svg></span> <span class="label-text">AI Insights</span></a>
+            <a href="{% url 'research_view' %}" class="nav-link {% if page_id == 'research' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></span> <span class="label-text">Ask Sauron</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">A</kbd></span></a>
+            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-journal"/></svg></span> <span class="label-text">AI Journal</span></a>
+            <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-insights"/></svg></span> <span class="label-text">AI Insights</span></a>
 
-            <div class="nav-section" data-nav-sec="the-markets"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The markets</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
-            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-instruments"/></svg></span> <span class="label-text">Instruments & Quotes</span></a>
-            <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-calendar"/></svg></span> <span class="label-text">Economic Calendar</span></a>
-            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-news"/></svg></span> <span class="label-text">News & Sentiment</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">N</kbd></span></a>
+            <div class="nav-section" data-nav-sec="the-markets"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The markets</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-instruments"/></svg></span> <span class="label-text">Instruments & Quotes</span></a>
+            <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-calendar"/></svg></span> <span class="label-text">Economic Calendar</span></a>
+            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-news"/></svg></span> <span class="label-text">News & Sentiment</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">N</kbd></span></a>
             {% comment %}Where the large players must move, from free public footprints, graded against what prices did next (2026-10-09). Information, never a gate; it reads the markets, so it sits with them.{% endcomment %}
-            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-big-money"/></svg></span> <span class="label-text">Big Money</span></a>
+            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-big-money"/></svg></span> <span class="label-text">Big Money</span></a>
 
             {% comment %}IS IT RUNNING — not "is it switched on". /health/ and the system map exist because six scraper components
                once sat at last_status='success' with zero rows between them. These pages answer whether data is actually
                MOVING.{% endcomment %}
-            <div class="nav-section" data-nav-sec="the-machine"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The machine</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
-            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-health"/></svg></span> <span class="label-text">System Health</span></a>
-            <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-tasks"/></svg></span> <span class="label-text">Agent Tasks</span></a>
-            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-models"/></svg></span> <span class="label-text">Model Selection</span></a>{% endif %}
-            {% if request.user.is_superuser %}<a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-ops"/></svg></span> <span class="label-text">Ops</span></a>
-            <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg></span> <span class="label-text">Admin Panel</span></a>
-            {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-audit"/></svg></span> <span class="label-text">Audit Log</span></a>{% endif %}
-            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-newsletters"/></svg></span> <span class="label-text">Newsletters</span></a>
-            {% endif %}<div class="nav-section" data-nav-sec="you"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">You</span><svg class="sv-ico sv-ico-fold" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <div class="nav-section" data-nav-sec="the-machine"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The machine</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-health"/></svg></span> <span class="label-text">System Health</span></a>
+            <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-tasks"/></svg></span> <span class="label-text">Agent Tasks</span></a>
+            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-models"/></svg></span> <span class="label-text">Model Selection</span></a>{% endif %}
+            {% if request.user.is_superuser %}<a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ops"/></svg></span> <span class="label-text">Ops</span></a>
+            <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg></span> <span class="label-text">Admin Panel</span></a>
+            {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-audit"/></svg></span> <span class="label-text">Audit Log</span></a>{% endif %}
+            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-newsletters"/></svg></span> <span class="label-text">Newsletters</span></a>
+            {% endif %}<div class="nav-section" data-nav-sec="you"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">You</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
 
-            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-profile"/></svg></span> <span class="label-text">Profile</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">R</kbd></span></a>
-            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg></span> <span class="label-text">Notifications</span></a>
-            <a href="{% url 'newsletter_archive' %}" class="nav-link {% if page_id == 'newsletters' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-letter"/></svg></span> <span class="label-text">Weekly Letter</span></a>
-            <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-setup"/></svg></span> <span class="label-text">Setup</span></a>
-            <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-start"/></svg></span> <span class="label-text">Getting Started</span></a>
+            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-profile"/></svg></span> <span class="label-text">Profile</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">R</kbd></span></a>
+            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg></span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'newsletter_archive' %}" class="nav-link {% if page_id == 'newsletters' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-letter"/></svg></span> <span class="label-text">Weekly Letter</span></a>
+            <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-setup"/></svg></span> <span class="label-text">Setup</span></a>
+            <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-start"/></svg></span> <span class="label-text">Getting Started</span></a>
         </nav>
         {# THE SECTIONS FOLD (UI redo B2, the desk v2 board, 2026-11-13): Amon Hen and the book open, the other five folded, the page's own section always open; his choice kept per browser (static/js/sv-frame.js owns the clicks). Applied here, before the first paint, so the menu never jumps. #}
         <script>
@@ -636,11 +636,11 @@
         <div class="sv-tower" aria-hidden="true"><svg viewBox="0 0 60 140" width="30" height="70" focusable="false"><path class="sv-tower-body" d="M4 140L12 133L14 113L18 109L20 85L23 81L24 57L26 53L26.5 35L22.5 31L18.5 5L25 23.5L28.5 29.5L31.5 29.5L35 23.5L41.5 5L37.5 31L33.5 35L34 53L36 57L37 81L40 85L42 109L46 113L48 133L56 140Z" fill="currentColor" fill-opacity="0.075"/><ellipse class="sv-tower-eye" cx="30" cy="20.5" rx="3.2" ry="1.5"/></svg></div>
         <div class="sidebar-footer">
             {# Same mark the Admin Panel nav-link carries, so both routes into admin read as one destination. #}
-            <a href="{% url 'admin:index' %}"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg> Admin</a>
+            <a href="{% url 'admin:index' %}"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg> Admin</a>
             <!-- 2. Logout as POST form -->
             <form method="post" action="{% url 'logout' %}" style="display:inline;">
                 {% csrf_token %}
-                <button type="submit" class="logout-btn"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-logout"/></svg> Logout</button>
+                <button type="submit" class="logout-btn"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-logout"/></svg> Logout</button>
             </form>
         </div>
     </aside>
@@ -671,8 +671,8 @@
                    are dead. Two contradictory liveness claims forty pixels
                    apart, and the false one had the better seat. {% endcomment %}
                 <a href="{% url 'toggle_theme' %}" class="theme-toggle-btn" title="Switch to light/dark mode">
-                    <span class="theme-icon-dark"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-sun"/></svg></span>
-                    <span class="theme-icon-light"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-moon"/></svg></span>
+                    <span class="theme-icon-dark"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-sun"/></svg></span>
+                    <span class="theme-icon-light"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-moon"/></svg></span>
                 </a>
                 <span id="clock" data-timezone="{{ user_timezone }}"></span>
                 {% comment %}data-ex-* hooks: sv-market-status.js polls
@@ -732,7 +732,7 @@
                         data-sv-open="notifPanel" aria-haspopup="true"
                         aria-expanded="false"
                         aria-label="Notifications{% if notification_count %} — {{ notification_count }} unread{% endif %}">
-                    <svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg>
+                    <svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg>
                     {% if notification_count %}<span class="notif-badge">{{ notification_count }}</span>{% endif %}
                 </button>
                 <div class="notif-dropdown" id="notifPanel" role="menu"
@@ -778,14 +778,14 @@
                         data-has-pin="{{ idle_lock.has_pin|yesno:'1,0' }}"
                         title="{% if idle_lock.has_pin %}Lock this session — the PIN reopens it{% else %}Set a PIN to lock this session{% endif %}"
                         aria-label="Lock session">
-                    <span aria-hidden="true">{% if idle_lock.has_pin %}<svg class="sv-ico" focusable="false"><use href="#svi-lock"/></svg>{% else %}<svg class="sv-ico" focusable="false"><use href="#svi-unlock"/></svg>{% endif %}</span>
+                    <span aria-hidden="true">{% if idle_lock.has_pin %}<svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-lock"/></svg>{% else %}<svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-unlock"/></svg>{% endif %}</span>
                 </button>
                 {% get_display_name as uname %}
                 <div class="user-menu" id="userMenu">
                     <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false">
                         <span class="um-avatar">{{ uname|first|upper }}</span>
                         <span class="um-name-text">{{ uname }}</span>
-                        <span class="um-caret"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></span>
+                        <span class="um-caret"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></span>
                     </button>
                     <div class="user-menu-dropdown" role="menu">
                         <div class="um-head">
@@ -794,23 +794,23 @@
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'profile' %}" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-profile"/></svg></span> Profile
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-profile"/></svg></span> Profile
                             </a>
                             <a class="um-link" href="{% url 'profile' %}?modal=password" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-key"/></svg></span> Change Password
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-key"/></svg></span> Change Password
                             </a>
                             <a class="um-link" href="{% url 'profile' %}?modal=pin" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-pin"/></svg></span> Change PIN
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-pin"/></svg></span> Change PIN
                             </a>
                             {# A phone's topbar has no room for the lock and the theme switch (2026-09-28): they are here, shown at 768px and below only. #}
                             {# Lock now clicks the real #lockNowBtn, the proxy sv-gollum.js already uses: idle-lock.js binds that button, and click() works on a hidden one. #}
                             <button type="button" class="um-link sv-phone-only" role="menuitem"
                                     style="width:100%;text-align:left;background:none;border:0;cursor:pointer;"
                                     onclick="var b=document.getElementById('lockNowBtn');if(b)b.click();">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-lock"/></svg></span> Lock now
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-lock"/></svg></span> Lock now
                             </button>
                             <a class="um-link sv-um-theme" href="{% url 'toggle_theme' %}" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-sun"/></svg></span> Light / dark mode
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-sun"/></svg></span> Light / dark mode
                             </a>
                         </div>
                         {# His choice of Ambience (the magic kept, 2026-11-12): Magic, Calm or Off, saved on his profile. static/js/sv-ambience.js posts a click to set_ambience; only the server's 200 that echoes the value changes the body's attribute and the pressed button, and a failure writes "Not saved" into the note. Display only. The menu explains nothing more. #}
@@ -828,18 +828,18 @@
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'notifications_inbox' %}" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg></span> Notifications
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg></span> Notifications
                             </a>
                             <a class="um-link" href="{% url 'getting_started' %}" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-start"/></svg></span> Getting Started
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-start"/></svg></span> Getting Started
                             </a>
                             <button type="button" class="um-link" id="umReplayTour" role="menuitem"
                                     style="width:100%;text-align:left;background:none;border:0;cursor:pointer;">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-compass"/></svg></span> Platform Tour
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-compass"/></svg></span> Platform Tour
                             </button>
                             {% if request.user.is_staff %}
                             <a class="um-link" href="{% url 'admin:index' %}" role="menuitem">
-                                <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg></span> Admin Panel
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg></span> Admin Panel
                             </a>
                             {% endif %}
                         </div>
@@ -847,7 +847,7 @@
                             <form method="post" action="{% url 'logout' %}" class="um-logout-form">
                                 {% csrf_token %}
                                 <button type="submit" class="um-link um-logout" role="menuitem">
-                                    <span class="um-icon"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-logout"/></svg></span> Log out
+                                    <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-logout"/></svg></span> Log out
                                 </button>
                             </form>
                         </div>
@@ -1206,7 +1206,7 @@
                     <span class="sv-seat-alarm" id="svBarAlarms" hidden></span>
                 </button>
                 <div class="sv-more">
-                <button type="button" data-sv-cell="more" class="ip-cat sv-sb-more" id="svMoreBtn" aria-expanded="false" aria-controls="svMorePop" aria-label="6 more cells: Positions, Strategies, Funding, Liquidations 24 h, Watchlist, Volatility"><span class="sv-more-n">6 more</span><svg class="sv-ico sv-ico-sm" aria-hidden="true" focusable="false"><use href="#svi-chevron-up"/></svg></button>
+                <button type="button" data-sv-cell="more" class="ip-cat sv-sb-more" id="svMoreBtn" aria-expanded="false" aria-controls="svMorePop" aria-label="6 more cells: Positions, Strategies, Funding, Liquidations 24 h, Watchlist, Volatility"><span class="sv-more-n">6 more</span><svg class="sv-ico sv-ico-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-up"/></svg></button>
                 <div class="sv-more-pop" id="svMorePop" role="group" aria-label="More cells" hidden>
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">POSITIONS</span>
@@ -1604,22 +1604,22 @@
 
 {# THE DOCK (UI redo B1, the desk v2 board, 2026-11-13): a 40 px column on the right edge, between the band and the status bar. Signals opens the rail as a column that pushes the page (its count and the long/short split ride the sweep); the Council and Activity open their own panels through their own doors (staff only, as the panels are); Ask Sauron opens the answer panel, as the Eye in the status bar does. static/js/sv-frame.js. #}
 <div class="sv-dock" id="svDock" role="toolbar" aria-label="Side panels" aria-orientation="vertical">
-    <button type="button" class="sv-dock-btn" data-sv-dock="signals" aria-controls="signalsRail" aria-expanded="false" title="Signals: open or close the rail (g then s for the page)" aria-label="Signals on the rail: open or close the rail"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg><span class="sv-dock-n" data-sv-live="dock-sig-n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span></button>
+    <button type="button" class="sv-dock-btn" data-sv-dock="signals" aria-controls="signalsRail" aria-expanded="false" title="Signals: open or close the rail (g then s for the page)" aria-label="Signals on the rail: open or close the rail"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg><span class="sv-dock-n" data-sv-live="dock-sig-n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span></button>
     <div class="sv-dock-dirs" aria-hidden="true" data-sv-live="dock-sig-dirs">{% if not rail.error %}<span class="up">&#9650;{{ rail.long_n|default:"0" }}</span><span class="down">&#9660;{{ rail.short_n|default:"0" }}</span>{% endif %}</div>
-    {% if user.is_staff %}<button type="button" class="sv-dock-btn" data-sv-dock="council" aria-controls="svCouncilBandPanel" aria-expanded="false" aria-keyshortcuts="c" title="The Council (c)" aria-label="The Council (c)"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg><span class="sv-dock-n" hidden></span></button>
-    <button type="button" class="sv-dock-btn" data-sv-dock="activity" aria-controls="svActivityPanel" aria-expanded="false" title="Sauron's activity log" aria-label="Sauron's activity log"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-activity"/></svg><span class="sv-dock-n" hidden></span></button>{% endif %}
-    <button type="button" class="sv-dock-btn" data-sv-dock="ask" aria-controls="seChatPanel" aria-expanded="false" aria-keyshortcuts="Control+K" title="Ask Sauron (Ctrl+K)" aria-label="Ask Sauron: the answer panel opens here (Ctrl+K)"><svg class="sv-ico" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></button>
+    {% if user.is_staff %}<button type="button" class="sv-dock-btn" data-sv-dock="council" aria-controls="svCouncilBandPanel" aria-expanded="false" aria-keyshortcuts="c" title="The Council (c)" aria-label="The Council (c)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg><span class="sv-dock-n" hidden></span></button>
+    <button type="button" class="sv-dock-btn" data-sv-dock="activity" aria-controls="svActivityPanel" aria-expanded="false" title="Sauron's activity log" aria-label="Sauron's activity log"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-activity"/></svg><span class="sv-dock-n" hidden></span></button>{% endif %}
+    <button type="button" class="sv-dock-btn" data-sv-dock="ask" aria-controls="seChatPanel" aria-expanded="false" aria-keyshortcuts="Control+K" title="Ask Sauron (Ctrl+K)" aria-label="Ask Sauron: the answer panel opens here (Ctrl+K)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></button>
 </div>
 
 {# THE PHONE'S BOTTOM NAV (2026-09-28). The four pages the keeper opens every day and the whole menu, one tap each. #}
 {# Shown at 768px and below only (static/css/sv-responsive.css), and not on the position page, whose close bar owns the bottom edge. #}
 {# aria-current comes from the same page_id tests the sidebar's active row uses; the bell stays in the topbar for alerts. #}
 <nav class="sv-phone-nav" id="svPhoneNav" aria-label="Main">
-    <a class="sv-pn-item" href="{% url 'command_center' %}"{% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" focusable="false"><use href="#svi-ops-center"/></svg></span><span class="sv-pn-label">Home</span></a>
-    <a class="sv-pn-item" href="{% url 'positions_list' %}"{% if page_id == 'positions' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" focusable="false"><use href="#svi-positions"/></svg></span><span class="sv-pn-label">Positions</span></a>
-    <a class="sv-pn-item" href="{% url 'portfolio_overview' %}"{% if page_id == 'portfolio' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" focusable="false"><use href="#svi-portfolio"/></svg></span><span class="sv-pn-label">Portfolio</span></a>
-    <a class="sv-pn-item" href="{% url 'briefing_dashboard' %}"{% if page_id == 'briefing' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" focusable="false"><use href="#svi-briefing"/></svg></span><span class="sv-pn-label">Briefing</span></a>
-    <button type="button" class="sv-pn-item" onclick="toggleMobileSidebar()" aria-controls="mainSidebar"><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" focusable="false"><use href="#svi-menu"/></svg></span><span class="sv-pn-label">Menu</span></button>
+    <a class="sv-pn-item" href="{% url 'command_center' %}"{% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-ops-center"/></svg></span><span class="sv-pn-label">Home</span></a>
+    <a class="sv-pn-item" href="{% url 'positions_list' %}"{% if page_id == 'positions' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-positions"/></svg></span><span class="sv-pn-label">Positions</span></a>
+    <a class="sv-pn-item" href="{% url 'portfolio_overview' %}"{% if page_id == 'portfolio' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-portfolio"/></svg></span><span class="sv-pn-label">Portfolio</span></a>
+    <a class="sv-pn-item" href="{% url 'briefing_dashboard' %}"{% if page_id == 'briefing' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-briefing"/></svg></span><span class="sv-pn-label">Briefing</span></a>
+    <button type="button" class="sv-pn-item" onclick="toggleMobileSidebar()" aria-controls="mainSidebar"><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-menu"/></svg></span><span class="sv-pn-label">Menu</span></button>
 </nav>
 
 <!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->

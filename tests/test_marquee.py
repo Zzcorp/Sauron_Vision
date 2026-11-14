@@ -314,7 +314,14 @@ window.__mq = (function () {
      band, so "clear of the tab" is the tab measured (seeRight), not the old
      120 px, and where no item stands wholly inside at that frame the
      strip's own position puts the first one that fits 8 px in, as the
-     hand's wheel would, before anything is measured. */
+     hand's wheel would, before anything is measured.
+     The room is the one find() asks for (#115's CI, 2026-11-14): 8 px
+     clear of the clip's left and 8 px clear of the tab, and a pixel for the
+     strip's whole-pixel rounding. With the CI's faces the first headline
+     that "fitted" was 366.0 px in a room of 366.4, put at 9 px in it ran
+     a pixel into the tab's 8 px, and the helper gave up; now the item
+     stands in the middle of that room, and the next is tried if one still
+     falls short. */
   function inside(name) {
     var p = parts(name), c = p.c.getBoundingClientRect(), its = items(p.t);
     function find() {
@@ -330,12 +337,13 @@ window.__mq = (function () {
     }
     var at = find();
     if (at || !window.SVMarquee) return at;
-    var room = seeRight(p, c) - c.left - 16;
+    var room = seeRight(p, c) - c.left - 18;
     for (var i = 0; i < its.length; i++) {
       var b = its[i].getBoundingClientRect();
       if (b.width < room && b.right > c.left) {
-        SVMarquee.to(p.t, SVMarquee.offset(p.t) + (c.left + 9 - b.left));
-        return find();
+        SVMarquee.to(p.t, SVMarquee.offset(p.t) + (c.left + 9 + (room - b.width) / 2 - b.left));
+        at = find();
+        if (at) return at;
       }
     }
     return null;
