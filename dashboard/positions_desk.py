@@ -13,14 +13,16 @@ book, off what the page already holds; it values nothing a second time.
   * THE BOOK AT eTORO, the real book only: the account's equity, the
     notional of the REAL rows at their marks, what every REAL stop costs
     if all fill against the open-risk limit (the gates' limit and book
-    size, read as the Orcs read the live book: bot_program.orcs.sources),
-    and the margin eToro says it holds.
+    size, each world-live row priced as the gate prices it: the reading
+    bot_program.orcs.sources makes of the live book, made here), and the
+    margin eToro says it holds.
   * CLOSED · 24 H, the REAL EXPOSURE by class and by side, and CLOSED · 30 D
     by world: the lower row of the board.
 
 DISPLAY ONLY. Nothing here writes, orders, sizes or gates; no broker and no
-model is called. A figure the platform does not have is None, and the page
-prints the em dash for it, never a zero.
+model is called, and nothing of the Orcs is imported (their importers are
+frozen: tests/orcs/test_orc_o2a_shadow_pins.py). A figure the platform does
+not have is None, and the page prints the em dash for it, never a zero.
 """
 import logging
 from datetime import timedelta
@@ -148,27 +150,63 @@ def _exposure(obj):
     return abs(qty * price * vpu)
 
 
+def _real_risk_at_stops(user, pf):
+    """What every REAL stop costs if all fill: each open world-live row
+    (OPEN or CLOSE_PENDING, never paper, never the DEMO world) priced as
+    the open-risk gate prices it (risk_gate._row_risk: a row with no stop
+    risks its whole notional), plus the legacy portfolio.Position rows the
+    gate counts on the limits book, never one a REAL row above mirrors.
+
+    The reading bot_program.orcs.sources._live_book makes of the live
+    book, row for row, made here: this page imports nothing of the Orcs,
+    whose importers are frozen (CI round 1, 2026-11-14:
+    tests/orcs/test_orc_o2a_shadow_pins.py). Reads only."""
+    from bot_program.models import AssetBotTrade
+    from portfolio import risk_gate
+    from portfolio.models import Position
+    from portfolio.services import value_per_unit
+    from .position_summary import WORLD_LIVE, world_of
+    total, symbols = 0.0, set()
+    for t in AssetBotTrade.objects.filter(
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING"),
+            paper=False):
+        if world_of(t) != WORLD_LIVE:
+            continue
+        risk, _stopped = risk_gate._row_risk(
+            t.qty, t.entry_price, t.stop_loss, t.side, value_per_unit(t))
+        total += risk
+        symbols.add(str(t.symbol).upper())
+    for p in (Position.objects.filter(portfolio=pf, closed_at__isnull=True)
+              .select_related("instrument")):
+        if str(getattr(p.instrument, "symbol", "")).upper() in symbols:
+            continue
+        risk, _stopped = risk_gate._row_risk(
+            p.quantity, p.entry_price, getattr(p, "stop_loss", None),
+            "BUY" if str(p.direction).lower() == "long" else "SELL")
+        total += risk
+    return total
+
+
 def _at_the_stops(user):
-    """(risk money, its % of the live book, the limit %) of the REAL rows,
-    read as bot_program.orcs.sources reads the live book: the world-live
-    rows at their stops (risk_gate._row_risk), against the live gates'
-    limit and book size. (None, None, None) when nothing can be measured.
-    Read only: the limits book is never created here."""
+    """(risk money, its % of the live book, the limit %) of the REAL rows:
+    what every REAL stop costs if all fill (_real_risk_at_stops), against
+    the live gates' limit and book size. (None, None, None) when nothing
+    can be measured; the risk is unknown, as the Orcs read it, while the
+    limit or the book size is. Read only: the limits book is never created
+    here."""
     try:
         from portfolio import risk_gate
         from portfolio.models import Portfolio
-        from bot_program.orcs.sources import _live_book
         pf = Portfolio.objects.filter(name="Main").first()
         if pf is None:
             return None, None, None
         limit_pct = risk_gate._limit_pct(pf, "max_open_risk_pct")
         book_v, _src = risk_gate.venue_book_value(user, pf, "live")
         book_v = _f(book_v)
-        _mode, risk, _limit_money = _live_book(user, pf)
-        risk = _f(risk)
-        share = (risk / book_v * 100.0
-                 if risk is not None and book_v and book_v > 0 else None)
-        return risk, share, limit_pct
+        if limit_pct is None or not book_v or book_v <= 0:
+            return None, None, limit_pct
+        risk = _real_risk_at_stops(user, pf)
+        return risk, risk / book_v * 100.0, limit_pct
     except Exception:  # noqa: BLE001 — the page never fails on a reading
         logger.warning("[desk] the open risk could not be read",
                        exc_info=True)

@@ -328,6 +328,25 @@ class DeskFiguresTests(TestCase):
         self.assertEqual(book["stops_limit"], "2.50%")
         self.assertFalse(book["stops_over"])
 
+    def test_the_stops_are_the_orcs_reading_of_the_live_book_made_without_them(self):
+        """CI round 1 (2026-11-14): the desk imported the Orcs' own reader
+        (bot_program.orcs.sources._live_book), a new importer of the Orcs,
+        which their pin refuses (tests/orcs/test_orc_o2a_shadow_pins.py). It
+        reads the live book itself now, row for row as the Orcs and the
+        open-risk gate price it: the same money on the same book, the DEMO
+        and PAPER rows left out."""
+        from bot_program.orcs.sources import _live_book
+        from dashboard import positions_desk
+        from portfolio.models import Portfolio
+        pf = Portfolio.objects.get(name="Main")
+        risk, share, limit = positions_desk._at_the_stops(self.user)
+        _mode, orcs_risk, _limit_money = _live_book(self.user, pf)
+        self.assertIsNotNone(orcs_risk)
+        self.assertAlmostEqual(risk, orcs_risk, places=9)
+        # 20,000 x 0.0026 + 1.5 x 23.60 + 4 x 4.90: the three REAL rows only.
+        self.assertAlmostEqual(risk, 107.0, places=6)
+        self.assertEqual(limit, 2.5)
+
     def test_the_real_exposure_by_class_and_side(self):
         ex = self.desk()["desk"]["exposure"]
         self.assertEqual([(c["name"], c["text"], c["share_text"]) for c in ex["classes"]],
