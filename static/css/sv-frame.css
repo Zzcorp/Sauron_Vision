@@ -1,0 +1,865 @@
+/* ════════════════════════════════════════════════════════════════════════
+   THE FRAME (UI redo B1 + B2, the desk v2 board, 2026-11-13)
+
+   The operator approved the desk v2 boards with "amazing work, bravo, I
+   need it fast!!" (canvas_v2/project/Desk2.dc.html, the frame around the
+   positions; Twist2.dc.html, the twist close up; Instrument2.dc.html, the
+   menu folded to its icons). This sheet draws that frame around every page
+   from 769 px up; the phone tier (sv-responsive.css, loaded after this
+   sheet) keeps the phone's own frame, and nothing here reaches it.
+
+     the menu       232 px (240 from 1680, 256 from 2200), 56 folded; its
+                    head is the top bar's height; Rajdhani 600 rows of 32
+                    px; Orbitron section heads of 28 px that fold; one icon
+                    family (templates/_partials/sv_icons.html); the tower in
+                    its empty foot only
+     the top bar    44 px: the page title (Orbitron 15), the "/ Symbol or
+                    command" field, then the clock, the sessions, the feed,
+                    REAL ARMED, the bell, the lock, the operator
+     the band       32 px under it: the prices, then the news, each lane
+                    its own marquee (sv-marquee.js)
+     the page       starts 16 px under the band; nothing floats over it
+     the dock       40 px on the right edge: Signals, the Council,
+                    Activity, Ask Sauron
+     the rail       a column left of the dock (300, 340 from 1440, 380
+                    from 2200) that pushes the page; the Council's, the
+                    activity's and Ask Sauron's panels open in that column
+                    and push the page the same way
+     the status bar 32 px across the whole foot: Gollum docked left, the
+                    REAL scope said once, BOTS, the Horde's standards,
+                    "N more", "? Keys", the Eye docked right
+
+   Colours are the token sheet's only (sv-tokens.css). Light is the magic
+   layer's own (sv-kit.css): the wordmark, the Eye's breath and flare, the
+   active row's edge, live dots, the open dock button's Eye underline; no
+   glow on a figure, REAL a flat red that never glows or dims (its white
+   dot beats). Display only.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── The icon family: one sprite, one look (every width) ─────────────── */
+.sv-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sv-ico {
+    display: inline-block; flex: none; width: 16px; height: 16px;
+    fill: none; stroke: currentColor; stroke-width: 1.5;
+    stroke-linecap: round; stroke-linejoin: round; vertical-align: middle;
+}
+.sv-ico-sm, .sv-ico-fold { width: 14px; height: 14px; }
+.nav-link .icon .sv-ico { width: 16px; height: 16px; }
+.sv-pn-icon .sv-ico { width: 18px; height: 18px; }
+.um-icon .sv-ico { width: 14px; height: 14px; }
+.sv-kbd {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-3); border-radius: 3px; background: var(--sv-bg-2);
+    font-family: var(--sv-font-mono); font-size: 11px; font-weight: 500; line-height: 1;
+    color: var(--sv-ink-2); text-transform: none; letter-spacing: 0;
+    box-shadow: none;
+}
+/* The words a screen reader says that the bar shows as a mark. */
+.sv-sr {
+    position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important;
+    padding: 0 !important; border: 0 !important; overflow: hidden !important; clip: rect(0 0 0 0) !important;
+    clip-path: inset(50%) !important; white-space: nowrap !important;
+}
+/* The keyboard's first stop: past the frame, straight to the page; seen
+   only while it holds the focus. */
+.sv-skip {
+    position: fixed; left: 8px; top: 8px; z-index: 10000; transform: translateY(-200%);
+    padding: 6px 12px; border-radius: var(--sv-radius-ctl);
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-3); color: var(--sv-ink-1);
+    font-family: var(--sv-font-sans); font-size: 12px; text-decoration: none;
+}
+.sv-skip:focus, .sv-skip:focus-visible { transform: none; }
+.sv-skip-to { display: block; height: 0; outline: none; }
+
+/* The frame's own pieces exist from 769 px up; the phone keeps its tier. */
+.sv-dock, .sv-band-sep, .sv-cmd, .sv-side-fold, .nav-keys, .sv-tower { display: none; }
+.nav-fold { all: unset; display: block; cursor: default; }
+.nav-fold .sv-ico-fold { display: none; }
+
+@media (min-width: 769px) {
+
+/* ── The frame's measures ─────────────────────────────────────────────── */
+:root {
+    --sv-frame-side: 232px;
+    --sv-frame-mini: 56px;
+    --sv-frame-top: 44px;
+    --sv-frame-band: 32px;
+    --sv-frame-foot: 32px;
+    --sv-frame-dock: 40px;
+    --sv-frame-rail: 300px;
+    --sv-frame-gutter: 16px;
+    /* The light from above every page wears (sv-tokens.css) faded out at
+       y = 156 px, under the old 142 px of chrome. Under the board's 76 px
+       (the top bar and the band) it would light the page: the same light,
+       centred 110 px above the window, on a 240 px ray, fades out at
+       y = 68 px, under the chrome, and adds nothing to the page. Outside
+       the token sheet its green is the Eye's token, at the same doses
+       (the old-design guard, B0: no literal of the Eye outside the tokens). */
+    --sv-void-light: radial-gradient(900px 240px at 46% -110px, color-mix(in srgb, var(--sv-eye) 10%, transparent), color-mix(in srgb, var(--sv-eye) 2.5%, transparent) 50%, transparent 74%);
+    /* The Eye's light reaching the page, where a page wears it (sv-kit.css,
+       the void), falls from the Eye itself, as the desk v2 board draws it
+       (Desk2's voidlight: centred on the brand's mark, 30 x 22 px from the
+       window's corner, a 1400 x 900 ray, .078 at its source, .025 at 38 %,
+       gone at 72 %): brightest in the top-left gutters, fading down and to
+       the right. Centred under the old 142 px chrome (sv-tokens.css) it lit
+       the page's middle from 150 px down. The Eye's token, at the board's
+       doses. */
+    --sv-void-light-reach: radial-gradient(1400px 900px at 30px 22px, color-mix(in srgb, var(--sv-eye) 7.8%, transparent), color-mix(in srgb, var(--sv-eye) 2.5%, transparent) 38%, transparent 72%);
+}
+html body {
+    --sidebar-width: var(--sv-frame-side);
+    --topbar-height: var(--sv-frame-top);
+    --hb-ticker-h: 0px;
+    --hb-data-h: 0px;
+    --ip-h: var(--sv-frame-foot);
+    /* The right column: the rail's, or an open panel's, never both. */
+    --sv-frame-col: 0px;
+    --sv-frame-right: calc(var(--sv-frame-dock) + var(--sv-frame-col));
+    /* The neighbours that read the old edges (Ask Sauron, the Council, the
+       activity, the Horde): the dock is the right edge now. */
+    --sv-rail-w: var(--sv-frame-dock);
+    --se-right-edge: var(--sv-frame-dock);
+    --se-top-edge: calc(var(--sv-frame-top) + var(--sv-frame-band));
+    --se-bottom-edge: var(--sv-frame-foot);
+    --se-left-chrome: var(--sidebar-width);
+    --se-panel-width: var(--sv-frame-ask);
+    --sv-frame-ask: 420px;
+}
+html body:has(.sidebar.mini) { --sidebar-width: var(--sv-frame-mini); --se-left-chrome: var(--sv-frame-mini); }
+html body:has(.signals-rail.open) { --sv-frame-col: var(--sv-frame-rail); }
+html body:has(.sv-activity.open) { --sv-frame-col: max(var(--sv-frame-rail), 360px); }
+html body:has(.sv-council-band.open) { --sv-frame-col: max(var(--sv-frame-rail), var(--sv-cband-open-w, 400px)); }
+html body:has(.sv-council-band.chamber) { --sv-frame-col: var(--sv-frame-rail); }
+html body:has(.se-chat-panel.open) { --sv-frame-col: var(--sv-frame-ask); }
+
+/* ── The page: under the band, beside the menu, left of the column ───── */
+html body .main-content {
+    margin-left: var(--sidebar-width) !important;
+    margin-right: var(--sv-frame-right) !important;
+    max-width: none !important;
+    padding-top: calc(var(--sv-frame-top) + var(--sv-frame-band)) !important;
+    min-height: 100vh;
+    box-sizing: border-box;
+    transition: none;
+}
+html body .page-content {
+    padding-top: 16px !important;
+    padding-left: var(--sv-frame-gutter);
+    padding-right: var(--sv-frame-gutter);
+    padding-bottom: calc(var(--sv-frame-foot) + var(--sv-frame-gutter)) !important;
+    transition: none;
+}
+/* A page that prints a figure straight on the void keeps the light above
+   only (the review of the desk v2 build, 2026-11-13): /positions/' eToro
+   split ("At that read: opened by Sauron 1,326.70 · outside Sauron …")
+   sits on no ground of its own, and the Eye's light must never lift the
+   dark behind an amount. Until its page gives it a ground (B7), that page
+   does not wear the light reaching the page; its embers keep their own
+   rules (sv-embers.js). */
+html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]):is([data-sv-embers], [data-sv-light]):has(.page-content [data-sv-live-key="pos.etoro.split"])::before {
+    background: var(--sv-void-light), var(--sv-void-vignette);
+}
+/* The row of small cards of the pages with the selection bar (/positions/,
+   /portfolio/, a position's page; sv-close-advice.css lays them out, at
+   least 300 px a card) under the frame (#115's CI, 2026-11-14). The frame
+   gives the page 56 px more at 1280 than the old chrome did (232 + 40 +
+   2 x 16 against 260 + 44 + 2 x 28), which put the row three across, 316 px
+   a card, where /positions/' asset-class table no longer fits in the face
+   a machine without Inter draws it in (279 px of table in 266,
+   tests/test_ui_s0_fixes.PositionCardsMeasuredTests). A card here is at
+   least that table and its card's 50 px: two across at 1280, as before the
+   frame, three from 1440. The cards' look is B7's. Display only. */
+html body:has(.sv-sel-bar) .page-content .grid-3 {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+}
+/* The page's own scrollbar, on the tokens (critic #113). */
+html { scrollbar-color: var(--sv-line-3) var(--sv-bg-0); }
+
+/* ── The menu ─────────────────────────────────────────────────────────── */
+html body .sidebar {
+    position: fixed; top: 0; left: 0; bottom: var(--sv-frame-foot);
+    width: var(--sv-frame-side) !important; height: auto;
+    display: flex; flex-direction: column;
+    background: var(--sv-bg-1); border-right: 1px solid var(--sv-line-1);
+    overflow-x: hidden; overflow-y: auto; scrollbar-width: none;
+    transform: none; transition: none;
+}
+html body .sidebar::-webkit-scrollbar { display: none; }
+html body .sidebar.mini { width: var(--sv-frame-mini) !important; }
+html body .sidebar-brand {
+    position: relative; flex: none; height: var(--sv-frame-top); box-sizing: border-box;
+    display: flex; align-items: center; padding: 0 16px; overflow: hidden;
+    border-bottom: 1px solid var(--sv-line-1);
+}
+html body .sidebar-brand h1 {
+    display: flex; align-items: center; gap: 11px; margin: 0; padding: 0;
+    font-size: 16px; line-height: 1; white-space: nowrap; color: var(--sv-eye);
+}
+html body .sidebar-brand .brand-eye-wrap { position: relative; width: 28px; height: 28px; flex: none; display: inline-flex; }
+html body .sidebar-brand .brand-eye { width: 28px; height: 28px; color: var(--sv-eye); }
+html body .sidebar-brand .subtitle { display: none; }
+/* The Eye's breath and its flare fit the 44 px head (the desk v2 board):
+   the mark's centre sits 22 px under the window's top, in the full menu
+   and the folded one alike. The halo is a 38 px circle whose light is gone
+   at 70 % of its ray (19.9 px from the centre at the breath's peak, 1.06),
+   and the flare a 38 px circle (its ring 20.5 px out at its largest,
+   1.08): both bloom whole inside the window, the head and the folded menu,
+   as the magic layer's own check asks (tests.test_magic_layer,
+   CollapsedMarkMeasuredTests). Magic and Calm only; Off draws neither. */
+html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar .sidebar-brand .brand-eye-wrap::before {
+    width: 38px; height: 38px;
+    background: radial-gradient(circle, rgba(0,232,104,.34) 0%, rgba(0,232,104,.16) 40%, rgba(0,232,104,0) 70%);
+}
+html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .sidebar .sidebar-brand .brand-eye-wrap.sv-flare::after { width: 38px; height: 38px; }
+/* The Eye's states (sv-frame.js reads the feed pill): with no news it
+   greys and stills; under the lock it shuts. Alive, the magic layer's
+   breath, and one beat each time the feed answers. */
+/* Not known yet (the feed has not answered, the session's first page) is
+   said as quiet: the Eye never claims a live feed it has not heard. */
+html body .sidebar-brand:is([data-sv-eye="quiet"], [data-sv-eye="unknown"], [data-sv-eye="locked"]) .brand-eye { color: var(--sv-ink-3); }
+html body .sidebar-brand:is([data-sv-eye="quiet"], [data-sv-eye="unknown"], [data-sv-eye="locked"]) .brand-eye-wrap::before { animation: none; opacity: 0; }
+html body .sidebar-brand[data-sv-eye="locked"] .sv-brand-iris { opacity: 0; }
+/* The market shut: the lids lower over the iris (Twist2 "marché fermé").
+   The session locked: the Eye shuts, a lid and its lashes. */
+.brand-eye .sv-brand-lids, .brand-eye .sv-brand-shut { display: none; }
+.brand-eye .sv-lid-fill { fill: var(--sv-bg-1); }
+html body .sidebar-brand[data-sv-eye="closed"] .sv-brand-lids { display: inline; }
+html body .sidebar-brand[data-sv-eye="closed"] .sv-brand-almond { stroke-opacity: 0; fill-opacity: .10; }
+html body .sidebar-brand[data-sv-eye="locked"] .sv-brand-almond { display: none; }
+html body .sidebar-brand[data-sv-eye="locked"] .sv-brand-shut { display: inline; }
+@media (prefers-reduced-motion: no-preference) {
+    html body:not(.light-mode)[data-sv-ambience="magic"] .sidebar-brand[data-sv-eye="live"] .brand-eye-wrap.sv-beat .brand-eye {
+        animation: sv-frame-beat 900ms var(--sv-ease) 1;
+    }
+}
+@keyframes sv-frame-beat {
+    0%, 100% { transform: scale(1); }
+    30% { transform: scale(1.08); }
+    55% { transform: scale(.98); }
+}
+html body .sidebar.mini .sidebar-brand { justify-content: center; padding: 0; }
+html body .sidebar.mini .sidebar-brand .brand-text { display: none; }
+
+html body .sv-side-fold {
+    position: absolute; right: 8px; top: 8px; width: 28px; height: 28px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: 0; border-radius: var(--sv-radius-ctl); background: transparent;
+    color: var(--sv-ink-3); cursor: pointer; opacity: 0;
+    transition: opacity var(--sv-dur-hover) var(--sv-ease), color var(--sv-dur-hover) var(--sv-ease);
+}
+html body .sidebar:hover .sv-side-fold, html body .sv-side-fold:focus-visible { opacity: 1; }
+html body .sv-side-fold:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+html body .sv-side-fold:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
+/* Folded, the whole head is the door back: the Eye unfolds the menu. */
+html body .sidebar.mini .sv-side-fold { inset: 0; width: auto; height: auto; opacity: 0; border-radius: 0; background: transparent; }
+html body .sidebar.mini .sv-side-fold .sv-ico { display: none; }
+
+html body .sidebar-nav { flex: 0 0 auto; padding: 6px 0 0; }
+html body .sidebar .nav-section {
+    display: block; height: 28px; margin: 0; padding: 0;
+    font-family: var(--sv-font-display); font-size: 11px; font-weight: 600;
+    letter-spacing: .18em; text-transform: uppercase; color: var(--sv-ink-3);
+    border: 0; background: none;
+}
+html body .sidebar .nav-fold {
+    all: revert; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; height: 28px; padding: 0 14px 0 18px; box-sizing: border-box; gap: 4px;
+    border: 0; background: transparent; color: inherit; cursor: pointer;
+    font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; white-space: nowrap;
+}
+html body .sidebar .nav-fold:hover { color: var(--sv-ink-2); }
+html body .sidebar .nav-fold:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
+.sidebar .nav-fold-name { flex: 0 1 auto; min-width: 0; }
+html body .sidebar .nav-fold .sv-ico-fold { display: inline-block; color: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
+.sidebar .nav-section.is-folded .sv-ico-fold { transform: rotate(-90deg); }
+/* A folded section that holds something unseen says so (the board's dot). */
+.sidebar .nav-section.has-unseen .nav-fold-name::after {
+    content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px; vertical-align: 2px;
+    border-radius: var(--sv-radius-round); background: var(--sv-ink-2);
+}
+html body .sidebar .nav-link.nav-folded { display: none !important; }
+
+html body .sidebar .nav-link {
+    position: relative; display: flex; align-items: center; gap: 11px;
+    height: 32px; padding: 0 14px 0 16px; margin: 0; box-sizing: border-box;
+    font-family: var(--sv-font-frame); font-size: 15px; font-weight: 600; letter-spacing: .02em;
+    line-height: 32px; white-space: nowrap; text-decoration: none;
+    border-left-width: 2px; border-radius: 0;
+}
+html body:not(.light-mode) .sidebar .nav-link { color: var(--sv-ink-2); }
+html body:not(.light-mode) .sidebar .nav-link:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+html body:not(.light-mode) .sidebar .nav-link.active { color: var(--sv-ink-1); }
+html body.light-mode .sidebar .nav-link.active { color: var(--sv-ink-1); }
+html body .sidebar .nav-link .icon {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 16px; height: 16px; margin: 0; line-height: 0; opacity: 1;
+}
+html body:not(.light-mode) .sidebar .nav-link .icon { color: var(--sv-ink-3); }
+html body:not(.light-mode) .sidebar .nav-link:hover .icon { color: var(--sv-ink-2); }
+html body .sidebar .nav-link .label-text { overflow: hidden; text-overflow: ellipsis; }
+/* The active row keeps S1a's 2 px Eye edge on the menu's own left edge
+   (its border; the magic layer's glow edge sits over it); Off is S1a. */
+html body .sidebar .nav-link .nav-dot { right: 14px; width: 6px; height: 6px; margin-top: -3px; background: var(--sv-ink-2); box-shadow: none; animation: none; }
+/* The g chords, as key caps on the hovered row only. */
+html body .sidebar .nav-keys { display: none; margin-left: auto; gap: 3px; }
+html body .sidebar .nav-link:is(:hover, :focus-visible) .nav-keys { display: inline-flex; }
+html body .sidebar .nav-link:is(:hover, :focus-visible) .nav-dot { display: none; }
+
+/* Folded to its icons: 56 px, the icons centred, the words in the title. */
+html body .sidebar.mini .nav-section { height: 15px; padding: 0; border-top: 0; }
+html body .sidebar.mini .nav-section .nav-fold { display: none; }
+html body .sidebar.mini .nav-section::before {
+    content: ""; display: block; width: 24px; height: 1px; margin: 7px auto; background: var(--sv-line-2);
+}
+html body .sidebar.mini .sidebar-nav .nav-section:first-child,
+html body .sidebar.mini .sidebar-nav .nav-section:not(.is-folded):not(.nav-section:not(.is-folded) ~ .nav-section) { height: 0; overflow: hidden; }
+/* A folded section stands back entirely (the board draws only the open
+   groups' icons, one rule between them, never a stack of rules). */
+html body .sidebar.mini .sidebar-nav .nav-section.is-folded { display: none; }
+html body .sidebar.mini .nav-link { width: var(--sv-frame-mini); padding: 0 2px 0 0; justify-content: center; gap: 0; }
+/* The word leaves the eye, never the row: it stays the link's name for a
+   screen reader and feeds the hover tip. */
+html body .sidebar.mini .nav-link .label-text {
+    position: absolute !important; width: 1px !important; height: 1px !important;
+    margin: -1px !important; padding: 0 !important; border: 0 !important;
+    overflow: hidden !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important;
+    white-space: nowrap !important; opacity: 1 !important; display: block !important;
+}
+html body .sidebar.mini .nav-link .nav-keys { display: none !important; }
+html body .sidebar.mini .nav-link .icon { width: 16px; }
+
+/* The tower: the empty foot only, ink at 7.5 %, its Eye a faint ember. */
+html body .sv-tower {
+    flex: none; margin-top: auto; padding: 16px 0 6px;
+    display: flex; justify-content: center; pointer-events: none;
+    color: var(--sv-ink-2);
+}
+.sv-tower svg { display: block; width: 30px; height: 70px; }
+.sv-tower .sv-tower-eye { fill: var(--sv-eye); fill-opacity: .35; }
+html body .sidebar.mini .sv-tower svg { width: 22px; height: 52px; }
+html body[data-sv-ambience="off"] .sv-tower,
+html body.light-mode .sv-tower { display: none; }
+/* Its two doors live in the operator's menu (Admin Panel, Log out). */
+html body .sidebar-footer { display: none; }
+
+/* ── The top bar ──────────────────────────────────────────────────────── */
+html body .topbar {
+    position: fixed; top: 0; left: var(--sidebar-width) !important; right: 0; transition: none;
+    height: var(--sv-frame-top); box-sizing: border-box;
+    display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    background: var(--sv-bg-1); border-bottom: 1px solid var(--sv-line-1);
+    backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none;
+}
+/* The page's name gives way last (the review of the desk v2 build,
+   2026-11-13): it never shrinks; the command field gives way to its 150 px
+   first, then sv-frame.js lets go, one step at a time and only as far as
+   the bar needs, the title's quieter words after its " · ", the field (to
+   its "/" key), the word "sessions", the operator's name, then two points
+   of the title's size. Each step keeps its words for a reader (the title,
+   the aria-labels). */
+html body .topbar > div:first-child { display: flex; align-items: center; gap: 8px; min-width: 0; flex: none; }
+html body .topbar .mobile-menu-btn { display: none; }
+html body .topbar-title {
+    font-family: var(--sv-font-display); font-size: 15px; font-weight: 600;
+    letter-spacing: var(--sv-track-display); text-transform: uppercase; color: var(--sv-ink-1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 20px; max-width: none;
+}
+html body .topbar-title .sv-ttl-sub {
+    font-family: var(--sv-font-sans); font-size: 12px; font-weight: 400; letter-spacing: 0;
+    text-transform: none; color: var(--sv-ink-3);
+}
+html body .sv-cmd {
+    position: relative; display: flex; align-items: center; gap: 8px; flex: 0 1 270px; min-width: 150px; height: 28px; margin: 0;
+    padding: 0 6px; box-sizing: border-box; cursor: text;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl); background: var(--sv-bg-0);
+}
+/* The field's ring is the field's (the kit's field ring), round the whole
+   field and its "/" key: never the inner input's, which crossed the
+   field's border and touched the typed words. */
+html body .sv-cmd:focus-within { border-color: var(--sv-line-3); box-shadow: 0 0 0 2px var(--sv-bg-0), 0 0 0 4px var(--sv-eye); }
+html body .sv-cmd input,
+html body .sv-cmd input:focus,
+html body .sv-cmd input:focus-visible {
+    flex: 1 1 auto; min-width: 0; height: 26px; margin: 0; padding: 0 0 0 2px; border: 0; outline: none; box-shadow: none;
+    background: transparent; color: var(--sv-ink-1); font-family: var(--sv-font-mono); font-size: 12px;
+}
+.sv-cmd input::placeholder { color: var(--sv-ink-3); font-family: var(--sv-font-sans); opacity: 1; }
+html body .topbar.sv-fit-2 .topbar-title .sv-ttl-sub { display: none; }
+html body .topbar.sv-fit-3 .sv-cmd { flex: 0 0 28px; width: 28px; min-width: 28px; padding: 0; justify-content: center; gap: 0; }
+html body .topbar.sv-fit-3 .sv-cmd input { flex: 0 0 0; width: 0; }
+html body .topbar.sv-fit-3 .sv-cmd:focus-within {
+    position: absolute; left: 16px; top: 7px; z-index: 3; width: min(360px, calc(100% - 32px));
+    padding: 0 6px; justify-content: flex-start; gap: 8px;
+}
+html body .topbar.sv-fit-3 .sv-cmd:focus-within input { flex: 1 1 auto; width: auto; }
+html body .topbar.sv-fit-4 .sv-ex-word { display: none; }
+html body .topbar.sv-fit-5 .user-menu-trigger .um-name-text { display: none; }
+html body .topbar.sv-fit-6 .topbar-title { font-size: 13px; }
+html body .topbar.sv-fit-7 > div:first-child { flex: 0 1 auto; }
+html body .topbar-right {
+    display: flex; align-items: center; gap: 14px; margin-left: auto; white-space: nowrap; flex: none;
+    font-family: var(--sv-font-sans); font-size: 12px; color: var(--sv-ink-3);
+}
+html body .topbar .theme-toggle-btn { display: none; }
+/* The clock's room is kept before it ticks, so the bar never jumps. */
+html body #clock { display: inline-flex; align-items: center; justify-content: flex-end; height: 16px; min-width: 12ch; text-align: right; font-family: var(--sv-font-mono); font-size: 12px; font-weight: 400; color: var(--sv-ink-2); letter-spacing: 0; }
+html body .exchange-indicator { position: relative; }
+html body .exchange-trigger {
+    display: inline-flex; align-items: baseline; gap: 4px; padding: 0; height: auto;
+    border: 0; background: none; font-family: var(--sv-font-sans); font-size: 12px; color: var(--sv-ink-3); cursor: default;
+}
+html body .exchange-trigger:hover { background: none; border: 0; }
+.sv-ex-n { font-family: var(--sv-font-mono); color: var(--sv-ink-2); }
+html body .live-status-pill {
+    display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; box-sizing: border-box;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-round); background: transparent;
+    font-family: var(--sv-font-sans); font-size: 11px; color: var(--sv-ink-2);
+}
+html body .live-status-pill:hover { background: var(--sv-bg-3); border-color: var(--sv-line-3); }
+html body .live-status-pill .lsp-dot { width: 6px; height: 6px; box-shadow: none; opacity: 1; }
+/* The feed's state as a dot with its word (§3.7): alive in the Eye's green
+   (the live dot's light is the magic layer's), a fault in amber, quiet in
+   grey; never a red fill, which is REAL's alone. */
+html body .live-status-pill .lsp-green { background: var(--sv-eye); }
+html body .live-status-pill :is(.lsp-red, .lsp-yellow, .lsp-never) { background: var(--sv-warn); }
+html body .live-status-pill :is(.lsp-flat, .lsp-off, .lsp-idle, .lsp-yielding, .lsp-unregistered) { background: var(--sv-ink-3); }
+html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .live-status-pill .lsp-green { box-shadow: var(--sv-glow-dot); }
+html body .live-status-pill .lsp-label { font-family: var(--sv-font-sans); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: lowercase; color: var(--sv-ink-2); }
+html body .sv-armed-pill {
+    display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; box-sizing: border-box;
+    border-radius: var(--sv-radius-chip); background: var(--sv-real); color: var(--sv-real-ink);
+    font-family: var(--sv-font-sans); font-size: 11px; font-weight: 600; letter-spacing: var(--sv-track-label);
+    text-transform: uppercase; text-decoration: none; box-shadow: none; filter: none;
+}
+html body .sv-armed-pill:hover, html body .sv-armed-pill:focus-visible { background: var(--sv-real); color: var(--sv-real-ink); filter: none; box-shadow: none; }
+html body .sv-armed-pill .sv-armed-dot { width: 6px; height: 6px; border-radius: var(--sv-radius-round); background: var(--sv-real-ink); flex: none; }
+html body .notif-bell,
+html body .lock-now {
+    position: relative; display: flex; align-items: center; justify-content: center; flex: none;
+    width: 28px; height: 28px; padding: 0; box-sizing: border-box;
+    border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl); background: transparent;
+    color: var(--sv-ink-2); font-size: 0; box-shadow: none; filter: none;
+}
+html body .notif-bell:hover,
+html body .lock-now:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-line-3); box-shadow: none; }
+/* No PIN set is no warning: the open padlock in the frame's ink, never
+   DEMO's gold; and the focus is the kit's ring, never the Eye's wash
+   (the critic's B2 addition, 2026-11-13). */
+html body .lock-now[data-has-pin="0"], html body .lock-now[data-has-pin="1"] { color: var(--sv-ink-2); }
+html body .lock-now[data-has-pin]:hover { color: var(--sv-ink-1); }
+html body .notif-bell:focus-visible,
+html body .lock-now:focus-visible { background: transparent; border-color: var(--sv-line-2); color: var(--sv-ink-1); outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+html body .lock-now > span { display: inline-flex; color: inherit; }
+html body .notif-bell .notif-badge {
+    position: absolute; top: -6px; right: -4px; min-width: 0; height: 15px; padding: 0 4px; box-sizing: border-box;
+    border: 1px solid var(--sv-bg-1); border-radius: var(--sv-radius-round); background: var(--sv-bg-4);
+    font-family: var(--sv-font-mono); font-size: 11px; line-height: 13px; color: var(--sv-ink-1); box-shadow: none; animation: none;
+}
+html body .user-menu-trigger {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px; box-sizing: border-box;
+    border: 0; background: transparent; box-shadow: none;
+    font-family: var(--sv-font-sans); font-size: 12px; font-weight: 600; letter-spacing: var(--sv-track-label);
+    text-transform: uppercase; color: var(--sv-ink-2);
+}
+html body .user-menu-trigger:hover, html body .user-menu.open .user-menu-trigger { color: var(--sv-ink-1); background: transparent; border: 0; }
+html body .user-menu-trigger .um-avatar { display: none; }
+html body .user-menu-trigger .um-name-text { font-family: var(--sv-font-sans); color: inherit; }
+html body .user-menu-trigger .um-caret { display: inline-flex; font-size: 0; color: inherit; }
+html body .um-link .um-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; font-size: 0; color: var(--sv-ink-3); }
+
+/* ── The band: prices, then the news ──────────────────────────────────── */
+.sv-band {
+    position: fixed; top: var(--sv-frame-top); left: var(--sidebar-width); right: 0; z-index: var(--z-chrome);
+    height: var(--sv-frame-band); box-sizing: border-box;
+    display: flex; align-items: stretch; overflow: hidden;
+    background: var(--sv-bg-1); border-bottom: 1px solid var(--sv-line-2);
+    font-family: var(--sv-font-sans); font-size: 12px;
+}
+html body .sv-band .data-headband,
+html body .sv-band .ticker-bar {
+    position: relative !important; top: auto !important; left: auto !important; right: auto !important;
+    height: var(--sv-frame-band) !important; min-width: 0; margin: 0; box-sizing: border-box;
+    border: 0 !important; background: transparent !important; box-shadow: none !important;
+    transform: none; opacity: 1; transition: none; overflow: hidden;
+}
+html body .sv-band .data-headband { flex: 1.75 1 0; }
+html body .sv-band .ticker-bar { flex: 1 1 0; }
+/* Each lane's ends fade over 12 px, as the board's .lane mask draws them,
+   so no glyph is ever cut in two at an edge: the lane's own items fade into
+   the band's ground, and nothing is painted over them (a painted fade is a
+   gradient the old-design guard counts, B0). While a lane's collapse button
+   shows (hover, focus), the mask keeps the button's own 24 px box whole, so
+   the button never fades with the items it sits over. */
+html body .sv-band .data-headband,
+html body .sv-band .ticker-bar {
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
+    mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
+}
+html body .sv-band .data-headband:is(:hover, :focus-within),
+html body .sv-band .ticker-bar:is(:hover, :focus-within) {
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent), linear-gradient(black, black);
+    mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent), linear-gradient(black, black);
+    -webkit-mask-size: 100% 100%, 24px 24px; mask-size: 100% 100%, 24px 24px;
+    -webkit-mask-position: 0 0, right 4px top 4px; mask-position: 0 0, right 4px top 4px;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+html body .sv-band .data-headband.collapsed,
+html body .sv-band .ticker-bar.collapsed { display: none; }
+html body .sv-band .dh-scroll { height: 100%; overflow: hidden; }
+/* The tracks stay inline-flex: a track's own box spans both copies, which
+   is what static/js/sv-marquee.js measures its loop by. */
+html body .sv-band .dh-track,
+html body .sv-band .ticker-track { height: 100%; display: inline-flex; align-items: center; }
+html body .sv-band-sep {
+    flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px;
+    border-left: 1px solid var(--sv-line-2);
+}
+.sv-band-sep .sv-label { font-family: var(--sv-font-sans); font-size: 11px; font-weight: 600; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-3); }
+html body .sv-band .data-headband.collapsed ~ .sv-band-sep,
+html body .sv-band .sv-band-sep:has(+ .ticker-bar.collapsed) { display: none; }
+/* A quote: its symbol, its price, its change, its dot; one line of 32 px. */
+html body .sv-band .dh-item {
+    display: flex; align-items: center; gap: 7px; height: var(--sv-frame-band); padding: 0 14px; box-sizing: border-box;
+    border-right: 1px solid var(--sv-line-1); white-space: nowrap; font-size: 12px; color: var(--sv-ink-1);
+}
+html body .sv-band .dh-item .dh-sym { order: 1; font-family: var(--sv-font-sans); font-weight: 600; font-size: 12px; color: var(--sv-ink-2); letter-spacing: .02em; }
+html body .sv-band .dh-item .dh-val { order: 2; font-family: var(--sv-font-mono); font-size: 13px; font-weight: 500; color: var(--sv-ink-1); }
+html body .sv-band .dh-item .dh-chg { order: 3; font-family: var(--sv-font-mono); font-size: 12px; background: none !important; padding: 0; border-radius: 0; }
+html body .sv-band .dh-item .dh-chg.up { color: var(--sv-up); }
+html body .sv-band .dh-item .dh-chg.down { color: var(--sv-down); }
+/* The dot is the price's freshness (the board's band), read from the one
+   price (sv-venue.js) by sv-frame.js: live in the Eye's green, recent in
+   ink-2, stale in amber, closed a ring. Until it is read, no dot: the old
+   up/down dot said nothing the change beside it does not. */
+html body .sv-band .dh-item .dh-dot { order: 4; display: none; width: 6px; height: 6px; margin-left: 3px; box-sizing: border-box; border-radius: var(--sv-radius-round); box-shadow: none; animation: none; }
+html body .sv-band .dh-item .dh-dot[data-sv-fresh] { display: inline-block; }
+html body .sv-band .dh-item .dh-dot[data-sv-fresh="live"] { background: var(--sv-eye); }
+html body .sv-band .dh-item .dh-dot[data-sv-fresh="recent"] { background: var(--sv-ink-2); }
+html body .sv-band .dh-item .dh-dot[data-sv-fresh="stale"] { background: var(--sv-warn); }
+html body .sv-band .dh-item .dh-dot[data-sv-fresh="closed"] { background: transparent; border: 1px solid var(--sv-ink-3); }
+html body .sv-band .ticker-item {
+    display: flex; align-items: center; gap: 8px; height: var(--sv-frame-band); padding: 0 10px 0 14px; box-sizing: border-box;
+    border-right: 0; font-family: var(--sv-font-sans); font-size: 12px; color: var(--sv-ink-2); white-space: nowrap;
+}
+html body .sv-band .ticker-item .t-sym,
+html body .sv-band .ticker-item .t-price { color: var(--sv-ink-1); font-size: 12px; }
+html body .sv-band .ticker-item .t-badge { font-size: 11px; }
+/* A headline says its time (the board's "12:30"), never a NEWS badge
+   under the lane's own News label. */
+html body .sv-band .ticker-item .t-time { font-family: var(--sv-font-mono); font-size: 11px; color: var(--sv-ink-3); }
+/* No news yet: the quiet line alone, in the frame's ink (its old FEED badge
+   was a blue of no token, under the lane's own News label). */
+html body .sv-band .ticker-item[data-type="empty"] { color: var(--sv-ink-3) !important; }
+html body .sv-band .ticker-item[data-type="empty"] .t-badge { display: none; }
+/* Each lane's collapse button: quiet, at its own right end. */
+html body .sv-band .hb-collapse-btn {
+    position: absolute; top: 4px; right: 4px; bottom: auto; z-index: 2;
+    width: 24px; height: 24px; padding: 4px; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    border: 0; border-radius: var(--sv-radius-ctl); background: var(--sv-bg-1); color: var(--sv-ink-3);
+    box-shadow: none; opacity: 0; transition: opacity var(--sv-dur-hover) var(--sv-ease);
+}
+html body .sv-band .data-headband:is(:hover, :focus-within) .hb-collapse-btn,
+html body .sv-band .ticker-bar:is(:hover, :focus-within) .hb-collapse-btn { opacity: 1; }
+html body .sv-band .hb-collapse-btn:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+html body .sv-band .hb-collapse-btn svg { width: 14px; height: 14px; }
+/* A collapsed lane comes back from a chip that names it ("News",
+   "Prices"), in its own slot at the band's right end: the lane left open
+   stops short of it, so the chip never sits over moving prices. With both
+   lanes shut the two chips stand at the band's start. */
+html body .hb-restore-tab {
+    position: fixed; top: calc(var(--sv-frame-top) + 4px) !important; right: 8px !important; left: auto !important; z-index: calc(var(--z-chrome) + 1);
+    width: 76px; height: 24px !important; padding: 0 8px; gap: 6px; box-sizing: border-box; justify-content: center;
+    align-items: center; border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    background: var(--sv-bg-1); color: var(--sv-ink-2); box-shadow: none;
+    font-family: var(--sv-font-sans); font-size: 11px;
+}
+html body .hb-restore-tab:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-line-3); }
+html body .hb-restore-tab svg { width: 14px; height: 14px; flex: none; }
+html body:is(.hb-ticker-hidden, .hb-data-hidden) .sv-band { padding-right: 92px; }
+html body.hb-ticker-hidden.hb-data-hidden .sv-band { padding-right: 0; }
+html body.hb-ticker-hidden.hb-data-hidden .hb-restore-tab.data { left: calc(var(--sidebar-width) + 16px) !important; right: auto !important; }
+html body.hb-ticker-hidden.hb-data-hidden .hb-restore-tab.ticker { left: calc(var(--sidebar-width) + 100px) !important; right: auto !important; }
+
+/* ── The status bar ───────────────────────────────────────────────────── */
+html body .info-panel-wrap {
+    position: fixed; left: 0 !important; right: 0 !important; bottom: 0; z-index: var(--z-chrome);
+    height: var(--sv-frame-foot); box-sizing: border-box;
+    padding-left: 46px; padding-right: 44px;
+    background: var(--sv-bg-2); border-top: 1px solid var(--sv-line-2);
+    transform: none !important; overflow: visible; display: block;
+}
+html body .info-panel-wrap .ip-minimize-tab,
+html body .info-panel-wrap .ip-arrow,
+html body .ip-restore-pill { display: none !important; }
+html body .info-panel-scroll { height: 31px; overflow: visible; }
+html body .info-panel-bar {
+    display: flex; align-items: center; height: 31px; min-width: 0; overflow: visible;
+    font-family: var(--sv-font-sans); font-size: 12px; white-space: nowrap;
+}
+/* One scope, said once: the REAL chip, then the real book's cells. */
+.sv-sgrp { display: flex; align-items: center; height: 31px; padding-left: 8px; flex: none; border-right: 1px solid var(--sv-line-3); }
+.sv-sb-real { flex: none; margin-right: 2px; height: 18px; display: inline-flex; align-items: center; }
+html body .info-panel-bar .ip-cat {
+    display: flex; flex-direction: row; align-items: center; gap: 5px;
+    height: 31px; min-height: 0; padding: 0 7px; margin: 0; box-sizing: border-box; flex: none; min-width: 0;
+    border: 0; border-right: 1px solid var(--sv-line-1); border-radius: 0; background: transparent;
+    color: var(--sv-ink-1); font-family: var(--sv-font-sans); font-size: 12px; text-decoration: none; cursor: pointer;
+    box-shadow: none;
+}
+html body .info-panel-bar .ip-cat:hover { background: var(--sv-bg-3); }
+html body .info-panel-bar .sv-sgrp .ip-cat:last-child { border-right: 0; }
+html body .info-panel-bar .ip-cat .ip-label {
+    font-family: var(--sv-font-sans); font-size: 11px; font-weight: 600; letter-spacing: var(--sv-track-label);
+    text-transform: uppercase; color: var(--sv-ink-3); line-height: 1;
+}
+html body .info-panel-bar .ip-cat .ip-v,
+html body .info-panel-bar .ip-cat .ip-count {
+    font-family: var(--sv-font-mono); font-size: 13px; font-weight: 400; line-height: 1;
+    font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--sv-ink-1); text-shadow: none;
+}
+html body .info-panel-bar .ip-cat .ip-count.red { color: var(--sv-down); }
+html body .info-panel-bar .ip-cat .ip-v { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+html body .info-panel-bar .ip-cat .ip-v .sbsub { margin-left: 2px; }
+html body .info-panel-bar .ip-cat .ip-sub,
+html body .info-panel-bar .ip-cat .sbsub,
+html body .info-panel-bar .ip-cat .sv-bar-mark { font-family: var(--sv-font-sans); font-size: 11px; line-height: 1; color: var(--sv-ink-3); }
+/* What a real-money figure covers and how old it is ("· 1/2", "· stale")
+   is part of the figure (§10: a price or P&L never looks live when stale,
+   never hides that it is partial): no width ever lets it go. */
+html body .info-panel-bar .ip-cat .ip-v .sv-bar-mark { display: inline; margin-left: 2px; white-space: nowrap; }
+/* The old lines of PORTFOLIO and OPEN P&L (both books' value and P&L)
+   stay in the page, live regions and all, and out of sight: the bar's
+   figures are the real book's now (the desk v2 board). By their region
+   names, so the region elements keep their markup as it was. */
+html body .info-panel-bar .ip-cat :is([data-sv-live="hb-pf-value"], [data-sv-live="hb-pf-pnl"], [data-sv-live="hb-pf-sub"],
+                                      [data-sv-live="hb-pnl"], [data-sv-live="hb-pnl-sub"]) { display: none !important; }
+html body .info-panel-bar .ip-cat .up { color: var(--sv-up); }
+html body .info-panel-bar .ip-cat .down { color: var(--sv-down); }
+html body .info-panel-bar .ip-cat .sv-unknown { color: var(--sv-ink-3); }
+.sv-dg { display: inline-block; width: 2ch; text-align: right; font-family: var(--sv-font-mono); }
+/* BOTS: the state as a dot and its word, then the counts. */
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state {
+    display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: none;
+    font-family: var(--sv-font-sans); font-size: 11px; font-weight: 600; letter-spacing: var(--sv-track-label); color: var(--sv-ink-2);
+}
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state::before {
+    content: ""; width: 6px; height: 6px; flex: none; border-radius: var(--sv-radius-round); background: var(--sv-ink-3);
+}
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state--ok::before { background: var(--sv-eye); }
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state--gold::before,
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state--warn::before { background: var(--sv-warn); }
+/* A halted program: a ring in the danger colour with its word (§3.6, a
+   dot with words), never a red fill, which is REAL's alone. */
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state--red::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--sv-down); }
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state { animation: none; }
+/* Running, the dot says it (the Eye's: "Sauron sees it alive"); its word
+   stays for a reader and in the title. Any other state keeps its word. */
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state--ok {
+    display: inline-block; flex: none; width: 6px; height: 6px; padding: 0; overflow: hidden;
+    text-indent: 12px; white-space: nowrap; border-radius: var(--sv-radius-round); background: var(--sv-eye);
+}
+html body .info-panel-bar [data-sv-cell="bots"] .hb-state--ok::before { display: none; }
+html body .info-panel-bar [data-sv-cell="bots"] .sv-bot-open { display: none; }
+html body .info-panel-bar [data-sv-cell="bots"] .ip-sub { color: var(--sv-ink-3); }
+/* THE HORDE: standards, then the seats in words. */
+.sv-sb-horde { font: inherit; }
+.sv-seats-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.sv-seats { display: inline-flex; align-items: center; gap: 3px; height: 14px; }
+.sv-seat { width: 9px; height: 14px; flex: none; overflow: visible; stroke-linecap: round; stroke-linejoin: round; }
+.sv-seat:nth-of-type(n+9) { display: none; }
+.sv-seat .sv-pole { fill: none; stroke-width: 1.3; }
+.sv-seat .sv-flag { stroke-width: 1; }
+.sv-seat[data-world="live"] { fill: var(--sv-real); stroke: var(--sv-real); }
+.sv-seat[data-world="live"] .sv-flag { stroke: none; }
+.sv-seat[data-world="demo"] { fill: none; stroke: var(--sv-demo); }
+.sv-seat[data-world="paper"], .sv-seat[data-world="none"] { fill: none; stroke: var(--sv-ink-3); }
+.sv-seat[data-world="none"] .sv-pole { stroke-dasharray: 2 1.5; }
+.sv-seat[data-world="live"] + .sv-seat:not([data-world="live"]),
+.sv-seat[data-world="demo"] + .sv-seat:not([data-world="demo"]),
+.sv-seat[data-world="paper"] + .sv-seat[data-world="none"] { margin-left: 5px; }
+.sv-seat-more { font-family: var(--sv-font-mono); font-size: 11px; color: var(--sv-ink-2); margin-left: 3px; }
+/* A seat in alarm wears an amber mark over its standard (Twist2 "alarme ·
+   marque ambre"); the count is said in the cell's name and title, and in
+   words for a reader (#svBarAlarms), never as words across the bar. */
+.sv-seat .sv-alarm { display: none; fill: var(--sv-warn); stroke: none; }
+.sv-seat.is-alarm .sv-alarm { display: inline; }
+/* The seats in words: the count always, its word let go last. */
+html body .info-panel-bar .sv-seats-n { font-family: var(--sv-font-sans); font-size: 11px; line-height: 1; color: var(--sv-ink-3); white-space: nowrap; }
+html body .info-panel-bar .sv-seats-n .sv-n { font-family: var(--sv-font-mono); color: var(--sv-ink-2); }
+html body .info-panel-bar .sv-tone-warn { color: var(--sv-warn); }
+html body .info-panel-bar .sv-tone-alarm { color: var(--sv-down); }
+/* "N more": the cells that wait, upward. */
+.sv-more { position: relative; display: flex; align-items: center; height: 31px; flex: none; }
+html body .info-panel-bar .sv-sb-more { gap: 4px; font: inherit; color: var(--sv-ink-3); font-size: 11px; }
+html body .info-panel-bar .sv-sb-more:hover, html body .info-panel-bar .sv-sb-more[aria-expanded="true"] { color: var(--sv-ink-1); }
+.sv-more-pop {
+    position: absolute; right: 0; left: auto; bottom: 36px; z-index: var(--z-hovercard);
+    min-width: 260px; padding: 4px 0; box-sizing: border-box;
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card);
+    box-shadow: var(--sv-shadow-pop);
+}
+.sv-more-pop[hidden], .sv-more-gone[hidden] { display: none !important; }
+html body .info-panel-bar .sv-more-pop .ip-cat {
+    width: 100%; height: 32px; padding: 0 12px; border-right: 0; justify-content: flex-start;
+}
+html body .info-panel-bar .sv-more-pop .ip-cat .ip-label { min-width: 92px; }
+html body .info-panel-bar .ip-cat .ip-dropdown { display: none; }
+html body .info-panel-bar .sv-sb-keys { gap: 6px; font: inherit; }
+html body .info-panel-bar .sv-sb-keys .sbsub { color: var(--sv-ink-3); }
+
+/* Gollum, docked left: a 24 px face in the bar's first cell. */
+html body .gollum-fab {
+    position: fixed; left: 0 !important; bottom: 0 !important; top: auto !important; right: auto !important; z-index: calc(var(--z-chrome) + 1);
+    width: 46px !important; height: var(--sv-frame-foot) !important; padding: 0; margin: 0; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    border: 0; border-right: 1px solid var(--sv-line-1); border-radius: 0;
+    background: var(--sv-bg-2); box-shadow: none; filter: none; transform: none; animation: none;
+}
+html body .gollum-fab:hover { background: var(--sv-bg-3); transform: none; }
+html body .gollum-fab .gollum-face { width: 24px; height: 24px; filter: none; }
+html body .gollum-fab .gl-ring { display: none; }
+html body .gollum-fab .gollum-count {
+    position: absolute; top: 1px; right: 1px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+    border: 1px solid var(--sv-bg-2); border-radius: var(--sv-radius-round); background: var(--sv-bg-4);
+    font-family: var(--sv-font-mono); font-size: 11px; line-height: 13px; text-align: center; color: var(--sv-ink-1);
+    box-shadow: none; animation: none;
+}
+/* His whisper stays in the menu's column, over its empty foot, never over
+   the page; with the menu folded to its icons there is no room for it, and
+   his count dot says it alone. */
+html body .gollum-bubble { left: 8px !important; right: auto !important; bottom: calc(var(--sv-frame-foot) + 8px) !important; top: auto !important; max-width: calc(var(--sidebar-width) - 16px); box-sizing: border-box; }
+html body:has(.sidebar.mini) .gollum-bubble { display: none !important; }
+html body .gollum-dialog { left: 8px !important; right: auto !important; bottom: calc(var(--sv-frame-foot) + 8px) !important; top: auto !important; }
+
+/* The Eye, docked right: Ask Sauron, a 26 px orb, calm. */
+html body .se-eye-fab:not(.open) {
+    position: fixed; right: 9px !important; bottom: 3px !important; left: auto !important; top: auto !important;
+    z-index: calc(var(--z-chrome) + 1);
+    width: 26px !important; height: 26px !important; padding: 0; margin: 0; box-sizing: border-box;
+    border: 0; border-radius: var(--sv-radius-round); transform: none; animation: none; filter: none;
+    background: radial-gradient(circle at 38% 34%, rgba(220,255,235,.55) 0 8%, rgba(0,232,104,.35) 22%, rgba(4,30,16,.95) 62%, var(--sv-bg-0) 100%);
+    box-shadow: inset 0 0 0 1px rgba(0,232,104,.55);
+}
+html body .se-eye-fab:not(.open)::before { content: none; }
+html body .se-eye-fab:not(.open)::after {
+    content: ""; position: absolute; inset: 8px; border-radius: var(--sv-radius-round); opacity: 1;
+    background: radial-gradient(circle, rgba(0,232,104,.95), rgba(0,232,104,0) 70%);
+    border: 0; box-shadow: none; animation: none; transform: none;
+}
+html body .se-eye-fab:not(.open) .se-fab-eye,
+html body .se-eye-fab:not(.open) .se-fab-label,
+html body .se-eye-fab:not(.open) .se-fab-unread-ring { display: none; }
+html body .se-eye-fab:not(.open):hover { box-shadow: inset 0 0 0 1px var(--sv-eye); transform: none; }
+html body .se-eye-fab:not(.open):focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .se-eye-fab:not(.open) {
+    box-shadow: inset 0 0 0 1px rgba(0,232,104,.55), 0 0 10px rgba(0,232,104,.28);
+}
+/* Ask Sauron's answer panel opens in the right column, under the band and
+   above the bar, and the page makes room for it. */
+html body .se-chat-panel {
+    top: calc(var(--sv-frame-top) + var(--sv-frame-band)) !important;
+    bottom: var(--sv-frame-foot) !important;
+    right: var(--sv-frame-dock) !important;
+    width: var(--sv-frame-ask) !important; max-width: none;
+    border-radius: 0; border-top: 0; border-bottom: 0; border-right: 0;
+}
+
+/* ── The dock ─────────────────────────────────────────────────────────── */
+html body .sv-dock {
+    position: fixed; top: calc(var(--sv-frame-top) + var(--sv-frame-band)); right: 0; bottom: var(--sv-frame-foot);
+    width: var(--sv-frame-dock); box-sizing: border-box; z-index: var(--z-rail);
+    display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 12px;
+    background: var(--sv-bg-1); border-left: 1px solid var(--sv-line-1);
+}
+.sv-dock-btn {
+    position: relative; flex: none; width: 30px; height: 30px; padding: 0; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    border: 0; border-radius: var(--sv-radius-ctl); background: transparent; color: var(--sv-ink-2); cursor: pointer;
+}
+.sv-dock-btn .sv-ico { width: 18px; height: 18px; }
+.sv-dock-btn:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
+.sv-dock-btn:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+.sv-dock-btn[aria-expanded="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); box-shadow: inset 0 -2px 0 var(--sv-eye); }
+.sv-dock-n {
+    position: absolute; top: -6px; right: -4px; height: 15px; padding: 0 4px; box-sizing: border-box;
+    border: 1px solid var(--sv-bg-1); border-radius: var(--sv-radius-round); background: var(--sv-bg-4);
+    font-family: var(--sv-font-mono); font-size: 11px; line-height: 13px; color: var(--sv-ink-1); pointer-events: none;
+}
+.sv-dock-n[hidden], .sv-dock-n:empty { display: none; }
+.sv-dock-dirs {
+    display: flex; flex-direction: column; align-items: center; margin: -2px 0 6px;
+    font-family: var(--sv-font-mono); font-size: 11px; line-height: 14px;
+}
+.sv-dock-dirs .up { color: var(--sv-up); }
+.sv-dock-dirs .down { color: var(--sv-down); }
+
+/* ── The right column: the rail, and the panels that open in its place ── */
+html body .signals-rail {
+    position: fixed; top: calc(var(--sv-frame-top) + var(--sv-frame-band)) !important; bottom: var(--sv-frame-foot) !important;
+    right: var(--sv-frame-dock) !important; width: var(--sv-frame-rail) !important; height: auto !important;
+    z-index: var(--z-rail); box-sizing: border-box;
+    background: var(--sv-bg-1); border-left: 1px solid var(--sv-line-2);
+}
+/* Shut, the rail stands past the right edge, unseen and out of the tab
+   order (its cards keep their layout for the refreshes that write them);
+   the dock's Signals button brings it back as the column. */
+html body .signals-rail:not(.open) {
+    visibility: hidden; pointer-events: none;
+    transform: translateX(calc(100% + var(--sv-frame-dock)));
+}
+html body .rail-toggle-btn,
+html body .sidebar-toggle-btn { display: none !important; }
+/* The Council and the activity: their own doors are the dock's now. */
+html body .sv-council-band-tab,
+html body .sv-activity-tab,
+html body .sv-horde-tab { display: none !important; }
+html body .sv-council-band {
+    --cb-top: calc(var(--sv-frame-top) + var(--sv-frame-band));
+    --cb-foot: 0px;
+    --cb-bottom: var(--sv-frame-foot);
+    right: var(--sv-frame-dock) !important;
+}
+html body .sv-activity {
+    top: calc(var(--sv-frame-top) + var(--sv-frame-band)) !important; bottom: var(--sv-frame-foot) !important;
+    right: var(--sv-frame-dock) !important;
+}
+/* Shut, a panel stands past the dock, out of view; open, in the column. */
+html body .sv-activity:not(.open) { visibility: hidden; }
+html body .sv-council-band:not(.open) { visibility: hidden; }
+/* The Horde's sheet rises from the bar across the page, not under the
+   column. */
+html body .sv-horde-panel {
+    left: var(--sidebar-width) !important; right: var(--sv-frame-right) !important; bottom: var(--sv-frame-foot) !important;
+}
+
+/* ── The tiers ────────────────────────────────────────────────────────── */
+}
+
+@media (min-width: 1440px) {
+    :root { --sv-frame-rail: 340px; }
+}
+@media (min-width: 1680px) {
+    :root { --sv-frame-side: 240px; --sv-frame-gutter: 20px; }
+}
+@media (min-width: 2200px) {
+    :root { --sv-frame-side: 256px; --sv-frame-rail: 380px; --sv-frame-gutter: 24px; }
+}
+/* Wherever the bar's own content would not fit, every cell keeps its line
+   and the words go one step at a time, only as far as the bar needs
+   (sv-frame.js measures and sets the steps; review of the desk v2 build,
+   2026-11-13): DRAWDOWN's "from peak", then AT STOPS' "of" its limit, then
+   the word "Keys", then the word "seats" (its count stays), then the
+   bots' paper count (their live count stays), then a little of each
+   cell's side room. A real figure's "· stale" and "· 1/2" never go, nor
+   the seats' count, nor the live bots'. */
+@media (min-width: 769px) {
+    html body .info-panel-wrap.sv-bar-t1 .info-panel-bar [data-sv-cell="drawdown"] .sbsub { display: none; }
+    html body .info-panel-wrap.sv-bar-t2 .info-panel-bar #svBarRisk .sbsub { display: none; }
+    html body .info-panel-wrap.sv-bar-t3 .info-panel-bar .sv-sb-keys .sbsub { display: none; }
+    html body .info-panel-wrap.sv-bar-t4 .info-panel-bar .sv-seats-word { display: none; }
+    html body .info-panel-wrap.sv-bar-t5 .info-panel-bar [data-sv-cell="bots"] .sv-bot-paper { display: none; }
+    html body .info-panel-wrap.sv-bar-t6 .info-panel-bar .ip-cat { padding: 0 5px; }
+    html body .info-panel-wrap.sv-bar-t6 .sv-sgrp { padding-left: 5px; }
+}

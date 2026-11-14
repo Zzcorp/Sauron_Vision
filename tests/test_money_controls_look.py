@@ -1468,6 +1468,15 @@ class MoneyControlsLightMeasuredTests(TestCase):
                                    ("/command/", (".sr-popup:has(.sr-pop-dir-bullish) .sr-pop-btn-act",
                                                   ".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn-act"))):
                 b.open(sid, url, PROBES)
+                if any(".sr-popup" in s for s in selectors):
+                    # Updated deliberately (the desk v2 board, approved
+                    # 2026-11-13: "amazing work, bravo, I need it fast!!"):
+                    # the signal rail is a column that is open, pushing the
+                    # page, or not on the screen at all; its cards open from
+                    # the open rail, so the rail is opened first (its Signals
+                    # button in the dock does the same).
+                    b.js(sid, "(function () { var r = document.getElementById('signalsRail');"
+                              " if (r) r.classList.add('open'); return 0; })()")
                 b.js(sid, "__sv.settle()")      # the page has landed before a box is read
                 for sel in selectors:
                     # A rail card is opened as a click opens it (a hover card

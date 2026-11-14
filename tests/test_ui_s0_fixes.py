@@ -175,7 +175,7 @@ class RailOverlapMeasuredTests(TestCase):
         var rail = document.querySelector(".signals-rail");
         var page = document.querySelector(".page-content");
         var main = document.querySelector(".main-content");
-        var out = { width: window.innerWidth };
+        var out = { width: window.innerWidth, client: document.documentElement.clientWidth };
         var states = ["closed", "open"];
         for (var i = 0; i < states.length; i++) {
             rail.classList.toggle("open", states[i] === "open");
@@ -210,14 +210,24 @@ class RailOverlapMeasuredTests(TestCase):
                                      "bar" % url)
         cls.got = _measure(pages, cls.VIEWPORTS, cls.PROBE, "sv-s0-rail-")
 
+    #: Updated deliberately (the desk v2 board, approved 2026-11-13:
+    #: "amazing work, bravo, I need it fast!!"): the rail is a column that
+    #: pushes the page, 300 px under 1440 and 340 px from there (380 from
+    #: 2560), or, shut, not on the screen at all (laid out past the
+    #: window's edge and hidden; the dock's Signals button opens it), no
+    #: longer a 44 px strip and a 280 px panel.
+    OPEN_WIDE = {1280: 300, 1440: 340, 1920: 340}
+
     def test_the_probe_sees_the_rail_it_set(self):
         for (url, width), got in sorted(self.got.items()):
             with self.subTest(url=url, width=width):
                 self.assertEqual(got["width"], width)
-                for state, wide in (("closed", 44), ("open", 280)):
+                for state in ("closed", "open"):
                     self.assertTrue(got[state]["railShown"], got)
-                    self.assertAlmostEqual(got[state]["railWidth"], wide,
-                                           delta=0.5, msg=got)
+                self.assertAlmostEqual(got["open"]["railWidth"], self.OPEN_WIDE[width],
+                                       delta=0.5, msg=got)
+                self.assertLess(got["open"]["railLeft"], got["client"], got)
+                self.assertGreaterEqual(got["closed"]["railLeft"], got["client"] - 0.5, got)
 
     def test_the_page_stops_at_the_rail(self):
         for (url, width), got in sorted(self.got.items()):

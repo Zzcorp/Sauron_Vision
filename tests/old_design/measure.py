@@ -2,9 +2,12 @@
 Chromium over its DevTools pipe, every request answered from the test
 client, the synthetic book, the scenes and the held clock."""
 import base64
+import builtins
 import collections
 import contextlib
 import copy
+import datetime as _dtm
+import importlib
 import json
 import mimetypes
 import os
@@ -12,7 +15,9 @@ import pathlib
 import re
 import select
 import subprocess
+import sys
 import time
+import types
 import urllib.parse
 from datetime import timedelta
 from decimal import Decimal
@@ -30,10 +35,13 @@ from tests.test_close_advice import CHROME, HOST, _Chrome
 # ══════════════════════════════════════════════════════════════════════════
 #
 # Chromium over its DevTools pipe (tests/test_close_advice._Chrome), on a
-# synthetic book, at one frozen instant (the one-price fixture's T, a
-# Thursday evening, every market open): the server's clock, the market
-# hours' and the page's own Date all read T, so a page measured on a
-# Saturday is the page measured on a Thursday.
+# synthetic book, at one frozen instant (the one-price fixture's T,
+# Thursday 2026-11-12 19:13:56 UTC, with NYSE, NASDAQ, TSX, the forex and
+# the CME open: the instant the budgets were measured at): every clock the
+# server reads (freeze_patches: the market hours', the calendar's, the
+# "... ago" words', the models' stamps', the idle lock's) and the page's
+# own Date, timers and idle callbacks (INIT) read T, so a page measured on
+# a Saturday is the page measured on a Thursday.
 #
 # THE CRITIC'S HOLE 1 (pages opened as files load nothing after the HTML):
 # every request the page makes is answered from the test client through the
@@ -58,12 +66,13 @@ from tests.test_close_advice import CHROME, HOST, _Chrome
 # and the states the lists missed (below, STATES).
 #
 # THE SAME COUNT IN EVERY RUN. Each page is read at the same instant of its
-# life: every timer the page sets (but setTimeout(fn, 0)) runs on a held
-# clock the run moves by fixed steps (2.6 s after the load, 1.6 s after an
-# act; INIT), firing them in their order and letting each one's fetches
-# land before the next, so the live pill's first poll, the nav dots',
-# Gollum's whisper, the Horde's first tab, the Wall's labels, a hover's
-# 450 ms beat, /intro/'s steps have all happened, and nothing later has.
+# life: every timer the page sets (but setTimeout(fn, 0)) and every idle
+# callback it asks for runs on a held clock the run moves by fixed steps
+# (2.6 s after the load, 1.6 s after an act; INIT), firing them in their
+# order and letting each one's fetches land before the next, so the live
+# pill's first poll, the nav dots', Gollum's whisper, the Horde's first
+# tab, the Wall's labels, a hover's 450 ms beat, /intro/'s steps have all
+# happened, and nothing later has.
 # The page's Date reads T plus the held clock, its Math.random is seeded,
 # a marquee strip (claude/marquee, when it lands) is held at its start.
 # What the motion layer hid below the fold is shown, finite animations end
@@ -116,49 +125,300 @@ def _frozen_instant():
     return T
 
 
-class _Frozen:
-    """datetime and date stand-ins whose now() and today() read T, for the
-    modules that ask the clock without django.utils.timezone (the market
-    hours, the market calendar, the charts' and bars' ages)."""
+# ── the server's one instant ────────────────────────────────────────────
+#
+# EVERY CLOCK THE SERVER READS (2026-11-14). The hold named six clocks:
+# django.utils.timezone.now, the one price's, and the datetime of the
+# market hours, the calendar, the charts and the bars. Every other reader
+# of the machine's clock read the real one: Django's timesince and
+# timeuntil (the "... ago" words of some forty templates), the models'
+# default stamps (default=timezone.now keeps the function, which asks
+# datetime itself), the idle lock's gap (int(time.time()) against the
+# session's first stamp: a shard slower than the census user's 10 minutes
+# would send every later scene to /locked/), the Oculus's probe ages, the
+# quote seams' time.time(). Their words aged with the machine's clock, and
+# one more scene could fall to the lock on a slow runner. Now the hold
+# swaps the time module's own readers (time.time and time.time_ns, and
+# time.localtime, gmtime, ctime, asctime and strftime asked without a
+# time), and in Django's modules and this project's every name for one of
+# them, for datetime.datetime or datetime.date (now, utcnow, today), or
+# for the datetime module itself (a copy holding the swapped classes:
+# timesince's datetime.datetime.now()). A module a page imports while the
+# census runs is held from the end of that import on. The datetime module's
+# own names stay the machine's, and so do the site packages': a C
+# extension takes the datetime types by name while it imports (pandas,
+# first imported under a swapped datetime.datetime, broke for the rest of
+# the process). The swapped classes answer isinstance and issubclass as the
+# real ones do, and make real datetimes only. Once the hold is over every
+# name is back, and a name a module took meanwhile reads the machine's
+# clock again.
 
-    @staticmethod
-    def make():
-        import datetime as _dt
-        T = _frozen_instant()
+#: The machine's clock as Python reads it, kept in a dict: a swap replaces
+#: the names modules hold, never what a dict holds.
+_WALL = {"datetime": _dtm.datetime, "date": _dtm.date, "module": _dtm, "time": time.time,
+         "time_ns": time.time_ns, "localtime": time.localtime, "gmtime": time.gmtime, "ctime": time.ctime,
+         "asctime": time.asctime, "strftime": time.strftime}
+#: id -> (kind, reader): every reader a swap has put in place, kept alive
+#: so that an id names one reader for good.
+_SWAPPED = {}
+#: The modules whose clocks the old hold named, imported before a hold
+#: looks: their names are swapped from its first moment.
+_NAMED = ("core.exchange_status", "core.market_calendar", "dashboard.chart_source", "market_data.bot_bars")
+_ROOT_PREFIX = tuple({str(ROOT) + os.sep, os.path.realpath(str(ROOT)) + os.sep})
+#: Never swapped in: the datetime module (a C extension reads its types
+#: there), and this one.
+_NEVER = ("datetime", "_datetime", __name__)
 
-        class FrozenDatetime(_dt.datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return T.astimezone(tz) if tz is not None else T.replace(tzinfo=None)
 
-            @classmethod
-            def utcnow(cls):
-                return T.replace(tzinfo=None)
+def _reached(mod, synthetic=False):
+    """Whether a swap reaches a module's names: Django's, and this
+    project's own files (not a site package's); a move also reaches a
+    module made in memory (missed_reader's)."""
+    name = getattr(mod, "__name__", None) or ""
+    if not isinstance(mod, types.ModuleType) or name in _NEVER:
+        return False
+    if name == "django" or name.startswith("django."):
+        return True
+    path = getattr(mod, "__file__", None)
+    if not path:
+        return synthetic
+    return path.startswith(_ROOT_PREFIX) and "-packages" not in path
 
-        class FrozenDate(_dt.date):
-            @classmethod
-            def today(cls):
-                return T.date()
 
-        return FrozenDatetime, FrozenDate
+class _Like(type):
+    """A swapped class answers isinstance and issubclass as the real one
+    does; a class made from it while it is in place (Django's
+    datetimeobject, when its module is first imported then) as itself."""
+
+    def __instancecheck__(cls, obj):
+        real = cls.__dict__.get("_real")
+        return isinstance(obj, real) if real else type.__instancecheck__(cls, obj)
+
+    def __subclasscheck__(cls, sub):
+        real = cls.__dict__.get("_real")
+        return issubclass(sub, real) if real else type.__subclasscheck__(cls, sub)
+
+
+def _readers(clock, live):
+    """{kind: reader} reading clock() (epoch seconds) while live["on"], and
+    the machine's clock once it is off."""
+    real_dt, real_date = _WALL["datetime"], _WALL["date"]
+
+    def secs():
+        return clock() if live["on"] else _WALL["time"]()
+
+    class SwappedDatetime(real_dt, metaclass=_Like):
+        _real = real_dt
+
+        def __new__(cls, *args, **kwargs):
+            if cls is SwappedDatetime:
+                return real_dt(*args, **kwargs)
+            return real_dt.__new__(cls, *args, **kwargs)
+
+        @classmethod
+        def now(cls, tz=None):
+            return real_dt.fromtimestamp(secs(), tz)
+
+        @classmethod
+        def utcnow(cls):
+            return real_dt.fromtimestamp(secs(), _dtm.timezone.utc).replace(tzinfo=None)
+
+        @classmethod
+        def today(cls):
+            return real_dt.fromtimestamp(secs())
+
+    class SwappedDate(real_date, metaclass=_Like):
+        _real = real_date
+
+        def __new__(cls, *args, **kwargs):
+            if cls is SwappedDate:
+                return real_date(*args, **kwargs)
+            return real_date.__new__(cls, *args, **kwargs)
+
+        @classmethod
+        def today(cls):
+            return real_date.fromtimestamp(secs())
+
+    def time_():
+        return secs()
+
+    def time_ns_():
+        return int(round(secs() * 1e9)) if live["on"] else _WALL["time_ns"]()
+
+    def localtime_(seconds=None):
+        return _WALL["localtime"](secs() if seconds is None else seconds)
+
+    def gmtime_(seconds=None):
+        return _WALL["gmtime"](secs() if seconds is None else seconds)
+
+    def ctime_(seconds=None):
+        return _WALL["ctime"](secs() if seconds is None else seconds)
+
+    def asctime_(t=None):
+        return _WALL["asctime"](_WALL["localtime"](secs()) if t is None else t)
+
+    def strftime_(fmt, t=None):
+        return _WALL["strftime"](fmt, _WALL["localtime"](secs()) if t is None else t)
+
+    module = types.ModuleType(_dtm.__name__, _dtm.__doc__)
+    module.__dict__.update({k: v for k, v in vars(_dtm).items() if k not in ("__name__", "__doc__", "__spec__",
+                                                                             "__loader__")})
+    module.datetime, module.date = SwappedDatetime, SwappedDate
+    return {"datetime": SwappedDatetime, "date": SwappedDate, "module": module, "time": time_,
+            "time_ns": time_ns_, "localtime": localtime_, "gmtime": gmtime_, "ctime": ctime_,
+            "asctime": asctime_, "strftime": strftime_}
+
+
+class _ClockSwap:
+    """From start() to stop(), the time module's readers, and every name
+    that the modules a swap reaches (_reached) hold for one of the machine
+    clock's readers, swapped for readers of clock(). The hold (over=True)
+    swaps the machine's own readers and any a move put in place, in the
+    modules loaded when it starts and in each one loaded after, at the end
+    of the import that loaded it (or, for a module still running then, of
+    the next import); a move (over=False) swaps only the machine's own, in
+    the modules loaded when it starts. The hold wins, whichever started
+    first, and a move reaches only what the hold missed."""
+
+    def __init__(self, clock, over):
+        self.over, self.live = over, {"on": False}
+        self.readers = _readers(clock, self.live)
+        self.done, self.seen, self.waiting = [], {}, {}
+        self.size, self.depth, self.imp = 0, 0, None
+
+    def _wanted(self):
+        wanted = {id(obj): kind for kind, obj in _WALL.items()}
+        if self.over:
+            wanted.update({i: kind for i, (kind, _r) in _SWAPPED.items()})
+        for obj in self.readers.values():
+            wanted.pop(id(obj), None)
+        return wanted
+
+    def _swap(self, mods):
+        wanted = self._wanted()
+        for mod in mods:
+            for attr, value in list(vars(mod).items()):
+                kind = wanted.get(id(value))
+                if kind is None:
+                    continue
+                try:
+                    setattr(mod, attr, self.readers[kind])
+                except Exception:       # a module that refuses the name keeps it (MeasuredClockTests would see it)
+                    continue
+                self.done.append((mod, attr, value))
+
+    def _look(self):
+        """The modules loaded since the last look, once each has run."""
+        out = []
+        for key, mod in list(self.waiting.items()):
+            if not getattr(getattr(mod, "__spec__", None), "_initializing", False):
+                del self.waiting[key]
+                out.append(mod)
+        if len(sys.modules) != self.size:
+            for mod in list(sys.modules.values()):
+                key = id(mod)
+                if key in self.seen:
+                    continue
+                self.seen[key] = mod     # kept, so its id names it for good
+                if getattr(getattr(mod, "__spec__", None), "_initializing", False):
+                    self.waiting[key] = mod
+                else:
+                    out.append(mod)
+            self.size = len(sys.modules)
+        self._swap([m for m in out if _reached(m, synthetic=not self.over)])
+
+    def _import(self, name, globals=None, locals=None, fromlist=(), level=0):
+        self.depth += 1
+        try:
+            return self.imp(name, globals, locals, fromlist, level)
+        finally:
+            self.depth -= 1
+            if not self.depth and self.live["on"] and (self.waiting or len(sys.modules) != self.size):
+                self._look()
+
+    def start(self):
+        if self.over:
+            for name in _NAMED:
+                try:
+                    importlib.import_module(name)
+                except ImportError:
+                    pass
+        for kind, obj in self.readers.items():
+            _SWAPPED[id(obj)] = (kind, obj)
+        mods = list(sys.modules.values())
+        self.seen, self.size = {id(m): m for m in mods}, len(sys.modules)
+        self._swap([sys.modules["time"]] + [m for m in mods if _reached(m, synthetic=not self.over)])
+        if self.over:
+            self.imp, builtins.__import__ = builtins.__import__, self._import
+        self.live["on"] = True
+        return self
+
+    def stop(self):
+        self.live["on"] = False
+        if self.imp is not None:
+            builtins.__import__, self.imp = self.imp, None
+        for mod, attr, value in reversed(self.done):
+            try:
+                setattr(mod, attr, value)
+            except Exception:       # put every other name back all the same
+                pass
+        self.done, self.seen, self.waiting = [], {}, {}
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.stop()
 
 
 def freeze_patches():
-    """The patches that hold the server at T (started by the caller)."""
+    """The patches that hold the server at T, started by the caller in this
+    order: every clock the process reads (_ClockSwap), then the two seams
+    the tests name (timezone.now, the one price's now)."""
     T = _frozen_instant()
-    dt, d = _Frozen.make()
-    out = [mock.patch("django.utils.timezone.now", return_value=T),
-           mock.patch("market_data.one_quote.now", return_value=T)]
-    for mod, names in (("core.exchange_status", ("datetime", "date")), ("core.market_calendar", ("datetime",)),
-                       ("dashboard.chart_source", ("datetime",)), ("market_data.bot_bars", ("datetime",))):
-        try:
-            m = __import__(mod, fromlist=["x"])
-        except ImportError:
-            continue
-        for name in names:
-            if hasattr(m, name):
-                out.append(mock.patch.object(m, name, dt if name == "datetime" else d))
-    return out
+    return [_ClockSwap(T.timestamp, over=True),
+            mock.patch("django.utils.timezone.now", return_value=T),
+            mock.patch("market_data.one_quote.now", return_value=T)]
+
+
+def machine_clock(at):
+    """The machine's own clock moved to `at` (an aware datetime), ticking on
+    from there, for every reader the hold has not swapped (a context
+    manager): under the hold it reaches nothing (MeasuredClockTests, and
+    SV_OLD_DESIGN_MACHINE_CLOCK on the measured shards)."""
+    offset = at.timestamp() - _WALL["time"]()
+    return _ClockSwap(lambda: _WALL["time"]() + offset, over=False)
+
+
+@contextlib.contextmanager
+def missed_reader():
+    """A loaded module holding the machine's own time.time and datetime, as
+    one the hold had missed would (a module the hold, started before it,
+    did not swap): what a move of the machine's clock does reach."""
+    mod = types.ModuleType("sv_census_missed_reader")
+    mod.time, mod.datetime = _WALL["time"], _WALL["datetime"]
+    sys.modules[mod.__name__] = mod
+    try:
+        yield mod
+    finally:
+        sys.modules.pop(mod.__name__, None)
+
+
+def instant(text):
+    """An ISO 8601 instant ("2026-11-14T12:00:00Z") as an aware datetime."""
+    at = _WALL["datetime"].fromisoformat(text.strip().replace("Z", "+00:00"))
+    return at if at.tzinfo else at.replace(tzinfo=_dtm.timezone.utc)
+
+
+def coming(weekday, hour, minute=0):
+    """The next instant on `weekday` (0 is Monday) at hour:minute UTC that is
+    more than a day ahead of the machine's clock."""
+    now = _WALL["datetime"].fromtimestamp(_WALL["time"](), _dtm.timezone.utc)
+    for days in range(1, 10):
+        at = (now + timedelta(days=days)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at.weekday() == weekday and at - now > timedelta(days=1):
+            return at
+    raise AssertionError("no weekday %d ahead" % weekday)
 
 
 def token_rgbs():
@@ -685,6 +945,18 @@ PARTIAL_SCENES = (("/command/?tab=portfolio", "/command/tab/portfolio/"),
 #: and random, once in six (the review of B0); on the held clock every run
 #: reads every page at the same instant of its life, on a fast machine as
 #: on a slow one. setTimeout(fn) and setTimeout(fn, 0) run as they are.
+#:
+#: And its idle callbacks (2026-11-14). Chromium runs a requestIdleCallback
+#: on the real clock: at the renderer's first idle moment, or at its
+#: timeout in wall time. The Horde's first tab read rides on one
+#: (sv-horde.js firstTab, timeout 1.5 s): on a runner too busy to idle, the
+#: census read the tab before it, still its skeleton "THE HORDE · 6 seats",
+#: whose name fits the widest tier and shows in the Eye's green
+#: (/ai-journal/: eye_text 13, budget 12, on PR #109; the painted tab drops
+#: a tier and hides the name). Held, each one runs when the held clock
+#: reaches its timeout (1 ms without one), as an idle period that timed
+#: out, in order with the timers.
+#:
 #: The page's Date reads T plus the held clock (not the wall clock's
 #: elapsed time), and Math.random is seeded: the same draws in every run.
 INIT = r"""(function () {
@@ -707,6 +979,11 @@ INIT = r"""(function () {
   };
   window.clearTimeout = function (id) { if (held[id]) delete held[id]; else nCT.call(window, id); };
   window.clearInterval = function (id) { if (held[id]) delete held[id]; else nCI.call(window, id); };
+  window.requestIdleCallback = function (fn, opts) {
+    var ms = Math.max(+(opts && opts.timeout) || 0, 1);
+    return hold(function () { fn({didTimeout: true, timeRemaining: function () { return 0; }}); }, ms, [], false);
+  };
+  window.cancelIdleCallback = function (id) { delete held[id]; };
   if (nFetch) {
     window.fetch = function () {
       flying += 1;
@@ -806,6 +1083,46 @@ INIT = r"""(function () {
 #: The held clock moved on by this many ms, its timers fired in order.
 ADVANCE = "(window.__svClock ? window.__svClock.advance(%d) : 0)"
 LOAD_MS, ACT_MS = 2600, 1600
+
+#: A page that sets a timer and asks for idle callbacks (one with a
+#: timeout, one without, one cancelled), each noting the held clock and
+#: its deadline when it runs (MeasuredClockTests).
+CLOCK_PAGE = b"""<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+window.__ran = [];
+function note(what) {
+  return function (deadline) { window.__ran.push([what, window.__svClock.now(), deadline ? deadline.didTimeout : null]); };
+}
+setTimeout(note('timer 500'), 500);
+requestIdleCallback(note('idle 1500'), {timeout: 1500});
+requestIdleCallback(note('idle'));
+cancelIdleCallback(requestIdleCallback(note('idle cancelled'), {timeout: 100}));
+</script></body></html>"""
+
+
+def held_clock_trace(wait_s=2.0):
+    """What CLOCK_PAGE's timer and idle callbacks did under INIT: once
+    loaded and left `wait_s` on the real clock (nothing, when every one
+    waits for the held clock), then with the held clock moved 1 s, then
+    2 s."""
+    def answer(request, rtype):
+        url = urllib.parse.urlsplit(request["url"])
+        if url.hostname == ORIGIN_HOST and url.path == "/__census__/clock/":
+            return 200, {"Content-Type": "text/html; charset=utf-8"}, CLOCK_PAGE
+        return None
+    driver = _Driver(CHROME, answer=answer)
+    try:
+        tid, sid = driver.tab(800, 600, False, INIT % {"t": int(_frozen_instant().timestamp() * 1000),
+                                                       "prefs": "{}", "ws": json.dumps("none")})
+        driver.go(sid, ORIGIN + "/__census__/clock/")
+        driver.js(sid, "window.__svClock.sleep(%d)" % int(wait_s * 1000))
+        out = {"real": driver.js(sid, "window.__ran.slice()")}
+        for held in (1000, 2000):
+            driver.js(sid, ADVANCE % 1000)
+            out["held %d" % held] = driver.js(sid, "window.__ran.slice()")
+        driver.close_tab(tid)
+    finally:
+        driver.close()
+    return out
 
 #: The page at rest, whatever the clock did. A card the motion layer
 #: (sv-motion.js) hid below the fold until it scrolls in, or until its
@@ -1014,9 +1331,14 @@ def build_scenes(details, live_id, paper_id):
       shows="#signalsRail.open #railSignals.collapsed")
     S("quote_card", act=_then(_hover(".data-headband .dh-item"), _click(".data-headband .dh-item")), shows=".dh-pop")
     S("news_card", act=_hover(".ticker-bar .ticker-item"), shows=".ticker-popup")
-    for name in ("PORTFOLIO", "POSITIONS", "SIGNALS"):
-        # The bar's dropdowns are portalled to <body> (base.html), pinned on a click.
-        S("bar_" + name.lower(), act=_click(".info-panel-wrap .ip-cat", text=name), shows=".ip-dropdown.sv-pinned")
+    # The bar's dropdowns are portalled to <body> (base.html), pinned on a
+    # click. B1 (the desk v2 board, 2026-11-13): POSITIONS waits in "N more"
+    # (the Horde stands in its place), which opens first; SIGNALS left the
+    # bar for the dock and the rail (its cell waits unseen, .sv-more-gone),
+    # whose states are measured above, so the bar has no SIGNALS state.
+    S("bar_portfolio", act=_click(".info-panel-wrap .ip-cat", text="PORTFOLIO"), shows=".ip-dropdown.sv-pinned")
+    S("bar_positions", act=_then(_click("#svMoreBtn"), _click(".info-panel-wrap .ip-cat", text="POSITIONS")),
+      shows=".ip-dropdown.sv-pinned")
     S("bell", act=_click("#notifBell"), shows="#notifPanel")
     S("bell_offline", ws="drop", act=_click("#notifBell"), shows="#notifBell.is-offline")
     S("user_menu", act=_click("#userMenuTrigger"), shows=".user-menu-dropdown")
@@ -1025,17 +1347,21 @@ def build_scenes(details, live_id, paper_id):
     S("instrument_preview", "/instruments/", act=_hover(".page-content [data-instrument]"), shows=".instrument-preview")
     S("fill_banner", act="window.svBanner('fill_open', {symbol: 'BTCUSD', side: 'BUY', qty: '0.05', entry: '64,200.00',"
                          " asset_class: 'crypto', rule_name: 'census_up', paper: true}) || 1", shows="#svBannerStack > *")
-    S("horde", "/positions/", act=_click("#svHordeTab"), shows=".sv-horde-panel")
-    S("council", act=_click("#svCouncilBandTab"), shows=".sv-council-band-panel")
-    S("activity", act=_click("#svActivityTab"), shows=".sv-activity-panel")
+    # B1 (the desk v2 board): the Horde opens from its cell in the bar, the
+    # Council and the activity from the dock on the right edge; the old
+    # edge tabs are gone from 769 px up.
+    S("horde", "/positions/", act=_click("#svHordeCell"), shows=".sv-horde-panel")
+    S("council", act=_click('.sv-dock-btn[data-sv-dock="council"]'), shows=".sv-council-band-panel")
+    S("activity", act=_click('.sv-dock-btn[data-sv-dock="activity"]'), shows=".sv-activity-panel")
     S("ask_sauron", act=_click("#seEyeFab"), shows="#seChatPanel")
     S("gollum", act=_click("#gollumFab"), shows="#gollumDialog")
     S("tour", act="(window.SV && SV.tour && SV.tour.start(), 1)", shows="#svTourCard")
     S("kbd_help", act=_key("?", "Slash", 191, text="?", shift=True), shows="#kbdModalOverlay.open")
     S("idle_lock", act="(window.svIdleLock && window.svIdleLock.engage(false), 1)", shows="#idleLockOverlay")
     S("sidebar_mini", sidebar="mini", act=_hover(".sidebar .nav-link:not(.active)"), shows="#navMiniTip")
+    # The bar is always shown from 769 px up (B1, the desk v2 board): no
+    # minimise tab, no restore pill, so no minimised state.
     S("bands_hidden", bands=True, shows=".hb-restore-tab")
-    S("bar_minimised", act=_click("#ipMinTab"), shows="#ipRestorePill")
     S("take_trade_paper", "/instruments/BTCUSD/", act=_click(".tk-side.tk-long"), shows=".sz-dialog",
       real_post=(r"^/instruments/BTCUSD/take-trade/preview/$",))
     # Made from the paper preview at run time ("@live", "@short").

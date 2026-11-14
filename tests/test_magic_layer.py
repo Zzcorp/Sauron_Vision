@@ -2047,12 +2047,19 @@ class LightFromAboveMeasuredTests(TestCase):
 
     def test_the_light_reaches_only_the_pages_that_opted_in(self):
         """The light that reaches the page on the pages proven off the void
-        (in the nav, the two with the embers); C1's light everywhere else."""
+        (in the nav, the two with the embers); C1's light everywhere else.
+
+        Updated deliberately (the desk v2 board, approved 2026-11-13:
+        "amazing work, bravo, I need it fast!!"): under the frame's 76 px of
+        chrome the light that reaches the page falls from the Eye itself,
+        as the board's voidlight does (1400 x 900 at the brand's mark, 30 x
+        22 px), no longer from 46 % / 150 px, which lit the page's middle
+        under the old 142 px chrome (sv-frame.css)."""
         opted = sorted({url for (url, _m, _y), got in self.sweep.items() if got["optedIn"]})
         self.assertEqual(opted, sorted([COMMAND, POSITIONS]))
         for (url, mode, y), got in sorted(self.sweep.items()):
             with self.subTest(url=url, mode=mode, scroll=y):
-                self.assertIn("at 46% 150px" if got["optedIn"] else "at 46% -110px", got["light"])
+                self.assertIn("at 30px 22px" if got["optedIn"] else "at 46% -110px", got["light"])
 
 
 #: The collapsed sidebar's mark: where it stands, the sidebar's clip (its
@@ -2389,11 +2396,18 @@ class KitMagicMeasuredTests(TestCase):
             cls.buttons = b.js(sid, "__sv.boxes('button, .btn')")
             # Where a moment's light is, at this instant: the row's light,
             # the flare at its widest, the card's edge, the icon's light.
+            # Updated deliberately (the desk v2 board, approved 2026-11-13:
+            # "amazing work, bravo, I need it fast!!"): the flare's box is
+            # its own circle at its largest scale (1.08, the kit's
+            # sv-eye-flare) plus 2 px, as it computes on the page, not the
+            # 70 px circle at the 1.9 it no longer reaches; in the 44 px
+            # head the menu's first fold button sits 6 px under the head.
             lights = ("(function () { var out = []; function box(e, pad) { var r = e.getBoundingClientRect();"
                       " return [r.left - pad, r.top - pad, r.width + 2 * pad, r.height + 2 * pad]; }"
                       " Array.prototype.forEach.call(document.querySelectorAll('.sv-row-light'), function (e) { out.push(box(e, 0)); });"
                       " var w = document.querySelector('.brand-eye-wrap.sv-flare');"
-                      " if (w) { var r = w.getBoundingClientRect(), R = 70 * 1.9 / 2; out.push([r.left + r.width / 2 - R, r.top + r.height / 2 - R, 2 * R, 2 * R]); }"
+                      " if (w) { var r = w.getBoundingClientRect(), R = (parseFloat(getComputedStyle(w, '::after').width) || 70) * 1.08 / 2 + 2;"
+                      " out.push([r.left + r.width / 2 - R, r.top + r.height / 2 - R, 2 * R, 2 * R]); }"
                       " Array.prototype.forEach.call(document.querySelectorAll('.sv-moment-arrive'), function (e) { var q = box(e, 0); out.push([q[0], q[1], q[2], 2]); });"
                       " Array.prototype.forEach.call(document.querySelectorAll('.sv-moment-icon'), function (e) { out.push(box(e, 4)); });"
                       " return out; })()")
@@ -2528,6 +2542,15 @@ class EmbersMeasuredTests(TestCase):
     text call; under Calm and Off, and on a page that has not opted in, the
     canvas is not displayed and no frame is drawn in 2 s."""
 
+    #: Updated deliberately, twice (the desk v2 board, approved 2026-11-13:
+    #: "amazing work, bravo, I need it fast!!"). Its frame keeps 16 px
+    #: gutters, and /command/ at 1440 x 900 has no void of 24 px left; the
+    #: build first measured a doctored /command/ (its hero hidden). The
+    #: review asked for the page as it ships: the embers now drift in the
+    #: board's gutter channels, clipped to them (sv-embers.js), so /command/
+    #: is measured as he has it, and EmberChannelsMeasuredTests below holds
+    #: what the channels draw.
+
     @classmethod
     def setUpTestData(cls):
         pages = {u: _file_page(m, scripts=("sv-embers.js",), before=EMBER_COUNTER)
@@ -2627,6 +2650,102 @@ class EmbersMeasuredTests(TestCase):
         self.assertGreater(self.reducedMaps, 0)
         self.assertGreater(self.reducedDrawn, 0)
         self.assertEqual(self.reduced["calls"], 0)       # nothing after the still frame
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class EmberChannelsMeasuredTests(TestCase):
+    """The embers in the gutters (the desk v2 board's channels, approved
+    2026-11-13: "amazing work, bravo, I need it fast!!"; Twist2 "Les
+    braises"), on /command/ and /positions/ as they ship, at 1440 x 900
+    under Magic: /command/, his home, which opted into the embers, shows
+    them again; every channel is a gutter of 6 to 40 px where nothing paints
+    and no word sits; every ember the frame draws in one ends at its edges
+    (it can never cross or sit on a panel); at most one per 280 px of a
+    channel, 20 in all; and a scroll lets the channels go until the next
+    map."""
+
+    PROBE = r"""(function () {
+      var s = window.__svEmberStats;
+      function paints(n) {
+        for (; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+          var cs = getComputedStyle(n);
+          if (cs.backgroundImage !== 'none') return true;
+          var m = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor); if (!m) continue;
+          var p = m[1].split(/[ ,\/]+/).filter(Boolean); if (p.length < 4 || parseFloat(p[3]) > 0) return true;
+        }
+        return false;
+      }
+      var chans = s.channels(), bad = [];
+      chans.forEach(function (c, i) {
+        var th = c[4] ? c[3] - c[1] : c[2] - c[0];
+        if (th < 6 || th > 40) bad.push(['thickness', i, th]);
+        var len = c[4] ? c[2] - c[0] : c[3] - c[1];
+        for (var u = 6; u < len - 6; u += 30) {
+          var x = c[4] ? c[0] + u : (c[0] + c[2]) / 2, y = c[4] ? (c[1] + c[3]) / 2 : c[1] + u;
+          var e = document.elementFromPoint(x, y);
+          if (e && paints(e)) { bad.push(['painted', i, Math.round(x), Math.round(y), e.className]); break; }
+        }
+      });
+      var out = [];
+      s.chanField().forEach(function (f) {
+        var c = chans[f[4]];
+        if (!c) return;
+        if (f[0] < c[0] - 0.01 || f[1] < c[1] - 0.01 || f[2] > c[2] + 0.01 || f[3] > c[3] + 0.01) out.push(f);
+      });
+      var per = {};
+      s.chanField().forEach(function (f) { per[f[4]] = (per[f[4]] || 0) + 1; });
+      var dense = chans.filter(function (c, i) {
+        var len = c[4] ? c[2] - c[0] : c[3] - c[1]; return (per[i] || 0) > Math.max(1, Math.floor(len / 280));
+      }).length;
+      return JSON.stringify({ channels: chans.length, embers: s.chanEmbers, drawn: s.chanField().length,
+                              bad: bad, outside: out, dense: dense });
+    })()"""
+
+    @classmethod
+    def setUpTestData(cls):
+        pages = {u: _file_page(m, scripts=("sv-embers.js",), before=EMBER_COUNTER)
+                 for u, m in _pages(_book("magic_channels"), (POSITIONS, COMMAND)).items()}
+        b = _Browser(pages, "sv-magic-channels-")
+        cls.got = {}
+        try:
+            sid = b.tab()
+            for url in (COMMAND, POSITIONS):
+                b.open(sid, url, PROBES)
+                b.js(sid, "(function () { return new Promise(function (r) { var n = 0, t = setInterval(function () {"
+                          " if ((window.__svEmberStats && __svEmberStats.maps) || ++n > 100) { clearInterval(t); r(0); } }, 50); }); })()")
+                b.js(sid, "new Promise(function (r) { setTimeout(function () { r(0); }, 900); })")
+                got = json.loads(b.js(sid, cls.PROBE))
+                # A page too short to scroll is reshaped instead: either way
+                # the page moved under the channels.
+                b.js(sid, "window.scrollBy(0, 240); if (!window.scrollY) window.dispatchEvent(new Event('resize')); 0")
+                b.js(sid, "new Promise(function (r) { setTimeout(function () { r(0); }, 60); })")
+                got["afterScroll"] = b.js(sid, "__svEmberStats.channels().length")
+                cls.got[url] = got
+        finally:
+            b.close()
+
+    def test_his_home_shows_embers_again(self):
+        g = self.got[COMMAND]
+        self.assertGreaterEqual(g["channels"], 1, g)
+        self.assertGreaterEqual(g["embers"], 1, g)
+        self.assertGreaterEqual(g["drawn"], 1, g)
+
+    def test_every_channel_is_a_gutter_where_nothing_paints(self):
+        for url, g in sorted(self.got.items()):
+            with self.subTest(url=url):
+                self.assertEqual(g["bad"], [])
+
+    def test_every_ember_in_a_channel_ends_at_its_edges(self):
+        for url, g in sorted(self.got.items()):
+            with self.subTest(url=url):
+                self.assertEqual(g["outside"], [])
+                self.assertLessEqual(g["embers"], 20)
+                self.assertEqual(g["dense"], 0)
+
+    def test_a_scroll_or_a_reshape_lets_the_channels_go_until_the_next_map(self):
+        for url, g in sorted(self.got.items()):
+            with self.subTest(url=url):
+                self.assertEqual(g["afterScroll"], 0)
 
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")

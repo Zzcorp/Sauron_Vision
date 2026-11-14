@@ -905,7 +905,10 @@ class PersonasPageTests(TestCase):
         base = _src("templates/base.html")
         self.assertIn("personas_dashboard", base)
         self.assertIn("Personalities", base)
-        self.assertEqual(base.count("◨"), 1)
+        # Updated deliberately (UI redo B2, the desk v2 board, approved 2026-11-13: "amazing work, bravo, I need it fast!!"):
+        # the row's mark is the one icon family's symbol, this row's alone.
+        self.assertEqual(base.count('href="#svi-personalities"'), 1)
+        self.assertEqual(base.count("◨"), 0)
         self.client.force_login(self.user)
         body = self.client.get(reverse("evidence_ledger")).content.decode()
         self.assertIn("Personalities", body)

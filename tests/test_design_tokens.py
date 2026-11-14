@@ -93,6 +93,12 @@ FONT_LINKS = (
     "%C3%94%C3%96%C3%99%C3%9B%C3%9C%20%C2%B7%E2%80%94%E2%80%93-%26%27%E2%80%99()%2F%3A.%2C!%3F%23%2B%25"
     "&display=swap",
     "https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap",
+    # Updated deliberately (the desk v2 board, approved 2026-11-13: "amazing
+    # work, bravo, I need it fast!!"): Google's latin subsets of Inter and
+    # JetBrains Mono lack ▲ ▼ ≈ ≥ → ↓, which a fallback face drew; this one
+    # link draws them in JetBrains Mono, and only them.
+    "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400..700"
+    "&text=%E2%96%B2%E2%96%BC%E2%89%88%E2%89%A5%E2%86%92%E2%86%93&display=swap",
 )
 
 #: §3: the approved palette (the preview of 2026-11-06), its twelve neutrals
