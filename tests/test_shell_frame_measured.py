@@ -1290,14 +1290,26 @@ class FrameLookDetailTests(TestCase):
                 foldPad: [getComputedStyle(fold).paddingLeft, getComputedStyle(fold).paddingRight],
                 dot: getComputedStyle(dot).backgroundColor,
                 pill: [getComputedStyle(pill).fontWeight, getComputedStyle(pill).textTransform],
-                fades: [getComputedStyle(lane, '::before').backgroundImage, getComputedStyle(lane, '::after').backgroundImage,
-                        getComputedStyle(prices, '::before').backgroundImage, getComputedStyle(prices, '::after').backgroundImage],
+                fades: [lane, prices].map(function (e) { var cs = getComputedStyle(e); return {
+                  mask: cs.maskImage || cs.webkitMaskImage,
+                  paint: [getComputedStyle(e, '::before').backgroundImage, getComputedStyle(e, '::after').backgroundImage] }; }),
                 newsBadges: document.querySelectorAll('.ticker-item .t-badge.news').length,
                 newsTimes: Array.prototype.map.call(document.querySelectorAll('.ticker-item[data-type="news"]:not([aria-hidden]) .t-time'), function (t) {
                   return [t.textContent.trim(), getComputedStyle(t).fontSize, getComputedStyle(t).color]; }),
                 dots: dots,
                 bubble: (function () { var g = q('.gollum-bubble'); return g ? getComputedStyle(g).maxWidth : null; })()
               }); })()"""))
+            # The lanes hovered, their collapse buttons shown: the mask keeps
+            # each button's own box whole.
+            lanes = ".sv-band .ticker-bar, .sv-band .data-headband"
+            b.force(sid, lanes, ("hover",))
+            cls.got["hovered"] = json.loads(b.js(sid, r"""JSON.stringify(Array.prototype.map.call(
+              document.querySelectorAll('.sv-band .ticker-bar, .sv-band .data-headband'), function (e) {
+                var cs = getComputedStyle(e), r = e.getBoundingClientRect(), t = e.querySelector('.hb-collapse-btn').getBoundingClientRect();
+                return { mask: cs.maskImage || cs.webkitMaskImage, size: cs.maskSize || cs.webkitMaskSize,
+                         position: cs.maskPosition || cs.webkitMaskPosition, repeat: cs.maskRepeat || cs.webkitMaskRepeat,
+                         button: [Math.round(r.right - t.right), Math.round(t.top - r.top), Math.round(t.width), Math.round(t.height)] }; }))"""))
+            b.force(sid, lanes, ())
             # Folded to its icons: one short rule between groups, none under the brand.
             b.js(sid, "document.getElementById('mainSidebar').classList.add('mini'); 0")
             cls.got["mini"] = json.loads(b.js(sid, r"""(function () {
@@ -1347,8 +1359,31 @@ class FrameLookDetailTests(TestCase):
         self.assertEqual(self.got["detail"]["pill"], ["400", "lowercase"])
 
     def test_each_lane_fades_at_both_ends(self):
-        for img in self.got["detail"]["fades"]:
-            self.assertIn("linear-gradient", img)
+        """Updated deliberately (the old-design guard, B0, merged from main):
+        the fade is the board's own .lane mask, 12 px at each end, so the
+        lane's items fade into the band's ground and nothing is painted over
+        them; a painted fade on ::before and ::after was a gradient the
+        guard counts on every page."""
+        self.assertEqual(len(self.got["detail"]["fades"]), 2)
+        for lane in self.got["detail"]["fades"]:
+            with self.subTest(lane=lane):
+                self.assertRegex(lane["mask"], r"^linear-gradient\(90deg, rgba\(0, 0, 0, 0\), rgb\(0, 0, 0\) 12px, "
+                                               r"rgb\(0, 0, 0\) calc\(100% - 12px\), rgba\(0, 0, 0, 0\)\)$")
+                self.assertEqual(lane["paint"], ["none", "none"])
+
+    def test_a_shown_collapse_button_never_fades(self):
+        """F8 kept: while a lane's collapse button shows, the mask's second
+        layer is a solid box over the button's own (24 px, 4 px in from the
+        lane's right and top), so the button never fades with the items."""
+        self.assertEqual(len(self.got["hovered"]), 2)
+        for lane in self.got["hovered"]:
+            with self.subTest(lane=lane):
+                # The button: 4 px in from the lane's right and top, 24 px.
+                self.assertEqual(lane["button"], [4, 4, 24, 24])
+                self.assertTrue(lane["mask"].endswith(", linear-gradient(rgb(0, 0, 0), rgb(0, 0, 0))"), lane["mask"])
+                self.assertEqual(lane["size"], "100% 100%, 24px 24px")
+                self.assertEqual(lane["position"], "0px 0px, calc(100% - 4px) 4px")
+                self.assertEqual(lane["repeat"], "no-repeat, no-repeat")
 
     def test_a_headline_says_its_time_not_news(self):
         self.assertEqual(self.got["detail"]["newsBadges"], 0)

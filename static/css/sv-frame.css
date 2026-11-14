@@ -93,16 +93,19 @@
        y = 156 px, under the old 142 px of chrome. Under the board's 76 px
        (the top bar and the band) it would light the page: the same light,
        centred 110 px above the window, on a 240 px ray, fades out at
-       y = 68 px, under the chrome, and adds nothing to the page. */
-    --sv-void-light: radial-gradient(900px 240px at 46% -110px, rgba(0,232,104,.10), rgba(0,232,104,.025) 50%, rgba(0,232,104,0) 74%);
+       y = 68 px, under the chrome, and adds nothing to the page. Outside
+       the token sheet its green is the Eye's token, at the same doses
+       (the old-design guard, B0: no literal of the Eye outside the tokens). */
+    --sv-void-light: radial-gradient(900px 240px at 46% -110px, color-mix(in srgb, var(--sv-eye) 10%, transparent), color-mix(in srgb, var(--sv-eye) 2.5%, transparent) 50%, transparent 74%);
     /* The Eye's light reaching the page, where a page wears it (sv-kit.css,
        the void), falls from the Eye itself, as the desk v2 board draws it
        (Desk2's voidlight: centred on the brand's mark, 30 x 22 px from the
        window's corner, a 1400 x 900 ray, .078 at its source, .025 at 38 %,
        gone at 72 %): brightest in the top-left gutters, fading down and to
        the right. Centred under the old 142 px chrome (sv-tokens.css) it lit
-       the page's middle from 150 px down. */
-    --sv-void-light-reach: radial-gradient(1400px 900px at 30px 22px, rgba(0,232,104,.078), rgba(0,232,104,.025) 38%, rgba(0,232,104,0) 72%);
+       the page's middle from 150 px down. The Eye's token, at the board's
+       doses. */
+    --sv-void-light-reach: radial-gradient(1400px 900px at 30px 22px, color-mix(in srgb, var(--sv-eye) 7.8%, transparent), color-mix(in srgb, var(--sv-eye) 2.5%, transparent) 38%, transparent 72%);
 }
 html body {
     --sidebar-width: var(--sv-frame-side);
@@ -469,15 +472,25 @@ html body .sv-band .ticker-bar {
 }
 html body .sv-band .data-headband { flex: 1.75 1 0; }
 html body .sv-band .ticker-bar { flex: 1 1 0; }
-/* Each lane's ends fade over 12 px (the board's .lane mask), so no glyph
-   is ever cut in two at an edge; the fade is the band's own ground, under
-   the lane's collapse button. */
-html body .sv-band .data-headband::before, html body .sv-band .data-headband::after,
-html body .sv-band .ticker-bar::before, html body .sv-band .ticker-bar::after {
-    content: ""; position: absolute; top: 0; bottom: 0; width: 12px; z-index: 1; pointer-events: none;
+/* Each lane's ends fade over 12 px, as the board's .lane mask draws them,
+   so no glyph is ever cut in two at an edge: the lane's own items fade into
+   the band's ground, and nothing is painted over them (a painted fade is a
+   gradient the old-design guard counts, B0). While a lane's collapse button
+   shows (hover, focus), the mask keeps the button's own 24 px box whole, so
+   the button never fades with the items it sits over. */
+html body .sv-band .data-headband,
+html body .sv-band .ticker-bar {
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
+    mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
 }
-html body .sv-band .data-headband::before, html body .sv-band .ticker-bar::before { left: 0; background: linear-gradient(90deg, var(--sv-bg-1), transparent); }
-html body .sv-band .data-headband::after, html body .sv-band .ticker-bar::after { right: 0; background: linear-gradient(270deg, var(--sv-bg-1), transparent); }
+html body .sv-band .data-headband:is(:hover, :focus-within),
+html body .sv-band .ticker-bar:is(:hover, :focus-within) {
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent), linear-gradient(black, black);
+    mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent), linear-gradient(black, black);
+    -webkit-mask-size: 100% 100%, 24px 24px; mask-size: 100% 100%, 24px 24px;
+    -webkit-mask-position: 0 0, right 4px top 4px; mask-position: 0 0, right 4px top 4px;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
 html body .sv-band .data-headband.collapsed,
 html body .sv-band .ticker-bar.collapsed { display: none; }
 html body .sv-band .dh-scroll { height: 100%; overflow: hidden; }

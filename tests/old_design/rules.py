@@ -32,6 +32,17 @@ SPECIMEN_CLASS = re.compile(r"(?<![\w-])(dk-icon|dk-chip-sample|dk-scale-row)(?!
 #: The magic's own scripts (2026-11-12, merged in #106): the embers' canvas
 #: and the moments draw the Eye's light, which is theirs to draw.
 MAGIC_SCRIPTS = ("static/js/sv-embers.js", "static/js/sv-moments.js")
+#: The frame's sheet (B1, the desk v2 board the operator approved on
+#: 2026-11-13): it sizes the magic's light to the board's frame, and that
+#: light is read as the kit's is (magic_rule()): the rules it scopes to the
+#: ambience (the Eye's breath in the 44 px head, the feed pill's live dot,
+#: the docked Eye's glow under Magic and Calm), and the docked Eye itself,
+#: Ask Sauron's orb at the bar's end, a sphere of the Eye's light the board
+#: draws in every ambience (Desk2's .orb). Every other rule written there is
+#: read like any sheet's, and the old floating Eye's rules (sauron.css,
+#: sv-overlay.css) are still counted under the same class.
+FRAME_SHEET = "static/css/sv-frame.css"
+FRAME_EYE = re.compile(r"\.se-eye-fab(?![\w-])")
 #: The files whose hex colours must be token values (emails, PDF, tags).
 PALETTE_FILES = re.compile(r"^(templates/email/|templates/newsletter/|core/templatetags/|"
                            r"dashboard/reports\.py$|dashboard/views_bot_charts\.py$)")
@@ -164,10 +175,13 @@ TEXT_OR_BORDER = re.compile(r"^(color|-webkit-text-fill-color|caret-color|text-d
 #: Where the Eye may draw text or a border (plan §3.3): focus, selection,
 #: the brand, the active nav row, the empty-state mark. Read per item of a
 #: selector list: the role is the item's subject's (its last compound), or
-#: an ancestor that is one of the named places.
+#: an ancestor that is one of the named places. The brand's places include
+#: its tower (B1, the desk v2 board: Barad-dûr's silhouette, drawn only in
+#: an empty space, the menu's foot; its Eye a faint ember of the brand's
+#: green, Twist2's "la tour en filigrane").
 EYE_ROLE = re.compile(r":focus|:checked|\[aria-(selected|pressed|current|checked|expanded)|\.is-(active|selected|on)\b|"
                       r"\.active\b|\.selected\b|\.sv-pinned\b|::selection")
-EYE_PLACE = re.compile(r"\.sidebar-brand\b|\.brand\b|empty-state|\.nav-link\.active\b")
+EYE_PLACE = re.compile(r"\.sidebar-brand\b|\.brand\b|empty-state|\.nav-link\.active\b|\.sv-tower(?![\w-])")
 VISUAL = re.compile(r"^(color|background(-[a-z]+)?|border(-[a-z]+)*|outline(-[a-z]+)?|font(-[a-z]+)?|"
                     r"letter-spacing|text-transform|text-shadow|box-shadow|filter|-webkit-text-fill-color|"
                     r"fill|stroke|text-decoration(-color)?|accent-color|caret-color|backdrop-filter)$")
@@ -282,6 +296,19 @@ def eye_role(selector):
     if not selector:
         return False
     return all(EYE_ROLE.search(subject(item)) or EYE_PLACE.search(item) for item in selector_items(selector))
+
+
+def magic_rule(selector, where):
+    """Whether a rule is the magic's own light, whose Eye literals, glows and
+    gradients are not counted: in the kit's sheet, a rule the magic scopes
+    to its ambience; in the frame's (B1), that, or a rule whose every item
+    is the docked Eye's own (FRAME_EYE on its subject)."""
+    if where == KIT_SHEET:
+        return "data-sv-ambience" in selector
+    if where == FRAME_SHEET:
+        return "data-sv-ambience" in selector or (
+            bool(selector) and all(FRAME_EYE.search(subject(item)) for item in selector_items(selector)))
+    return False
 
 
 #: Colour functions whose lightness is read directly (oklch, oklab, lab,
@@ -471,7 +498,7 @@ def declaration_markers(prop, raw, selector="", rule_decls=(), where=""):
     out = []
     if where == KIT_PAGE and selector and all(SPECIMEN_CLASS.search(i) for i in selector_items(selector)):
         return out          # a specimen of the kit's page
-    magic = where == KIT_SHEET and "data-sv-ambience" in selector
+    magic = magic_rule(selector, where)
     if not magic:
         if has_eye_literal(value):
             out.append(("eye_literal", value))

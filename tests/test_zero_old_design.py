@@ -104,8 +104,12 @@ written there is read like any sheet's), the kit page's specimens (a swatch,
 the type scale, the wordmark), and in sv-kit.css the rules the magic scopes
 to its ambience (data-sv-ambience: the wordmark, the Eye, the
 active row, live dots, the selected tab, a live hero card's edge, a side's
-inset light, the moments). A var() fallback behind a token is inert and is
-not counted either.
+inset light, the moments). The frame's sheet (sv-frame.css, B1, the desk
+v2 board) sizes that light to the board's frame and is read the same way:
+its rules scoped to the ambience, and its docked Eye (Ask Sauron's orb, a
+sphere of the Eye's light in every ambience); the brand's tower in the
+menu's foot is a place of the brand. A var() fallback behind a token is
+inert and is not counted either.
 
 THE FILE:LINE -> BATCH MAP (the critic's hole 5): OWNERS below names, for
 every scanned file (and for the stretches of the shared files: base.html,
@@ -443,6 +447,43 @@ class MarkerRuleTests(SimpleTestCase):
                                    '<div class="dk-scale-row"><span style="color: var(--sv-eye);">SAURON</span></div>', kit),
                          [])
         self.assertEqual(self.page('<style>.dk-icon { color: var(--sv-eye); }</style>'), ["accent_role"])
+
+    def test_the_frame_s_light_is_the_magic_s(self):
+        """B1 (the desk v2 board, approved 2026-11-13): the frame's sheet
+        sizes the magic's light to the board's frame, and it is read as the
+        kit's is. Its rules scoped to the ambience (the feed pill's live dot,
+        the Eye's breath in the 44 px head, the docked Eye's glow) and its
+        docked Eye (Ask Sauron's orb, Desk2's sphere of the Eye's light,
+        drawn in every ambience) are the magic's; the brand's tower in the
+        menu's foot wears the brand's green. The same looks in another
+        sheet, unscoped, or on any other element of the frame are counted,
+        so the old floating Eye's rules still are."""
+        frame = "static/css/sv-frame.css"
+        scope = ':is([data-sv-ambience="magic"], [data-sv-ambience="calm"])'
+        dot = "html body:not(.light-mode)%s .live-status-pill .lsp-green { box-shadow: var(--sv-glow-dot); }"
+        self.assertEqual(self.css(dot % scope, frame), [])
+        self.assertEqual(self.css(dot % "", frame), ["glow"])
+        self.assertEqual(self.css(dot % scope), ["glow"])
+        orb = ("html body .se-eye-fab:not(.open) { background: radial-gradient(circle at 38% 34%, rgba(220,255,235,.55) 0 8%,"
+               " rgba(0,232,104,.35) 22%, rgba(4,30,16,.95) 62%, var(--sv-bg-0) 100%);"
+               " box-shadow: inset 0 0 0 1px rgba(0,232,104,.55), 0 0 10px rgba(0,232,104,.28); }")
+        old_eye = ["eye_literal", "eye_literal", "glow", "gradient"]
+        self.assertEqual(self.css(orb, frame), [])
+        self.assertEqual(self.css(orb.replace(":not(.open) {", ":not(.open)::after {"), frame), [])
+        self.assertEqual(self.css(orb), old_eye)
+        self.assertEqual(self.css(orb.replace(".se-eye-fab:not(.open)", ".card"), frame), old_eye)
+        self.assertEqual(self.css(orb.replace(".se-eye-fab:not(.open)", ".se-eye-fab:not(.open), html body .card"), frame),
+                         old_eye)
+        tower = ".sv-tower .sv-tower-eye { fill: var(--sv-eye); fill-opacity: .35; }"
+        self.assertEqual(self.css(tower, frame), [])
+        self.assertEqual(self.css(tower.replace(".sv-tower ", ".sv-panel "), frame), ["accent_role"])
+        self.assertEqual(self.page('<div class="sv-tower"><svg><ellipse fill="var(--sv-eye)"/></svg></div>'), [])
+        self.assertEqual(self.page('<div class="sv-tower-x"><svg><ellipse fill="var(--sv-eye)"/></svg></div>'),
+                         ["accent_role"])
+        # A lane's fade painted over its ends is a gradient, even there.
+        self.assertEqual(self.css("html body .sv-band .ticker-bar::after { right: 0;"
+                                  " background: linear-gradient(270deg, var(--sv-bg-1), transparent); }", frame),
+                         ["gradient"])
 
 
 class _MeasuredShard:

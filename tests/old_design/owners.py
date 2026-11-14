@@ -167,8 +167,11 @@ ANCHORED = {
         ('class="theme-toggle-btn"', "B2"),                             # the theme toggle's ☀ ☾
         ('<span id="clock"', "B1"),
         ('<div class="exchange-indicator">', "B3"),                     # the sessions menu (#40)
+        # B1 (the desk v2 board) put the feed pill before REAL ARMED, so the
+        # bell, which followed the pill, has an anchor of its own.
+        ("<!-- UPGRADE-8: Live status pill -->", "B3"),                 # the live-status list (#39, #40)
         ('class="sv-armed-pill"', "B1"),                                # REAL ARMED (#41)
-        ("<!-- UPGRADE-8: Live status pill -->", "B3"),                 # the live-status list, the bell (#39, #40)
+        ('class="notif-bell" id="notifBell"', "B3"),                    # the bell (#40)
         ("{# Lock now, rather than waiting out the idle window", "B2"),  # lock now (#113)
         ('<div class="user-menu" id="userMenu">', "B3"),                # the user menu (#40)
         ("<!-- Ticker Bar (fixed, always visible) -->", "B1"),          # the strips, restore tabs, the bottom strip (#1, #10, #11)
