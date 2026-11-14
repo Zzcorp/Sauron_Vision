@@ -107,48 +107,19 @@
 .sv-ih .dtl-venue { color: var(--sv-ink-3); }
 .sv-ih-more { color: var(--sv-ink-3); text-decoration: underline; text-underline-offset: 2px; }
 .sv-ih-more:hover { color: var(--sv-ink-1); }
-/* The two sides: the deal ticket (its markup, words and PIN path are the
-   ticket's own), laid out as the board draws it: two boxes of 42 px, the
-   side's words over the price, the venue and the spread between them. A
-   box keeps its width while the price ticks and grows for a longer price,
-   never letting it spill (plan §10: a fixed min-width; the review of B10,
-   M2). */
+/* The two sides: the deal ticket. Its face is its own sheet's
+   (static/css/sv-ticket.css, the board Ticket2, B6): two fixed boxes of
+   124 px around the middle's 92 px, the side's words over its price in the
+   number face at 15 px, in ink, so a tick never moves a button; the REAL
+   chip over the spread's hint line; a stale ticket dashed, with no price.
+   B10 left that face to B6, which reconciles it here (the review of B10,
+   F17 and m3: the 17 px price this header gave the old ticket yields to the
+   ticket's own 15 px). The header keeps what is its own: the sides at the
+   right end of the row, each box 42 px tall in the 52 px row (the sheet's
+   own boxes are taller), and the folds below, which narrow the ticket on a
+   narrower desk. */
 .sv-ih-act { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.sv-ih .sv-ticket {
-    display: flex; align-items: stretch; gap: 8px; height: 42px;
-    border: 0; border-radius: 0; background: transparent; padding: 0; overflow: visible;
-}
-.sv-ih .sv-ticket .tk-side {
-    display: flex; flex-direction: column; justify-content: center; gap: 1px;
-    min-width: 116px; height: 42px; padding: 0 12px;
-    border-radius: var(--sv-radius-ctl); background: var(--sv-bg-1); box-sizing: border-box;
-}
-.sv-ih .sv-ticket .tk-short { border: 1.5px solid var(--sv-down); align-items: flex-start; }
-.sv-ih .sv-ticket .tk-long { border: 1.5px solid var(--sv-up); align-items: flex-end; }
-/* The side's own hover, the kit's 14 % wash (plan §3.4), in every
-   ambience (the review of B10, m2). */
-.sv-ih .sv-ticket .tk-long:hover:not([disabled]) { background: var(--sv-up-wash); }
-.sv-ih .sv-ticket .tk-short:hover:not([disabled]) { background: var(--sv-down-wash); }
-/* The ticket's own face stays its own (sauron.css, the deal ticket: the
-   side's colour on the side's words and price, the mono face); the header
-   sizes it to the board's 42 px boxes, the price at the board's 17 px
-   (the operator's approved board), nothing under 11 px. */
-.sv-ih .sv-ticket .tk-lbl {
-    font-size: var(--sv-fs-micro); font-weight: 600;
-    letter-spacing: var(--sv-track-label); text-transform: uppercase; line-height: 14px;
-}
-.sv-ih .sv-ticket .tk-px {
-    font-size: 17px; font-weight: var(--sv-figure-weight);
-    line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap;
-}
-.sv-ih .sv-ticket .tk-mid {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-    padding: 0; min-width: 52px; border: 0; background: transparent;
-}
-.sv-ih .sv-ticket .tk-k { font-size: var(--sv-fs-micro); font-weight: 600; letter-spacing: var(--sv-track-label); line-height: 14px; color: var(--sv-ink-3); }
-.sv-ih .sv-ticket .tk-v { font-size: var(--sv-fs-micro); line-height: 14px; color: var(--sv-ink-2); }
-.sv-ih .sv-ticket .tk-venue { font-size: var(--sv-fs-micro); line-height: 14px; padding: 0 4px; border-radius: var(--sv-radius-chip); }
-.sv-ih .sv-ticket.tk-stale .tk-side { border-style: dashed; }
+.sv-ih .sv-ticket .tk-side { height: 42px; padding-top: 0; padding-bottom: 0; }
 /* The watchlist and Ask Sauron: at the right end of the chart's toolbar
    row (the chart card holds them, before the widget), never in the header
    row (the review of B10, F1 and m1). */
@@ -176,16 +147,30 @@
 @container svih (max-width: 1000px) {
     .sv-ih > .sv-ih-g { margin-right: 14px; }
     .sv-ih-day .sv-ih-r2 .sv-ih-word { display: none; }
-    .sv-ih .sv-ticket .tk-side { min-width: 108px; padding: 0 10px; }
+    /* the sides at 108 px, a price of ten characters still whole (the
+       review of B10, M2); the quote each side trades at folds into its
+       button's title, as the ticket's compact face folds it */
+    .sv-ih .sv-ticket { grid-template-columns: 108px 92px 108px; }
+    .sv-ih .sv-ticket .tk-side { width: 108px; padding-left: 8px; padding-right: 8px; }
+    .sv-ih .sv-ticket .tk-at { display: none; }
 }
 @container svih (max-width: 780px) {
     .sv-ih > .sv-ih-g { margin-right: 10px; }
     .sv-ih-r1 { gap: 6px; }
     .sv-ih-pos .sv-ih-r2 .sv-ih-age { display: none; }
     .sv-ih-pos .sv-ih-mark { display: none; }
-    .sv-ih .sv-ticket { gap: 6px; }
-    .sv-ih .sv-ticket .tk-side { min-width: 96px; padding: 0 8px; }
-    .sv-ih .sv-ticket .tk-px { font-size: 15px; }
+    /* the ticket in its compact face (sv-ticket.css, .sv-ticket--sm): sides
+       of 96 px, a middle of 64 px, the spread under its word, the chip and
+       its two lines inside the 42 px box, the price in the base size, so a
+       price of ten characters stays whole in a box that never moves (M2);
+       a stale ticket still prints no price */
+    .sv-ih .sv-ticket { grid-template-columns: 96px 64px 96px; column-gap: 6px; }
+    .sv-ih .sv-ticket .tk-side { width: 96px; padding-left: 8px; padding-right: 8px; gap: 2px; }
+    .sv-ih .sv-ticket .tk-px { font-size: var(--sv-fs-base); }
+    .sv-ih .sv-ticket.tk-stale .tk-px { font-size: 0; }
+    .sv-ih .sv-ticket.tk-stale .tk-px::after { font-size: var(--sv-fs-base); }
+    .sv-ih .sv-ticket .tk-mid { gap: 0; }
+    .sv-ih .sv-ticket .tk-spread { flex-direction: column; align-items: center; gap: 0; line-height: 12px; }
 }
 @container svih (max-width: 720px) {
     .sv-ih-pos .sv-ih-r { display: none; }

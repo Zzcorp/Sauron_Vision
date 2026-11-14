@@ -1,4 +1,4 @@
-{% load sauron_tags quote_tags %}
+{% load static sauron_tags quote_tags %}
 {% comment %}
 The deal ticket — SHORT at the bid, the spread, LONG at the ask.
 
@@ -19,7 +19,15 @@ two tickets can coexist without either going stale.
 A missing side renders the muted em-dash, never a zero: the house rule
 is that unknown is not a number, and it matters most here, where the
 number sits on a button that opens a position.
+
+THE BOARD (desk v2, approved 2026-11-13): two fixed-width boxes, the
+quote each side trades at named on its label (· BID, · ASK), the price in
+ink in the number face, the world chip and the spread between them. Its
+sheet, static/css/sv-ticket.css, comes with it. The chip names the world
+as the TAKE TRADE dialog it opens does: REAL on an armed lane (the board,
+UI plan §3.5 and §10's ticket row), where it said LIVE.
 {% endcomment %}
+<link rel="stylesheet" href="{% static 'css/sv-ticket.css' %}">
 <div class="sv-ticket {{ klass }}"
      data-ticket="{{ symbol }}"
      data-decimals="{{ decimals|default:'2' }}">
@@ -27,7 +35,7 @@ number sits on a button that opens a position.
             title="SHORT {{ symbol }} — hits the bid"
             aria-label="Short {{ symbol }} at the bid"
             onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ symbol|escapejs }}', 'SELL');">
-        <span class="tk-lbl">▼ SHORT</span>
+        <span class="tk-lbl">▼ SHORT<span class="tk-at"> · BID</span></span>
         <span class="tk-px" data-dq="bid" data-q="{{ symbol }}" data-q-f="bid">{% if quote.bid %}{% px quote.bid asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </button>
     <span class="tk-mid">
@@ -41,15 +49,15 @@ number sits on a button that opens a position.
         Rendered only when the caller passes `lane_mode`, so every other
         include keeps its exact shape.{% endcomment %}
         {% if lane_mode %}<span class="tk-venue tk-venue--{{ lane_mode }}"
-              title="{% if lane_mode == 'live' %}This ticket places REAL orders — the manual lane for this asset class is armed{% else %}Simulated — the manual lane for this asset class is in paper mode{% endif %}">{% if lane_mode == 'live' %}● LIVE{% else %}◌ paper{% endif %}</span>{% endif %}
-        <span class="tk-k">SPREAD</span>
-        <span class="tk-v" data-dq="spread" data-q="{{ symbol }}" data-q-f="spread">{% if quote.bid and quote.ask %}{% q symbol "spread" %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+              title="{% if lane_mode == 'live' %}This ticket places REAL orders — the manual lane for this asset class is armed{% else %}Simulated — the manual lane for this asset class is in paper mode{% endif %}">{% if lane_mode == 'live' %}REAL{% else %}◌ paper{% endif %}</span>{% endif %}
+        <span class="tk-spread"><span class="tk-k">SPREAD</span>
+        <span class="tk-v" data-dq="spread" data-q="{{ symbol }}" data-q-f="spread">{% if quote.bid and quote.ask %}{% q symbol "spread" %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span></span>
     </span>
     <button type="button" class="tk-side tk-long"
             title="LONG {{ symbol }} — lifts the ask"
             aria-label="Long {{ symbol }} at the ask"
             onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ symbol|escapejs }}', 'BUY');">
-        <span class="tk-lbl">▲ LONG</span>
+        <span class="tk-lbl">▲ LONG<span class="tk-at"> · ASK</span></span>
         <span class="tk-px" data-dq="ask" data-q="{{ symbol }}" data-q-f="ask">{% if quote.ask %}{% px quote.ask asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </button>
 </div>
