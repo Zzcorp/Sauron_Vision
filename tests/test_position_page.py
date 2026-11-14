@@ -174,8 +174,19 @@ class _Base(TestCase):
 
 class OpenPaperForexTests(_Base):
     username = "pp_open_paper"
+    #: The clock held on a weekday, the FX week open, as the one price's own
+    #: tests hold it (market_data.one_quote.now and timezone.now, as in
+    #: tests/test_one_quote_screens.py). Run on a weekend, the quote written
+    #: a moment ago is dated at the week's close (one_quote._outside_at: a
+    #: re-stamp reads its true age) and the page said "test · 12 h"
+    #: (Saturday 2026-11-14, after main's merge into the desk v2 frame).
+    NOW = datetime(2026, 11, 11, 12, 0, tzinfo=dt_timezone.utc)
 
     def setUp(self):
+        for patch in (mock.patch("django.utils.timezone.now", return_value=self.NOW),
+                      mock.patch("market_data.one_quote.now", return_value=self.NOW)):
+            patch.start()
+            self.addCleanup(patch.stop)
         super().setUp()
         sig = _signal(self.inst)
         self.trade = _trade(self.user, metadata={"manual": True,
