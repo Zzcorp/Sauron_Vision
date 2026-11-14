@@ -1480,20 +1480,25 @@ def sync_etoro_accounts():
                 # as often. Asked only by the pass that holds the
                 # account's turn (_quiet_between_noting_passes): the first
                 # pass of each minute of the clock, the minute its beat
-                # sent it in (_beat_sent_at), never two in one minute. A
-                # pass that holds the turn and reads nothing (a miss, a
-                # budget deferral) spends it, as the old beat's did; a beat
-                # the lock idles holds none, and a minute whose first beat
-                # it idled is asked by its second, 30 s later. ON A FIXED
-                # GRID (the third round, 2026-11-13; until then a turn came
-                # 55 s after the last, and with passes 0 to 24 s late it
-                # was asked 15 % less often than at 60 s). Measured on the
+                # sent it in (_beat_sent_at), never two from one minute's
+                # beats. A pass that holds the turn and reads nothing (a
+                # miss, a budget deferral) spends it, as the old beat's
+                # did; a beat the lock idles holds none, and a minute whose
+                # first beat it idled is asked by its second, 30 s later.
+                # ON A FIXED GRID (the third round, 2026-11-13; until then a
+                # turn came 55 s after the last, and with passes 0 to 24 s late
+                # it was asked 15 % less often than at 60 s). Measured on the
                 # real code (the PR's third round), REAL's asks: on time
                 # one a minute, 60 s apart, at the 60 s beat's instants or
-                # 30 s off them as the beat's phase falls on the clock, a
+                # 30 s off them as the beat's phase falls on the clock (but
+                # for one gap of 30 to 90 s around a restart of the beat,
+                # and one of 30 s each time the beat's own drift carries
+                # its phase across a minute's edge: config/celery.py), a
                 # dip shorter than a minute caught exactly as often as at
                 # 60 s at every phase; with passes 0 to 24 s late one a
-                # minute, 36 to 84 s apart (at 60 s 37 to 84 s), a 10, 30
+                # minute, 36 to 84 s apart from the third minute on (at
+                # 60 s 37 to 84 s; the first two after a cold start as
+                # close as 7 s), a 10, 30
                 # and 59 s dip caught 18.9, 48.3 and 90.0 % of the time
                 # over the clock's phases against 17.8, 43.3 and 88.9 %, as
                 # often within sampling (the 60 s beat's very runs in half
@@ -1504,8 +1509,13 @@ def sync_etoro_accounts():
                 # read every third beat), asks 30 to 90 s apart, a 59 s dip
                 # caught 83.3 % against 100 %, and with passes also 0 to
                 # 24 s late both beats of a minute can find the lock held,
-                # that minute unasked: asks 7 to 142 s apart, 80.0 %
-                # against 91.1 %. The operator decides any change to it.
+                # that minute unasked: asks 7 to 142 s apart (two under
+                # 30 s apart in most runs; at 60 s never under 36 s),
+                # 80.0 % against 91.1 %. Never two from one minute's
+                # beats; by the clock as close as 6 s where a minute's
+                # first beat was idle or dropped and its second ran late
+                # (the fourth round, 2026-11-14). The operator decides any
+                # change to it.
                 # The pools above are still resized from every pass.
                 if holds_turn:
                     _shock_trigger(user, now)

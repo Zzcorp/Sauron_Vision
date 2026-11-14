@@ -49,6 +49,13 @@ reaches, late or not, and nothing to drift. A beat the lock holds spends
 its window's quotes turn only behind a pass that took its own as its
 window's first beat (where the old beat stood).
 
+THE FOURTH ROUND (the recheck of the grid, 2026-11-14): no behaviour
+change. Two tests pin what the words now say: the beat's own drift (each
+run dated from the instant the beat sent the last one) brings, each time
+its phase crosses a window's edge, two turns half a window apart, in two
+windows, never two in one; and by the clock two shock asks can come 6 s
+apart, each from its own minute's beats.
+
 Fakes only: no network, broker or model call.
 
 Run with:  python manage.py test tests.test_etoro_old_beat_turns
@@ -128,6 +135,37 @@ class TheOldBeatTurnTests(SimpleTestCase):
             held = [s for s, turn in seen if turn]
             self.assertEqual(held, _firsts([s for s, _turn in seen], beat),
                              beat)
+
+    def test_a_drifting_beat_brings_two_turns_half_a_window_apart_once(
+            self):
+        """THE BEAT'S OWN DRIFT (the fourth round, 2026-11-14). The database
+        scheduler dates each run from the instant it sent the last one
+        (django_celery_beat's ModelEntry.__next__), so every run it sends a
+        few ms late moves every later one the same way, and now and then
+        the beat's phase crosses a window's edge. Here each run is sent 1
+        to 9 ms after its due instant, from 50 ms before the window's
+        second beat reaches the next window: the sync's 30 s beat on its
+        60 s windows, the quotes' 15 s beat on their 30 s windows. At the
+        crossing that window's second beat becomes the next window's first:
+        once, two turns half a window apart, in two windows. Every other
+        gap is one window; every window has its one turn, never two."""
+        rng = random.Random(1114)
+        for beat, window in ((30.0, 60), (15.0, 30)):
+            cache.clear()
+            sent, turns = ON_THE_MINUTE + window - beat - 0.05, []
+            for _ in range(200):
+                if vh.old_beat_turn(f"obt:drift:{window}", window, at=sent):
+                    turns.append(sent)
+                sent += beat + rng.uniform(0.001, 0.009)
+            gaps = [b - a for a, b in zip(turns, turns[1:])]
+            short = [g for g in gaps if g < window - 1.0]
+            self.assertEqual(len(short), 1, (window, short))
+            self.assertAlmostEqual(short[0], beat, delta=0.05)
+            self.assertTrue(all(abs(g - window) < 1.0 for g in gaps
+                                if g >= window - 1.0), (window, gaps))
+            held = [vh.old_beat_window(window, t) for t in turns]
+            self.assertEqual(held, list(range(held[0], held[0] + len(held))),
+                             window)
 
     def test_each_account_and_each_beat_its_own(self):
         t = ON_THE_MINUTE
@@ -862,6 +900,41 @@ class TheBeatsSendInstantTests(TestCase):
                 self.assertIn("stopped", out, start)
                 noted.append(note_at())
         self.assertEqual(noted[-1], [10.0, 40.0])
+
+    def test_by_the_clock_two_asks_can_come_6_s_apart_each_its_own_minute(
+            self):
+        """NEVER TWO FROM ONE MINUTE'S BEATS, NOT NEVER TWO CLOSE BY THE
+        CLOCK (the fourth round, 2026-11-14). The run sent at 0 asks. A
+        pass runs long: the beats sent at 30 and 60 find the lock held and
+        read nothing. The minute from 60 is asked by its second beat, sent
+        at 90 and started 24 s late (inside its 25 s expiry), at 114; the
+        next minute's first beat, sent at 120, starts on time and asks at
+        120. Each minute the beat sent runs in is asked once, as the old
+        60 s beat asked each minute; by the clock two asks come 6 s apart,
+        where the old beat's runs, late by up to 24 s, came no closer than
+        36 s."""
+        with mock.patch.object(tasks, "_shock_trigger") as shock:
+            for sent, start in ((0, 0), (30, 30), (60, 60), (90, 114),
+                                (120, 120)):
+                held = sent in (30, 60)
+                if held:
+                    cache.add(tasks.ETORO_SYNC_LOCK_KEY, "a long pass",
+                              tasks.ETORO_SYNC_LOCK_S)
+                tasks.sync_etoro_accounts.push_request(
+                    expires=_expires(self._at(sent).timestamp(), 25))
+                try:
+                    out = self._pass_at(start)
+                finally:
+                    tasks.sync_etoro_accounts.pop_request()
+                    if held:
+                        cache.delete(tasks.ETORO_SYNC_LOCK_KEY)
+                if held:
+                    self.assertIn("still running", out["idle"], sent)
+                else:
+                    self.assertEqual(out["stored"], 1, sent)
+        self.assertEqual(
+            [round((c.args[1] - self.t0).total_seconds(), 3)
+             for c in shock.call_args_list], [0, 114, 120])
 
     def test_no_expiry_or_one_that_does_not_fit_is_the_wall_clock(self):
         """A run with no expiry, called directly (tests, the shell), keyed

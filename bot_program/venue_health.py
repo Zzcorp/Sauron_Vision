@@ -241,25 +241,35 @@ def old_beat_turn(key: str, beat_s: float, *, at: float) -> bool:
         a late run, a pass that outlives its beat or a beat the lock idles
         moves no later window's. (Unread, every pass notes: below; a cache
         emptied inside a window lets that window be taken once more.)
-      * On time: one pass in two, one old beat apart, at the same second of
-        each window: the first of the window's two beats. That is the pass
-        the old beat ran, or the one halfway between, as the beat's phase
-        falls on the clock; either way the old beat's pace and odds, as an
-        old beat run at that phase would have them. Per incident, so, the
-        instant eToro turns sick is the old beat's, or that of an old beat
-        run half a beat away: sooner or later, or on one side only
-        (measured on the real code under 5xx and 429 hiccups, the PR's
-        third round: the odds over the clock's phases exactly the old
-        beats', each incident within 30 s). A pass that outlives its beat:
-        its caller says what its lock does.
+      * On time: one pass in two, the first of each window's two beats.
+        That is the pass the old beat ran, or the one halfway between, as
+        the beat's phase falls on the clock; either way the old beat's pace
+        and odds, as an old beat run at that phase would have them. Per
+        incident, so, the instant eToro turns sick is the old beat's, or
+        that of an old beat run half a beat away: sooner or later, or on
+        one side only (measured on the real code under 5xx and 429
+        hiccups, the PR's third round: the odds over the clock's phases
+        exactly the old beats', each incident within 30 s). One old beat
+        apart, but for two moments (the fourth round, 2026-11-14). THE
+        BEAT'S PHASE DRIFTS: the database scheduler dates each run from the
+        instant it sent the last one (django_celery_beat's ModelEntry.
+        __next__), so every run it sends a few ms late moves every later
+        run the same way. Each time the phase crosses a window's edge, that
+        window's second beat becomes the next window's first: two turns
+        half an old beat apart (30 s for the sync, 15 s for the quotes), in
+        two windows, never two in one (at 5 ms a run, once in about 50 h
+        for the sync, 12.5 h for the quotes). A restart of the beat moves
+        its phase once too. A pass that outlives its beat: its caller says
+        what its lock does.
       * Late inside the expiry (25 s for the sync, 10 s for the quotes,
         both under half a beat): keyed on the instant its beat sent it, a
         run keeps its window however late it starts, so the windows'
         turns go to the same beats as on time, each as late as the worker
         made it: two never closer than an old beat less the lateness, as
-        the old beat's own late passes (half a beat less after a window
-        whose first beat was idle or dropped, its second holding the
-        turn). A run that carries no send instant is keyed on its start: a
+        the old beat's own late passes, but half a beat less after a
+        window whose first beat was idle or dropped, its second holding
+        the turn: by the clock two sync turns as close as 6 s, each in its
+        own window. A run that carries no send instant is keyed on its start: a
         window's second beat started late enough to fall in the next
         window would take that window's turn ahead of its first beat
         (measured in the third round before keying on the send instant,
