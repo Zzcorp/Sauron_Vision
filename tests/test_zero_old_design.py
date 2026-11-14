@@ -836,6 +836,85 @@ class MeasuredGuardBitesTests(TestCase):
 
 
 @_measured
+class MeasuredSideShareTests(TestCase):
+    """A side's share drawn as a bar at the volume dose is a data mark, not a
+    see-through surface (B7, 2026-11-14). The desk's exposure by side (board
+    8, approved) draws the sides' fills at 35 %, --sv-up-vol and
+    --sv-down-vol: the dose the tokens give "up bars, up volume". see_through
+    already left the sides' hues at a dose on a shape smaller than a card; it
+    did not know their fills, and counted the bar on /positions/ and on every
+    state of it, where the stacked lower row draws it some 900 px wide. A
+    card on a see-through ground is still counted, and so is a side's fill
+    washed over a card's area."""
+
+    MARKS = ('<style>'
+             '.sv-meta-split { display: flex; gap: 2px; width: 900px; height: 8px; }'
+             '.sv-meta-split i { display: block; height: 100%; }'
+             '.sv-meta-split .sv-meta-split-l { width: 85%; background: var(--sv-up-vol);'
+             ' border-radius: var(--sv-radius-round) 0 0 var(--sv-radius-round); }'
+             '.sv-meta-split .sv-meta-split-s { width: 15%; background: var(--sv-down-vol);'
+             ' border-radius: 0 var(--sv-radius-round) var(--sv-radius-round) 0; }'
+             '.sv-meta-glass { width: 400px; height: 120px; padding: 12px; border-radius: var(--sv-radius-card);'
+             ' background: color-mix(in srgb, var(--sv-bg-3) 30%, transparent); }'
+             '.sv-meta-wash { width: 400px; height: 60px; border-radius: var(--sv-radius-card);'
+             ' background: var(--sv-up-vol); }'
+             '</style>')
+    SPLIT = '<div class="sv-meta-split"><i class="sv-meta-split-l"></i><i class="sv-meta-split-s"></i></div>'
+    CARDS = '<div class="sv-meta-glass">A card on a see-through ground</div><div class="sv-meta-wash"></div>'
+
+    @classmethod
+    def setUpTestData(cls):
+        import shutil as _shutil
+        import tempfile
+        user = get_user_model().objects.create_user("census_share", password="x", is_staff=True)
+        client = Client()
+        client.force_login(user)
+        page = client.get("/design/kit/", HTTP_HOST=HOST).content.decode("utf-8")
+        page = re.sub(r"<script\b.*?</script>", "", page, flags=re.S)
+        page = re.sub(r'<link\b[^>]*href="https?://[^>]*>', "", page)
+        page = page.replace("/static/", "file://%s/static/" % settings.BASE_DIR)
+        i = page.index('<div class="page-content')
+        i = page.index(">", i) + 1
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="sv-guard-share-"))
+        paths = {}
+        for name, marks in (("clean", ""), ("split", cls.MARKS + cls.SPLIT), ("cards", cls.MARKS + cls.CARDS)):
+            paths[name] = tmp / ("%s.html" % name)
+            paths[name].write_text(page[:i] + marks + page[i:], encoding="utf-8")
+        source = CENSUS_JS.read_text(encoding="utf-8")
+        opts = census_opts()
+        chrome = _Chrome(CHROME)
+        try:
+            sid = chrome.page(1440, 900, False)
+            cls.got = {}
+            for name, path in paths.items():
+                chrome.open(sid, path.as_uri())
+                chrome.eval(sid, SETTLE % 100)
+                cls.got[name] = chrome.eval(sid, source + "\n;census(%s)" % json.dumps(opts))
+        finally:
+            chrome.close()
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+    def result(self, name):
+        g = self.got[name]
+        return {"/design/kit/": {"counts": g["counts"], "examples": g["examples"], "error": None}}
+
+    def test_a_side_s_share_at_the_volume_dose_is_no_see_through_card(self):
+        budget = measured_budget_from(self.result("clean"), glyphs=False)
+        self.assertEqual(compare_measured(self.result("split"), budget, glyphs=False), ([], []))
+        named = {marker: rows for marker, rows in self.got["split"]["examples"].items()
+                 if any("sv-meta-split" in row[1] for row in rows)}
+        self.assertEqual(named, {})
+
+    def test_a_see_through_card_and_a_side_s_wash_over_a_card_s_area_still_count(self):
+        budget = measured_budget_from(self.result("clean"), glyphs=False)
+        over, _under = compare_measured(self.result("cards"), budget, glyphs=False)
+        joined = "\n".join(over)
+        self.assertIn("/design/kit/: see_through", joined)
+        self.assertIn("div.sv-meta-glass  background-color: ", joined)
+        self.assertIn("div.sv-meta-wash  background-color: ", joined)
+
+
+@_measured
 class MeasuredPipelineBitesTests(TestCase):
     """B0's meta-test through the run itself (the review of B0: the static
     copy above exercises the census and the comparison, not the Fetch

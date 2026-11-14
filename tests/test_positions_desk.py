@@ -1426,6 +1426,73 @@ class DeskWidthsMeasuredTests(TestCase):
                 _lower_row_checks(self, got["lower"], got["desk"], got["lowerGap"])
 
 
+#: The phone pass: every closed detail row, then one opened and closed again
+#: by its disclosure.
+PHONE_PROBE = r"""(async function () {
+  await __pd.settle();
+  function shown(tr) { return getComputedStyle(tr).display !== 'none' && tr.checkVisibility(); }
+  var dets = Array.prototype.slice.call(document.querySelectorAll('.pd-table > tbody > tr.pd-det'));
+  var out = { vw: window.innerWidth, n: dets.length,
+              closedShown: dets.filter(function (tr) { return tr.hidden && shown(tr); }).map(function (tr) { return tr.id; }) };
+  var btn = document.querySelector('.pd-table .pd-disc');
+  var det = btn && document.getElementById(btn.getAttribute('aria-controls'));
+  out.before = det ? shown(det) : null;
+  if (btn) btn.click();
+  await __pd.settle();
+  out.opened = det ? [det.hidden, shown(det)] : null;
+  if (btn) btn.click();
+  await __pd.settle();
+  out.closedAgain = det ? [det.hidden, shown(det)] : null;
+  return out;
+})()"""
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class DeskPhoneAndFacesMeasuredTests(TestCase):
+    """The old-design guard's measured half, on main merged (B0, 2026-11-14),
+    read two things on this page the board never draws. On the phone every
+    row's detail stood open as a see-through card of its own: sauron.css's
+    stacked tables give every row display: block, which outranks the hidden
+    attribute. And the open book's live chip drew its ◉ in a fallback face,
+    as Inter has none: the desk's words chain the number face after Inter for
+    their glyphs, as the board's chips do."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.test_magic_layer import _Browser
+        _user, client = desk_client("desk_phone")
+        page = _file(_loaded(client), scripts=DESK_SCRIPTS)
+        b = _Browser({"desk": page}, "sv-desk-p-")
+        try:
+            sid = b.tab(390, 844)
+            b.open(sid, "desk", PROBE)
+            cls.phone = b.js(sid, PHONE_PROBE)
+            sid = b.tab(1440, 900)
+            b.open(sid, "desk", PROBE)
+            chip = ".pd-pos .pd-chead > .sv-live-chip"
+            cls.chip_text = b.js(sid, "(async function () { await __pd.settle();"
+                                      " return document.querySelector('%s').textContent; })()" % chip)
+            cls.chip_faces = b.fonts(sid, chip)
+        finally:
+            b.close()
+
+    def test_a_closed_detail_row_stays_closed_on_the_phone(self):
+        got = self.phone
+        self.assertEqual(got["vw"], 390)
+        self.assertGreater(got["n"], 0)
+        self.assertEqual(got["closedShown"], [])
+        self.assertIs(got["before"], False)
+        # its disclosure still opens it, and closes it again
+        self.assertEqual(got["opened"], [False, True])
+        self.assertEqual(got["closedAgain"], [True, False])
+
+    def test_the_live_chip_s_glyph_is_drawn_in_the_kit_s_faces(self):
+        self.assertIn("◉", self.chip_text)
+        faces = [f["family"] for node in self.chip_faces for f in node]
+        self.assertTrue(faces, self.chip_faces)
+        self.assertEqual([f for f in faces if not f.startswith(("Inter", "JetBrains Mono"))], [], self.chip_faces)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 5. The review (2026-11-13), held by the page as rendered
 # ══════════════════════════════════════════════════════════════════════════

@@ -212,8 +212,10 @@
     background: var(--sv-bg-2); color: var(--sv-ink-2);
     font-family: var(--sv-font-mono); font-size: var(--sv-fs-micro); font-weight: 500; line-height: 1;
 }
+/* Its ◉ in the number face, as every glyph on the desk (Inter has none:
+   the old-design guard read a fallback face, 2026-11-14). */
 .pd-desk .sv-live-chip {
-    font-family: var(--sv-font-sans); font-size: var(--sv-fs-micro); font-weight: 600;
+    font-family: var(--pd-words); font-size: var(--sv-fs-micro); font-weight: 600;
     letter-spacing: var(--sv-track-label); color: var(--sv-ink-2); white-space: nowrap; flex: none;
 }
 .pd-desk .sv-live-chip.is-offline { color: var(--sv-ink-3); }
@@ -459,6 +461,11 @@
 /* The row's detail: the Orc line, then what the one line leaves out; its
    ground is the row's own, so the pinned column shows it too. */
 .pd-desk .pd-table > tbody > tr.pd-det { background: var(--sv-bg-2); }
+/* Closed, it stays closed at every width: on the phone the stacked tables
+   (sauron.css, sv-responsive.css's pairs at (0,4,4)) give every row a
+   display, which outranks the hidden attribute, and each row's detail stood
+   open as a card of its own (the old-design guard's phone pass, 2026-11-14). */
+.pd-desk .pd-pos .pd-table > tbody > tr.pd-det[hidden] { display: none; }
 /* The pinned CLOSE column paints the row's own ground (S0: --sv-pin-row):
    no zebra on this table, the detail row's bg-2 on its own pad. */
 body:not(.light-mode) .pd-desk .pd-table.sv-perf-table > tbody > tr[data-sv-position-row]:not(:hover) { --sv-pin-row: transparent; }
