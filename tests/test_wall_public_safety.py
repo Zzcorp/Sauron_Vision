@@ -24,14 +24,20 @@ And one guard of the render-time walk itself (2026-10-31): the `next` a
 visitor puts in the address is echoed into the login form, and is never
 read as the page's.
 
+And one guard of the third walk's scrub (2026-11-14): the login forms'
+CSRF token is a random draw, not an identifier, and is cut out by its own
+attribute; the same digits anywhere beside it are still found.
+
 Run with:  python manage.py test tests.test_wall_public_safety
 """
 import re
 from pathlib import Path
+from unittest import mock
 
 from django.conf import settings
 from django.core.cache import cache
-from django.test import TestCase
+from django.middleware.csrf import CSRF_SECRET_LENGTH, CSRF_TOKEN_LENGTH
+from django.test import Client, TestCase
 
 from core import book_content as book
 from core import wall_facts as wf
@@ -56,19 +62,47 @@ COMMAND_HOST_OR_KEY = [
     "orderid",
 ]
 
+#: The CSRF token of the Wall's three login forms, as whole() reads it:
+#: Django's {% csrf_token %} prints <input type="hidden"
+#: name="csrfmiddlewaretoken" value="...">, the value 64 letters and
+#: digits drawn afresh on every render. The value alone, found by that
+#: attribute.
+CSRF_TOKEN_VALUE = re.compile(
+    r'(?<=name="csrfmiddlewaretoken" value=")[0-9a-z]{%d}(?=")'
+    % CSRF_TOKEN_LENGTH)
+#: The third walk's own digit-run pattern, looked up by what it finds.
+DIGIT_RUN = dict((what, pattern) for pattern, what in WHOLE_PATTERNS)[
+    "an identifier-length digit run"]
+#: The run CI read in a token (PR #112's CI, 2026-11-14: "the Wall shows
+#: an identifier-length digit run: '65685'"), and a CSRF draw that holds
+#: it: 32 characters of Django's alphabet, what
+#: django.middleware.csrf._get_new_csrf_string returns for a secret and
+#: for a mask, so every token the page prints holds the run too.
+CSRF_RUN = "65685"
+CSRF_DRAW = ("wall" + CSRF_RUN).ljust(CSRF_SECRET_LENGTH, "x")
+
 
 def _scrubbed(whole, facts):
-    """The whole answer with what is a count or an escape taken out, so the
-    digit-run pattern reads identifiers and nothing else.
+    """The whole answer with what is a draw, an escape or a count taken
+    out, so the digit-run pattern reads identifiers and nothing else.
+
+    The login forms' CSRF token is a draw (2026-11-14): 64 random letters
+    and digits, new on every render, hold a run of five digits in about
+    one render in 180, and CI read one as an identifier twice in a day.
+    Its value comes out first, found by its own attribute, and nothing
+    beside it does: the same digits in the page's text, in the token's
+    tag or in the same form are still found
+    (test_an_identifier_beside_the_token_is_still_found).
 
     json_script writes an en dash as \\u2013, and the ring's "13:15–20:15"
-    then holds the six-digit run 201320; the escapes come out first. A
+    then holds the six-digit run 201320; the escapes come out next. A
     wall count of five figures or more (the tests green) is a count, not an
     identifier, and only those come out: removing every value, the small
     ones included, erased those digits page-wide and blinded the IP and
     digit-run checks (measured: a planted 10.0.0.1 was found before and
     missed after)."""
-    text = re.sub(r"\\u[0-9a-f]{4}", " ", whole)
+    text = CSRF_TOKEN_VALUE.sub("", whole)
+    text = re.sub(r"\\u[0-9a-f]{4}", " ", text)
     for value in facts.values():
         if isinstance(value, int) and value >= 10000:
             text = re.sub(r"(?<![\d,.])%d(?![\d,])" % value, " ", text)
@@ -103,15 +137,57 @@ class TheWallCarriesNothingPrivate(TestCase):
                 found = [word for word in COMMAND_HOST_OR_KEY if word in text]
                 self.assertEqual(found, [], "%s says %r" % (path.name, found))
 
-    def test_the_wall_shows_no_email_ip_or_identifier(self):
-        facts = wf.wall_facts()
-        scrubbed = _scrubbed(self.whole, facts)
+    def assertShowsNoEmailIpOrIdentifier(self, text, facts):
+        """The third walk, on a whole answer: once scrubbed, no e-mail
+        address, no IP address, no identifier-length digit run."""
+        scrubbed = _scrubbed(text, facts)
         for pattern, what in WHOLE_PATTERNS:
             hit = pattern.search(scrubbed)
             self.assertIsNone(hit, "the Wall shows %s: %r" % (what, hit and hit.group(0)))
+
+    def test_the_wall_shows_no_email_ip_or_identifier(self):
+        facts = wf.wall_facts()
+        self.assertShowsNoEmailIpOrIdentifier(self.whole, facts)
         # The scrub blinds nothing: a planted address is still found.
         planted = _scrubbed(self.whole + " 10.0.0.1 ", facts)
         self.assertTrue(any(p.search(planted) for p, _ in WHOLE_PATTERNS))
+
+    def test_a_digit_run_in_the_csrf_token_is_not_an_identifier(self):
+        """CI's run, pinned (2026-11-14). Django's CSRF draw is made to
+        hold "65685", so every token the page prints holds it, where the
+        digit-run pattern reads it: before the cut this failed on every
+        run, as it had failed by chance about one render in 180."""
+        with mock.patch("django.middleware.csrf._get_new_csrf_string",
+                        return_value=CSRF_DRAW):
+            text = whole(Client().get(WALL).content.decode("utf-8"))
+        values = re.findall(r'name="csrfmiddlewaretoken" value="([^"]*)"', text)
+        self.assertTrue(values)
+        for value in values:
+            self.assertIn(CSRF_RUN, [hit.group(0) for hit in DIGIT_RUN.finditer(value)])
+        self.assertShowsNoEmailIpOrIdentifier(text, wf.wall_facts())
+
+    def test_an_identifier_beside_the_token_is_still_found(self):
+        """The cut is the token's value and nothing wider: the same five
+        digits as an account number in the page's text, in the token's own
+        tag, or in the same form beside it, fail the walk."""
+        facts = wf.wall_facts()
+        tag = re.search(r'<input type="hidden" name="csrfmiddlewaretoken" '
+                        r'value="[^"]*"', self.body).group(0)
+        plants = (
+            ("the page's text", "</body>", "<p>Account %s</p></body>" % CSRF_RUN),
+            ("the token's tag", tag, '%s data-account="%s"' % (tag, CSRF_RUN)),
+            ("the same form", tag + ">",
+             '%s><input type="hidden" name="account" value="%s">' % (tag, CSRF_RUN)),
+        )
+        for where, old, new in plants:
+            with self.subTest(planted_in=where):
+                self.assertIn(old, self.body)
+                with self.assertRaisesRegex(
+                        AssertionError,
+                        "the Wall shows an identifier-length digit run: '%s'" % CSRF_RUN,
+                        msg="the walk missed %s planted in %s" % (CSRF_RUN, where)):
+                    self.assertShowsNoEmailIpOrIdentifier(
+                        whole(self.body.replace(old, new, 1)), facts)
 
     def test_the_wall_shows_no_commit_hash(self):
         hashes = {commit for *_rest, commit in book.MILESTONES} | set(KNOWN_COMMITS)
