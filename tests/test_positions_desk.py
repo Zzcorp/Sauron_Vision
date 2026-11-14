@@ -1466,6 +1466,59 @@ PHONE_PROBE = r"""(async function () {
 })()"""
 
 
+#: The open book's live chip, as the faces test reads it.
+LIVE_CHIP = ".pd-pos .pd-chead > .sv-live-chip"
+
+#: The kit's two faces stood in (CI round 1, 2026-11-14). This page, opened
+#: as a file, fetches no face (_offline drops Google's links), so the faces
+#: that drew the chip were the machine's: Inter and JetBrains Mono where they
+#: are installed (the old-design guard's job installs both), the machine's
+#: own sans everywhere else (the suite's runner, which installs neither,
+#: drew all six glyphs in DejaVu Sans). As FacesMeasuredTests does for
+#: Orbitron, a face every DejaVu install has stands in for each kit face,
+#: over the characters that face carries in the chip, as the faces the guard
+#: installs carry them (fc-list: JetBrains Mono has U+25C9, Inter has not):
+#: (the kit's family, the faces that stand in for it, its characters).
+CHIP_STANDINS = (
+    ("Inter", ("DejaVu Serif",), "U+0000-00FF", "L"),
+    ("JetBrains Mono", ("DejaVu Sans Mono", "DejaVu Serif"), "U+0000-00FF, U+25C9", "◉"),
+)
+STANDIN_FACES = {face for _family, faces, _range, _char in CHIP_STANDINS for face in faces}
+
+#: The stand-ins declared and loaded (the count of faces each load found),
+#: then the machine's own face for the mark: a span beside the chip in the
+#: chip's chain without the kit's two families, which the measure must be
+#: able to tell from the stand-ins.
+CHIP_FACES_PROBE = r"""(async function () {
+  await __pd.settle();
+  var st = document.createElement('style');
+  st.textContent = %(rules)s;
+  document.head.appendChild(st);
+  var loaded = [];
+  var each = %(loads)s;
+  for (var i = 0; i < each.length; i++) loaded.push((await document.fonts.load(each[i][0], each[i][1])).length);
+  await document.fonts.ready;
+  var chip = document.querySelector(%(chip)s);
+  var kit = each.map(function (e) { return e[2]; });
+  var tail = getComputedStyle(chip).fontFamily.split(',').filter(function (f) {
+    return kit.indexOf(f.trim().replace(/"/g, '')) < 0; }).join(',');
+  var mark = document.createElement('span');
+  mark.setAttribute('data-pd-own-face', '');
+  mark.style.cssText = 'font-family:' + tail + ';font-weight:600;font-size:11px';
+  mark.textContent = '◉';
+  chip.parentNode.appendChild(mark);
+  return { text: chip.textContent, family: getComputedStyle(chip).fontFamily, loaded: loaded };
+})()""" % {
+    "rules": json.dumps(" ".join(
+        '@font-face { font-family: "%s"; font-weight: 100 900; src: %s; unicode-range: %s; }'
+        % (family, ", ".join('local("%s")' % f for f in faces), ranges)
+        for family, faces, ranges, _char in CHIP_STANDINS)),
+    "loads": json.dumps([['600 11px "%s"' % family, char, family]
+                         for family, _faces, _ranges, char in CHIP_STANDINS]),
+    "chip": json.dumps(LIVE_CHIP),
+}
+
+
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class DeskPhoneAndFacesMeasuredTests(TestCase):
     """The old-design guard's measured half, on main merged (B0, 2026-11-14),
@@ -1474,7 +1527,8 @@ class DeskPhoneAndFacesMeasuredTests(TestCase):
     stacked tables give every row display: block, which outranks the hidden
     attribute. And the open book's live chip drew its ◉ in a fallback face,
     as Inter has none: the desk's words chain the number face after Inter for
-    their glyphs, as the board's chips do."""
+    their glyphs, as the board's chips do. The chip is read with the kit's
+    faces stood in (CHIP_STANDINS), the same on every machine."""
 
     @classmethod
     def setUpTestData(cls):
@@ -1488,10 +1542,9 @@ class DeskPhoneAndFacesMeasuredTests(TestCase):
             cls.phone = b.js(sid, PHONE_PROBE)
             sid = b.tab(1440, 900)
             b.open(sid, "desk", PROBE)
-            chip = ".pd-pos .pd-chead > .sv-live-chip"
-            cls.chip_text = b.js(sid, "(async function () { await __pd.settle();"
-                                      " return document.querySelector('%s').textContent; })()" % chip)
-            cls.chip_faces = b.fonts(sid, chip)
+            cls.chip = b.js(sid, CHIP_FACES_PROBE)
+            cls.chip_faces = b.fonts(sid, LIVE_CHIP)
+            cls.own_faces = b.fonts(sid, "[data-pd-own-face]")
         finally:
             b.close()
 
@@ -1506,10 +1559,17 @@ class DeskPhoneAndFacesMeasuredTests(TestCase):
         self.assertEqual(got["closedAgain"], [True, False])
 
     def test_the_live_chip_s_glyph_is_drawn_in_the_kit_s_faces(self):
-        self.assertIn("◉", self.chip_text)
+        self.assertIn("◉", self.chip["text"])
+        # each kit face is stood in on this machine
+        self.assertEqual([n >= 1 for n in self.chip["loaded"]], [True] * len(CHIP_STANDINS), self.chip)
+        # the machine's own face for the mark is none of the stand-ins: the measure tells them apart
+        own = [f["family"] for node in self.own_faces for f in node]
+        self.assertTrue(own, self.own_faces)
+        self.assertEqual([f for f in own if f in STANDIN_FACES], [], self.own_faces)
+        # every glyph of the chip in a kit face, the ◉ (no glyph of Inter's) in the number face's
         faces = [f["family"] for node in self.chip_faces for f in node]
         self.assertTrue(faces, self.chip_faces)
-        self.assertEqual([f for f in faces if not f.startswith(("Inter", "JetBrains Mono"))], [], self.chip_faces)
+        self.assertEqual([f for f in faces if f not in STANDIN_FACES], [], (self.chip_faces, self.chip["family"]))
 
 
 # ══════════════════════════════════════════════════════════════════════════
