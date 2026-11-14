@@ -3356,11 +3356,13 @@ def _render_positions(request, live_only, *, deep_link=None):
                                         orcs=True, venues=open_venues,
                                         quotes=for_request(request)))),
         keep={"tab": "open"}, base_url=positions_url)
+    closed_pairs = list(zip(
+        closed_positions,
+        _position_card_details(request.user, closed_positions)))
     closed_view = build_view(
         request.GET if tab == "history" else {},
-        list(zip(closed_positions,
-                 _position_card_details(request.user, closed_positions))),
-        history=True, keep={"tab": "history"}, base_url=positions_url)
+        closed_pairs, history=True, keep={"tab": "history"},
+        base_url=positions_url)
 
     # eToro's OWN used figure heads the strip (2026-10-31): see
     # _etoro_cell; the split rides under the strip.
@@ -3368,6 +3370,32 @@ def _render_positions(request, live_only, *, deep_link=None):
     etoro = (capital or {}).get("etoro")
     if etoro:
         strip["etoro"] = _etoro_cell(etoro)
+    # THE DESK (2026-11-13, the desk v2 the operator approved: "amazing
+    # work, bravo, I need it fast!!"): the figures the board draws around
+    # the open table, read off the rows above (dashboard.positions_desk).
+    # Display only; the open tab and its refresh only.
+    # Guarded (the review of 2026-11-13): this is the page the operator
+    # closes from, so a figure that cannot be read prints dashes and the
+    # rows and their CLOSE stand, never a 500.
+    from . import positions_desk
+    desk = closed_book = None
+    if tab == "open":
+        try:
+            desk = positions_desk.desk(request.user, open_objects, open_rows,
+                                       closed_pairs, etoro)
+        except Exception:  # noqa: BLE001 — never the page for a figure
+            logger.warning("[positions] the desk's figures could not be read",
+                           exc_info=True)
+            desk = positions_desk.empty_desk(open_rows)
+    else:
+        # The closed book by world, never summed (the review, F5): the
+        # history tab's strip and its refresh.
+        try:
+            closed_book = positions_desk.closed_book(closed_pairs)
+        except Exception:  # noqa: BLE001 — never the page for a figure
+            logger.warning("[positions] the closed book could not be read",
+                           exc_info=True)
+            closed_book = []
 
     context = {
         "page_id": "positions",
@@ -3404,6 +3432,8 @@ def _render_positions(request, live_only, *, deep_link=None):
         # A "Close position" link's note and dialog (2026-10-24): the full
         # page only, so the live refresh never opens it a second time.
         "deep_link": None if live_only else deep_link,
+        "desk": desk,
+        "closed_book": closed_book,
     }
 
     if not live_only:
@@ -3456,11 +3486,17 @@ def _render_positions(request, live_only, *, deep_link=None):
             p.bar_pct = (round(abs(float(pct)) / peak * 100, 1)
                          if pct is not None and peak > 0 else None)
 
+        # Best and worst are picked across the worlds: each names its own
+        # (the review of 2026-11-13, F5), the REAL chip solid.
+        world_of = {id(p): (d or {}).get("world") or ""
+                    for p, d in closed_pairs}
         context.update({
             "closed_positions": closed_positions,
             "total_closed": stats["n_closed"],
             "best_trade": best_trade,
             "worst_trade": worst_trade,
+            "best_world": world_of.get(id(best_trade), ""),
+            "worst_world": world_of.get(id(worst_trade), ""),
             # With ONE graded close, best and worst are the same row, and the
             # page showed it twice — once in a green "Best Trade" card that
             # hardcoded a + in front of the number. A single losing short read

@@ -1,0 +1,11 @@
+{% comment %}
+The Horde as an army (the desk v2 board, Twist2.dc.html "Les sièges de la
+Horde", 2026-11-13): one standard per open seat, REAL first (a solid
+standard in REAL's red), then DEMO (a gold outline), then PAPER (a grey
+outline), then a hand-kept row with no venue (a dashed grey pole). At most
+eight stand; past eight the rest is "+n". The count is always said in
+words beside it, so a standard is never the only way to read it. A seat in
+alarm wears an amber mark over its standard (sv-horde.js marks it).
+Parameters: live, demo, paper, none (the seats by world) and total.
+Display only.
+{% endcomment %}{% with lv=live|default:0 dv=demo|default:0 pv=paper|default:0 nv=none|default:0 tv=total|default:0 %}<span class="sv-seats" aria-hidden="true">{% for _ in ""|rjust:lv %}<svg class="sv-seat" data-world="live" viewBox="0 0 9 14" focusable="false"><path class="sv-pole" d="M1 .6V13.6"/><path class="sv-flag" d="M1.7 1H8.6L6.6 4.3L8.6 7.6H1.7Z"/><path class="sv-alarm" d="M-2 -1.2L1 -6.2L4 -1.2Z"/></svg>{% endfor %}{% for _ in ""|rjust:dv %}<svg class="sv-seat" data-world="demo" viewBox="0 0 9 14" focusable="false"><path class="sv-pole" d="M1 .6V13.6"/><path class="sv-flag" d="M1.7 1H8.6L6.6 4.3L8.6 7.6H1.7Z"/><path class="sv-alarm" d="M-2 -1.2L1 -6.2L4 -1.2Z"/></svg>{% endfor %}{% for _ in ""|rjust:pv %}<svg class="sv-seat" data-world="paper" viewBox="0 0 9 14" focusable="false"><path class="sv-pole" d="M1 .6V13.6"/><path class="sv-flag" d="M1.7 1H8.6L6.6 4.3L8.6 7.6H1.7Z"/><path class="sv-alarm" d="M-2 -1.2L1 -6.2L4 -1.2Z"/></svg>{% endfor %}{% for _ in ""|rjust:nv %}<svg class="sv-seat" data-world="none" viewBox="0 0 9 14" focusable="false"><path class="sv-pole" d="M1 .6V13.6"/><path class="sv-flag" d="M1.7 1H8.6L6.6 4.3L8.6 7.6H1.7Z"/><path class="sv-alarm" d="M-2 -1.2L1 -6.2L4 -1.2Z"/></svg>{% endfor %}{% if tv > 8 %}<span class="sv-seat-more">+{{ tv|add:"-8" }}</span>{% endif %}</span>{% endwith %}

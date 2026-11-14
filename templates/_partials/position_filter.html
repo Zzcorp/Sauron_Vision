@@ -97,6 +97,8 @@ Parameters
 {% if view.n_total %}
 <form method="get" class="pos-filter" data-pos-filter aria-label="Order, filter and group the {{ label }}">
     {% for name, value in view.keep %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    {# The desk's world tab (2026-11-13) rides a pick here, as the tabs keep these picks. #}
+    {% if view.world %}<input type="hidden" name="world" value="{{ view.world }}">{% endif %}
     <label class="pos-filter-field">Order
         <select name="sort">{% for o in view.sort_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
     </label>

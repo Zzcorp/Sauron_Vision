@@ -68,6 +68,10 @@
     --sv-down-fill: #E5484D; /* down candles, bars, volume (at 35 %) */
     --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
     --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+    /* The fills at the volume dose (35 %): a side's share drawn as a bar
+       (the desk's exposure by side, 2026-11-13), never a solid red. */
+    --sv-up-vol: color-mix(in srgb, var(--sv-up-fill) 35%, transparent);
+    --sv-down-vol: color-mix(in srgb, var(--sv-down-fill) 35%, transparent);
     --sv-up-tint: var(--sv-up);  /* the base of sauron.css's own washes and glows behind a gain */
 
     /* ── §3.5 Whose money (the approved convention of 2026-09-30) ── */
@@ -281,6 +285,8 @@ body.light-mode {
        PAPER. Here they read the light palette above. */
     --sv-up-wash: color-mix(in srgb, var(--sv-up) 14%, transparent);
     --sv-down-wash: color-mix(in srgb, var(--sv-down) 14%, transparent);
+    --sv-up-vol: color-mix(in srgb, var(--sv-up-fill) 35%, transparent);
+    --sv-down-vol: color-mix(in srgb, var(--sv-down-fill) 35%, transparent);
     --sv-paper: var(--sv-ink-3);
     --sv-danger: var(--sv-down);
     --sv-grid: color-mix(in srgb, var(--sv-ink-1) 5%, transparent);

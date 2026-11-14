@@ -168,10 +168,12 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "tick-asset-bots"), "5 min")
         self.assertEqual(_when(scheme, "refresh-bot-bars"), "10 min")
         # 2026-10-31: 300 s, the operator's "the 15min etoro refresh is
-        # way too long" (config/celery.py); 60 s since 2026-11-06 ("augmenter
-        # to the maximum le taux de refresh ... de eToro surtout").
-        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "60 s")
-        self.assertEqual(_when(scheme, "refresh-etoro-quotes"), "30 s")
+        # way too long" (config/celery.py); 60 s from 2026-11-06 ("augmenter
+        # to the maximum le taux de refresh ... de eToro surtout"); 30 s, and
+        # the held quotes 15 s, since 2026-11-13 ("aussi le refresh etoro
+        # par minute est toujours trop long, je suggère 20-30 secondes non?")
+        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "30 s")
+        self.assertEqual(_when(scheme, "refresh-etoro-quotes"), "15 s")
         self.assertEqual(_when(scheme, "sauron-mind-synthesize"), "1 h")
         self.assertEqual(_when(scheme, "sauron-critic-pass"), "2 h")
         self.assertEqual(_when(scheme, "fetch-tradingview-ideas"), "6 h")

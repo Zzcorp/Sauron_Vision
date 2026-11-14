@@ -24,7 +24,23 @@
        panels and bars the map found): gone within 12 px of an edge, whole
        again at 24 px, so none is ever cut flat by a card or seen in a
        gutter under 24 px between figures (the magic lives around the
-       numbers, never among them).
+       numbers, never among them);
+     - and in the gutters themselves, as the desk v2 board draws them
+       (approved 2026-11-13, "amazing work, bravo, I need it fast!!";
+       Twist2 "Les braises"): a gutter of 6 to 40 px between two panels,
+       found where the map's panels face each other and walked point by
+       point (void, and no word within 24 px), is a channel; a few embers
+       of at most 11 px drift along it, at most one per 280 px of it
+       (about one per 7 cm), each drawn CLIPPED to its channel, so none can
+       ever cross a panel or sit on one. A channel is let go the moment the
+       page scrolls or changes shape, and found again with the map;
+     - and never on a figure a page prints straight on the void (a text
+       with a digit and nothing painted under it up to <body>, as
+       /positions/' eToro split line is until its page grounds it): the map
+       counts it as covering the void, as a card does, so no ember or ash is
+       drawn within 12 px of it, and no channel runs within 24 px of it
+       (the review of the desk v2 build, 2026-11-13; Twist2: "aucune lueur
+       ni reflet derrière un montant").
 
    It runs under Ambience Magic, in the dark theme, on a page that opted
    in, and nowhere else: there it maps nothing and asks for no frame. Where
@@ -68,6 +84,12 @@
     /* What covers the void as the last map found it: an ember fades out
        as it nears one, gone within HUG px of its edge, whole at FAR px. */
     var HUG = 12, FAR = 24, ground = [], grounds = [];
+    /* The figures printed straight on the void, as the last map found them
+       (their text nodes), and their boxes now: they cover the void too. */
+    var FIG_CAP = 200, FIG_SCAN = 20000, figs = [], figBoxes = [];
+    /* The gutters' channels and their embers (the desk v2 board). */
+    var CH_MIN = 6, CH_MAX = 40, CH_LEN = 96, CH_GAP = 280, CH_STEP = 20, CH_CAP = 20, CH_SAMPLES = 1600;
+    var chans = [], cembers = [], chanOff = false;
     /* base.html's "?" sheet: a modal that is not SV.overlay's (no scroll lock) */
     var kbd = d.getElementById('kbdModalOverlay'), stale = false;
     /* What the tests read: frames drawn, the last RING draw times (a ring,
@@ -86,6 +108,11 @@
         groundAt: function (x, y, a) { if (wordsDirty) readWords(); return fade(x, y, a); },
         /* where each ember is, and its own alpha */
         field: function () { return embers.map(function (e) { return [e.x, e.y, e.a]; }); },
+        /* the gutters' channels [left, top, right, bottom, horizontal] and
+           where each of their embers is drawn [left, top, right, bottom,
+           channel] after its clip, as the last frame drew it */
+        channels: function () { return chanOff ? [] : chans.map(function (c) { return [c.l, c.t, c.r, c.b, c.h]; }); },
+        chanField: function () { return cembers.map(function (e) { return e.box ? e.box.concat([e.c]) : null; }).filter(Boolean); },
         /* the brightest ember the field would draw at (x, y): its largest
            sprite, at the alpha its own cap gives there */
         stamp: function (x, y) {
@@ -118,6 +145,19 @@
             var q = g.box;
             if (q && q[3] > -FAR && q[1] < H + FAR && q[2] > -FAR && q[0] < W + FAR) grounds.push(q);
         }
+        /* A figure on the void covers it as a card does (never on a figure). */
+        figBoxes = [];
+        for (var f = 0; f < figs.length; f++) {
+            var fg = figs[f];
+            if (fg.n.isConnected !== false) {           /* a swap that kept the page's shape keeps its box */
+                var rg = d.createRange(); rg.selectNodeContents(fg.n);
+                var fr = rg.getBoundingClientRect();
+                fg.box = fr.width && fr.height ? [fr.left, fr.top, fr.right, fr.bottom] : null;
+            }
+            var fq = fg.box;
+            if (fq && fq[3] > -FAR && fq[1] < H + FAR && fq[2] > -FAR && fq[0] < W + FAR) { figBoxes.push(fq); grounds.push(fq); }
+        }
+        stats.figures = figBoxes.length;
         stats.grounds = grounds.length;
     }
     /* An ember near what covers the void fades out: 0 within HUG px of
@@ -160,7 +200,7 @@
         return !!d.hidden || locked || body.classList.contains('sv-scroll-locked')
             || !!(kbd && kbd.classList.contains('open'));
     }
-    function running() { return shown() && embers.length > 0 && !held() && !reduced.matches; }
+    function running() { return shown() && (embers.length + cembers.length) > 0 && !held() && !reduced.matches; }
 
     /* Three glow sprites, drawn once: a pale core, the Eye's green, a halo
        as wide as main's mid glow (its 2.5x disc), so an ember reads as main's
@@ -248,14 +288,165 @@
         }
         ground = [];
         j.cover.forEach(function (el) { ground.push({ el: el, box: null }); });
+        figs = voidFigures(j.memo);
         stats.maps++; stats.mapMs = j.ms; stats.mapSlices = j.slices; stats.voidArea = Math.round(voidArea);
         stats.rows = rows.slice(); stats.ROW = ROW;
         readWords();
+        findChannels(j.memo);
         fit();
         first = false;
         drawn = false;
         wake();
     }
+    /* ── the gutters' channels ─────────────────────────────────────────── */
+    /* A point of a gutter is void when nothing up to <body> paints there
+       and no word of the void sits within FAR px of it. */
+    function quiet(x, y, memo) {
+        var el = d.elementFromPoint(x, y);
+        if (!el || painter(el, memo)) return false;
+        for (var n = el.firstChild; n; n = n.nextSibling) {
+            if (n.nodeType !== 3 || !n.nodeValue.trim()) continue;
+            var rg = d.createRange(); rg.selectNodeContents(n);
+            var rs = rg.getClientRects();
+            for (var k = 0; k < rs.length; k++) {
+                var q = rs[k];
+                if (x > q.left - FAR && x < q.right + FAR && y > q.top - FAR && y < q.bottom + FAR) return false;
+            }
+        }
+        return true;
+    }
+    /* The figures a page prints straight on the void, in the window: a text
+       with a digit whose element, up to <body>, paints nothing (the magic
+       layer's own measure of a figure on the void). Read once per map. */
+    function voidFigures(memo) {
+        var out = [];
+        if (!d.createTreeWalker || !d.createRange) return out;
+        var top = (d.querySelector && d.querySelector('.page-content')) || body;
+        var tw = d.createTreeWalker(top, 4 /* NodeFilter.SHOW_TEXT */, null), n, seen = 0;
+        while ((n = tw.nextNode()) && out.length < FIG_CAP && ++seen < FIG_SCAN) {
+            if (!/\d/.test(n.nodeValue)) continue;
+            var el = n.parentElement;
+            if (!el || el.closest('script, style, noscript, template, textarea') || !el.getClientRects().length) continue;
+            var b = el.getBoundingClientRect();
+            if (b.bottom < -FAR || b.top > H + FAR || b.right < -FAR || b.left > W + FAR) continue;
+            if (painter(el, memo)) continue;            /* on a card: the card covers it already */
+            out.push({ n: n, box: null });
+        }
+        return out;
+    }
+    /* A gutter's cross-section within FAR px of a figure on the void. */
+    function byFigure(x0, y0, x1, y1) {
+        for (var i = 0; i < figBoxes.length; i++) {
+            var q = figBoxes[i];
+            if (x1 > q[0] - FAR && x0 < q[2] + FAR && y1 > q[1] - FAR && y0 < q[3] + FAR) return true;
+        }
+        return false;
+    }
+    /* Where two of the map's panels face each other across 6 to 40 px, the
+       gap between them is walked every CH_STEP px; each run of void long
+       enough, never by a figure on the void, is a channel. */
+    function findChannels(memo) {
+        chans = []; chanOff = false;
+        var boxes = [];
+        for (var i = 0; i < ground.length; i++) {
+            var b = ground[i].el.getBoundingClientRect();
+            if (b.width < 40 || b.height < 12 || b.bottom <= 0 || b.top >= H || b.right <= 0 || b.left >= W) continue;
+            boxes.push([b.left, b.top, b.right, b.bottom]);
+        }
+        var cand = [];
+        for (var a = 0; a < boxes.length; a++) {
+            var A = boxes[a], hz = null, vt = null;
+            for (var c = 0; c < boxes.length; c++) {
+                if (c === a) continue;
+                var C = boxes[c];
+                var ox = Math.min(A[2], C[2]) - Math.max(A[0], C[0]), gy = C[1] - A[3];
+                if (ox >= CH_LEN && gy >= CH_MIN && gy <= CH_MAX && (!hz || gy < hz.g)) {
+                    hz = { g: gy, r: [Math.max(A[0], C[0]), A[3], Math.min(A[2], C[2]), C[1]] };
+                }
+                var oy = Math.min(A[3], C[3]) - Math.max(A[1], C[1]), gx = C[0] - A[2];
+                if (oy >= CH_LEN && gx >= CH_MIN && gx <= CH_MAX && (!vt || gx < vt.g)) {
+                    vt = { g: gx, r: [A[2], Math.max(A[1], C[1]), C[0], Math.min(A[3], C[3])] };
+                }
+            }
+            if (hz) cand.push({ h: true, r: hz.r });
+            if (vt) cand.push({ h: false, r: vt.r });
+        }
+        /* the longest first, each gap once */
+        cand.sort(function (p, q) { return (q.r[2] - q.r[0]) + (q.r[3] - q.r[1]) - (p.r[2] - p.r[0]) - (p.r[3] - p.r[1]); });
+        var taken = [], samples = 0;
+        for (var k = 0; k < cand.length && samples < CH_SAMPLES; k++) {
+            var cd = cand[k], r = [Math.max(0, cd.r[0]), Math.max(0, cd.r[1]), Math.min(W, cd.r[2]), Math.min(H, cd.r[3])];
+            if (r[2] - r[0] < 1 || r[3] - r[1] < 1) continue;
+            var dup = false;
+            for (var t = 0; t < taken.length && !dup; t++) {
+                var o = taken[t];
+                var ix = Math.min(o[2], r[2]) - Math.max(o[0], r[0]), iy = Math.min(o[3], r[3]) - Math.max(o[1], r[1]);
+                if (ix > 0 && iy > 0 && ix * iy > 0.5 * (r[2] - r[0]) * (r[3] - r[1])) dup = true;
+            }
+            if (dup) continue;
+            taken.push(r);
+            var len = cd.h ? r[2] - r[0] : r[3] - r[1], mid = cd.h ? (r[1] + r[3]) / 2 : (r[0] + r[2]) / 2;
+            var start = null, last = null;
+            for (var u = CH_STEP / 2; u <= len; u += CH_STEP) {
+                samples++;
+                var px = cd.h ? r[0] + u : mid, py = cd.h ? mid : r[1] + u;
+                var clear = !(cd.h ? byFigure(px, r[1], px, r[3]) : byFigure(r[0], py, r[2], py));
+                if (clear && quiet(px, py, memo)) { if (start === null) start = u; last = u; }
+                else { run(cd.h, r, start, last); start = null; }
+            }
+            run(cd.h, r, start, last);
+        }
+        stats.chanCount = chans.length;
+    }
+    function run(h, r, start, last) {
+        if (start === null || last - start + CH_STEP < CH_LEN) return;
+        var a = Math.max(0, start - CH_STEP / 2), b = last + CH_STEP / 2;
+        chans.push(h ? { h: true, l: r[0] + a, t: r[1], r: Math.min(r[2], r[0] + b), b: r[3] }
+                     : { h: false, l: r[0], t: r[1] + a, r: r[2], b: Math.min(r[3], r[1] + b) });
+    }
+    /* At most one ember per CH_GAP px of a channel, CH_CAP in all. */
+    function chanFit(room) {
+        var want = [];
+        for (var i = 0; i < chans.length; i++) {
+            var c = chans[i], len = c.h ? c.r - c.l : c.b - c.t;
+            for (var k = 0; k < Math.min(4, Math.max(1, Math.floor(len / CH_GAP))); k++) want.push(i);
+        }
+        want = want.slice(0, Math.max(0, Math.min(CH_CAP, room)));
+        cembers = want.map(function (ci) {
+            var c = chans[ci], len = c.h ? c.r - c.l : c.b - c.t, th = c.h ? c.b - c.t : c.r - c.l;
+            return { c: ci, t: Math.random() * len, v: 7 + Math.random() * 11, a: 0.3 + Math.random() * 0.22,
+                     dd: Math.max(5, Math.min(11, th - 2)), off: (Math.random() - 0.5) * Math.max(0, Math.min(3, th - 12)),
+                     ph: Math.random() * 6.283, pv: 0.5 + Math.random(), s: Math.random() < 0.5 ? 0 : 1, f: 0, box: null };
+        });
+    }
+    function stepChan(dt) {
+        for (var i = 0; i < cembers.length; i++) {
+            var e = cembers[i], c = chans[e.c];
+            if (!c) continue;
+            var len = c.h ? c.r - c.l : c.b - c.t;
+            e.t += e.v * dt; e.ph += e.pv * dt;
+            if (e.f < 1) e.f = Math.min(1, e.f + dt);
+            if (e.t > len + e.dd) e.t = -e.dd;
+        }
+    }
+    /* One drawImage each, its source cut so the sprite ends at the
+       channel's edges: an ember in a gutter is never drawn past it. */
+    function drawChan() {
+        for (var i = 0; i < cembers.length; i++) {
+            var e = cembers[i], c = chans[e.c];
+            e.box = null;
+            if (!c || chanOff) continue;
+            var x = c.h ? c.l + e.t : (c.l + c.r) / 2 + e.off, y = c.h ? (c.t + c.b) / 2 + e.off : c.b - e.t;
+            var x0 = x - e.dd / 2, y0 = y - e.dd / 2;
+            var cx0 = Math.max(x0, c.l), cy0 = Math.max(y0, c.t), cx1 = Math.min(x0 + e.dd, c.r), cy1 = Math.min(y0 + e.dd, c.b);
+            if (cx1 - cx0 < 0.5 || cy1 - cy0 < 0.5) continue;
+            var img = SPR[e.s], k = img.width / e.dd;
+            ctx.globalAlpha = (words.length ? capNear(x, y, e.a) : e.a) * e.f * (0.65 + 0.35 * Math.sin(e.ph * 1.7));
+            ctx.drawImage(img, (cx0 - x0) * k, (cy0 - y0) * k, (cx1 - cx0) * k, (cy1 - cy0) * k, cx0, cy0, cx1 - cx0, cy1 - cy0);
+            e.box = [cx0, cy0, cx1, cy1];
+        }
+    }
+
     function rowAt(y) { var r = Math.floor(y / ROW); return r >= 0 && r < rows.length ? rows[r] : 0; }
     function voidY() {
         var total = cum.length ? cum[cum.length - 1] : 0;
@@ -267,6 +458,7 @@
     /* the counts follow the void: one ember per DENSITY px² of it */
     function fit() {
         var n = Math.min(NMAX, Math.round(voidArea / DENSITY));
+        chanFit(NMAX - n);
         var na = Math.min(NAMAX, Math.round(voidArea / ASH_DENSITY));
         while (embers.length > n) embers.pop();
         while (embers.length < n) { var e = {}; seed(e, true); embers.push(e); }
@@ -275,7 +467,8 @@
         for (var i = 0; i < embers.length; i++) {      /* a covered row: move, faded in */
             if (rowAt(embers[i].y) < 0.05) seed(embers[i], true);
         }
-        stats.embers = embers.length; stats.ash = ashes.length;
+        stats.embers = embers.length + cembers.length; stats.ash = ashes.length;
+        stats.chanEmbers = cembers.length;
     }
     /* A live swap usually repaints values, not the layout: the map is redone
        only when the page's shape moved (its height, the scroll, the window). */
@@ -289,6 +482,7 @@
            rail) scrolling inside itself, moved no void */
         if (ev && (ev.type === 'sv:live-swapped' || (ev.type === 'scroll' && ev.target !== d))
             && shapeNow() === shape) return;
+        chanOff = true;                                 /* the gutters moved: found again with the map */
         if (mapTimer) w.clearTimeout(mapTimer);
         mapTimer = w.setTimeout(function () { mapTimer = 0; shape = shapeNow(); mapVoid(); }, 220);
     }
@@ -317,6 +511,7 @@
         canvas.width = Math.ceil(W * S); canvas.height = Math.ceil(H * S);
     }
     function step(dt) {
+        stepChan(dt);
         for (var i = 0; i < embers.length; i++) {
             var e = embers[i];
             e.x += e.v * dt; e.y += e.dy * dt; e.ph += e.pv * dt;
@@ -349,6 +544,7 @@
             ctx.globalAlpha = (words.length ? capNear(e.x, y, ea) : ea) * e.f * (0.6 + 0.4 * Math.sin(e.ph * 1.7));
             ctx.drawImage(SPR[e.s], e.x - dd / 2, y - dd / 2, dd, dd);
         }
+        drawChan();
         ctx.globalAlpha = 1;
         drawn = true;
     }
@@ -385,7 +581,11 @@
         if (stale) { stale = false; remap(); }          /* the hold is over: map the page as it is now */
         if (reduced.matches) {                          /* one still frame: the field is simply there */
             halt();
-            if (!drawn && embers.length) { for (var k = 0; k < embers.length; k++) embers[k].f = 1; draw(); }
+            if (!drawn && (embers.length || cembers.length)) {
+                for (var k = 0; k < embers.length; k++) embers[k].f = 1;
+                for (var q = 0; q < cembers.length; q++) cembers[q].f = 1;
+                draw();
+            }
             return;
         }
         resume();

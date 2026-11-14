@@ -386,7 +386,12 @@ class ProtectiveButtonsLookTests(SimpleTestCase):
         self.assertIn('class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">'
                       "{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}",
                       positions)
-        self.assertIn('class="btn btn-sm btn-danger" id="svCloseAll"', positions)
+        # CLOSE ALL takes the kit's stop variant with its square (S2.2, the
+        # desk v2 the operator approved, 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"): S1a left it on the neutral .btn-danger "for
+        # S2.2". Its words, its script, its preview and its PIN are main's
+        # (tests/test_positions_desk.py diffs them).
+        self.assertIn('class="btn btn-sm btn-stop" id="svCloseAll"', positions)
         self.assertIn("whole book", positions)
         ops = read("templates/dashboard/ops.html")
         self.assertIn('{% if r.comp.is_enabled %}btn-danger{% else %}btn-primary{% endif %}">'
@@ -1467,6 +1472,15 @@ class MoneyControlsLightMeasuredTests(TestCase):
                                    ("/command/", (".sr-popup:has(.sr-pop-dir-bullish) .sr-pop-btn-act",
                                                   ".sr-popup:has(.sr-pop-dir-bearish) .sr-pop-btn-act"))):
                 b.open(sid, url, PROBES)
+                if any(".sr-popup" in s for s in selectors):
+                    # Updated deliberately (the desk v2 board, approved
+                    # 2026-11-13: "amazing work, bravo, I need it fast!!"):
+                    # the signal rail is a column that is open, pushing the
+                    # page, or not on the screen at all; its cards open from
+                    # the open rail, so the rail is opened first (its Signals
+                    # button in the dock does the same).
+                    b.js(sid, "(function () { var r = document.getElementById('signalsRail');"
+                              " if (r) r.classList.add('open'); return 0; })()")
                 b.js(sid, "__sv.settle()")      # the page has landed before a box is read
                 for sel in selectors:
                     # A rail card is opened as a click opens it (a hover card

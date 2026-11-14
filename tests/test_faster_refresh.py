@@ -33,6 +33,15 @@ de eToro surtout svp?".
     yfinance citizen (tests/test_data_quality.py), the commodity and index
     pollers' cadence.
 
+FASTER AGAIN (2026-11-13, the operator: "aussi le refresh etoro par
+minute est toujours trop long, je suggère 20-30 secondes non?"): the
+account sync every 30 s and the held quotes every 15 s, three requests a
+pass (the cap stays twelve a minute). The pins below that read the old
+cadence were updated on purpose with his words; what was tuned to the
+60 s pass is kept in wall-clock terms (the stall alert after thirty
+missed beats, fifteen minutes; the history one row in five minutes; the
+venue's health noted from one pass a minute), tests.test_etoro_sync_30s.
+
 The suite runs with the eToro budget, the 429 pause, the rates cache and
 the shut cadence OFF (tests/__init__.py); the tests below turn on what
 they pin.
@@ -102,23 +111,28 @@ def _refresh():
 
 class TheBeatsTests(SimpleTestCase):
 
-    def test_the_quotes_beat_every_30_s_on_the_fast_queue(self):
+    def test_the_quotes_beat_every_15_s_on_the_fast_queue(self):
+        # every 30 s until 2026-11-13, every 15 s since (the operator:
+        # "aussi le refresh etoro par minute est toujours trop long, je
+        # suggère 20-30 secondes non?"; tests.test_etoro_sync_30s)
         from config.celery import app
         entry = _beat("refresh-etoro-quotes")
         self.assertEqual(entry["task"],
                          "bot_program.tasks.refresh_etoro_quotes")
-        self.assertEqual(entry["schedule"], 30.0)
+        self.assertEqual(entry["schedule"], 15.0)
         # a run not started within the beat is dropped, never queued
         # behind a slow one (expire_seconds: the database scheduler's
         # spelling, django_celery_beat ModelEntry._unpack_options)
         self.assertEqual(entry["options"],
-                         {"expires": 25, "expire_seconds": 25})
+                         {"expires": 10, "expire_seconds": 10})
         self.assertEqual(
             app.conf.task_routes["bot_program.tasks.refresh_etoro_quotes"],
             {"queue": "fast"})
 
-    def test_the_sync_every_60_s(self):
-        self.assertEqual(_beat("sync-etoro-accounts")["schedule"], 60.0)
+    def test_the_sync_every_30_s(self):
+        # every 60 s until 2026-11-13, every 30 s since (the operator: "je
+        # suggère 20-30 secondes non?"; tests.test_etoro_sync_30s)
+        self.assertEqual(_beat("sync-etoro-accounts")["schedule"], 30.0)
 
     def test_the_reconcile_stays_every_5_minutes_the_ticks_row_its(self):
         """The bots' component row (pipeline_asset_bots) is judged
@@ -157,17 +171,20 @@ class TheBeatsTests(SimpleTestCase):
         found = [t for s in scheme["stages"] for t in s["tasks"]
                  if t["key"] == "refresh-etoro-quotes"]
         self.assertEqual(len(found), 1)
-        self.assertEqual(found[0]["when"], "30 s")
+        # "30 s" until 2026-11-13 ("je suggère 20-30 secondes non?")
+        self.assertEqual(found[0]["when"], "15 s")
         self.assertEqual(scheme["unplaced"], [])
 
 
 class TheSchedulerKeepsTheBeatsTests(TestCase):
-    """django_celery_beat's DatabaseScheduler stores each as it is."""
+    """django_celery_beat's DatabaseScheduler stores each as it is (the
+    quotes at 15 s and the sync at 30 s since 2026-11-13, the operator's
+    "je suggère 20-30 secondes non?")."""
 
     def test_the_database_scheduler_keeps_them(self):
         from django_celery_beat.schedulers import ModelEntry
-        for key, every in (("refresh-etoro-quotes", 30),
-                           ("sync-etoro-accounts", 60),
+        for key, every in (("refresh-etoro-quotes", 15),
+                           ("sync-etoro-accounts", 30),
                            ("fetch-forex-live", 300)):
             model, field = ModelEntry.to_model_schedule(
                 _beat(key)["schedule"])
@@ -337,8 +354,8 @@ class TheQuotesAreWrittenTests(_QuotesCase):
     def test_the_task_reads_the_switches_itself_and_writes_no_component_row(
             self):
         """Ungated by guarded_task, as refresh_etoro_cells: the component
-        row broker_account_sync is the sync's verdict, and a beat every 30 s
-        must not overwrite it."""
+        row broker_account_sync is the sync's verdict, and a beat every 15 s
+        (30 s until 2026-11-13) must not overwrite it."""
         from bot_program import tasks
         from core.component_digest import _component_key_of
         from core.platform_control import PlatformComponent
@@ -459,9 +476,12 @@ class TheBatchTests(_QuotesCase):
         self.assertIsNone(_quote("AAA"))
         self.assertIn("stopped", out)
 
-    def test_an_answer_read_in_the_last_15_s_is_not_asked_again(self):
+    def test_an_answer_read_in_the_last_7_s_is_not_asked_again(self):
         """The shared rates cache (E2) answered by another reader (the
-        manage tick, the CLOSE button) within PREFETCH_FRESH_S."""
+        manage tick, the CLOSE button) within OWN_FRESH_S, half the beat:
+        PREFETCH_FRESH_S (15 s) until 2026-11-13, when the beat went to
+        15 s ("je suggère 20-30 secondes non?") and skipped its own last
+        answer (tests.test_etoro_sync_30s). This answer is a second old."""
         self.client.ticker("AAA")
         before = len(self.wire.rates())
         _refresh()
@@ -471,9 +491,11 @@ class TheBatchTests(_QuotesCase):
 class TheCapTests(_QuotesCase):
 
     def test_at_most_the_cap_a_pass_stalest_first(self):
+        # six a pass at the 30 s beat until 2026-11-13; three at 15 s since
+        # ("je suggère 20-30 secondes non?"): twelve a minute either way
         from bot_program import etoro_quotes
         cap = etoro_quotes.SINGLE_READS_PER_PASS
-        self.assertEqual(cap, 6)
+        self.assertEqual(cap, 3)
         ids = {f"S{i}": 100 + i for i in range(1, 9)}
         for s, i in ids.items():
             _instrument(s, "stock")
@@ -484,12 +506,12 @@ class TheCapTests(_QuotesCase):
         with mock.patch.object(etoro_quotes, "_now", clock):
             _refresh()
             first = list(self.wire.rates())
-            clock.t += 30
+            clock.t += 15
             _refresh()
             second = self.wire.rates()[len(first):]
-        self.assertEqual(first, [str(100 + i) for i in range(1, 7)])
+        self.assertEqual(first, [str(100 + i) for i in range(1, 4)])
         self.assertEqual(len(second), cap)
-        self.assertEqual(second[:2], ["107", "108"],
+        self.assertEqual(second, ["104", "105", "106"],
                          "the instruments the last pass did not reach first")
 
 
@@ -592,7 +614,7 @@ class TheBudgetTests(_QuotesCase):
 
 class TheShutMarketTests(_ShutOn, TestCase):
     """A market the shut cadence (E2) holds shut is not asked: its price
-    does not move, and a quote rewritten every 30 s would read fresh."""
+    does not move, and a quote rewritten every 15 s would read fresh."""
 
     def test_a_shut_commodity_is_not_asked_an_open_one_is(self):
         _components()
@@ -689,7 +711,8 @@ class TheRefusedWritesTests(_QuotesCase):
         out = StringIO()
         call_command("etoro_budget", stdout=out)
         text = out.getvalue()
-        self.assertIn("eToro's own quotes (every 30 s): the last pass at",
+        # "every 30 s" until 2026-11-13 ("je suggère 20-30 secondes non?")
+        self.assertIn("eToro's own quotes (every 15 s): the last pass at",
                       text)
         self.assertIn("2 asked, 1 written, 1 refused: a higher-ranked feed "
                       "holds the row (AAA: oanda_stream)", text)
@@ -699,7 +722,8 @@ class TheRefusedWritesTests(_QuotesCase):
     def test_a_skipped_pass_and_no_pass_are_said(self):
         out = StringIO()
         call_command("etoro_budget", stdout=out)
-        self.assertIn("eToro's own quotes (every 30 s): no pass recorded in "
+        # "every 30 s" until 2026-11-13 ("je suggère 20-30 secondes non?")
+        self.assertIn("eToro's own quotes (every 15 s): no pass recorded in "
                       "the last two days", out.getvalue())
         _refresh()
         out = StringIO()
@@ -778,13 +802,17 @@ class ThePushedTickSaysItsSourceTests(TestCase):
 
 class TheTwelveAMinuteTests(_QuotesCase):
     """THE FEED SPEC'S P-c.3: the beat's reads stay at P3 (TheBudgetTests)
-    and inside its twelve a minute, SINGLE_READS_PER_PASS at the 30 s beat,
-    the room the feed's budget leaves it. Verified: a proven batch that
-    left rows out was followed by six single reads (seven requests a
-    pass), and a run started late (up to its 25 s expiry) beside the next
-    beat's run put three passes in a minute. A pass now sends at most six
-    requests in all, and a key no more than twelve in any rolling
-    minute."""
+    and inside its twelve a minute, SINGLE_READS_PER_PASS at the beat, the
+    room the feed's budget leaves it. Verified: a proven batch that left
+    rows out was followed by six single reads (seven requests a pass), and
+    a run started late (up to its 25 s expiry) beside the next beat's run
+    put three passes in a minute. A pass now sends at most
+    SINGLE_READS_PER_PASS requests in all, and a key no more than twelve in
+    any rolling minute. Since 2026-11-13 (the operator: "aussi le refresh
+    etoro par minute est toujours trop long, je suggère 20-30 secondes
+    non?") the beat is 15 s and a pass three requests: still twelve a
+    minute, and a run late by its 10 s expiry beside the next beats' puts
+    five passes in a minute, the fifth sending nothing."""
 
     def _instruments(self, n):
         ids = {f"S{i}": 100 + i for i in range(1, n + 1)}
@@ -804,25 +832,27 @@ class TheTwelveAMinuteTests(_QuotesCase):
         self.assertEqual(_beat("refresh-etoro-quotes")["schedule"],
                          etoro_quotes.BEAT_S)
 
-    def test_three_passes_in_a_minute_never_send_more_than_twelve(self):
+    def test_five_passes_in_a_minute_never_send_more_than_twelve(self):
+        # three passes of six at the 30 s beat until 2026-11-13 (steps 0,
+        # 25, 5, 31: 6, 6, 0, 6); five passes of three at 15 s since ("je
+        # suggère 20-30 secondes non?"): a run late by 10 s, then on time
         from bot_program import etoro_quotes
         self._instruments(8)
         clock = _Clock(1_000_000.0)
         sent = []
         with mock.patch.object(etoro_quotes, "_now", clock):
-            for step in (0, 25, 5, 31):
+            for step in (0, 10, 5, 15, 15):
                 clock.t += step
                 before = len(self.wire.rates())
                 out = _refresh()
                 sent.append(len(self.wire.rates()) - before)
-                if step == 5:
-                    third = out
-        self.assertEqual(sent, [6, 6, 0, 6])
-        self.assertIn("12 reads a minute", third["stopped"])
+        self.assertEqual(sent, [3, 3, 3, 3, 0])
+        self.assertIn("12 reads a minute", out["stopped"])
 
-    def test_a_batch_and_its_single_reads_are_six_a_pass_at_most(self):
-        """A proven batch that left rows out: the batch is one of the six,
-        the rows it left out are read alone with the five left."""
+    def test_a_batch_and_its_single_reads_are_three_a_pass_at_most(self):
+        """A proven batch that left rows out: the batch is one of the three
+        (six until 2026-11-13: "je suggère 20-30 secondes non?"), the rows
+        it left out are read alone with the two left."""
         from bot_program import etoro_quotes
         for name, value in (("CACHE", True), ("MEASURED_FIRST", True)):
             p = mock.patch.object(er, name, value)
@@ -836,12 +866,16 @@ class TheTwelveAMinuteTests(_QuotesCase):
         self.assertEqual(len(sent), etoro_quotes.SINGLE_READS_PER_PASS)
         self.assertEqual(len(sent[0].split(",")), 8,
                          "one batch carried the eight")
-        self.assertEqual(out["written"], 6, "the batched row, five alone")
+        self.assertEqual(out["written"], 3, "the batched row, two alone")
 
 
-# ── the sync every minute ─────────────────────────────────────────────────
+# ── the sync every 30 s (every minute from 2026-11-06 to 2026-11-13) ──────
 
-class TheSyncEveryMinuteTests(TestCase):
+class TheSyncEveryThirtySecondsTests(TestCase):
+    """Every 60 s until 2026-11-13, every 30 s since (the operator: "aussi
+    le refresh etoro par minute est toujours trop long, je suggère 20-30
+    secondes non?"); the history keeps its five minutes and the stall alert
+    its fifteen (tests.test_etoro_sync_30s)."""
 
     def setUp(self):
         cache.clear()
@@ -855,6 +889,7 @@ class TheSyncEveryMinuteTests(TestCase):
             return _sync_etoro(_client())
 
     def test_the_cells_every_pass_the_history_every_five_minutes(self):
+        # passes a minute apart until 2026-11-13, 30 s apart since
         from bot_program.equity_models import BrokerEquityReading
         from bot_program.models import EtoroAccount
         t0 = timezone.now().replace(microsecond=0)
@@ -864,17 +899,19 @@ class TheSyncEveryMinuteTests(TestCase):
                 broker="etoro", account_pk=self.acct.pk).count()
         self._sync(t0)
         self.assertEqual(rows(), 1)
-        for minute in (1, 2, 3, 4):
-            out = self._sync(t0 + timedelta(minutes=minute))
+        for k in range(1, 10):                          # 30 s .. 270 s
+            out = self._sync(t0 + timedelta(seconds=30 * k))
             self.assertEqual(out["stored"], 1)
             self.assertEqual(
                 EtoroAccount.objects.get(pk=self.acct.pk).last_equity_at,
-                t0 + timedelta(minutes=minute))
-            self.assertEqual(rows(), 1, minute)
+                t0 + timedelta(seconds=30 * k))
+            self.assertEqual(rows(), 1, k)
         self._sync(t0 + timedelta(minutes=5))
         self.assertEqual(rows(), 2)
 
-    def test_the_etoro_stall_alert_waits_fifteen_misses(self):
+    def test_the_etoro_stall_alert_waits_thirty_misses(self):
+        # fifteen at the 60 s beat until 2026-11-13, thirty at 30 s since:
+        # fifteen minutes either way ("je suggère 20-30 secondes non?")
         from bot_program.models import IBKRAccount
         from bot_program.tasks import _note_broker_miss
         ib = IBKRAccount.objects.create(user=self.user, port=4003,
@@ -884,16 +921,18 @@ class TheSyncEveryMinuteTests(TestCase):
         with mock.patch("bot_program.notifications."
                         "notify_broker_unreachable") as said, \
                 self.assertLogs("bot_program.tasks", level="WARNING"):
-            for _ in range(14):
+            for _ in range(29):
                 _note_broker_miss(self.acct, self.user)
-            self.assertFalse(said.called, "fourteen minutes is a blip")
+            self.assertFalse(said.called, "fourteen and a half minutes is "
+                                          "a blip")
             _note_broker_miss(self.acct, self.user)
             self.assertEqual(said.call_count, 1)
             for _ in range(3):
                 _note_broker_miss(ib, self.user)
             self.assertEqual(said.call_count, 2, "IBKR still says it at 3")
 
-    def test_fifteen_passes_of_the_beat_are_the_fifteen_minutes(self):
+    def test_the_threshold_times_the_beat_is_the_fifteen_minutes(self):
+        # fifteen passes of 60 s until 2026-11-13, thirty of 30 s since
         from bot_program.tasks import (BROKER_MISS_ALERT_AFTER,
                                        broker_miss_alert_after)
         self.assertEqual(broker_miss_alert_after("etoro")
@@ -910,12 +949,13 @@ class TheSyncEveryMinuteTests(TestCase):
             key="broker_account_sync",
             defaults={"name": "s", "category": "system", "is_enabled": True})
         key = f"broker_sync:miss:etoro:{self.acct.pk}"
-        cache.set(key, 14, 3600)
+        # 14 and 15 until 2026-11-13, 29 and 30 at the 30 s beat since
+        cache.set(key, 29, 3600)
         self.assertEqual(alarm.read_brokers(timezone.now()), [])
-        cache.set(key, 15, 3600)
+        cache.set(key, 30, 3600)
         said = alarm.read_brokers(timezone.now())
         self.assertEqual(len(said), 1)
-        self.assertIn(f"eToro account #{self.acct.pk} has not answered 15 "
+        self.assertIn(f"eToro account #{self.acct.pk} has not answered 30 "
                       f"syncs in a row", said[0].words)
 
 
@@ -927,21 +967,26 @@ class TheWordsTests(SimpleTestCase):
         return (Path(settings.BASE_DIR).joinpath(*parts)
                 .read_text(encoding="utf-8"))
 
-    def test_the_switch_names_the_minute_and_the_quotes(self):
+    def test_the_switch_names_the_beat_and_the_quotes(self):
+        # "eToro every minute" and the quotes "every 30 s" until
+        # 2026-11-13 ("je suggère 20-30 secondes non?")
         from core.platform_control import DEFAULT_COMPONENTS
         row = next(c for c in DEFAULT_COMPONENTS
                    if c["key"] == "broker_account_sync")
-        self.assertIn("eToro every minute", row["description"])
+        self.assertIn("eToro every 30 s", row["description"])
         self.assertIn("eToro's own quotes for the open real positions "
-                      "every 30 s", row["description"])
+                      "every 15 s", row["description"])
         forex = next(c for c in DEFAULT_COMPONENTS
                      if c["key"] == "scraper_forex")
         self.assertIn("(every 5 min)", forex["description"])
 
-    def test_the_broker_card_says_the_minute(self):
+    def test_the_broker_card_says_the_beat(self):
+        # "eToro every minute" until 2026-11-13 ("je suggère 20-30
+        # secondes non?")
         card = self._read("templates", "_partials", "broker_account.html")
-        self.assertIn("eToro every minute", card)
+        self.assertIn("eToro every 30 s", card)
         self.assertNotIn("eToro every 5 min", card)
+        self.assertNotIn("eToro every minute", card)
 
     def test_the_book_and_the_wall_keep_the_reconciles_five_minutes(self):
         from core import book_content as book

@@ -179,12 +179,23 @@ class PageTests(TestCase):
 
     def test_the_nav_links_the_page(self):
         """◆, not the spec's ◈: that glyph is Signals', and the rail refuses
-        a shared shape (tests/test_nav_grouping.py)."""
+        a shared shape (tests/test_nav_grouping.py). Updated deliberately
+        (UI redo B2, the desk v2 board, approved 2026-11-13: "amazing work,
+        bravo, I need it fast!!"): the row's mark is the one icon family's
+        own symbol (#svi-big-money), shared with no other row, not a glyph,
+        and its <svg> carries the symbol's viewBox, its own coordinate space
+        (tests/test_chart_surfaces.py, ViewBoxTests)."""
         body = self.client.get("/big-money/").content.decode()
         self.assertIn('href="/big-money/"', body)
-        self.assertIn("<span class=\"icon\">◆</span> <span class=\"label-text\">"
+        self.assertIn('<span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+                      '<use href="#svi-big-money"/></svg></span> <span class="label-text">'
                       "Big Money</span>", body)
-        self.assertIn("◆ BIG MONEY", body)
+        # The page's title in the bar is its name in words (updated
+        # deliberately, the desk v2 board, approved 2026-11-13: "amazing
+        # work, bravo, I need it fast!!"): the ◆ it opened with, drawn by a
+        # fallback face, goes (sauron_tags.sv_bar_title); the template's
+        # block keeps it.
+        self.assertIn('<span class="topbar-title">BIG MONEY</span>', body)
 
 
 class TicketNoteTests(TestCase):

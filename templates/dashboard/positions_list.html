@@ -9,11 +9,21 @@
 {# The selection bar and the "Should I close?" dialog. A sheet of its own #}
 {# rather than this page's own style block: /portfolio/ and the position #}
 {# page carry the same controls, and one component styled in three places #}
-{# is how the three start disagreeing. #}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-close-advice.css' %}">{% endblock %}
+{# is how the three start disagreeing. The desk's own sheet (2026-11-13, #}
+{# UI batch B7) follows it: the board the operator approved, on the tokens. #}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-close-advice.css' %}">
+<link rel="stylesheet" href="{% static 'css/sv-positions.css' %}">{% endblock %}
 
 {% block content %}
 {% comment %}
+THE DESK (UI batch B7, 2026-11-13). The operator approved the desk v2
+board ("amazing work, bravo, I need it fast!!"): the KPI strip by world,
+never summed; THE BOOK AT ETORO; OPEN POSITIONS with its world tabs, its
+keys and CLOSE ALL; one line a position, the Orc line in a disclosure row;
+then CLOSED · 24 H, the REAL EXPOSURE and CLOSED · 30 D by world. The
+figures around the table come from dashboard/positions_desk.py; the rows
+are the open book's own (dashboard.views._live_row). Display only.
+
 LIVE REGIONS. Anything inside a data-sv-live wrapper is re-rendered by
 /positions/live/, which re-enters this very template through
 dashboard/_live_shell.html — the refreshed markup is this markup, so an
@@ -21,219 +31,92 @@ unpriced position renders the same em-dash on the tenth sweep as on the first
 paint. data-sv-live-key names a value so the refresher can flash only the ones
 that changed; a row's key is the position's identity, never its index, or the
 flashes would land on the wrong rows the moment a fill reorders the book.
-
-The strip's numbers are formatted in the view (dashboard.views): the em-dash
-rule for an unmeasured value then lives in one place instead of in eight
-template branches, each a fresh chance to print a confident zero.
+What the page's own script keeps inside a region (an open Orc line, the
+row the keys are on) it puts back after each swap (sv:live-swapped,
+static/js/sv-positions.js).
 {% endcomment %}
-{# ── 1. Top stat strip — 8 cells, eToro's own used figure first ────── #}
-<div class="oc-strip" style="margin-bottom:18px;" data-sv-live="pos-strip">
-    {% comment %}
-    eToro's OWN used figure heads the strip (2026-10-31): the margin eToro
-    holds as its cells say, with what is available, the total and the age
-    (bot_program.etoro_used through capital_summary), and the split under
-    the strip. EXPOSURE beside it is the notional of Sauron's rows at live
-    marks; a position opened in the eToro app is in eToro's figure only.
-    {% endcomment %}
-    {% if strip.etoro %}
-    <div class="oc-strip-cell" title="{{ strip.etoro.title }}">
-        <span class="oc-strip-label"><span class="sv-venue {{ etoro.venue_class }}">{{ etoro.world_word }}</span> ETORO USED</span>
-        <span class="oc-strip-value" data-sv-live-key="pos.etoro">{{ strip.etoro.text }}</span>
-        <span class="oc-strip-sub oc-strip-sub--wrap" data-sv-live-key="pos.etoro.sub">{{ strip.etoro.sub }}</span>
-    </div>
-    {% endif %}
-    <div class="oc-strip-cell" title="{{ strip.open.title }}">
-        <span class="oc-strip-label">OPEN</span>
-        <span class="oc-strip-value {{ strip.open.tone }}" data-sv-live-key="pos.open">{{ strip.open.text }}</span>
-        <span class="oc-strip-sub">{{ strip.open.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.unrealized.title }}">
-        <span class="oc-strip-label">OPEN UNREAL P&amp;L</span>
-        <span class="oc-strip-value {{ strip.unrealized.tone }}" data-sv-live-key="pos.unrealized">{{ strip.unrealized.text }}</span>
-        <span class="oc-strip-sub">{{ strip.unrealized.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.exposure.title }}">
-        <span class="oc-strip-label">EXPOSURE</span>
-        <span class="oc-strip-value {{ strip.exposure.tone }}" data-sv-live-key="pos.exposure">{{ strip.exposure.text }}</span>
-        <span class="oc-strip-sub">{{ strip.exposure.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.closed.title }}">
-        <span class="oc-strip-label">CLOSED TRADES</span>
-        <span class="oc-strip-value {{ strip.closed.tone }}" data-sv-live-key="pos.closed">{{ strip.closed.text }}</span>
-        <span class="oc-strip-sub" data-sv-live-key="pos.closed.sub">{{ strip.closed.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.win_rate.title }}">
-        <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value {{ strip.win_rate.tone }}" data-sv-live-key="pos.win_rate">{{ strip.win_rate.text }}</span>
-        <span class="oc-strip-sub">{{ strip.win_rate.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.realized.title }}">
-        <span class="oc-strip-label">REALIZED P&amp;L</span>
-        <span class="oc-strip-value {{ strip.realized.tone }}" data-sv-live-key="pos.realized">{{ strip.realized.text }}</span>
-        <span class="oc-strip-sub">{{ strip.realized.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.profit_factor.title }}">
-        <span class="oc-strip-label">PROFIT FACTOR</span>
-        <span class="oc-strip-value {{ strip.profit_factor.tone }}" data-sv-live-key="pos.profit_factor">{{ strip.profit_factor.text }}</span>
-        <span class="oc-strip-sub">{{ strip.profit_factor.sub }}</span>
-    </div>
-    <div class="oc-strip-cell" title="{{ strip.avg_wl.title }}">
-        <span class="oc-strip-label">AVG W / L</span>
-        <span class="oc-strip-value" data-sv-live-key="pos.avg_wl">{{ strip.avg_wl.text }}</span>
-        <span class="oc-strip-sub">{{ strip.avg_wl.sub }}</span>
-    </div>
-    {% if etoro %}
-    {# grid-column spans the whole strip: the split is a sentence, not a cell. #}
-    <p class="oc-strip-sub" style="grid-column:1/-1;white-space:normal;margin:0;" title="{{ etoro.title }}" data-sv-live-key="pos.etoro.split">{{ etoro.split_t }}.</p>
-    {% endif %}
-</div>
-
-{% if broker %}
-{% comment %}── At the broker — IBKR's own holdings, verbatim ─────────
-Display only: nothing here is imported into any book. CLAIMED means a
-Sauron row exists for the symbol; UNCLAIMED is a position opened by hand
-in TWS or an orphan — real exposure the platform did not open, which an
-ISA will legitimately carry. Outside the live regions on purpose: the
-rows are written by the 15-min broker sync, and the age stamp is the
-honest freshness claim.
-
-At eToro each position is claimed apart, as /treasury/'s outside list
-claims it (2026-10-31, etoro_used.mark_holdings): STOPPED is a close
-Sauron gave up on that eToro still lists, NO BROKER a live row on the
-symbol that records no broker (the split counts it apart), and UNCLAIMED
-says it in eToro's words.{% endcomment %}
-<div class="card" style="margin-bottom:18px;">
-    <div class="card-header">
-        <span class="card-title">⌂ At the broker · {{ broker.name }} {{ broker.label }} · {{ broker.env }}</span>
-        {% if broker.positions %}
-        <span class="bk-age sv-age" data-sv-at="{{ broker.positions.at|date:'c' }}">{{ broker.positions.at|timesince }} ago</span>
-        {% endif %}
-    </div>
-    {% if broker.positions %}
-    {% if broker.positions.rows %}
-    <div class="table-wrapper">
-        <table class="bkp-table sv-stack">
-            <thead><tr>
-                <th>SYMBOL</th><th>TYPE</th><th>SIDE</th><th>QTY</th>
-                <th>AVG COST</th><th>MARK</th><th>VALUE</th>
-                <th>UNREAL P&L</th><th>CCY</th><th></th>
-            </tr></thead>
-            <tbody>
-            {% for row in broker.positions.rows %}
-            {# spaceless (2026-09-28): the ten labels lengthen each row by 176 characters of markup; the whitespace between its cells, which no layout reads, pays for them, so a reader of a row's first 600 characters (tests/test_broker_truth.py) still reaches its claim chip. #}
-            {% spaceless %}<tr>
-                {# data-label: the header's words (2026-09-28). The last header is empty on a wide screen, where the chip names itself; stacked, it reads "Claim". #}
-                <td data-label="Symbol">{{ row.symbol }}</td>
-                <td data-label="Type">{{ row.sec_type }}</td>
-                <td data-label="Side" class="{% if row.side == 'BUY' %}bkp-up{% else %}bkp-down{% endif %}">{{ row.side }}</td>
-                <td data-label="Qty">{{ row.qty|floatformat:"-4" }}</td>
-                <td data-label="Avg cost">{{ row.avg_cost|floatformat:"-4" }}</td>
-                {# eToro's list carries no mark and no value, and its P&L is the position's own net profit (2026-11-06, views._render_positions: net_profit_t): a dash where eToro sent nothing, never the stored constant 0. #}
-                <td data-label="Mark">{% if broker.kind == "etoro" %}&mdash;{% else %}{{ row.market_price|floatformat:"-4" }}{% endif %}</td>
-                <td data-label="Value">{% if broker.kind == "etoro" %}&mdash;{% else %}{{ row.market_value|floatformat:2 }}{% endif %}</td>
-                <td data-label="Unreal P&amp;L" class="{% if broker.kind == 'etoro' %}{% if row.net_profit_t %}bkp-{{ row.net_profit|sign_class }}{% else %}sv-unknown{% endif %}{% elif row.unrealized_pnl >= 0 %}bkp-up{% else %}bkp-down{% endif %}">{% if broker.kind == "etoro" %}{% if row.net_profit_t %}{{ row.net_profit_t }}{% else %}&mdash;{% endif %}{% else %}{{ row.unrealized_pnl|floatformat:2 }}{% endif %}</td>
-                <td data-label="Ccy">{{ row.currency }}</td>
-                <td data-label="Claim">{% if row.claim == "stopped" %}<span class="bkp-claim bkp-claim--stopped" title="Sauron stopped trying to close this position and eToro still lists it: close it at eToro.">STOPPED</span>{% elif row.claim == "no_broker" %}<span class="bkp-claim bkp-claim--nobroker" title="A live Sauron row on this symbol records no broker, so it is not counted as eToro's: it may be this position.">NO BROKER</span>{% elif row.claimed %}<span class="bkp-claim">CLAIMED</span>{% elif broker.kind == "etoro" %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row accounts for this position: opened in the eToro app, a second position beside Sauron's, or an orphan. Real exposure the platform does not manage.">UNCLAIMED</span>{% else %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row matches this symbol — opened by hand in TWS, or an orphan. Real exposure the platform did not open and does not manage.">UNCLAIMED</span>{% endif %}</td>
-            </tr>{% endspaceless %}
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);padding:4px 12px 12px;">The broker reports no holdings on this account.</p>
-    {% endif %}
-    {% else %}
-    <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);padding:4px 12px 12px;">
-        <span class="sv-unknown">—</span> no holdings reading yet. Unread is not empty:
-        the sync lands one within 15 minutes of the gateway answering.
-    </p>
-    {% endif %}
-</div>
-{% endif %}
-
-{# ── 2. Direction donut + asset-class breakdown + monthly P&L ─── #}
-{% include "_partials/capital_card.html" %}
-{# data-sv-reveal: the motion layer rises this grid's cards as the page is scrolled (static/js/sv-motion.js). #}
-<div class="grid grid-3" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
-<div class="card">
-        <div class="card-header"><span class="card-title">Direction · open</span></div>
-        <div data-sv-live="pos-dir">
-        {% if direction_donut %}
-            {% include "_partials/chart_donut.html" with rows=direction_donut tones="long=accent,short=red" label="Share of open positions by direction" %}
-        {% else %}
-            <p class="oc-empty">No open positions.</p>
-        {% endif %}
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header"><span class="card-title">By asset class · open</span></div>
-        <div data-sv-live="pos-class">
-        {% if asset_breakdown %}
-            <div class="table-wrapper">
-            <table class="sv-perf-table">
-                <thead><tr><th>class</th><th>N</th><th>exposure</th><th>unreal P&amp;L</th></tr></thead>
-                <tbody>
-                    {% for a in asset_breakdown %}
-                        <tr>
-                            <td><strong>{{ a.asset_class|upper }}</strong></td>
-                            <td>{{ a.n }}</td>
-                            {# Exposure is marked where a quote exists and sized #}
-                            {# at entry cost otherwise; a share of an unpriced #}
-                            {# book is a share of nothing, so it dashes. #}
-                            <td style="font-family:var(--font-mono);font-size:11px;">{{ a.exposure|floatformat:0 }} <span style="color:var(--text-muted);">({% if a.exposure_pct is not None %}{{ a.exposure_pct }}%{% else %}&mdash;{% endif %})</span></td>
-                            <td class="{{ a.unrealized_tone }}" style="font-family:var(--font-mono);" data-sv-live-key="pos.class.{{ a.asset_class }}">{% if a.unrealized is not None %}{{ a.unrealized_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-        {% else %}
-            <p class="oc-empty">No open positions to break down.</p>
-        {% endif %}
-        </div>
-    </div>
-
-    {% if not live_only %}
-    <div class="card">
-        <div class="card-header"><span class="card-title">Monthly realized P&amp;L · 12m</span></div>
-        {# Signed: the zero line is the story here, so it is drawn, not implied. #}
-        {% include "_partials/chart_bars.html" with bars=monthly_rows max=monthly_max peak=monthly_max_display signed=1 short=1 unit="realized P&L per month" when="last 12 months" empty="No closed trades yet." %}
-    </div>
-    {% endif %}
-</div>
-
-<!-- Tab Navigation -->
-<div class="pos-tabs fade-in-up" style="margin-bottom: 20px;">
-    <a href="?tab=open" class="pos-tab {% if tab == 'open' %}active{% endif %}">Open Positions</a>
-    <a href="?tab=history" class="pos-tab {% if tab == 'history' %}active{% endif %}">Position History</a>
-</div>
-
+<div class="pd-desk" data-pd-desk>
 {% if tab == 'open' %}
-<!-- ── Open Positions Tab ──────────────────────────── -->
+{# ── 1. The KPI strip: open P&L by world, never summed; the REAL book at eToro ── #}
+<div class="pd-strip" data-sv-live="pos-strip">
+<div class="pd-kpis">
+    <section class="pd-card pd-kgrp" aria-label="Open P&amp;L by world, never summed">
+        <div class="pd-khead"><h2 class="card-title pd-title">Open P&amp;L</h2><span class="pd-note">by world · never summed</span><span class="pd-note pd-note--end" title="{{ desk.words }}">eToro’s own where eToro lists the position</span></div>
+        <div class="pd-kcells">
+            {% for w in desk.worlds %}
+            <div class="pd-kc" data-pd-world="{{ w.world }}">
+                <div class="pd-kl">{% money_world w.world "1" %}</div>
+                {# An estimate is drawn in ink with its ≈ and an empty arrow slot (the board): never a measured gain's colour and arrow. #}
+                <div class="pd-kr"><span class="pd-kv{% if w.world != 'live' %} pd-kv--2{% endif %}"><span class="pd-pv {% if w.pnl.est %}pd-pv--est{% else %}{{ w.pnl.tone }}{% endif %}">{% if w.pnl.est %}<span class="pd-est" title="An estimate: a row here is not on eToro's own list">≈</span>{% endif %}<span data-sv-live-key="pos.pnl.{{ w.world }}">{% if w.pnl.value is not None %}{{ w.pnl.text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span><span class="pd-dg" aria-hidden="true">{% if not w.pnl.est %}{{ w.pnl.arrow }}{% endif %}</span></span></span></div>
+                <div class="pd-ks" data-sv-live-key="pos.pnl.{{ w.world }}.sub">{{ w.sub }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    <section class="pd-card pd-kgrp pd-kgrp--book" aria-label="The real book at eToro"{% if desk.book.title %} title="{{ desk.book.title }}"{% endif %}>
+        <div class="pd-khead">{% money_world "live" "1" %}<h2 class="card-title pd-title">The book at eToro</h2>
+        {% comment %}
+        eToro's OWN used figure (2026-10-31), said as eToro states it, with
+        what is available, the total and the age, and the split against
+        Sauron's own eToro rows (bot_program.etoro_used, carried by
+        capital_summary). One click from the equity it qualifies, on its own
+        ground in the top layer: the review of 2026-11-13 found it a line on
+        the void between the cards, where the Eye's light and the embers
+        pass, and the board puts no figure there. MARGIN USED below is this
+        figure over the total.
+        {% endcomment %}
+        {% if strip.etoro %}<button type="button" class="pd-note pd-note--end pd-acct-btn" popovertarget="pdEtoro" aria-label="eToro's own figures for the real account: used, available, total, and the split against Sauron's rows">equity <span class="pd-m" data-sv-live-key="pos.book.equity">{{ desk.book.equity }}</span>{% if desk.book.equity_read %} · read {{ desk.book.equity_read }} ago{% endif %}<svg class="pd-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>
+        <div class="pd-etoro" id="pdEtoro" popover title="{{ strip.etoro.title }}"><p class="pd-etoro-line"><span class="pd-lbl">{{ etoro.world_word }} ETORO USED</span> <span class="pd-m pd-etoro-v" data-sv-live-key="pos.etoro">{{ strip.etoro.text }}</span> · <span data-sv-live-key="pos.etoro.sub">{{ strip.etoro.sub }}</span>.</p>{% if etoro %}<p class="pd-etoro-split" data-sv-live-key="pos.etoro.split">{{ etoro.split_t }}.</p>{% endif %}</div>
+        {% else %}<span class="pd-note pd-note--end">equity <span class="pd-m" data-sv-live-key="pos.book.equity">{{ desk.book.equity }}</span>{% if desk.book.equity_read %} · read {{ desk.book.equity_read }} ago{% endif %}</span>{% endif %}</div>
+        <div class="pd-kcells">
+            <div class="pd-kc">
+                <div class="pd-kl"><span class="pd-lbl">Exposure</span></div>
+                <div class="pd-kr"><span class="pd-kv" data-sv-live-key="pos.exposure">{% if desk.book.exposure_n %}{{ desk.book.exposure }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                <div class="pd-ks">notional at eToro’s marks</div>
+            </div>
+            {# AT THE STOPS, measured as the open-risk gate measures it against its limit: what every REAL stop books from its entry (the review of 2026-11-13 asked for one definition, said). #}
+            <div class="pd-kc" title="What the real positions book if every stop fills, measured from each entry: the open-risk gate's own measure, against its limit.">
+                <div class="pd-kl"><span class="pd-lbl">At the stops</span></div>
+                <div class="pd-kr"><span class="pd-kv{% if desk.book.stops_over %} pd-kv--over{% endif %}" data-sv-live-key="pos.stops">{{ desk.book.stops }}</span>{% if desk.book.stops_limit %}<span class="pd-ks">of <span class="pd-m">{{ desk.book.stops_limit }}</span></span>{% endif %}</div>
+                <div class="pd-ks"><span class="pd-m" data-sv-live-key="pos.stops.money">{{ desk.book.stops_money }}</span> if all stops fill</div>
+            </div>
+            <div class="pd-kc">
+                <div class="pd-kl"><span class="pd-lbl">Margin used</span></div>
+                <div class="pd-kr"><span class="pd-kv" data-sv-live-key="pos.margin">{{ desk.book.margin }}</span></div>
+                <div class="pd-ks" data-sv-live-key="pos.margin.sub"><span class="pd-m">{{ desk.book.margin_used }}</span> · <span class="pd-m">{{ desk.book.margin_free }}</span> free</div>
+            </div>
+        </div>
+    </section>
+</div>
+</div>
+
+{# ── 2. OPEN POSITIONS ─────────────────────────────────────────────── #}
 {# data-sv-select-scope: what the phone's "select all" below covers — the #}
 {# ticks in this card and no other (static/js/sv-close-advice.js). #}
-<div class="card fade-in-up" data-sv-select-scope>
-    {# flex-wrap, or the title and the chip set a floor wider than a 360px #}
-    {# card and take the whole body sideways with them. #}
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span class="card-title">Current Positions</span>
-        <span style="display:flex;align-items:center;gap:10px;">
-        {# Position by position is the right default and the wrong tool when #}
-        {# the reason to be flat is the market rather than the trade. Only #}
-        {# rendered when there is something to close, so the page never #}
-        {# offers an action that would report "nothing to do". #}
-        {# A filter narrows the TABLE, never this button: it closes the whole book, so under a filter its label and tooltip say so (2026-09-26). No count on it: it sits outside every live region, and a number here would go stale after a fill; the note inside pos-open carries M and is re-rendered each sweep. #}
-        {% if positions %}
-        <button type="button" class="btn btn-sm btn-danger" id="svCloseAll"{% if open_view.filtered %} title="Acts on the whole book, not only the rows this filter shows; its preview names any position it cannot close." aria-label="Close all open positions in the whole book, not only the filtered rows shown"{% endif %}>Close all{% if open_view.filtered %} (whole book){% endif %}</button>
-        {% endif %}
+<section class="pd-card pd-pos" aria-label="Open positions" data-sv-select-scope>
+    <div class="pd-chead">
+        <h2 class="card-title pd-title">Open positions</h2>
+        <span class="pd-bub" data-sv-live="pos-count"><span data-sv-live-key="pos.open">{{ desk.n_open }}</span></span>
+        {# THE WORLD TABS (2026-11-13): links, so the choice rides the query string and every refresh (dashboard.position_views); a tab narrows the table, never CLOSE ALL. #}
+        {% if positions %}<nav class="pd-seg" aria-label="Show one world" data-sv-live="pos-worlds">{% for t in open_view.world_tabs %}<a class="pd-seg-btn{% if t.current %} is-on{% endif %}" href="{{ t.href }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.label }} <span class="pd-m" data-sv-live-key="pos.world.n.{{ t.value|default:'all' }}">{{ t.n }}</span></a>{% endfor %}</nav>{% endif %}
+        {# From the keys' row, Tab walks the symbol, the stop, the target, then CLOSE (its dialog and PIN unchanged): the hint says where it goes (the review of 2026-11-13). #}
+        {# Each key with its words: a pair the head has no room for drops whole, never cut mid-word. #}
+        {% if positions_detailed %}<span class="pd-keys" aria-hidden="true"><span class="pd-key"><kbd class="pd-kbd">J</kbd><kbd class="pd-kbd">K</kbd><span>move</span></span><span class="pd-key"><kbd class="pd-kbd">Enter</kbd><span>the Orc line</span></span><span class="pd-key"><kbd class="pd-kbd">Tab</kbd><span>stop · target · Close</span></span></span>{% endif %}
         {# Says which way the numbers below are arriving: pushed on fills, or #}
         {# swept on a timer because the feed is down. It reads the class #}
         {# base.html stamps on the body — this page opens no socket of its own. #}
         <span class="sv-live-chip" data-sv-live-status>◉ LIVE</span>
-        </span>
+        {# The order-and-filter bar (2026-09-26), folded into the head: its form is main's, in a popover (the top layer, so nothing in the table paints over it); the button, a quiet icon (the board has none: the review of 2026-11-13), is lit while a pick of its own is on (the world rides the tabs), and the view note says which. #}
+        {% if not live_only and positions %}<button type="button" class="pd-filter-btn{% if open_view.filter_on %} is-on{% endif %}" popovertarget="pdFilter" aria-label="Order and filter the open positions" title="Order · filter{% if open_view.filter_on %}: a pick is on{% endif %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M7 12h10"/><path d="M10 18h4"/></svg></button><div class="pd-filter-pop" id="pdFilter" popover>{% include "_partials/position_filter.html" with view=open_view label="open positions" %}</div>{% endif %}
+        {# Position by position is the right default and the wrong tool when #}
+        {# the reason to be flat is the market rather than the trade. Only #}
+        {# rendered when there is something to close, so the page never #}
+        {# offers an action that would report "nothing to do". #}
+        {# A filter narrows the TABLE, never this button: it closes the whole book, so under a filter its label and tooltip say so (2026-09-26). No count on it: it sits outside every live region, and a number here would go stale after a fill; the note inside pos-open carries M and is re-rendered each sweep. The stop variant with its square (the kit's .btn-stop, 2026-11-13): a protective action, never a red slab. #}
+        {% if positions %}
+        <button type="button" class="btn btn-sm btn-stop" id="svCloseAll"{% if open_view.filtered %} title="Acts on the whole book, not only the rows this filter shows; its preview names any position it cannot close." aria-label="Close all open positions in the whole book, not only the filtered rows shown"{% endif %}>Close all{% if open_view.filtered %} (whole book){% endif %}</button>
+        {% endif %}
     </div>
-    {% if not live_only %}{% include "_partials/position_filter.html" with view=open_view label="open positions" %}{% endif %}
     {# THE PHONE'S "SELECT ALL". At 768px and below the table stacks into cards and #}
     {# its header row is visually hidden, taking the header's box with it; #}
     {# this one is shown only there (sv-close-advice.css), and only once #}
@@ -244,18 +127,17 @@ says it in eToro's words.{% endcomment %}
     {% include "_partials/position_view_note.html" with view=open_view noun="open positions" closes=1 %}
     {% if positions_detailed %}
     <div class="table-wrapper">
-    {# sv-stack (2026-09-28): at 768px and below each row is a card, two labelled fields a line (sv-stack--pairs), and every cell names its own column in data-label. The labels sauron.css pinned by position had shifted on this fourteen-column table: a phone read the target price under "P&L" (measured at 360 and 390) — and the tick column ("Should I close?") would have shifted them once more. A label on the cell cannot drift from the column it names, whatever is added in front of it. #}
-    <table class="sv-perf-table sv-stack sv-stack--pairs">
-        {# Capital sits beside the prices because it is the question the price #}
-{# cells cannot answer: an entry of 2,400 says nothing about whether this #}
-{# position is a rounding error or half the pool. Every price cell carries #}
-{# its own percentage underneath — a distance for the levels, the move #}
-{# since entry for the mark — so no cell asks the operator to divide. #}
-<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num" title="How many times its own capital this position carries: the broker's multiplier on an eToro row, the class's margin model otherwise. 1x settles in full.">Lev</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+    {# sv-stack (2026-09-28): at 768px and below each row is a card, two labelled fields a line (sv-stack--pairs), and every cell names its own column in data-label. A label on the cell cannot drift from the column it names, whatever is added in front of it. #}
+    {# ONE LINE A POSITION (2026-11-13, the desk v2): the board's columns; the rest of what a row knows (its capital and share of the pool, its leverage, the move in percent, the rule, when it opened, the Orc) is one click away in its disclosure row, never gone. #}
+    <table class="sv-perf-table sv-stack sv-stack--pairs pd-table{% if desk.retry %} pd-table--retry{% endif %}">
+        <caption class="pd-sr">Open positions</caption>
+        {# THE COLUMNS (the review of 2026-11-13, its blocker): each figure column as wide as its widest figure, counted in characters of the number face (dashboard.positions_desk.figure_columns; the sheet turns pd-chN into N ch of JetBrains Mono at the row's size tier), so a tier's larger type never cuts a figure; PRICED BY a fixed share, never the rest of the table. #}
+        <colgroup><col class="pd-c-sel"><col class="pd-c-sym pd-ch{{ desk.cols.sym }}"><col class="pd-c-side"><col class="pd-c-world"><col class="pd-c-qty pd-ch{{ desk.cols.qty }}"><col class="pd-c-px pd-ch{{ desk.cols.px }}"><col class="pd-c-px pd-ch{{ desk.cols.px }}"><col class="pd-c-pnl pd-ch{{ desk.cols.pnl }}"><col class="pd-c-r pd-ch{{ desk.cols.r }}"><col class="pd-c-lvl pd-ch{{ desk.cols.lvl }}"><col class="pd-c-lvl pd-ch{{ desk.cols.lvl }}"><col class="pd-c-src"><col class="pd-c-act"></colgroup>
+<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th class="pd-th-sym">Symbol</th><th>Side</th><th>World</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">P&amp;L</th><th class="num">R</th><th class="num">Stop</th><th class="num">Target</th><th>Priced by</th><th class="nowrap sv-cell-action"><span class="pd-sr">Action</span></th></tr></thead>
         <tbody>
         {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
         {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
-        {# ── the twelve columns cannot: distance to each level, live R, the   ── #}
+        {# ── the columns cannot: distance to each level, live R, the          ── #}
         {# ── rule's score, the reason the engine wrote, the signal behind it. ── #}
         {# ── An empty value is a value the platform does not have and renders ── #}
         {# ── on the card as an em-dash — never as 0, which reads as measured. ── #}
@@ -271,11 +153,12 @@ says it in eToro's words.{% endcomment %}
         {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=16 scope="pos" %}{% endif %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=13 scope="pos" %}{% endif %}
         {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
-        {# The money world (2026-09-30): REAL MONEY rows carry a red edge and the solid marker in the symbol cell. #}
+        {# The money world (2026-09-30): REAL MONEY rows carry a red edge and the solid marker. #}
         <tr data-sv-position-row{% if d.world == "live" %} class="sv-row--live"{% endif %}
+            data-pd-key="{{ p.key }}"
             data-pos-world="{{ d.world }}"
             data-pos-instrument-href="{{ instrument_url }}"
             data-pos-symbol="{{ d.symbol }}" data-pos-side="{{ d.side }}"
@@ -315,49 +198,26 @@ says it in eToro's words.{% endcomment %}
             data-pos-spark="{{ d.spark }}" data-pos-spark-min="{{ d.spark_min }}"
             data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}" data-pos-spark-fam="{{ d.spark_fam }}" data-pos-spark-bars="{{ d.spark_bars }}"
             data-pos-href="{{ d.href }}"{% if d.orc %} data-pos-orc-label="{{ d.orc.label }}" data-pos-orc-plan="{{ d.orc.plan }}" data-pos-orc-compare="{{ d.orc.compare }}" data-pos-orc-j1="{{ d.orc.j1 }}" data-pos-orc-j2="{{ d.orc.j2 }}" data-pos-orc-j3="{{ d.orc.j3 }}" data-pos-orc-href="{{ d.orc.page }}"{% endif %}>
+            {# The REAL edge rides the first cell (sauron.css: tr.sv-row--live > td:first-child), over any hover ground and inside the keys' frame (sv-positions.css). #}
             {# THE TICK (static/js/sv-close-advice.js). Only a bot trade has #}
             {# one: a row from the shared portfolio book has no close path, #}
             {# so selecting it for "Close selected" would promise a close #}
             {# nothing can do. The cell is marked so the row's own click #}
             {# (sv-position-card.js) never turns a tick into a navigation. #}
             <td class="sv-sel-cell" data-sv-select-cell data-label="Select">{% if p.trade_id %}<input type="checkbox" class="sv-sel-box" data-sv-select-trade="{{ p.trade_id }}" aria-label="Select {{ p.symbol }}, position #{{ p.trade_id }}">{% endif %}</td>
-            {# The symbol is the INSTRUMENT, not the trade, and it now goes #}
-            {# where it says: the underlying's own page. The trade's detail #}
-            {# is the row's click — and DETAIL beside it is that same page #}
-            {# for a keyboard, because the dwell card is aria-hidden and #}
-            {# pointer-only, so without a real anchor here the detail would #}
-            {# be unreachable without a mouse. #}
-            {# aria-label and no title: a native tooltip fires at about one #}
-            {# second and the dwell card at two, so a title here would put #}
-            {# an OS bubble over the row a moment before the card the #}
-            {# operator was actually waiting for. The label is for the #}
-            {# screen reader, which has no such race. #}
-            <td data-label="Symbol" class="nowrap sv-cell-wide"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% money_world d.world %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span>{% if d.orc %}<div class="pos-orc-line"><a href="{{ d.orc.page }}">{{ d.orc.line }}</a></div>{% endif %}</td>
-            <td data-label="Direction"><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
-            <td data-label="Qty" class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
-            {# What it ties up, and out of how much. `committed_kind` matters: #}
-            {# on a levered position the money down is MARGIN, and printing #}
-            {# the notional as the cost overstates what was spent by 30x. #}
-            <td data-label="Capital" class="num pos-cap-cell" title="{% if d.committed_kind == 'margin' %}Margin posted — the broker sets it; notional exposure is larger{% else %}Cash cost at entry: quantity x entry price{% endif %}">
-                {% if d.committed %}<span class="pos-cap-money">{{ d.committed }}</span>{% if d.committed_pct %}<span class="pos-cap-share">{{ d.committed_pct }}% of pool</span>{% endif %}{% if d.committed_kind == 'margin' %}<span class="pos-cap-kind">margin</span>{% endif %}
-                {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
-            </td>
-            {# LEVERAGE (2026-10-03, the operator: "add leverage used by position on the line"). The same fact the dwell card carries (d.leverage, views._pos_leverage): the broker's multiplier on an eToro row, the class's margin model otherwise; "" is unknown and prints as a dash, never as 1. #}
-            <td data-label="Lev" class="num pos-lev-cell" style="font-family: var(--font-mono);">{% if d.leverage %}<span class="pos-lev{% if d.leverage != '1' %} is-levered{% endif %}">{{ d.leverage }}x</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            <td data-label="Entry" class="num pos-price-cell" style="font-family: var(--font-mono);">
-                <span class="pos-price">{{ p.entry_price }}</span><span class="pos-price-pct is-ref">entry</span>
-            </td>
-            {# None is a real state here (no quote for the symbol, or an #}
-            {# options row with no premium feed) — render the muted em-dash, #}
-            {# never the string "None" painted loss-red. #}
-            {# The mark's percentage is the PRICE move since entry, signed by #}
-            {# the price. On a short it is the opposite of the P&L sign — a #}
-            {# mark 4% below entry is a 4% fall that made money — so the two #}
-            {# columns deliberately disagree rather than one of them lying. #}
-            <td data-label="Current" class="num pos-price-cell" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">
-                {% if p.current_price is not None %}<span class="pos-price" data-q="{{ p.symbol }}" data-q-side="{{ p.q_side }}"{% if p.q_text %} data-q-title="{{ p.q_tail }}"{% endif %} title="{{ p.q_title|default:p.mark_title }}">{{ p.last_text }}</span>{% if p.mark_word and not p.paper %}<span class="pos-price-src sv-muted" data-mark-source="{{ p.mark_source }}"{% if p.q_words %} data-q="{{ p.symbol }}" data-q-f="words" data-q-side="{{ p.q_side }}"{% endif %} title="{{ p.mark_title }}" style="font-size:.7em;margin-left:.35em;letter-spacing:.04em;">{{ p.q_words|default:p.mark_word }}</span>{% endif %}{% if d.mark_pct %}<span class="pos-price-pct sign-{{ d.mark_pct|sign_class }}"{% if d.mark_since %} data-q="{{ p.symbol }}" data-q-f="since" data-q-side="{{ p.q_side }}" data-q-ref="{{ d.q_entry }}">{{ d.mark_since }}{% else %}>{{ d.mark_pct }}% since entry{% endif %}</span>{% endif %}
-                {% else %}<span class="sv-unknown" title="{{ p.mark_title }}">&mdash;</span>{% if p.mark_wait %}<span class="pos-price-src pos-price-wait sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="display:block;font-size:.7em;font-weight:400;">{{ p.mark_wait }}</span>{% endif %}{% endif %}
-            </td>
+            {# THE DISCLOSURE (2026-11-13): the Orc line and the row's other facts, one click (or Enter) away; its chevron leads the symbol's cell. The symbol is the INSTRUMENT, not the trade: the underlying's own page. The trade's detail is the row's click, and "Full detail" in the disclosure for a keyboard. #}
+            <td data-label="Symbol" class="nowrap sv-cell-wide pd-symtd"><button type="button" class="pd-disc" aria-expanded="false" aria-controls="pd-det-{{ p.key }}" aria-label="Show the detail of {{ p.instrument.symbol|default:'this position' }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 7l5 5-5 5"/></svg></button><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% if d.orc %}<span class="pd-orcm" title="{{ d.orc.label }} follows this position"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Followed by {{ d.orc.label }}"><path d="M5.5 14.5a6.5 6.5 0 0 1 13 0V20h-4.2v-4.6H9.7V20H5.5z"/><path d="M12 8V3.5"/><path d="M5.5 14.5h13"/></svg></span>{% endif %}</span></td>
+            <td data-label="Side"><span class="pd-sd">{% if p.direction == 'long' %}▲ Long{% else %}▼ Short{% endif %}</span></td>
+            <td data-label="World">{% money_world d.world "1" %}</td>
+            <td data-label="Qty" class="num pd-f">{{ p.quantity|qty }}</td>
+            <td data-label="Entry" class="num pd-f">{% px p.entry_price p.asset_class p.symbol %}</td>
+            {# One price everywhere: the instrument's one price at the row's closing side (market_data.one_quote); the painter keeps it. None is a real state here (no quote): the muted em-dash, and the venue's words where it waits. #}
+            <td data-label="Mark" class="num pd-f" data-sv-live-key="{{ p.key }}.last">{% if p.current_price is not None %}<span class="pos-price" data-q="{{ p.symbol }}" data-q-side="{{ p.q_side }}"{% if p.q_text %} data-q-title="{{ p.q_tail }}"{% endif %} title="{{ p.q_title|default:p.mark_title }}">{{ p.last_text }}</span>{% else %}<span class="sv-unknown" title="{{ p.mark_title }}">&mdash;</span>{% endif %}</td>
+            {# WHOSE P&L (2026-11-06, views._live_row): eToro's own figure on an eToro row its holdings list; anywhere else the estimate mark, and its words in the title and in the disclosure. #}
+            <td data-label="P&amp;L" class="num" data-sv-live-key="{{ p.key }}.pnl"{% if p.pnl_title %} title="{{ p.pnl_title }}"{% endif %}>{% if p.unrealized_pnl is not None %}{% if p.pnl_source == 'estimate' %}<span class="pd-pv pd-pv--est"><span class="pd-est" aria-label="estimate">≈</span>{{ p.pnl_text }}<span class="pd-dg" aria-hidden="true"></span></span>{% else %}<span class="pd-pv {{ p.pnl_tone }}">{{ p.pnl_text }}<span class="pd-dg" aria-hidden="true">{% if p.pnl_tone == 'up' %}▲{% elif p.pnl_tone == 'down' %}▼{% endif %}</span></span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            {# R against the stop the position OPENED with, not the current one: a trailing stop rewrites that column. No stop and no mark both mean no R — an em-dash, never 0.0R. #}
+            {# R in its sign's tone (the board); an estimate's R one step down, in ink-2, as its P&L is in ink. #}
+            <td data-label="R" class="num {% if p.pnl_source == 'estimate' %}pd-r--est{% else %}{{ p.r_tone }}{% endif %}" data-sv-live-key="{{ p.key }}.r" title="{{ p.r_title }}">{% if p.r_multiple is not None %}{{ p.r_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
 {% comment %}
             Both levels are EDITABLE where they are read, rather than on a
             page the operator has to go and find. The button carries
@@ -366,7 +226,7 @@ says it in eToro's words.{% endcomment %}
             decimal_places=8 columns and were rendered raw: a stop of
             80.00 came out as 80.00000000.
             {% endcomment %}
-            <td data-label="Stop" class="num pos-price-cell is-stop" style="font-family: var(--font-mono);">
+            <td data-label="Stop" class="num pos-price-cell is-stop{% if d.stop_through %} is-through{% endif %}">
                 {% if p.trade_id and p.status == 'OPEN' %}
                 <button type="button" class="lvl-edit" data-lvl-trade="{{ p.trade_id }}"
                         data-lvl-symbol="{{ p.symbol }}" data-lvl-side="{{ p.direction|upper }}"
@@ -375,15 +235,12 @@ says it in eToro's words.{% endcomment %}
                         data-lvl-decimals="{% px_decimals p.stop_loss p.asset_class p.symbol %}"
                         data-lvl-live="{% if p.paper %}0{% else %}1{% endif %}"
                         data-lvl-protected="{% if p.protected %}1{% else %}0{% endif %}"
-                        title="Change the stop">
-                    {% if p.stop_loss %}<span class="pos-price">{% px p.stop_loss p.asset_class p.symbol %}</span>{% if d.stop_pct %}<span class="pos-price-pct">{% if d.stop_through %}THROUGH by {{ d.stop_pct }}%{% else %}{{ d.stop_pct }}% away{% endif %}</span>{% endif %}
-                    {% else %}<span class="lvl-add">+ stop</span>{% endif %}
-                </button>
+                        title="Change the stop{% if d.stop_pct %} · {% if d.stop_through %}THROUGH by {{ d.stop_pct }}%{% else %}{{ d.stop_pct }}% away{% endif %}{% endif %}">{% if p.stop_loss %}<span class="pos-price">{% px p.stop_loss p.asset_class p.symbol %}</span>{% else %}<span class="lvl-add">+ stop</span>{% endif %}</button>
                 {% else %}
                     {% if p.stop_loss %}<span class="pos-price">{% px p.stop_loss p.asset_class p.symbol %}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
                 {% endif %}
             </td>
-            <td data-label="Target" class="num pos-price-cell is-target" style="font-family: var(--font-mono);">
+            <td data-label="Target" class="num pos-price-cell is-target{% if d.target_through %} is-through{% endif %}">
                 {% if p.trade_id and p.status == 'OPEN' %}
                 <button type="button" class="lvl-edit" data-lvl-trade="{{ p.trade_id }}"
                         data-lvl-symbol="{{ p.symbol }}" data-lvl-side="{{ p.direction|upper }}"
@@ -392,33 +249,39 @@ says it in eToro's words.{% endcomment %}
                         data-lvl-decimals="{% px_decimals p.take_profit p.asset_class p.symbol %}"
                         data-lvl-live="{% if p.paper %}0{% else %}1{% endif %}"
                         data-lvl-protected="{% if p.protected %}1{% else %}0{% endif %}"
-                        title="Change the target">
-                    {% if p.take_profit %}<span class="pos-price">{% px p.take_profit p.asset_class p.symbol %}</span>{% if d.target_pct %}<span class="pos-price-pct">{% if d.target_through %}THROUGH by {{ d.target_pct }}%{% else %}{{ d.target_pct }}% away{% endif %}</span>{% endif %}
-                    {% else %}<span class="lvl-add">+ target</span>{% endif %}
-                </button>
+                        title="Change the target{% if d.target_pct %} · {% if d.target_through %}THROUGH by {{ d.target_pct }}%{% else %}{{ d.target_pct }}% away{% endif %}{% endif %}">{% if p.take_profit %}<span class="pos-price">{% px p.take_profit p.asset_class p.symbol %}</span>{% else %}<span class="lvl-add">+ target</span>{% endif %}</button>
                 {% else %}
                     {% if p.take_profit %}<span class="pos-price">{% px p.take_profit p.asset_class p.symbol %}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
                 {% endif %}
             </td>
-            {# WHOSE P&L (2026-11-06, views._live_row): eToro's own figure on an eToro row its holdings list; anywhere else on an eToro row, the words say it is an estimate and from what (pnl_words), with its own key so the refresh pulses it. #}
-            <td data-label="P&amp;L" class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl"{% if p.pnl_title %} title="{{ p.pnl_title }}"{% endif %}>{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}{% if p.pnl_words %}<span class="pos-pnl-src sv-muted" data-sv-live-key="{{ p.key }}.pnlsrc" style="display:block;font-size:.7em;font-weight:400;">{{ p.pnl_words }}</span>{% endif %}</td>
-            <td data-label="P&amp;L %" class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} <span class="cap-pct" title="The same P&L measured against the CAPITAL this position ties up (margin for forex, premium for options) — the notional figure is silent about your cash">{{ p.cap_pct_text }} cap</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            {# R against the stop the position OPENED with, not the current #}
-            {# one: a trailing stop rewrites that column, and grading against #}
-            {# it scores every trailed winner at ~1.0R. No stop recorded and #}
-            {# no mark both mean no R — an em-dash, never 0.0R, which would #}
-            {# read as a trade sitting exactly at entry. #}
-            <td data-label="R" class="num {{ p.r_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.r" title="{{ p.r_title }}">{% if p.r_multiple is not None %}{{ p.r_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            {# sv-ident is the sheet's opt-in for identifier columns: a rule name is one long token whose min-content width would otherwise set the table's floor. #}
-            <td data-label="Strategy" class="sv-ident" style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
-            <td data-label="Opened" class="nowrap" style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
+            {# PRICED BY (§3.7): the dot, the source and the age of the price in this row, in the one price's words; the painter keeps both live (data-q-state, sv-age--stale). A real row waiting for its venue says so. #}
+            <td data-label="Priced by" class="pd-srcc" data-sv-live-key="{{ p.key }}.src">{% if p.current_price is not None %}<span class="pd-src{% if p.q.state %} pd-src--{{ p.q.state }}{% endif %}"{% if p.q_words %} data-q="{{ p.symbol }}" data-q-f="words" data-q-side="{{ p.q_side }}" data-q-state="{{ p.q.state }}"{% endif %} data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}">{{ p.q_words|default:p.mark_word|default:"—" }}</span>{% elif p.mark_wait %}<span class="pd-src pd-src--none" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}">{{ p.mark_wait }}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# Only bot trades have a close path; a portfolio Position row has nothing that could flatten it, so it gets a dash rather than a dead button. #}
-            <td data-label="Action" class="nowrap sv-cell-action">
+            <td data-label="Action" class="nowrap sv-cell-action pd-act">
                 {% if p.trade_id %}
                     <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}</button>
                 {% else %}
                     <span class="sv-unknown">&mdash;</span>
                 {% endif %}
+            </td>
+        </tr>
+        {# THE ROW'S DETAIL (2026-11-13): the Orc line first, then what the one line leaves out; hidden until its disclosure (or Enter) opens it, and kept open across a refresh by the page's script. #}
+        <tr class="pd-det{% if d.world == 'live' %} sv-row--live{% endif %}" id="pd-det-{{ p.key }}" data-pd-key="{{ p.key }}" hidden>
+            <td class="pd-det-pad" aria-hidden="true"></td>
+            <td colspan="12" class="pd-det-cell">
+                {% if d.orc %}<div class="pd-detl"><span class="pd-orcm" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 14.5a6.5 6.5 0 0 1 13 0V20h-4.2v-4.6H9.7V20H5.5z"/><path d="M12 8V3.5"/><path d="M5.5 14.5h13"/></svg></span><div class="pos-orc-line"><a href="{{ d.orc.page }}">{{ d.orc.line }}</a></div></div>{% endif %}
+                <div class="pd-det2">
+                    <span>capital {% if d.committed %}<span class="pd-m">{{ d.committed }}</span>{% if d.committed_pct %} · <span class="pos-cap-share">{{ d.committed_pct }}% of pool</span>{% endif %}{% if d.committed_kind == 'margin' %} · margin{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span class="pos-lev-cell">leverage {% if d.leverage %}<span class="pd-m">{{ d.leverage }}x</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span>P&amp;L <span class="pd-m {{ p.pct_tone }}" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} · <span class="cap-pct" title="The same P&amp;L measured against the CAPITAL this position ties up (margin for forex, premium for options); the notional figure is silent about your cash">{{ p.cap_pct_text }} on capital</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></span>
+                    {% if p.pnl_words %}<span class="pd-pnlsrc" data-sv-live-key="{{ p.key }}.pnlsrc">{{ p.pnl_words }}</span>{% endif %}
+                    {% if d.mark_since %}<span class="pd-m pos-price-pct sign-{{ d.mark_pct|sign_class }}" data-q="{{ p.symbol }}" data-q-f="since" data-q-side="{{ p.q_side }}" data-q-ref="{{ d.q_entry }}">{{ d.mark_since }}</span>{% elif d.mark_pct %}<span class="pd-m pos-price-pct sign-{{ d.mark_pct|sign_class }}">{{ d.mark_pct }}% since entry</span>{% endif %}
+                    {% if d.stop_through %}<span class="pd-thru">stop THROUGH by {{ d.stop_pct }}%</span>{% endif %}{% if d.target_through %}<span class="pd-thru">target THROUGH by {{ d.target_pct }}%</span>{% endif %}
+                    <span class="sv-ident">{{ p.strategy.name|default:d.rule|default:"-"|truncatechars:24 }}</span>
+                    <span>opened <span class="pd-m">{{ p.opened_at|date:"M d H:i" }}</span>{% if d.age %} · {{ d.age }} ago{% endif %}</span>
+                    {% if d.orc %}<a href="{{ d.orc.page }}">Orc page ›</a>{% endif %}
+                    {% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">Full detail ›</a>{% endif %}
+                </div>
             </td>
         </tr>
         {% endfor %}
@@ -439,53 +302,125 @@ says it in eToro's words.{% endcomment %}
     {% endif %}
     </div>
     {% include "_partials/close_selection_bar.html" %}
+</section>
+
+{# ── 3. The lower row: closed in 24 h, the REAL exposure, closed in 30 days ── #}
+<div class="pd-lower" data-sv-live="pos-lower">
+    <section class="pd-card pd-low pd-low--c24" aria-label="Closed in the last 24 hours">
+        <div class="pd-chead">
+            <h2 class="card-title pd-title">Closed · 24 h</h2>
+            {% for w in desk.closed_24h.worlds %}<span class="pd-csum">{% money_world w.world "1" %}{% if w.pnl.value is not None %}<span class="pd-pv {{ w.pnl.tone }}" data-sv-live-key="pos.c24.{{ w.world }}">{{ w.pnl.text }}<span class="pd-dg" aria-hidden="true">{{ w.pnl.arrow }}</span></span>{% else %}<span class="pd-none">none</span>{% endif %}</span>{% endfor %}
+            {# In both renders (the review of 2026-11-13): this region is swapped from /positions/live/, and a link only the full page carried vanished at the first sweep, leaving nothing on the page that leads to the history. #}
+            <a class="pd-lk" href="?tab=history">History ›</a>
+        </div>
+        {% if desk.closed_24h.rows %}
+        <div class="table-wrapper">
+        <table class="pd-tc" aria-label="Closed in the last 24 hours">
+            <colgroup><col class="pd-c-edge"><col class="pd-tc-sym"><col class="pd-tc-side"><col class="pd-tc-world"><col class="pd-tc-px"><col class="pd-tc-px"><col class="pd-tc-pnl"><col class="pd-tc-r"><col class="pd-tc-by"></colgroup>
+            <thead><tr><th class="pd-edge" aria-hidden="true"></th><th>Symbol</th><th>Side</th><th>World</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&amp;L</th><th class="num">R</th><th>By</th></tr></thead>
+            <tbody>
+            {% for r in desk.closed_24h.rows %}
+            <tr class="pd-tc-row{% if r.world == 'live' %} sv-row--live{% endif %}"><td class="pd-edge" aria-hidden="true"></td><td>{% if r.href %}<a class="pd-sym" href="{{ r.href }}">{{ r.symbol }}</a>{% else %}<span class="pd-sym">{{ r.symbol }}</span>{% endif %}</td><td><span class="pd-sd">{% if r.short %}▼ Short{% else %}▲ Long{% endif %}</span></td><td>{% money_world r.world "1" %}</td><td class="num pd-f">{{ r.entry }}</td><td class="num pd-f">{{ r.exit }}</td><td class="num">{% if r.pnl.value is not None %}<span class="pd-pv {{ r.pnl.tone }}">{{ r.pnl.text }}<span class="pd-dg" aria-hidden="true">{{ r.pnl.arrow }}</span></span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td><td class="num {{ r.r_tone }}">{{ r.r }}</td><td class="pd-by">{{ r.by }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <p class="pd-empty">No position closed in the last 24 hours.</p>
+        {% endif %}
+    </section>
+    <section class="pd-card pd-low pd-low--ex" aria-label="Real exposure">
+        <div class="pd-chead">{% money_world "live" "1" %}<h2 class="card-title pd-title">Exposure</h2></div>
+        {% with ex=desk.exposure %}
+        {% if ex %}
+        <div class="pd-exb">
+            {% for c in ex.classes %}
+            <div class="pd-exr"><span class="pd-exl">{{ c.name|capfirst }}</span><span class="pd-m pd-exv" data-sv-live-key="pos.x.{{ c.name }}">{{ c.text }}</span><span class="pd-m pd-exs">{{ c.share_text }}</span>
+                <div class="pd-bar" role="img" aria-label="{{ c.name|capfirst }}: {{ c.share_text }} of the real exposure"><i style="width:{{ c.share }}%"></i></div></div>
+            {% endfor %}
+            <div class="pd-lbl pd-exside">By side</div>
+            <div class="pd-split" role="img" aria-label="Long {{ ex.long_text }}, short {{ ex.short_text }}">{% if ex.long %}<i class="pd-split-l" style="width:{{ ex.long }}%"></i>{% endif %}{% if ex.short %}<i class="pd-split-s" style="width:{{ ex.short }}%"></i>{% endif %}</div>
+            <div class="pd-splitl"><span>Long <span class="pd-m">{{ ex.long_text }}</span></span><span>Short <span class="pd-m">{{ ex.short_text }}</span></span></div>
+            <div class="pd-foot">Total <span class="pd-m">{{ ex.total }}</span>{% if ex.top %} · {{ ex.top.symbol }} alone is <span class="pd-m">{{ ex.top.text }}</span>{% endif %}</div>
+        </div>
+        {% else %}
+        <p class="pd-empty">No real-money position open.</p>
+        {% endif %}
+        {% endwith %}
+    </section>
+    <section class="pd-card pd-low pd-low--c30" aria-label="Closed in thirty days, by world">
+        <div class="pd-chead"><h2 class="card-title pd-title">Closed · 30 d</h2></div>
+        <div class="table-wrapper">
+        <table class="pd-t30" aria-label="Closed in thirty days, by world">
+            <colgroup><col class="pd-t30-w"><col class="pd-t30-n"><col class="pd-t30-r"><col class="pd-t30-k"><col class="pd-t30-pf"></colgroup>
+            <thead><tr><th>World</th><th class="num">Won</th><th class="num">R / trade</th><th class="num">n</th><th class="num">PF</th></tr></thead>
+            <tbody>
+            {% for r in desk.closed_30d %}
+            <tr><td>{% money_world r.world "1" %}</td><td class="num pd-f" data-sv-live-key="pos.c30.{{ r.world }}.won">{{ r.won }}</td><td class="num {{ r.r_tone }}" data-sv-live-key="pos.c30.{{ r.world }}.r">{{ r.r }}</td><td class="num pd-f" data-sv-live-key="pos.c30.{{ r.world }}.n">{{ r.n }}</td><td class="num pd-f" data-sv-live-key="pos.c30.{{ r.world }}.pf">{{ r.pf }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        <p class="pd-foot pd-foot--c30">A world is judged from {{ desk.min_graded }} graded closes; fewer show their count and a dash. Fees are not counted yet; each world is graded on its own closes, never added to another.</p>
+    </section>
 </div>
 
+
+{% else %}
+{# ── THE CLOSED BOOK (the history tab), by world, never summed (the review of 2026-11-13: the strip added REAL, DEMO and PAPER into one "realized P&L" that read as real money). REAL keeps the keys the strip always had; DEMO and PAPER take theirs with the world's suffix. /positions/live/?tab=history refreshes this region, so it renders on the live branch too. ── #}
+<div class="pd-strip" data-sv-live="pos-strip">
+<section class="pd-card pd-hbook" aria-label="The closed book, by world, never summed">
+    <div class="pd-chead"><h2 class="card-title pd-title">The closed book</h2><span class="pd-note">by world · never summed</span><span class="pd-note pd-note--end">every closed position that carries a P&amp;L</span></div>
+    <div class="table-wrapper">
+    <table class="pd-t30 pd-hb" aria-label="The closed book, by world">
+        <colgroup><col class="pd-hb-w"><col class="pd-hb-n"><col class="pd-hb-wl"><col class="pd-hb-won"><col class="pd-hb-pnl"><col class="pd-hb-pf"><col class="pd-hb-avg"></colgroup>
+        <thead><tr><th>World</th><th class="num">Closed</th><th class="num">W / L</th><th class="num">Won</th><th class="num">Realized P&amp;L</th><th class="num">PF</th><th class="num">Avg W / L</th></tr></thead>
+        <tbody>
+        {% for w in closed_book %}
+        <tr data-pd-closed-world="{{ w.world }}" title="{{ w.title }}"><td>{% money_world w.world "1" %}</td><td class="num pd-f"><span data-sv-live-key="{{ w.keys.closed }}">{{ w.closed }}</span></td><td class="num pd-f"><span data-sv-live-key="{{ w.keys.closed_sub }}">{{ w.wl }}</span></td><td class="num pd-f"><span data-sv-live-key="{{ w.keys.win_rate }}">{{ w.won }}</span></td><td class="num">{% if w.realized.value is not None %}<span class="pd-pv {{ w.realized.tone }}"><span data-sv-live-key="{{ w.keys.realized }}">{{ w.realized.text }}</span><span class="pd-dg" aria-hidden="true">{{ w.realized.arrow }}</span></span>{% else %}<span class="sv-unknown" data-sv-live-key="{{ w.keys.realized }}">&mdash;</span>{% endif %}</td><td class="num pd-f"><span data-sv-live-key="{{ w.keys.profit_factor }}">{{ w.pf }}</span></td><td class="num pd-f"><span data-sv-live-key="{{ w.keys.avg_wl }}">{{ w.avg_wl }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if closed_book %}<p class="pd-foot pd-foot--hb">A world's rates are read from {{ closed_book.0.min_graded }} graded closes; fewer show their count and a dash. Fees are not counted yet; each world stands on its own closes, never added to another.</p>{% endif %}
+</section>
+</div>
 {% if not live_only %}
-<div class="card" style="margin-top:24px;">
-  <div class="card-header"><div class="card-title">Position Analytics</div></div>
-  {# hx-trigger is "load" and no longer "load, every 30s": this panel reads the #}
-  {# same book as the table above it, so it refreshes when those numbers do — #}
-  {# one clock on the page instead of a second unconditional one. #}
-  <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/positions/" hx-trigger="load"></div>
-</div>
-{% endif %}
-
-{% elif not live_only %}
 <!-- ── Position History Tab ────────────────────────── -->
 
 {# Best and worst are the SAME row until two trades have been graded, and the #}
 {# card used to force a + and paint it green whatever the number was — so a #}
 {# single losing short appeared as the platform's best trade and its worst. #}
 {% if have_pair %}
-<div class="grid grid-2" style="margin-bottom:20px;">
-    <div class="card fade-in-up delay-1" style="border-left:3px solid var(--accent);">
-        <div class="card-header"><span class="card-title" style="color:var(--accent);">Best Trade</span></div>
-        <div style="padding:12px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
+<div class="pd-pair">
+    <div class="pd-card pd-best">
+        <div class="pd-chead"><h2 class="card-title pd-title">Best Trade</h2></div>
+        <div class="pd-best-body">
+            <div class="pd-best-head">
                 {# Same rule as the open book above: a symbol anywhere on #}
                 {# this page is the instrument and goes to the instrument. #}
                 {% if best_trade.instrument.has_page %}{% url 'instrument_detail' best_trade.instrument.symbol as best_url%}{% endif %}
                 {% if best_url %}<a href="{{ best_url }}" class="ph-sym is-lg">{{ best_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg">{{ best_trade.instrument.symbol }}</span>{% endif %}
-                <span class="badge badge-{% if best_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ best_trade.direction }}</span>
+                {# Picked across the worlds, so it names its own (the review of 2026-11-13). #}
+                <span class="pd-best-tags">{% money_world best_world "1" %}<span class="pd-sd">{% if best_trade.direction == 'long' %}▲ Long{% else %}▼ Short{% endif %}</span></span>
             </div>
             {# Sign and colour follow the number. The best of a losing book is #}
             {# still a loss, and printing it green with a + is a lie. #}
-            <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl|measured:2 }} ({{ best_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
-            <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|measured:2 }} → {{ best_trade.current_price|measured:2 }}</span></div>
+            <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl|measured:2 }} ({{ best_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
+            <div class="ph-kv"><span>Entry → Exit</span><span>{% px best_trade.entry_price best_trade.instrument.asset_class best_trade.instrument.symbol %} → {% px best_trade.current_price best_trade.instrument.asset_class best_trade.instrument.symbol %}</span></div>
             <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d"|default:"—" }} → {{ best_trade.closed_at|date:"M d"|default:"—" }}</span></div>
         </div>
     </div>
-    <div class="card fade-in-up delay-2" style="border-left:3px solid var(--accent-red);">
-        <div class="card-header"><span class="card-title" style="color:var(--accent-red);">Worst Trade</span></div>
-        <div style="padding:12px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div class="pd-card pd-best">
+        <div class="pd-chead"><h2 class="card-title pd-title">Worst Trade</h2></div>
+        <div class="pd-best-body">
+            <div class="pd-best-head">
                 {% if worst_trade.instrument.has_page %}{% url 'instrument_detail' worst_trade.instrument.symbol as worst_url%}{% endif %}
                 {% if worst_url %}<a href="{{ worst_url }}" class="ph-sym is-lg is-loss">{{ worst_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg is-loss">{{ worst_trade.instrument.symbol }}</span>{% endif %}
-                <span class="badge badge-{% if worst_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ worst_trade.direction }}</span>
+                <span class="pd-best-tags">{% money_world worst_world "1" %}<span class="pd-sd">{% if worst_trade.direction == 'long' %}▲ Long{% else %}▼ Short{% endif %}</span></span>
             </div>
-            <div class="ph-kv"><span>P&L</span><span class="{% if worst_trade.unrealized_pnl > 0 %}up{% elif worst_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if worst_trade.unrealized_pnl > 0 %}+{% endif %}{{ worst_trade.unrealized_pnl|measured:2 }} ({{ worst_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
-            <div class="ph-kv"><span>Entry → Exit</span><span>{{ worst_trade.entry_price|measured:2 }} → {{ worst_trade.current_price|measured:2 }}</span></div>
+            <div class="ph-kv"><span>P&L</span><span class="{% if worst_trade.unrealized_pnl > 0 %}up{% elif worst_trade.unrealized_pnl < 0 %}down{% endif %}">{% if worst_trade.unrealized_pnl > 0 %}+{% endif %}{{ worst_trade.unrealized_pnl|measured:2 }} ({{ worst_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
+            <div class="ph-kv"><span>Entry → Exit</span><span>{% px worst_trade.entry_price worst_trade.instrument.asset_class worst_trade.instrument.symbol %} → {% px worst_trade.current_price worst_trade.instrument.asset_class worst_trade.instrument.symbol %}</span></div>
             <div class="ph-kv"><span>Period</span><span>{{ worst_trade.opened_at|date:"M d"|default:"—" }} → {{ worst_trade.closed_at|date:"M d"|default:"—" }}</span></div>
         </div>
     </div>
@@ -494,21 +429,21 @@ says it in eToro's words.{% endcomment %}
 {# No pair to show — either one graded close, or several that tie on P&L #}
 {# and hand back the same row twice. Name it for what it is rather than #}
 {# crowning it, and let the note below say which of the two happened. #}
-<div class="card fade-in-up delay-1" style="margin-bottom:20px;border-left:3px solid {% if best_trade.unrealized_pnl > 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
-    <div class="card-header"><span class="card-title">{% if n_graded > 1 %}Closed trades, all level{% else %}Only closed trade{% endif %}</span></div>
-    <div style="padding:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
+<div class="pd-card pd-best pd-best--one">
+    <div class="pd-chead"><h2 class="card-title pd-title">{% if n_graded > 1 %}Closed trades, all level{% else %}Only closed trade{% endif %}</h2></div>
+    <div class="pd-best-body">
+        <div class="pd-best-head">
             {# Neutral on purpose: the card's border already carries the #}
         {# outcome, and painting the only trade's name accent-green when it #}
         {# lost would be the card contradicting itself. #}
         {% if best_trade.instrument.has_page %}{% url 'instrument_detail' best_trade.instrument.symbol as only_url%}{% endif %}
         {% if only_url %}<a href="{{ only_url }}" class="ph-sym is-lg is-neutral">{{ best_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg is-neutral">{{ best_trade.instrument.symbol }}</span>{% endif %}
-            <span class="badge badge-{% if best_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ best_trade.direction }}</span>
+            <span class="pd-best-tags">{% money_world best_world "1" %}<span class="pd-sd">{% if best_trade.direction == 'long' %}▲ Long{% else %}▼ Short{% endif %}</span></span>
         </div>
-        <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl|measured:2 }} ({{ best_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
-        <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|measured:2 }} → {{ best_trade.current_price|measured:2 }}</span></div>
+        <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl|measured:2 }} ({{ best_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
+        <div class="ph-kv"><span>Entry → Exit</span><span>{% px best_trade.entry_price best_trade.instrument.asset_class best_trade.instrument.symbol %} → {% px best_trade.current_price best_trade.instrument.asset_class best_trade.instrument.symbol %}</span></div>
         <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d"|default:"—" }} → {{ best_trade.closed_at|date:"M d"|default:"—" }}</span></div>
-        <div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+        <div class="pd-best-note">
             {% if n_graded > 1 %}All {{ n_graded }} graded closes booked the
             same P&amp;L, so there is no best and no worst to name yet.
             {% else %}Best and worst need two graded closes to mean anything.{% endif %}
@@ -517,10 +452,11 @@ says it in eToro's words.{% endcomment %}
 </div>
 {% endif %}
 
-<div class="card fade-in-up delay-3">
-    <div class="card-header">
-        <span class="card-title">Trade History</span>
-        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">{{ total_closed }} TRADES</span>
+<div class="pd-card pd-hist">
+    <div class="pd-chead">
+        <h2 class="card-title pd-title">Trade History</h2>
+        <span class="pd-bub">{{ total_closed }}</span><span class="pd-note">trades</span>
+        <a class="pd-lk pd-note--end" href="?tab=open">‹ Open positions</a>
     </div>
     {% include "_partials/position_filter.html" with view=closed_view label="closed trades" %}
     {% include "_partials/position_view_note.html" with view=closed_view noun="closed trades" %}
@@ -534,26 +470,26 @@ says it in eToro's words.{% endcomment %}
         {# expanded the card the operator was leaving. #}
         <div class="ph-trade-card{% if d.world == "live" %} sv-row--live{% endif %}" onclick="if (!event.target.closest('a')) { this.classList.toggle('expanded'); }">
             <div class="ph-trade-row">
-                <div style="display:flex;align-items:center;gap:10px;">
-                    <span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}" style="font-size:9px;padding:2px 6px;">{{ p.direction }}</span>
+                <div class="ph-trade-l">
+                    <span class="pd-sd">{% if p.direction == 'long' %}▲ Long{% else %}▼ Short{% endif %}</span>
                     {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as closed_url%}{% endif %}
                     {% if closed_url %}<a href="{{ closed_url }}" class="ph-sym">{{ p.instrument.symbol }}</a>{% else %}<span class="ph-sym">{{ p.instrument.symbol }}</span>{% endif %}
-                    {% money_world d.world %}
-                    {% if p.strategy %}<span style="font-size:10px;color:var(--text-muted);">via {{ p.strategy.name|truncatechars:20 }}</span>{% endif %}
+                    {% money_world d.world "1" %}
+                    {% if p.strategy %}<span class="ph-via">via {{ p.strategy.name|truncatechars:20 }}</span>{% endif %}
                 </div>
-                <div style="display:flex;align-items:center;gap:16px;">
-                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ p.opened_at|date:"M d H:i"|default:"—" }} → {{ p.closed_at|date:"M d H:i"|default:"—" }}</span>
+                <div class="ph-trade-r">
+                    <span class="ph-when">{{ p.opened_at|date:"M d H:i"|default:"—" }} → {{ p.closed_at|date:"M d H:i"|default:"—" }}</span>
                     {# sign_class, not an inline "if pnl >= 0": smart-if swallows #}
                     {# the TypeError from comparing None and evaluates it False, #}
                     {# so an UNGRADED close was painted in the loss colour — the #}
                     {# platform stating a loss it had never measured. #}
-                    <span class="ph-num sign-{{ p.unrealized_pnl|sign_class }}" style="min-width:80px;">
+                    <span class="ph-num ph-num--pnl sign-{{ p.unrealized_pnl|sign_class }}">
                         {% if p.unrealized_pnl > 0 %}+{% endif %}{{ p.unrealized_pnl|measured:2 }}
                     </span>
-                    <span class="ph-num is-sm sign-{{ p.unrealized_pnl_pct|sign_class }}" style="min-width:55px;">
+                    <span class="ph-num is-sm sign-{{ p.unrealized_pnl_pct|sign_class }}">
                         {% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|measured_pct:2 }}
                     </span>
-                    <span class="ph-expand-icon">&#9662;</span>
+                    <svg class="ph-expand-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>
                 </div>
             </div>
             <div class="ph-trade-detail">
@@ -648,19 +584,20 @@ says it in eToro's words.{% endcomment %}
                 the colour, direction is the marker. No number, no bar.
                 {% endcomment %}
                 <div class="ph-chart-bar">
-                    <div class="ph-chart-label" style="left:0;">Entry: {{ p.entry_price|measured:2 }}</div>
+                    <div class="ph-chart-label ph-chart-label--l">Entry: {{ p.entry_price|measured:2 }}</div>
                     <div class="ph-chart-track">
                         {% if p.bar_pct is not None %}
                         <div class="ph-chart-fill {{ p.unrealized_pnl|sign_class }}"
                              style="width:{{ p.bar_pct }}%;max-width:100%;min-width:4px;"
                              title="{{ p.unrealized_pnl_pct|measured_pct:2 }} — bar scaled against the largest move in this history">
-                            <span class="ph-chart-marker">{% if p.direction == 'long' %}&#9654;{% else %}&#9664;{% endif %}</span>
+                            {# The side, beside the bar's end on the track (the review of 2026-11-13: ◀ ▶ sat on the fills at 2.8:1). #}
+                            <span class="ph-chart-marker" aria-hidden="true">{% if p.direction == 'long' %}▲{% else %}▼{% endif %}</span>
                         </div>
                         {% else %}
                         <div class="ph-chart-empty">no return to scale</div>
                         {% endif %}
                     </div>
-                    <div class="ph-chart-label" style="right:0;">Exit: {{ p.current_price|measured:2 }}</div>
+                    <div class="ph-chart-label ph-chart-label--r">Exit: {{ p.current_price|measured:2 }}</div>
                 </div>
             </div>
         </div>
@@ -680,378 +617,83 @@ says it in eToro's words.{% endcomment %}
     {% endif %}
 </div>
 {% endif %}
+{% endif %}
+{# THE CARDS UNDER EITHER TAB (the review of 2026-11-13): main showed the broker's own holdings and the capital card on both tabs, and so does the desk; the analytics read the open book and stand under it alone. #}
+{% if broker %}
+{% comment %}── At the broker — the broker's own holdings, verbatim ─────────
+Display only: nothing here is imported into any book. CLAIMED means a
+Sauron row exists for the symbol; UNCLAIMED is a position opened by hand
+or an orphan — real exposure the platform did not open.
 
+At eToro each position is claimed apart, as /treasury/'s outside list
+claims it (2026-10-31, etoro_used.mark_holdings): STOPPED is a close
+Sauron gave up on that eToro still lists, NO BROKER a live row on the
+symbol that records no broker (the split counts it apart), and UNCLAIMED
+says it in eToro's words.{% endcomment %}
+<section class="pd-card pd-broker" aria-label="At the broker">
+    <div class="pd-chead">
+        {# The account's world as its chip, never a money word in the display face (the review of 2026-11-13); the connection's own words stay in the title. #}
+        <h2 class="card-title pd-title" title="{{ broker.env }}">At the broker · {{ broker.name }} {{ broker.label }}</h2>{% with env=broker.env|upper %}{% if env|slice:":4" == "LIVE" %}{% money_world "live" "1" %}{% elif env|slice:":4" == "DEMO" %}{% money_world "demo" "1" %}{% elif env|slice:":5" == "PAPER" %}{% money_world "paper" "1" %}{% else %}<span class="pd-note">{{ broker.env }}</span>{% endif %}{% endwith %}
+        {% if broker.positions %}
+        <span class="pd-note pd-note--end bk-age sv-age" data-sv-at="{{ broker.positions.at|date:'c' }}">{{ broker.positions.at|timesince }} ago</span>
+        {% endif %}
+    </div>
+    {% if broker.positions %}
+    {% if broker.positions.rows %}
+    <div class="table-wrapper">
+        <table class="bkp-table sv-stack">
+            <thead><tr>
+                <th>SYMBOL</th><th>TYPE</th><th>SIDE</th><th>QTY</th>
+                <th>AVG COST</th><th>MARK</th><th>VALUE</th>
+                <th>UNREAL P&L</th><th>CCY</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for row in broker.positions.rows %}
+            {# spaceless (2026-09-28): the ten labels lengthen each row by 176 characters of markup; the whitespace between its cells, which no layout reads, pays for them, so a reader of a row's first 600 characters (tests/test_broker_truth.py) still reaches its claim chip. #}
+            {% spaceless %}<tr>
+                {# data-label: the header's words (2026-09-28). The last header is empty on a wide screen, where the chip names itself; stacked, it reads "Claim". #}
+                <td data-label="Symbol">{{ row.symbol }}</td>
+                <td data-label="Type">{{ row.sec_type }}</td>
+                <td data-label="Side" class="{% if row.side == 'BUY' %}bkp-up{% else %}bkp-down{% endif %}">{{ row.side }}</td>
+                <td data-label="Qty">{{ row.qty|qty }}</td>
+                <td data-label="Avg cost">{{ row.avg_cost|floatformat:"-4" }}</td>
+                {# eToro's list carries no mark and no value, and its P&L is the position's own net profit (2026-11-06, views._render_positions: net_profit_t): a dash where eToro sent nothing, never the stored constant 0. #}
+                <td data-label="Mark">{% if broker.kind == "etoro" %}&mdash;{% else %}{{ row.market_price|floatformat:"-4" }}{% endif %}</td>
+                <td data-label="Value">{% if broker.kind == "etoro" %}&mdash;{% else %}{{ row.market_value|floatformat:2 }}{% endif %}</td>
+                <td data-label="Unreal P&amp;L" class="{% if broker.kind == 'etoro' %}{% if row.net_profit_t %}bkp-{{ row.net_profit|sign_class }}{% else %}sv-unknown{% endif %}{% elif row.unrealized_pnl >= 0 %}bkp-up{% else %}bkp-down{% endif %}">{% if broker.kind == "etoro" %}{% if row.net_profit_t %}{{ row.net_profit_t }}{% else %}&mdash;{% endif %}{% else %}{{ row.unrealized_pnl|floatformat:2 }}{% endif %}</td>
+                <td data-label="Ccy">{{ row.currency }}</td>
+                <td data-label="Claim">{% if row.claim == "stopped" %}<span class="bkp-claim bkp-claim--stopped" title="Sauron stopped trying to close this position and eToro still lists it: close it at eToro.">STOPPED</span>{% elif row.claim == "no_broker" %}<span class="bkp-claim bkp-claim--nobroker" title="A live Sauron row on this symbol records no broker, so it is not counted as eToro's: it may be this position.">NO BROKER</span>{% elif row.claimed %}<span class="bkp-claim">CLAIMED</span>{% elif broker.kind == "etoro" %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row accounts for this position: opened in the eToro app, a second position beside Sauron's, or an orphan. Real exposure the platform does not manage.">UNCLAIMED</span>{% else %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row matches this symbol — opened by hand in TWS, or an orphan. Real exposure the platform did not open and does not manage.">UNCLAIMED</span>{% endif %}</td>
+            </tr>{% endspaceless %}
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="pd-empty">The broker reports no holdings on this account.</p>
+    {% endif %}
+    {% else %}
+    <p class="pd-empty">
+        <span class="sv-unknown">—</span> no holdings reading yet. Unread is not empty:
+        the sync lands one within 15 minutes of the gateway answering.
+    </p>
+    {% endif %}
+</section>
+{% endif %}
+
+{# ── Capital · pools & cash: the money question, answered by one service (the shared card) ── #}
+{% include "_partials/capital_card.html" %}
+
+{% if tab == 'open' and not live_only %}
+<section class="pd-card pd-analytics" aria-label="Position analytics">
+  <div class="pd-chead"><h2 class="card-title pd-title">Position Analytics</h2></div>
+  {# hx-trigger is "load" and no longer "load, every 30s": this panel reads the #}
+  {# same book as the table above it, so it refreshes when those numbers do — #}
+  {# one clock on the page instead of a second unconditional one. #}
+  <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/positions/" hx-trigger="load"></div>
+</section>
+{% endif %}
+</div>
 {% if not live_only %}
-<style>
-/* Tab navigation */
-.pos-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
-.pos-tab {
-    padding: 10px 20px; font-family: var(--font-display); font-size: 12px;
-    letter-spacing: 2px; text-transform: uppercase; text-decoration: none;
-    color: var(--text-muted); border-bottom: 2px solid transparent;
-    transition: all 0.2s;
-}
-.pos-tab:hover { color: var(--text-primary); }
-.pos-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-/* History key-value pairs */
-.ph-kv {
-    display: flex; justify-content: space-between; padding: 5px 0;
-    font-family: var(--font-mono); font-size: 12px;
-    border-bottom: 1px dashed rgba(19,48,32,0.3);
-}
-.ph-kv span:first-child { color: var(--text-muted); }
-.ph-kv span:last-child { color: var(--text-primary); }
-
-/* Trade cards */
-.ph-trade-card {
-    border-bottom: 1px solid var(--border); cursor: pointer;
-    transition: background 0.15s;
-}
-.ph-trade-card:hover { background: rgba(0,232,104,0.02); }
-/* The row is two flex clusters of fixed-min-width cells. Flex items do not
-   shrink below min-content, and .card is overflow:visible — so on any width
-   narrower than their sum the row pushed straight out of the card and took
-   the whole PAGE sideways with it. Wrapping is the honest fix: the cluster
-   drops to a second line instead of the body growing a scrollbar. */
-.ph-trade-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 14px; gap: 12px;
-    flex-wrap: wrap; row-gap: 8px;
-}
-.ph-trade-row > div { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
-.ph-expand-icon {
-    font-size: 10px; color: var(--text-muted);
-    transition: transform 0.2s;
-}
-.ph-trade-card.expanded .ph-expand-icon { transform: rotate(180deg); }
-
-/* Expandable detail */
-.ph-trade-detail {
-    max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
-    padding: 0 14px;
-}
-/* overflow:hidden is what makes the collapse animate, and while EXPANDED it
-   was an amputation: content past the cap was cut with no scrollbar and no
-   sign. The shared sheet raises the cap; this makes the leftover scroll
-   inside the panel, so nothing in the card is ever silently lost. */
-.ph-trade-card.expanded .ph-trade-detail {
-    max-height: 300px; padding: 0 14px 16px; overflow: auto;
-}
-
-/* Bare 1fr tracks cannot shrink below their content, so this grid set the
-   card's floor width and blew the page out sideways with it. The shared
-   sheet now restates the tracks one selector deeper (.card .ph-detail-grid,
-   auto-fit) and wins here — this stays honest as the standalone floor. */
-.ph-detail-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
-    gap: 12px;
-    margin-bottom: 14px;
-}
-.ph-detail-item { }
-.ph-detail-label {
-    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
-    color: var(--text-muted); text-transform: uppercase; margin-bottom: 3px;
-}
-.ph-detail-value {
-    font-family: var(--font-mono); font-size: 13px; font-weight: 600;
-    color: var(--text-primary);
-}
-/* ── Price and capital cells ──────────────────────────────────────────
-   A price with no percentage under it asks the operator to divide in their
-   head, every row, on every glance — and the answer they most need (how far
-   is my stop, how far is my target, what has this actually done) is exactly
-   the one the raw number withholds.
-
-   Two lines per cell: the figure at full weight, its percentage under it at
-   9px in the muted ink. The percentage never competes with the price; it
-   only stops the price being ambiguous. */
-.pos-price-cell, .pos-cap-cell {
-    line-height: 1.25;
-    /* Column widths were set by four bare numbers; two-line cells need the
-       table to stop distributing space by content alone or the percentage
-       wraps mid-phrase. */
-    white-space: nowrap;
-}
-.pos-price, .pos-cap-money { display: block; }
-.pos-price-pct, .pos-cap-share, .pos-cap-kind {
-    display: block;
-    font-family: var(--font-mono); font-size: 9px; letter-spacing: .04em;
-    color: var(--text-muted); font-weight: 400;
-}
-/* The entry is the reference every other percentage is measured from, so it
-   is labelled rather than given a meaningless 0.00%. */
-.pos-price-pct.is-ref { opacity: .55; }
-/* Stop and target keep their colour on the PRICE, where it means "this is
-   the losing end" — not on the distance, which is neutral information. */
-.pos-price-cell.is-stop .pos-price { color: var(--accent-red); }
-.pos-price-cell.is-target .pos-price { color: var(--accent); }
-
-.pos-cap-money { font-family: var(--font-mono); font-weight: 600; }
-/* The share of the pool is the point of this column, so it is the one
-   sub-line that is allowed to be read before the money above it. */
-.pos-cap-share { color: var(--text-secondary); }
-.pos-cap-kind {
-    color: var(--accent-gold-ink); text-transform: uppercase;
-    letter-spacing: .1em; font-size: 8.5px;
-}
-
-/* `.sign-*` lives in sauron.css and ties with `.ph-detail-value` on
-   specificity — and this block is loaded AFTER it, so the plain colour won
-   and the ROI cell lost its win/loss colour entirely. Two classes beat one. */
-.ph-detail-value.sign-up   { color: var(--accent); }
-.ph-detail-value.sign-down { color: var(--accent-red); }
-.ph-detail-value.sign-flat { color: var(--text-muted); }
-
-/* `.sign-up` / `.sign-down` / `.sign-flat` are in sauron.css: the
-   `sign_class` filter is available to every template, so its classes
-   cannot live in one page's inline style. */
-.ph-num {
-    font-family: var(--font-mono); font-weight: 700; font-size: 13px;
-    text-align: right;
-}
-.ph-num.is-sm { font-weight: 400; font-size: 11px; }
-
-/* Mini chart bar */
-.ph-chart-bar {
-    position: relative; padding: 18px 0 4px;
-}
-.ph-chart-label {
-    position: absolute; top: 0; font-size: 9px; font-family: var(--font-mono);
-    color: var(--text-muted);
-}
-.ph-chart-track {
-    height: 6px; background: rgba(19,48,32,0.4); border-radius: 3px;
-    overflow: visible; position: relative;
-}
-.ph-chart-fill {
-    height: 100%; border-radius: 3px; position: relative;
-    transition: width 0.4s ease;
-}
-.ph-chart-fill.up { background: linear-gradient(90deg, var(--accent), rgba(0,232,104,0.4)); }
-.ph-chart-fill.down { background: linear-gradient(90deg, var(--accent-red), rgba(220,50,50,0.4)); }
-/* `sign_class` has a third answer. Without a rule for it the bar keeps its
-   width and paints nothing — an invisible bar reads as no bar at all, which
-   is the one thing an unmeasured value must not look like. */
-.ph-chart-fill.flat { background: var(--text-muted); opacity: 0.55; }
-.ph-chart-marker {
-    position: absolute; right: -4px; top: -5px; font-size: 10px;
-    color: var(--text-primary);
-}
-/* A close nothing could price gets an honest blank, not a full track that
-   reads as a complete move. */
-.ph-chart-empty {
-    font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
-    line-height: 6px;
-}
-
-/* ══ Three gestures, three destinations ═══════════════════════════════
-   Hover a row and the dwell card previews the position. Click the row and
-   the trade's full detail opens. Click the SYMBOL and the instrument
-   underneath it opens — the chart, the indicators, the signals, the news
-   for the thing actually being held. That third one is new, and it only
-   exists as far as it is VISIBLE: a link painted like the cell next to it
-   is a link nobody presses, so the symbol carries the accent, an offset
-   dotted underline that goes solid under the pointer, and a focus ring
-   for the operator who never touches the mouse.
-
-   All of the card CSS below lives here rather than in static/css/
-   sauron.css, which another hand owns. The consequence is real and worth
-   stating: this card is also built on the Op Center, the portfolio
-   overview and the eye panel, and there it gets the shared sheet's
-   chrome without these refinements. Nothing here is load-bearing for
-   legibility — every rule is a refinement over a block that already
-   reads — but the block belongs in the shared sheet the day that file is
-   free to take it.                                                     */
-
-/* The symbol and its detail link, side by side inside one cell. The
-   wrapper is an inline-flex SPAN and not the <td> itself: display:flex
-   on a table cell drops it out of the table's column model and takes the
-   header alignment with it. white-space:normal because tbody td is
-   nowrap globally, and a cell that cannot wrap cannot flex-wrap either —
-   which on a narrow window is exactly how one long symbol sets the floor
-   width of the whole table. */
-.pos-sym-cell {
-    display: inline-flex; align-items: baseline;
-    flex-wrap: wrap; gap: 4px 8px; min-width: 0;
-    white-space: normal;
-    font-family: var(--font-display); font-size: 13px;
-}
-.pos-sym-cell .pos-sym-link {
-    font-weight: 700; letter-spacing: .04em;
-    overflow-wrap: anywhere;
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    text-underline-offset: 3px;
-}
-.pos-sym-cell .pos-sym-link:hover,
-.pos-sym-cell .pos-sym-link:focus-visible {
-    color: var(--accent-bright);
-    text-decoration-style: solid;
-    text-decoration-color: currentColor;
-}
-/* A symbol with no instrument page behind it must not look like one. */
-.pos-sym-plain { color: var(--text-secondary); font-weight: 700; }
-
-/* The keyboard's way to the page the row's click opens. Muted until the
-   row is hovered or the link is focused, so the table still reads as a
-   table — but never display:none, because a control that appears only
-   under a pointer is a control a keyboard can never reach. */
-.pos-row-detail {
-    font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em;
-    text-transform: uppercase; text-decoration: none;
-    color: var(--text-muted);
-    border-bottom: 1px solid transparent;
-    transition: color .12s ease, border-color .12s ease;
-}
-[data-sv-position-row]:hover .pos-row-detail,
-.pos-row-detail:hover,
-.pos-row-detail:focus-visible {
-    color: var(--accent);
-    border-bottom-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.pos-sym-cell a:focus-visible,
-.ph-sym:focus-visible {
-    outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 1px;
-}
-/* The Orc that follows the row (O1d): one muted line under the symbol,
-   read by code, its page one click away. Wraps rather than widen the
-   column. */
-.pos-orc-line {
-    font-family: var(--font-mono); font-size: 9px; line-height: 1.35;
-    color: var(--text-muted); white-space: normal; max-width: 42ch;
-    margin-top: 2px;
-}
-.pos-orc-line a { color: inherit; text-decoration: none; }
-.pos-orc-line a:hover, .pos-orc-line a:focus-visible { color: var(--accent); }
-
-/* Only a row that HAS a destination behaves like one. data-pos-href is
-   empty on a row from the shared portfolio book — nothing on this
-   platform can open, or close, a position with no trade behind it — and
-   a pointer cursor there promises a page that does not exist.
-   The stroke rides the first cell rather than the <tr>: under
-   border-collapse a row's own box-shadow is not painted at all in some
-   engines, and a hover cue that renders in one browser is worse than
-   none. */
-[data-sv-position-row]:not([data-pos-href=""]) { cursor: pointer; }
-[data-sv-position-row] > td:first-child {
-    box-shadow: inset 2px 0 0 0 transparent;
-    transition: box-shadow .12s ease;
-}
-[data-sv-position-row]:not([data-pos-href=""]):hover > td:first-child,
-[data-sv-position-row]:focus-within > td:first-child {
-    box-shadow: inset 2px 0 0 0 var(--accent);
-}
-
-/* ── The dwell card (static/js/sv-position-card.js) ─────────────────
-   Portalled to <body>, so it is not inside this page's markup — but it
-   is this page's card, and these rules reach it from here.            */
-
-/* Four blocks divided by four identical dashed rules read as one long
-   list. A named section with a hairline running off the end of its name
-   is what turns the card into a document: capital, levels, provenance,
-   why. Thin stroke, square cap, no box — the house language. */
-.pos-pop .pos-pop-sec-cap {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 6px;
-}
-.pos-pop .pos-pop-sec-cap::after {
-    content: ""; flex: 1 1 auto; min-width: 0; height: 1px;
-    background: color-mix(in srgb, var(--border) 85%, transparent);
-}
-
-/* The title is the link to the instrument, so it has to read as both:
-   display type for the name, the accent and the house's "goes somewhere"
-   chevron for the destination. */
-.pos-pop a.pos-pop-sym {
-    display: inline-block; text-decoration: none;
-    text-underline-offset: 3px;
-}
-/* The same mark the notification card's linked items carry, so "this goes
-   somewhere" reads the same everywhere on the platform. */
-.pos-pop a.pos-pop-sym::after {
-    content: " ›"; font-family: var(--font-mono); font-size: 13px;
-    opacity: .75;
-}
-.pos-pop a.pos-pop-sym:hover,
-.pos-pop a.pos-pop-sym:focus-visible {
-    color: var(--accent-bright); text-decoration: underline;
-}
-
-/* The bottom line of the ledger — what this position is worth if it is
-   closed right now — sat fifth among five rows of identical weight,
-   which on a card read in two seconds is the same as not being there. */
-.pos-pop .pos-pop-mrow.is-net {
-    margin-top: 5px; padding-top: 6px;
-    border-top: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
-}
-.pos-pop .pos-pop-mrow.is-net .ml {
-    color: var(--text-secondary); font-weight: 700;
-}
-.pos-pop .pos-pop-mrow.is-net .mv { font-size: 14px; }
-
-/* Two navigations sharing a line and the close alone beneath them. The
-   auto-fit track has a min() floor so it collapses to one column instead
-   of setting a width the card has to grow to; the close spans the row on
-   purpose — it is the destructive one, and the pointer travels to a page
-   many times for every once it flattens a position. */
-.pos-pop .pos-pop-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
-    gap: 6px;
-}
-.pos-pop .pos-pop-close { grid-column: 1 / -1; }
-.pos-pop .pos-pop-inst,
-.pos-pop .pos-pop-open { min-width: 0; overflow-wrap: anywhere; }
-
-/* It now teaches three gestures rather than naming one page, which is a
-   sentence and not a label. */
-.pos-pop .nf-pop-cta { text-align: left; line-height: 1.5; }
-
-/* ── History tab ────────────────────────────────────────────────────
-   Same rule, same page: a symbol is the instrument and goes to the
-   instrument, whether the position is open or graded and gone. */
-.ph-sym {
-    font-family: var(--font-display); font-size: 14px; font-weight: 700;
-    color: var(--accent); overflow-wrap: anywhere;
-}
-.ph-sym.is-lg { font-size: 18px; }
-.ph-sym.is-loss { color: var(--accent-red); }
-/* The only-closed-trade card carries its outcome in its border; painting
-   the name green when that one trade lost would contradict it. */
-.ph-sym.is-neutral { color: var(--text-primary); }
-a.ph-sym {
-    text-decoration: underline; text-decoration-style: dotted;
-    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
-    text-underline-offset: 3px;
-}
-a.ph-sym:hover, a.ph-sym:focus-visible {
-    text-decoration-style: solid;
-    text-decoration-color: currentColor;
-}
-a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
-    color: var(--accent);
-}
-
-@media (max-width: 768px) {
-    .ph-trade-row { flex-direction: column; align-items: flex-start; gap: 6px; }
-}
-
-/* The card is nearly the whole screen at this width, and three action
-   buttons across it would each be four characters wide. Nothing on this
-   page may scroll sideways — the table has its own wrapper for that. */
-@media (max-width: 420px) {
-    .pos-pop .pos-pop-actions { grid-template-columns: 1fr; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    [data-sv-position-row] > td:first-child,
-    .pos-row-detail { transition: none; }
-}
-</style>
-
 {% url 'positions_live' as live_url %}
 {% include "_partials/live_region.html" %}
 {% endif %}
@@ -1064,6 +706,8 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
 <script src="{% static 'js/sv-position-card.js' %}" defer></script>
 {# The ticks, the selection bar, "Should I close?" and "Close selected". #}
 <script src="{% static 'js/sv-close-advice.js' %}" defer></script>
+{# The desk's own keys and disclosures (2026-11-13): J K move, Enter the Orc line; nothing here closes. #}
+<script src="{% static 'js/sv-positions.js' %}" defer></script>
 
 <script>
 /* CLOSE ALL. Position by position is the safe default and the wrong tool

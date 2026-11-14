@@ -19,7 +19,8 @@ of the tab order, hidden from screen readers (2026-11-13).
     <span class="t-price">{{ item.price }}</span>
     <span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
     {% elif item.type == "news" %}
-    <span class="t-badge news">NEWS</span>
+    {# Its time, as the board's band says it ("12:30"), never a NEWS badge under the lane's own News label (the desk v2 board, 2026-11-13). #}
+    {% if item.published_at %}<span class="t-time">{{ item.published_at }}</span>{% endif %}
     <span>{{ item.title|truncatechars:50 }}</span>
     {% elif item.type == "strategy" %}
     <span class="t-badge strat">STRAT</span>

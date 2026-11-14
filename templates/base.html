@@ -63,6 +63,8 @@
     {# The frame's faces (the magic kept, 2026-11-12): Orbitron for titles and the nav rows' face at 600. Two links, because text= applies to a whole request, and it is what keeps the digits out: Orbitron comes as a subset of the capitals, the Latin-1 capitals and the title punctuation only, since a digit must never be drawn in Orbitron (its 5, 6, 8 and 9 are the least distinct of the four faces). A title's digits fall to JetBrains Mono, the next face of --sv-font-display. #}
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&amp;text=ABCDEFGHIJKLMNOPQRSTUVWXYZ%C3%80%C3%81%C3%82%C3%84%C3%87%C3%88%C3%89%C3%8A%C3%8B%C3%8E%C3%8F%C3%94%C3%96%C3%99%C3%9B%C3%9C%20%C2%B7%E2%80%94%E2%80%93-%26%27%E2%80%99()%2F%3A.%2C!%3F%23%2B%25&amp;display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&amp;display=swap" rel="stylesheet">
+    {# The figures' arrows (the desk v2 board, 2026-11-13): Google's latin subsets of Inter and JetBrains Mono lack ▲ ▼ ≈ ≥ → ↓, so a fallback face drew them; this one link draws them in JetBrains Mono. #}
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400..700&amp;text=%E2%96%B2%E2%96%BC%E2%89%88%E2%89%A5%E2%86%92%E2%86%93&amp;display=swap" rel="stylesheet">
 
 
 
@@ -125,12 +127,19 @@
     <script src="{% static 'js/sv-rail-filters.js' %}" defer></script>
     {# The kit (UI plan S1a, 2026-11-06): the components on the tokens, and the calm of a work page. After every shell sheet it restyles by class, before the phone tier. #}
     <link rel="stylesheet" href="{% static 'css/sv-kit.css' %}">
+    {# The frame (UI redo B1 + B2, the desk v2 board, 2026-11-13): the 44 px top bar, the one 32 px band, the 32 px status bar, the 40 px dock, the rail as a column, the compact menu. After the kit, before the phone tier, which keeps the phone's own frame. #}
+    <link rel="stylesheet" href="{% static 'css/sv-frame.css' %}">
+    <script src="{% static 'js/sv-frame.js' %}" defer></script>
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
 </head>
 {# data-sv-ambience (the magic kept, 2026-11-12): how much of Sauron's theme shows: magic, calm or off. Display only. A page opts into the embers by filling sv_embers with " data-sv-embers", once it has proved no figure of its sits on the void (tests/test_magic_layer.py); that page also wears the Eye's light reaching the page (sv-kit.css, the void). A page with no embers opts into that light alone by filling sv_light with " data-sv-light", on the same proof (2026-11-13). #}
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}" data-sv-ambience="{% get_ambience %}"{% block sv_embers %}{% endblock %}{% block sv_light %}{% endblock %}>
+
+{% include "_partials/sv_icons.html" %}
+{# The keyboard's first stop (the desk v2 board's review, 2026-11-13): past the menu, the top bar, the band's moving prices and the bar, straight to the page. Seen only while it has the focus. #}
+<a class="sv-skip" href="#svPage">Skip to the page</a>
 
 <!-- Animated grid background -->
 <div class="grid-bg"></div>
@@ -440,7 +449,7 @@
                         <polygon points="12,1.4 21.2,6.7 21.2,17.3 12,22.6 2.8,17.3 2.8,6.7"
                                  stroke-width="1"/>
                         <defs><clipPath id="svBrandLid"><path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"/></clipPath></defs>
-                        <path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"
+                        <path class="sv-brand-almond" d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"
                               fill="currentColor" fill-opacity="0.14" stroke-width="1.5"/>
                         {# The iris looks toward the pointer under Ambience Magic (sv-moments.js moves this group, inside the lid's own almond). #}
                         <g clip-path="url(#svBrandLid)">
@@ -449,12 +458,17 @@
                                 <circle cx="12" cy="12" r="1.25" fill="var(--bg-secondary, #081410)" stroke="none"/>
                             </g>
                         </g>
+                        {# The Eye's two other states (the desk v2 board, Twist2 "Le battement du système"): the market shut, its lids lower over the iris; the session locked, it shuts. Drawn only in those states (sv-frame.css). #}
+                        <g class="sv-brand-lids"><path d="M4.2 12Q12 3.4 19.8 12Q12 7.4 4.2 12Z M4.2 12Q12 20.6 19.8 12Q12 16.6 4.2 12Z" class="sv-lid-fill" stroke="none"/><path d="M4.2 12Q12 7.4 19.8 12M4.2 12Q12 16.6 19.8 12" stroke-width="1.5"/></g>
+                        <g class="sv-brand-shut"><path d="M4.2 12Q12 18.4 19.8 12" stroke-width="1.5"/><path d="M7.2 14.6l-1.1 1.6M12 15.9v1.9M16.8 14.6l1.1 1.6" stroke-width="1"/></g>
                         <path d="M12 1.4V3.2M12 22.6V20.8" stroke-width="0.9"/>
                     </svg>
                 </span>
                 <span class="brand-text">SAURON</span>
             </h1>
             <div class="subtitle">TRADING INTELLIGENCE</div>
+            {# The menu folds to its icons from its own head (the desk v2 board, 2026-11-13: the page's edge toggles go); folded, the Eye unfolds it. toggleSidebar() keeps the choice, as before. #}
+            <button type="button" class="sv-side-fold" onclick="toggleSidebar()" aria-label="Fold or unfold the menu" title="Fold the menu to its icons; folded, the Eye opens it again"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-panel-left"/></svg></button>
 <!-- UPGRADE-9: sidebar toggle moved to unified edge button -->
         </div>
         <nav class="sidebar-nav" data-nav-page-id="{{ page_id }}">
@@ -475,135 +489,158 @@
                Glyph duplication is deliberately NOT fixed here: several marks appear on two or three rows, against the
                "one mark, one row" convention other comments claim. Renaming marks and regrouping rows in the same
                change would make both unreviewable.{% endcomment %}
-            <div class="nav-section">Amon Hen</div>
+            <div class="nav-section" data-nav-sec="amon-hen" data-nav-open><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">Amon Hen</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
             {% comment %}The Oculus sits ABOVE every other row on purpose: it is the only page that answers "is the machine
                turning, and which wheels are engaged" rather than one subsystem's own question. Its mark U+29BF is used nowhere
                else (U+25CE was taken by Trade Forensics). It owns no data and caches nothing (2026-09-13).{% endcomment %}
-            <a href="{% url 'oculus_dashboard' %}" class="nav-link {% if page_id == 'oculus' %}active{% endif %}"><span class="icon">⦿</span> <span class="label-text">Oculus</span></a>
-            <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Operations Center</span></a>
+            <a href="{% url 'oculus_dashboard' %}" class="nav-link {% if page_id == 'oculus' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-oculus"/></svg></span> <span class="label-text">Oculus</span></a>
+            <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ops-center"/></svg></span> <span class="label-text">Operations Center</span></a>
 
             {% comment %}THE BOOK — where the money is and what it is exposed to. The four sizing pages sit together because
                they answer one question at four zooms: each pool's share of the ACCOUNT, one TICK's entries against one budget,
                per-RULE multipliers, and the correlation depth behind all three. One row named "allocator" once hid the
                second (2026-09-12), which is why all four are named for what they size.{% endcomment %}
-            <div class="nav-section">The book &middot; the money</div>
-            <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Portfolio</span></a>
-            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon">⌁</span> <span class="label-text">Brokers</span></a>
-            <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon">⛁</span> <span class="label-text">Treasury</span></a>
+            <div class="nav-section" data-nav-sec="the-book" data-nav-open><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The book &middot; the money</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-portfolio"/></svg></span> <span class="label-text">Portfolio</span></a>
+            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-brokers"/></svg></span> <span class="label-text">Brokers</span></a>
+            <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-treasury"/></svg></span> <span class="label-text">Treasury</span></a>
             {% comment %}Withdrawals asked for in advance (2026-09-28): the reserve held back from new sizing, then marked
                withdrawn when the money leaves. Mark U+21E9, the down arrow beside the Promotion Ladder's U+21E7, used nowhere else.{% endcomment %}
-            <a href="{% url 'withdrawals' %}" class="nav-link {% if page_id == 'withdrawals' %}active{% endif %}"><span class="icon">⇩</span> <span class="label-text">Withdrawals</span></a>
-            <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
-            <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon">▦</span> <span class="label-text">Tax Lots</span></a>
-            <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>
+            <a href="{% url 'withdrawals' %}" class="nav-link {% if page_id == 'withdrawals' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-withdrawals"/></svg></span> <span class="label-text">Withdrawals</span></a>
+            <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-positions"/></svg></span> <span class="label-text">Positions</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">P</kbd></span></a>
+            <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-tax-lots"/></svg></span> <span class="label-text">Tax Lots</span></a>
+            <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bot-program"/></svg></span> <span class="label-text">Bot Program</span></a>
             {% comment %}ROUTED AND IN NO MENU until 2026-09-13, so unreachable by anything but a typed URL — the defect the
                comment beside the ladder pages already names: "a page nobody can find is a page that does not exist". One row per
                bot config with its open count, 24h fills and 24h P&L, and the hand-taken book counted separately. Mark U+25F0,
                used nowhere else.{% endcomment %}
-            <a href="{% url 'asset_bots_dashboard' %}" class="nav-link {% if page_id == 'asset_bots' %}active{% endif %}"><span class="icon">◰</span> <span class="label-text">Asset Bots</span></a>
-            <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon">◫</span> <span class="label-text">Share Allocator</span></a>
+            <a href="{% url 'asset_bots_dashboard' %}" class="nav-link {% if page_id == 'asset_bots' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-asset-bots"/></svg></span> <span class="label-text">Asset Bots</span></a>
+            <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-share-allocator"/></svg></span> <span class="label-text">Share Allocator</span></a>
             {% comment %}The Share Allocator sizes each POOL; the Capital Desk ranks ONE TICK's entries against one risk budget
                and says what it refused and why. Its mark U+25A9 is used nowhere else (2026-09-12).{% endcomment %}
-            <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon">▩</span> <span class="label-text">Capital Desk</span></a>
-            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
-            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon">⚠</span> <span class="label-text">Risk Depth</span></a>
+            <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-capital-desk"/></svg></span> <span class="label-text">Capital Desk</span></a>
+            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-risk-allocator"/></svg></span> <span class="label-text">Risk Allocator</span></a>
+            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-risk-depth"/></svg></span> <span class="label-text">Risk Depth</span></a>
             {% comment %}Read "Bot Performance" until 2026-09-13, indistinguishable in the rail from the per-rule expectancy
                table two sections down. This one is the equity curve and the R-distribution.{% endcomment %}
-            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon">▥</span> <span class="label-text">Bot Equity Curve</span></a>
+            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-equity-curve"/></svg></span> <span class="label-text">Bot Equity Curve</span></a>
 
             {% comment %}WHAT MAY ACT. A rule's whole life in one section: what it proposes, what stage that puts it on, what the
                admin lane has done to it, and what kind of trader carries it. These pages deep-link into each other and were
                scattered across two sections; four of them were in no menu at all until recently, reachable only from the admin
                dashboard — and a page nobody can find is a page that does not exist.{% endcomment %}
-            <div class="nav-section">What can act</div>
-            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
-            <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
+            <div class="nav-section" data-nav-sec="what-can-act"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What can act</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg></span> <span class="label-text">Signals</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">S</kbd></span></a>
+            <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-strategies"/></svg></span> <span class="label-text">Strategies</span></a>
             {# ◧ — the half-filled square: /opportunities/ shows the matches a setup MADE, /setups/ answers for the ones it never made. No data-nav-id: the dot probe's table is the seven sections in tests/test_nothing_unseen.py, and a diagnosis has no "new since your last visit". #}
-            <a href="{% url 'setups_dashboard' %}" class="nav-link {% if page_id == 'setups' %}active{% endif %}"><span class="icon">◧</span> <span class="label-text">Setups</span></a>
-            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
-            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon">⊙</span> <span class="label-text">Rule Controls</span></a>
-            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon">⇧</span> <span class="label-text">Promotion Ladder</span></a>
+            <a href="{% url 'setups_dashboard' %}" class="nav-link {% if page_id == 'setups' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-setups"/></svg></span> <span class="label-text">Setups</span></a>
+            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-opportunities"/></svg></span> <span class="label-text">Opportunities</span></a>
+            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-rule-controls"/></svg></span> <span class="label-text">Rule Controls</span></a>
+            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ladder"/></svg></span> <span class="label-text">Promotion Ladder</span></a>
             {% comment %}WHAT KIND OF TRADER the pool is — the coherent preset of knobs, its own grading window, its share band and
                its weight on the 5-10 year view. Its mark U+25E8 is used nowhere else, and the leverage correction lives on the
                page: no personality borrows to fund a position, and forex is the exception where the platform does lever, at the
                broker (2026-09-12).{% endcomment %}
-            <a href="{% url 'personas_dashboard' %}" class="nav-link {% if page_id == 'personas' %}active{% endif %}"><span class="icon">◨</span> <span class="label-text">Personalities</span></a>
+            <a href="{% url 'personas_dashboard' %}" class="nav-link {% if page_id == 'personas' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-personalities"/></svg></span> <span class="label-text">Personalities</span></a>
             {% comment %}Also routed and in no menu until 2026-09-13. The real-time fast-rule engine: what fired, how often, how
                fast. It belongs beside the rules it fires, not in a drawer nobody opens. Mark U+25F1, used nowhere else.{% endcomment %}
-            <a href="{% url 'events_dashboard' %}" class="nav-link {% if page_id == 'events' %}active{% endif %}"><span class="icon">◱</span> <span class="label-text">Event Engine</span></a>
+            <a href="{% url 'events_dashboard' %}" class="nav-link {% if page_id == 'events' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-events"/></svg></span> <span class="label-text">Event Engine</span></a>
 
             {% comment %}WHAT IS MEASURED. Everything that grades something, together — because this platform's recurring failure
                is a count that reads as strength while meaning the opposite, and these are the pages that settle it: the ledger,
                the two levels of self-grading (signal and fill), the one-fill autopsy, the two simulators, and how reliable each
                agent has actually been.{% endcomment %}
-            <div class="nav-section">What is measured</div>
-            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon">⊨</span> <span class="label-text">Evidence Ledger</span></a>
-            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
-            <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
-            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">⌖</span> <span class="label-text">Trade Forensics</span></a>
-            <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
-            <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
-            <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
+            <div class="nav-section" data-nav-sec="what-is-measured"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What is measured</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ledger"/></svg></span> <span class="label-text">Evidence Ledger</span></a>
+            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-performance"/></svg></span> <span class="label-text">Signal Performance</span></a>
+            <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bot-performance"/></svg></span> <span class="label-text">Bot Performance</span></a>
+            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-forensics"/></svg></span> <span class="label-text">Trade Forensics</span></a>
+            <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-backtest"/></svg></span> <span class="label-text">Backtesting</span></a>
+            <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bot-backtest"/></svg></span> <span class="label-text">Bot Backtest</span></a>
+            <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-calibration"/></svg></span> <span class="label-text">Agent Calibration</span></a>
             {% comment %}THE COUNCIL (2026-10-22): ten voices graded nightly on what the market did next, beside the calibration they run in; it acts on nothing, so it is measured, not "can act". Staff only, as the page is. Mark U+2654, used nowhere else.{% endcomment %}
-            {% if request.user.is_staff %}<a href="{% url 'council_dashboard' %}" class="nav-link {% if page_id == 'council' %}active{% endif %}"><span class="icon">♔</span> <span class="label-text">The Council</span></a>{% endif %}
+            {% if request.user.is_staff %}<a href="{% url 'council_dashboard' %}" class="nav-link {% if page_id == 'council' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg></span> <span class="label-text">The Council</span></a>{% endif %}
 
             {% comment %}WHAT IS BEING INVENTED. The research half: what the miner proposes, what the generator writes, what the
                brain believes and how long it has believed it. NOTHING in this section can place an order — every path out of it
                runs through the ladder in "What can act" first, which is the whole reason the two are separate sections and
                not one.{% endcomment %}
-            <div class="nav-section">What is invented</div>
-            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⟲</span> <span class="label-text">Strategy Evolution</span></a>
-            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
-            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
-            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
-            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">⌬</span> <span class="label-text">Sauron&#39;s Mind</span></a>
-            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">❖</span> <span class="label-text">Knowledge Graph</span></a>
+            <div class="nav-section" data-nav-sec="what-is-invented"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">What is invented</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-evolution"/></svg></span> <span class="label-text">Strategy Evolution</span></a>
+            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-discoveries"/></svg></span> <span class="label-text">Discoveries</span></a>
+            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-generated"/></svg></span> <span class="label-text">Generated Strategies</span></a>
+            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-hypotheses"/></svg></span> <span class="label-text">Hypothesis Market</span></a>
+            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-mind"/></svg></span> <span class="label-text">Sauron&#39;s Mind</span></a>
+            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-graph"/></svg></span> <span class="label-text">Knowledge Graph</span></a>
             {% comment %}The Lore (2026-10-14): Sauron's staff-only library of strategies, fund playbooks, episodes and concepts, read by cleared agents as reference data. Staff only, so the link shows to staff only.{% endcomment %}
-            {% if request.user.is_staff %}<a href="{% url 'lore:index' %}" class="nav-link {% if page_id == 'lore' %}active{% endif %}"><span class="icon">❧</span> <span class="label-text">The Lore</span></a>{% endif %}
-            <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
+            {% if request.user.is_staff %}<a href="{% url 'lore:index' %}" class="nav-link {% if page_id == 'lore' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-lore"/></svg></span> <span class="label-text">The Lore</span></a>{% endif %}
+            <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-consolidation"/></svg></span> <span class="label-text">Consolidation</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
-            <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
-            <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
-            <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
-            <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon">$</span> <span class="label-text">Earnings Reviews</span></a>
+            <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-horizon"/></svg></span> <span class="label-text">Horizon</span></a>
+            <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-hub"/></svg></span> <span class="label-text">Intelligence Hub</span></a>
+            <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-briefing"/></svg></span> <span class="label-text">Strategist Briefing</span></a>
+            <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-earnings"/></svg></span> <span class="label-text">Earnings Reviews</span></a>
             {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
-            <a href="{% url 'research_view' %}" class="nav-link {% if page_id == 'research' %}active{% endif %}"><span class="icon">?</span> <span class="label-text">Ask Sauron</span></a>
-            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
-            <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
+            <a href="{% url 'research_view' %}" class="nav-link {% if page_id == 'research' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></span> <span class="label-text">Ask Sauron</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">A</kbd></span></a>
+            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-journal"/></svg></span> <span class="label-text">AI Journal</span></a>
+            <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-insights"/></svg></span> <span class="label-text">AI Insights</span></a>
 
-            <div class="nav-section">The markets</div>
-            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">⌗</span> <span class="label-text">Instruments & Quotes</span></a>
-            <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
-            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
+            <div class="nav-section" data-nav-sec="the-markets"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The markets</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-instruments"/></svg></span> <span class="label-text">Instruments & Quotes</span></a>
+            <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-calendar"/></svg></span> <span class="label-text">Economic Calendar</span></a>
+            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-news"/></svg></span> <span class="label-text">News & Sentiment</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">N</kbd></span></a>
             {% comment %}Where the large players must move, from free public footprints, graded against what prices did next (2026-10-09). Information, never a gate; it reads the markets, so it sits with them.{% endcomment %}
-            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon">◆</span> <span class="label-text">Big Money</span></a>
+            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-big-money"/></svg></span> <span class="label-text">Big Money</span></a>
 
             {% comment %}IS IT RUNNING — not "is it switched on". /health/ and the system map exist because six scraper components
                once sat at last_status='success' with zero rows between them. These pages answer whether data is actually
                MOVING.{% endcomment %}
-            <div class="nav-section">The machine</div>
-            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon">✚</span> <span class="label-text">System Health</span></a>
-            <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
-            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⊚</span> <span class="label-text">Model Selection</span></a>{% endif %}
-            {% if request.user.is_superuser %}<a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon">⌘</span> <span class="label-text">Ops</span></a>
-            <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
-            {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon">⊠</span> <span class="label-text">Audit Log</span></a>{% endif %}
-            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">▭</span> <span class="label-text">Newsletters</span></a>
-            {% endif %}<div class="nav-section">You</div>
+            <div class="nav-section" data-nav-sec="the-machine"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">The machine</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
+            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-health"/></svg></span> <span class="label-text">System Health</span></a>
+            <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-tasks"/></svg></span> <span class="label-text">Agent Tasks</span></a>
+            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-models"/></svg></span> <span class="label-text">Model Selection</span></a>{% endif %}
+            {% if request.user.is_superuser %}<a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ops"/></svg></span> <span class="label-text">Ops</span></a>
+            <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg></span> <span class="label-text">Admin Panel</span></a>
+            {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-audit"/></svg></span> <span class="label-text">Audit Log</span></a>{% endif %}
+            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-newsletters"/></svg></span> <span class="label-text">Newsletters</span></a>
+            {% endif %}<div class="nav-section" data-nav-sec="you"><button type="button" class="nav-fold" aria-expanded="true"><span class="nav-fold-name">You</span><svg class="sv-ico sv-ico-fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></button></div>
 
-            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◐</span> <span class="label-text">Profile</span></a>
-            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">◌</span> <span class="label-text">Notifications</span></a>
-            <a href="{% url 'newsletter_archive' %}" class="nav-link {% if page_id == 'newsletters' %}active{% endif %}"><span class="icon">✉</span> <span class="label-text">Weekly Letter</span></a>
-            <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⊡</span> <span class="label-text">Setup</span></a>
-            <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">★</span> <span class="label-text">Getting Started</span></a>
+            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-profile"/></svg></span> <span class="label-text">Profile</span><span class="nav-keys" aria-hidden="true"><kbd class="sv-kbd">G</kbd><kbd class="sv-kbd">R</kbd></span></a>
+            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg></span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'newsletter_archive' %}" class="nav-link {% if page_id == 'newsletters' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-letter"/></svg></span> <span class="label-text">Weekly Letter</span></a>
+            <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-setup"/></svg></span> <span class="label-text">Setup</span></a>
+            <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-start"/></svg></span> <span class="label-text">Getting Started</span></a>
         </nav>
+        {# THE SECTIONS FOLD (UI redo B2, the desk v2 board, 2026-11-13): Amon Hen and the book open, the other five folded, the page's own section always open; his choice kept per browser (static/js/sv-frame.js owns the clicks). Applied here, before the first paint, so the menu never jumps. #}
+        <script>
+        (function () {
+            var saved = {};
+            try { saved = JSON.parse(window.localStorage.getItem('sv_nav_folds') || '{}') || {}; } catch (e) { saved = {}; }
+            var heads = document.querySelectorAll('#mainSidebar .nav-section[data-nav-sec]');
+            Array.prototype.forEach.call(heads, function (head) {
+                var key = head.getAttribute('data-nav-sec'), rows = [], n = head.nextElementSibling, active = false;
+                while (n && !n.classList.contains('nav-section')) {
+                    if (n.classList.contains('nav-link')) { rows.push(n); if (n.classList.contains('active')) active = true; }
+                    n = n.nextElementSibling;
+                }
+                var folded = Object.prototype.hasOwnProperty.call(saved, key) ? !!saved[key] : !head.hasAttribute('data-nav-open');
+                if (active) folded = false;
+                head.classList.toggle('is-folded', folded);
+                var b = head.querySelector('.nav-fold');
+                if (b) b.setAttribute('aria-expanded', folded ? 'false' : 'true');
+                rows.forEach(function (r) { r.classList.toggle('nav-folded', folded); });
+            });
+        })();
+        </script>
+        {# The tower (the desk v2 board, Twist2 "La tour en filigrane"): Barad-dûr's silhouette in the menu's empty foot only, ink at 7.5 %, its Eye a faint ember. It takes its own room at the foot, so no row is ever written over it. #}
+        <div class="sv-tower" aria-hidden="true"><svg viewBox="0 0 60 140" width="30" height="70" focusable="false"><path class="sv-tower-body" d="M4 140L12 133L14 113L18 109L20 85L23 81L24 57L26 53L26.5 35L22.5 31L18.5 5L25 23.5L28.5 29.5L31.5 29.5L35 23.5L41.5 5L37.5 31L33.5 35L34 53L36 57L37 81L40 85L42 109L46 113L48 133L56 140Z" fill="currentColor" fill-opacity="0.075"/><ellipse class="sv-tower-eye" cx="30" cy="20.5" rx="3.2" ry="1.5"/></svg></div>
         <div class="sidebar-footer">
             {# Same mark the Admin Panel nav-link carries, so both routes into admin read as one destination. #}
-            <a href="{% url 'admin:index' %}">⬢ Admin</a>
+            <a href="{% url 'admin:index' %}"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg> Admin</a>
             <!-- 2. Logout as POST form -->
             <form method="post" action="{% url 'logout' %}" style="display:inline;">
                 {% csrf_token %}
-                <button type="submit" class="logout-btn">⏻ Logout</button>
+                <button type="submit" class="logout-btn"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-logout"/></svg> Logout</button>
             </form>
         </div>
     </aside>
@@ -615,8 +652,16 @@
         <header class="topbar">
             <div style="display:flex;align-items:center;gap:8px;">
                 <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileSidebar()" aria-label="Toggle menu">&#9776;</button>
-                <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
+                {# The page's name on one line, never cut (the desk v2 board, 2026-11-13): sv_bar_title drops the glyph a title opens with and puts what follows its first " · " in a quieter span the frame lets go first; static/js/sv-frame.js gives the name its room. #}
+                <span class="topbar-title">{% filter sv_bar_title %}{% block page_title %}Dashboard{% endblock %}{% endfilter %}</span>
+                {# A page that names nothing (/treasury/, /evidence/, …: the block's default) takes its menu row's name, before the first paint. #}
+                <script>(function () { var t = document.currentScript && document.currentScript.parentNode.querySelector('.topbar-title'); if (!t || t.textContent.trim() !== 'Dashboard') return; var a = document.querySelector('#mainSidebar .nav-link.active .label-text'); if (a && a.textContent.trim()) t.textContent = a.textContent.trim(); })();</script>
             </div>
+            {# "/ Symbol or command" (the desk v2 board, 2026-11-13): "/" comes here from anywhere outside a field. Enter goes to a symbol the page knows, then to a page of the menu by its name, else to the instruments list searched for the words (its own ?q=). static/js/sv-frame.js reads it; it sends nothing anywhere but a page the menu already links. #}
+            <form class="sv-cmd" role="search" action="{% url 'instruments_list' %}" method="get" data-sv-sym-url="{% url 'instrument_detail' 'SVSYM' %}">
+                <kbd class="sv-kbd" aria-hidden="true">/</kbd>
+                <input type="text" id="svCmd" name="q" placeholder="Symbol or command" aria-label="Go to a symbol or run a command" aria-keyshortcuts="/" autocomplete="off" spellcheck="false">
+            </form>
             <div class="topbar-right">
                 {% comment %} A hardcoded green "LIVE" dot used to sit here, driven by
                    nothing at all — no context variable, no poller, no socket.
@@ -626,8 +671,8 @@
                    are dead. Two contradictory liveness claims forty pixels
                    apart, and the false one had the better seat. {% endcomment %}
                 <a href="{% url 'toggle_theme' %}" class="theme-toggle-btn" title="Switch to light/dark mode">
-                    <span class="theme-icon-dark">☀</span>
-                    <span class="theme-icon-light">☾</span>
+                    <span class="theme-icon-dark"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-sun"/></svg></span>
+                    <span class="theme-icon-light"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-moon"/></svg></span>
                 </a>
                 <span id="clock" data-timezone="{{ user_timezone }}"></span>
                 {% comment %}data-ex-* hooks: sv-market-status.js polls
@@ -638,7 +683,7 @@
                 until somebody reloaded.{% endcomment %}
                 <div class="exchange-indicator">
                     <span class="exchange-trigger">
-                        <span style="color:var(--accent);" data-ex-open-count>{{ exchanges_open_count }}</span><span style="color:var(--text-muted);">/<span data-ex-total>{{ exchanges_total }}</span> SE</span>
+                        <span class="sv-ex-word">sessions</span> <span class="sv-ex-n"><span data-ex-open-count>{{ exchanges_open_count }}</span>/<span data-ex-total>{{ exchanges_total }}</span></span>
                     </span>
                     <div class="exchange-dropdown">
                         <div class="exchange-dropdown-header">Market Sessions</div>
@@ -653,13 +698,6 @@
                         {% endfor %}
                     </div>
                 </div>
-                {% comment %}THE ARMED PILL (2026-09-30): on every page while a LIVE config is enabled — the one indicator that real money is in play. The "LIVE" pill beside it is the data feeds, and said nothing about money.{% endcomment %}
-                {% if panel_bot and panel_bot.live %}
-                <a href="{% url 'asset_bots_dashboard' %}" class="sv-armed-pill" title="{{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed on real money — open the bots page">
-                  <span class="sv-armed-dot" aria-hidden="true"></span>
-                  <span>REAL MONEY</span><span class="sv-armed-words">&middot; {{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed</span>
-                </a>
-                {% endif %}
                 <!-- UPGRADE-8: Live status pill -->
                 <div class="live-status-pill" id="liveStatusPill" title="Live data sources">
                   <span class="lsp-dot lsp-flat"></span>
@@ -671,6 +709,14 @@
                     </div>
                   </div>
                 </div>
+                {# REAL ARMED after the feed (the desk v2 board, 2026-11-13). It is a link, so a tab stop: the money stops keep their order (REAL ARMED, the bell, the lock, the operator), measured in tests/test_shell_frame_measured.py. #}
+                {% comment %}THE ARMED PILL (2026-09-30): on every page while a LIVE config is enabled — the one indicator that real money is in play. The "LIVE" pill beside it is the data feeds, and said nothing about money.{% endcomment %}
+                {% if panel_bot and panel_bot.live %}
+                <a href="{% url 'asset_bots_dashboard' %}" class="sv-armed-pill" title="{{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed on real money — open the bots page">
+                  <span class="sv-armed-dot" aria-hidden="true"></span>
+                  <span>REAL MONEY</span><span class="sv-armed-words">&middot; {{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed</span>
+                </a>
+                {% endif %}
                 
                 {% comment %}
                 Notification bell. The panel is a sibling of the trigger, not a
@@ -686,7 +732,7 @@
                         data-sv-open="notifPanel" aria-haspopup="true"
                         aria-expanded="false"
                         aria-label="Notifications{% if notification_count %} — {{ notification_count }} unread{% endif %}">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1C5.8 1 4 2.8 4 5v3l-1 2h10l-1-2V5c0-2.2-1.8-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="14" r="1.5" fill="currentColor"/></svg>
+                    <svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg>
                     {% if notification_count %}<span class="notif-badge">{{ notification_count }}</span>{% endif %}
                 </button>
                 <div class="notif-dropdown" id="notifPanel" role="menu"
@@ -732,14 +778,14 @@
                         data-has-pin="{{ idle_lock.has_pin|yesno:'1,0' }}"
                         title="{% if idle_lock.has_pin %}Lock this session — the PIN reopens it{% else %}Set a PIN to lock this session{% endif %}"
                         aria-label="Lock session">
-                    <span aria-hidden="true">{% if idle_lock.has_pin %}&#128274;{% else %}&#128275;{% endif %}</span>
+                    <span aria-hidden="true">{% if idle_lock.has_pin %}<svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-lock"/></svg>{% else %}<svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-unlock"/></svg>{% endif %}</span>
                 </button>
                 {% get_display_name as uname %}
                 <div class="user-menu" id="userMenu">
                     <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false">
                         <span class="um-avatar">{{ uname|first|upper }}</span>
                         <span class="um-name-text">{{ uname }}</span>
-                        <span class="um-caret">▼</span>
+                        <span class="um-caret"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg></span>
                     </button>
                     <div class="user-menu-dropdown" role="menu">
                         <div class="um-head">
@@ -748,23 +794,23 @@
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'profile' %}" role="menuitem">
-                                <span class="um-icon">◉</span> Profile
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-profile"/></svg></span> Profile
                             </a>
                             <a class="um-link" href="{% url 'profile' %}?modal=password" role="menuitem">
-                                <span class="um-icon">⚿</span> Change Password
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-key"/></svg></span> Change Password
                             </a>
                             <a class="um-link" href="{% url 'profile' %}?modal=pin" role="menuitem">
-                                <span class="um-icon">⌗</span> Change PIN
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-pin"/></svg></span> Change PIN
                             </a>
                             {# A phone's topbar has no room for the lock and the theme switch (2026-09-28): they are here, shown at 768px and below only. #}
                             {# Lock now clicks the real #lockNowBtn, the proxy sv-gollum.js already uses: idle-lock.js binds that button, and click() works on a hidden one. #}
                             <button type="button" class="um-link sv-phone-only" role="menuitem"
                                     style="width:100%;text-align:left;background:none;border:0;cursor:pointer;"
                                     onclick="var b=document.getElementById('lockNowBtn');if(b)b.click();">
-                                <span class="um-icon">&#128274;</span> Lock now
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-lock"/></svg></span> Lock now
                             </button>
-                            <a class="um-link sv-phone-only" href="{% url 'toggle_theme' %}" role="menuitem">
-                                <span class="um-icon">&#9680;</span> Light / dark mode
+                            <a class="um-link sv-um-theme" href="{% url 'toggle_theme' %}" role="menuitem">
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-sun"/></svg></span> Light / dark mode
                             </a>
                         </div>
                         {# His choice of Ambience (the magic kept, 2026-11-12): Magic, Calm or Off, saved on his profile. static/js/sv-ambience.js posts a click to set_ambience; only the server's 200 that echoes the value changes the body's attribute and the pressed button, and a failure writes "Not saved" into the note. Display only. The menu explains nothing more. #}
@@ -782,23 +828,18 @@
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'notifications_inbox' %}" role="menuitem">
-                                <span class="um-icon um-icon-svg">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M6 8a6 6 0 0 1 12 0c0 5 2 7 2 7H4s2-2 2-7"/>
-                                        <path d="M10 19a2 2 0 0 0 4 0"/>
-                                    </svg>
-                                </span> Notifications
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-bell"/></svg></span> Notifications
                             </a>
                             <a class="um-link" href="{% url 'getting_started' %}" role="menuitem">
-                                <span class="um-icon">★</span> Getting Started
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-start"/></svg></span> Getting Started
                             </a>
                             <button type="button" class="um-link" id="umReplayTour" role="menuitem"
                                     style="width:100%;text-align:left;background:none;border:0;cursor:pointer;">
-                                <span class="um-icon">◈</span> Platform Tour
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-compass"/></svg></span> Platform Tour
                             </button>
                             {% if request.user.is_staff %}
                             <a class="um-link" href="{% url 'admin:index' %}" role="menuitem">
-                                <span class="um-icon">⬢</span> Admin Panel
+                                <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg></span> Admin Panel
                             </a>
                             {% endif %}
                         </div>
@@ -806,7 +847,7 @@
                             <form method="post" action="{% url 'logout' %}" class="um-logout-form">
                                 {% csrf_token %}
                                 <button type="submit" class="um-link um-logout" role="menuitem">
-                                    <span class="um-icon">⏻</span> Log out
+                                    <span class="um-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-logout"/></svg></span> Log out
                                 </button>
                             </form>
                         </div>
@@ -816,22 +857,8 @@
         </header>
 
         <!-- Ticker Bar (fixed, always visible) -->
-        {% comment %}The two strips scroll on their own (2026-11-13, the
-        operator's decision): static/js/sv-marquee.js moves each at its
-        frame's data-sv-marquee-speed, in px per second (news 30, prices
-        40), and holds it still while a card it opened
-        (data-sv-marquee-pop) is on the page.{% endcomment %}
-        <div class="ticker-bar" id="tickerBar" data-sv-marquee-speed="30" data-sv-marquee-pop=".ticker-popup">
-            <button type="button" class="hb-collapse-btn" data-collapse="ticker" aria-label="Hide ticker bar" title="Hide ticker bar">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
-                </svg>
-            </button>
-            <div class="ticker-track" id="tickerTrack">
-                {% include "_partials/ticker_items.html" %}
-            </div>
-        </div>
-
+        {# THE ONE BAND (UI redo B1, the desk v2 board, 2026-11-13): the prices, then the news, side by side in one 32 px row under the top bar; each lane keeps its own frame, speed and pop (static/js/sv-marquee.js), its collapse button and its restore tab. The marker comment above opens the slice of the bands the page-runner tests read. #}
+        <div class="sv-band" id="svBand" role="region" aria-label="Markets and news">
         <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
 <div class="data-headband" id="dataHeadband" data-sv-marquee-speed="40" data-sv-marquee-pop=".dh-pop">
   <button type="button" class="hb-collapse-btn" data-collapse="data" aria-label="Hide data headband" title="Hide data headband">
@@ -847,17 +874,34 @@
     </div>
   </div>
 </div>
+<div class="sv-band-sep"><span class="sv-label">News</span></div>
+        {% comment %}The two strips scroll on their own (2026-11-13, the
+        operator's decision): static/js/sv-marquee.js moves each at its
+        frame's data-sv-marquee-speed, in px per second (news 30, prices
+        40), and holds it still while a card it opened
+        (data-sv-marquee-pop) is on the page.{% endcomment %}
+        <div class="ticker-bar" id="tickerBar" data-sv-marquee-speed="30" data-sv-marquee-pop=".ticker-popup">
+            <button type="button" class="hb-collapse-btn" data-collapse="ticker" aria-label="Hide ticker bar" title="Hide ticker bar">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
+                </svg>
+            </button>
+            <div class="ticker-track" id="tickerTrack">
+                {% include "_partials/ticker_items.html" %}
+            </div>
+        </div>
+        </div>
 
 <!-- Restore tabs (visible only when the corresponding headband is collapsed) -->
 <button type="button" class="hb-restore-tab ticker" data-restore="ticker" aria-label="Show ticker bar" title="Show ticker bar">
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>
-  </svg>
+  </svg><span class="sv-restore-word">News</span>
 </button>
 <button type="button" class="hb-restore-tab data" data-restore="data" aria-label="Show data headband" title="Show data headband">
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>
-  </svg>
+  </svg><span class="sv-restore-word">Prices</span>
 </button>
 
         <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
@@ -890,8 +934,13 @@
             <button type="button" class="ip-arrow right" aria-label="Scroll right">&#9654;</button>
             <div class="info-panel-scroll" id="ipScroll">
             <div class="info-panel-bar">
-                <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link ip-cat-pf">
+                {# THE STATUS BAR (UI redo B1, the desk v2 board, 2026-11-13): one scope said once, the real book at eToro, then the bots, the Horde in POSITIONS' place, the rest behind "N more", the keys. Every old cell keeps its regions, keys and dropdown. #}
+                <div class="sv-sgrp" role="group" aria-label="The real book at eToro: its equity, open P&amp;L and margin as eToro reports them, and its risk at the stops as the entry gate measures it">
+                <span class="sv-world sv-world--live sv-sb-real" title="Real money: the cells up to the rule are the real book at eToro (PORTFOLIO, OPEN P&amp;L and MARGIN as eToro reports them; AT STOPS as the entry gate measures them)">REAL</span>
+                <a href="{% url 'portfolio_overview' %}" data-sv-cell="portfolio" class="ip-cat ip-cat-link ip-cat-pf">
                     <span class="ip-label">PORTFOLIO</span>
+                    {# THE REAL BOOK AT ETORO (the desk v2 board, 2026-11-13): eToro's own equity for the REAL account, read with its age; an account read in DEMO, or none, is not the real book: a dash with its reason. The both-books value, P&L and count below stay in their regions (and in the dropdown), out of the one-line bar. #}
+                    <span class="ip-v" data-sv-live="hb-real-equity" data-sv-live-key="hb-real-equity">{% if panel_etoro and panel_etoro.world == "live" and panel_etoro.total is not None %}<span title="eToro's own equity{% if panel_etoro.read %}, read {{ panel_etoro.age_t }} ago{% endif %}">{{ panel_etoro.currency|currency_sign }}{{ panel_etoro.total_t }}</span>{% elif panel_etoro and panel_etoro.world == "live" %}<span class="sv-unknown" title="{{ panel_etoro.t }}">&mdash;</span>{% else %}<span class="sv-unknown" title="No REAL eToro account is read: the real book's equity is not measured here">&mdash;</span>{% endif %}</span>
                     <span class="ip-count" data-sv-live="hb-pf-value" data-sv-live-key="hb-pf-value">{% if panel_portfolio_value %}<span title="{{ panel_value_title|default:panel_book_coverage }}">{{ panel_currency_symbol }}{{ panel_portfolio_value }}</span>{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span>
                     {% comment %}
                     THE LIVE P&L (2026-10-14, the operator: "add also on
@@ -992,6 +1041,173 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Portfolio</div>
                     </div>
                 </a>
+                {% comment %}
+                OPEN P&L gets its own cell. It used to be the 9px sub-line
+                under the POSITIONS count — the one number on the band an
+                operator glances at most, rendered smallest. The value is the
+                same panel_open_pnl the POSITIONS and PORTFOLIO popups quote,
+                so the three can never disagree. No live mark on any open
+                position is an em-dash: an unmarked book is unknown, not flat.
+                The sub-line says which books the figure adds ("real +
+                paper"), as the PORTFOLIO cell beside it keeps them apart
+                (the Horde's final review, 2026-10-16).
+                {% endcomment %}
+                <a href="{% url 'positions_list' %}" data-sv-cell="pnl" class="ip-cat ip-cat-link ip-cat-pnl">
+                    <span class="ip-label">OPEN P&amp;L</span>
+                    {# The real book alone (the desk v2 board): the same per-row figures the PORTFOLIO cell's LIVE line sums by world, never a sum of two worlds; the arrow in its own slot after the figure; a dash with its reason when no real row is marked. The both-books figure stays in its region and its dropdown. #}
+                    <span class="ip-v" data-sv-live="hb-real-pnl" data-sv-live-key="hb-real-pnl">{% if panel_open_pnl_live_display %}<span class="sv-bar-fig {% if panel_open_pnl_live > 0 %}up{% elif panel_open_pnl_live < 0 %}down{% endif %}"{% if panel_live_pnl_title %} title="{{ panel_live_pnl_title }}"{% endif %}>{{ panel_open_pnl_live_display }}<span class="sv-dg" aria-hidden="true">{% if panel_open_pnl_live > 0 %}&#9650;{% elif panel_open_pnl_live < 0 %}&#9660;{% endif %}</span></span>{% if panel_live_coverage_short %}<span class="sv-bar-mark sv-unknown" title="{{ panel_live_coverage_title }}">&middot; {{ panel_live_coverage_short }}</span>{% endif %}{% if panel_live_stale_title %}<span class="sv-bar-mark sv-unknown" title="{{ panel_live_stale_title }}">&middot; stale</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ panel_live_dash_title|default:'No real-money position is open' }}">&mdash;</span>{% endif %}</span>
+                    <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books: eToro's own figure for each eToro position its holdings list, live marks otherwise. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
+                    {# The count is the positions the figure HOLDS (2026-11-06, the review's probe J): a row the book could not price is in it when eToro's figure for it is (panel_pnl_unpriced), never "0 of 1" under a figure that holds it. #}
+                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_pnl_unpriced and panel_pnl_positions < panel_positions %}real + paper across {{ panel_pnl_positions }} of {{ panel_positions }} positions{% elif panel_pnl_unpriced %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% elif panel_positions_priced < panel_positions %}real + paper across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">OPEN P&amp;L &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
+                        <div data-sv-live="hb-pnl-detail">
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">OPEN P&amp;L</span><span class="dv {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv {% if panel_open_r > 0 %}up{% elif panel_open_r < 0 %}down{% endif %}">{% if panel_open_r_display %}{{ panel_open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LONG</span><span class="dv up">{% if panel_n_long is None %}<span class="sv-unknown" title="A position's side could not be read">&mdash;</span>{% else %}{{ panel_n_long }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHORT</span><span class="dv down">{% if panel_n_short is None %}<span class="sv-unknown" title="A position's side could not be read">&mdash;</span>{% else %}{{ panel_n_short }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">GRADED</span><span class="dv">{{ panel_open_r_n }} of {{ panel_positions }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">PRICED</span><span class="dv">{{ panel_positions_priced }} of {{ panel_positions }}</span></div>
+                        </div>
+                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_as_of %} <span data-sv-live-ephemeral>Measured {{ panel_as_of }} UTC.</span>{% endif %}</div>
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
+                    </div>
+                </a>
+                {# AT STOPS (the desk v2 board, 2026-11-13): what every stop costs if all fill, against the limit, as the entry gate measures the real-money side (the Horde's own answer, /api/horde/, which sv-horde.js paints here when it reads it). Until it is read: a dash, never a zero. #}
+                <a href="{% url 'positions_list' %}" data-sv-cell="stops" class="ip-cat ip-cat-link sv-sb-stops" title="What every stop costs if all fill, against your limit (the entry gate's measure)">
+                    <span class="ip-label">AT STOPS</span>
+                    <span class="ip-v" id="svBarRisk"><span class="sv-unknown" title="Not read yet: the Horde reads it on load">&mdash;</span></span>
+                </a>
+                {# MARGIN (the desk v2 board): eToro's own used margin over its own equity, for the REAL account only; a dash otherwise. #}
+                <a href="{% url 'portfolio_overview' %}" data-sv-cell="margin" class="ip-cat ip-cat-link sv-sb-margin">
+                    <span class="ip-label">MARGIN</span>
+                    <span class="ip-v" data-sv-live="hb-real-margin" data-sv-live-key="hb-real-margin">{% if panel_etoro and panel_etoro.world == "live" and panel_etoro.used is not None and panel_etoro.total %}{% widthratio panel_etoro.used panel_etoro.total 1000 as sv_margin_pm %}<span title="eToro's used margin {{ panel_etoro.used_t }} of its equity {{ panel_etoro.total_t }}">{% if sv_margin_pm|length == 1 %}0{% else %}{{ sv_margin_pm|slice:":-1" }}{% endif %}.{{ sv_margin_pm|slice:"-1:" }}%</span>{% else %}<span class="sv-unknown" title="No REAL eToro account is read: its margin is not measured here">&mdash;</span>{% endif %}</span>
+                </a>
+                </div>
+                {% comment %}
+                DRAWDOWN and VOLATILITY had no panel at all, and DRAWDOWN
+                rendered `|default:"0"` — so with no snapshot ever taken it
+                showed a confident red 0%, which reads as "no downside".
+                {% endcomment %}
+                {# DRAWDOWN stands outside the REAL group (the review of the desk v2 build, 2026-11-13): its figure is this book's daily snapshots (the per-user portfolio, bot trades not in it), not the real book at eToro; its title says so. #}
+                <a href="{% url 'portfolio_overview' %}" data-sv-cell="drawdown" class="ip-cat ip-cat-link" title="Drawdown from the peak of this book's daily snapshots: the per-user portfolio, without the bot trades, not the real book at eToro">
+                    <span class="ip-label">DRAWDOWN</span>
+                    <span class="ip-count red" data-sv-live="hb-dd" data-sv-live-key="hb-dd">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="No daily snapshot exists for this book">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub sbsub">from peak</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">DRAWDOWN FROM PEAK</div>
+                        <div data-sv-live="hb-dd-detail">
+                        {% if panel_dd_snapshots %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">CURRENT</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LIMIT</span><span class="dv">{% if panel_max_dd %}{{ panel_max_dd }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">PEAK VALUE</span><span class="dv">{{ panel_currency_symbol }}{{ panel_dd_peak|floatformat:0 }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">NOW</span><span class="dv">{{ panel_currency_symbol }}{{ panel_dd_current|floatformat:0 }}</span></div>
+                        </div>
+                        <div class="ip-dd-note">
+                            Peak set {{ panel_dd_peak_date|date:"M j, Y" }} · measured over
+                            {{ panel_dd_snapshots }} daily snapshot{{ panel_dd_snapshots|pluralize }}
+                        </div>
+                        {% else %}
+                        {% comment %}
+                        Snapshots are the only input to this number, and the task that
+                        writes them marks the SHARED "Main" portfolio while this band
+                        reads the per-user book — so on most installs this cell is
+                        honestly unmeasurable rather than briefly empty. Saying which
+                        is the difference between a missing feed and a broken page.
+                        {% endcomment %}
+                        <div class="sv-empty">
+                            <b>Not measurable yet</b>
+                            Drawdown comes from daily portfolio snapshots, and none have been taken for this book. Unlike the cells to the left, it does not include bot trades.
+                        </div>
+                        {% endif %}
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Portfolio</div>
+                    </div>
+                </a>
+                <a href="{% url 'asset_bots_dashboard' %}" data-sv-cell="bots" class="ip-cat ip-cat-link">
+                    {% comment %}
+                    This cell printed ARMED whenever one config had enabled=True,
+                    and linked to the LEGACY crypto bot page — a different bot
+                    program from the one it was counting. Enabled is not running:
+                    the tick task is @guarded_task, so the platform master switch
+                    and the pipeline_asset_bots component each stop every tick on
+                    their own, a circuit breaker stops a bot opening anything,
+                    shadow mode submits nothing, and the kill switch disables the
+                    lot. The state word below is that whole chain, not one column,
+                    and an unreadable bot program stays an em-dash rather than
+                    being drawn as OFF.
+                    {% endcomment %}
+                    <span class="ip-label">BOTS</span>
+                    <span class="ip-count" data-sv-live="hb-bot-state" data-sv-live-key="hb-bot-state">{% if panel_bot %}<span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}" title="{{ panel_bot.reason }}">{{ panel_bot.state }}</span>{% else %}<span class="sv-unknown" title="The bot program's state could not be read — this cell claims nothing">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live<span class="sv-bot-paper"> · {{ panel_bot.paper }} paper</span><span class="sv-bot-open"> · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">BOT PROGRAM &middot; IS IT RUNNING? <span class="sv-live-chip" data-sv-live-status></span></div>
+                        <div data-sv-live="hb-bot-detail">
+                        {% if panel_bot %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">STATE</span><span class="dv"><span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}">{{ panel_bot.state }}</span></span></div>
+                            <div class="ip-dd-cell"><span class="dk">ENABLED</span><span class="dv">{{ panel_bot.enabled }}/{{ panel_bot.configs }}</span></div>
+                            {% comment %} A platform stopped at the master switch means every
+                               bot is idle no matter what its own row says, so it is
+                               named here first. UNSET is not OFF: guarded_task treats
+                               a missing component row as off, but the fix is to seed
+                               the components rather than to flip a switch. {% endcomment %}
+                            <div class="ip-dd-cell"><span class="dk">MASTER SWITCH</span><span class="dv {% if not panel_bot.master_on %}red{% endif %}">{% if panel_bot.master_on %}ON{% elif panel_bot.master_known %}OFF{% else %}UNSET{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">TICK GATE</span><span class="dv {% if not panel_bot.gate_on %}red{% endif %}">{% if panel_bot.gate_on %}ON{% elif panel_bot.gate_known %}OFF{% else %}UNSET{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ARMED LIVE</span><span class="dv {% if panel_bot.live %}gold{% endif %}">{{ panel_bot.live }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ARMED PAPER</span><span class="dv">{{ panel_bot.paper }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LAST TICK</span><span class="dv {% if panel_bot.tick_overdue %}red{% endif %}">{% if panel_bot.tick_ago %}{{ panel_bot.tick_ago }} ago{% else %}<span class="sv-unknown" title="No enabled bot has written a heartbeat yet">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">CADENCE</span><span class="dv">{{ panel_bot.cadence_min }} min</span></div>
+                            <div class="ip-dd-cell"><span class="dk">HALTED</span><span class="dv {% if panel_bot.halted %}red{% endif %}">{{ panel_bot.halted }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHADOW</span><span class="dv {% if panel_bot.shadow %}gold{% endif %}">{{ panel_bot.shadow }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{{ panel_bot.open }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv">{% if panel_bot.open_r_display %}{{ panel_bot.open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H FILLS</span><span class="dv">{{ panel_bot.opened_24h }} in &middot; {{ panel_bot.closed_24h }} out</span></div>
+                            <div class="ip-dd-cell"><span class="dk">WIN RATE 24H</span><span class="dv">{% if panel_bot.winrate is not None %}{{ panel_bot.winrate }}%{% else %}<span class="sv-unknown" title="Nothing closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{% if panel_bot.pnl_24h_display %}{{ panel_bot.pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trade closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
+                        </div>
+                        <div class="ip-dd-note">{{ panel_bot.reason }}</div>
+                        {% if panel_bot.kill_at %}
+                        <div class="ip-dd-note"><span class="sv-chip sv-chip--bearish">kill switch</span> fired <span class="sv-age" data-sv-at="{{ panel_bot.kill_at|date:'c' }}">{{ panel_bot.kill_at|timesince }} ago</span>{% if panel_bot.kill_reason %} &middot; {{ panel_bot.kill_reason|truncatechars:60 }}{% endif %}</div>
+                        {% endif %}
+                        {% for b in panel_bot.bots %}
+                        <div class="ip-dd-row">
+                            <span class="ipr-sym">{{ b.name|truncatechars:14 }}</span>
+                            <span class="ipr-kind">{{ b.asset_class }}</span>
+                            {% if b.enabled %}<span class="sv-chip {% if b.mode == 'live' %}sv-chip--warn{% else %}sv-chip--muted{% endif %}">{{ b.mode }}</span>{% else %}<span class="sv-chip sv-chip--muted">off</span>{% endif %}
+                            {% if b.shadow %}<span class="sv-chip sv-chip--warn" title="Shadow mode: decides, submits nothing">shadow</span>{% endif %}
+                            {% if b.halted %}<span class="sv-chip sv-chip--bearish" title="{{ b.halted|join:'; ' }}">breaker</span>{% endif %}
+                            <span class="ipr-qty">{{ b.open }} open</span>
+                            <span class="ipr-age">{% if b.tick_ago %}{{ b.tick_ago }} ago{% else %}<span class="sv-unknown" title="This bot has never recorded a tick">&mdash;</span>{% endif %}</span>
+                        </div>
+                        {% endfor %}
+                        {% if panel_bot.bots_hidden %}<div class="ip-dd-note">+{{ panel_bot.bots_hidden }} more bot{{ panel_bot.bots_hidden|pluralize }} configured.</div>{% endif %}
+                        {% if panel_bot_last %}
+                        <div class="ip-dd-note">
+                            Last close: <strong>{{ panel_bot_last.symbol }}</strong> {{ panel_bot_last.outcome }}{% if panel_bot_last.r is not None %}
+                            <span class="{% if panel_bot_last.r >= 0 %}up{% else %}down{% endif %}">{{ panel_bot_last.r|floatformat:2 }}R</span>{% endif %}
+                            <span class="sv-age" data-sv-at="{{ panel_bot_last.when|date:'c' }}">{{ panel_bot_last.when|timesince }} ago</span>
+                        </div>
+                        {% endif %}
+                        {% else %}
+                        <div class="sv-empty"><b>Bot state unknown</b>The bot program could not be read, so this cell claims nothing about it — not even that it is off.</div>
+                        {% endif %}
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to the bots</div>
+                    </div>
+                </a>
+                {# THE HORDE (the desk v2 board, his default "yes", 2026-11-13): in POSITIONS' place, one standard per seat, REAL (solid REAL red) then DEMO (gold outline) then PAPER (grey outline), at most eight then "+n"; the count in words. It opens the Horde's sheet (h). The standards are this render's book; sv-horde.js repaints them from its own answer. #}
+                <button type="button" data-sv-cell="horde" class="ip-cat sv-sb-horde" id="svHordeCell" aria-controls="svHordePanel" aria-expanded="false" aria-keyshortcuts="h" aria-label="The Horde: {{ panel_positions|default:0 }} seat{{ panel_positions|default:0|pluralize }}, {{ panel_live_positions|default:0 }} real, {{ panel_demo_positions|default:0 }} demo, {{ panel_paper_positions|default:0 }} paper. Key h">
+                    <span class="ip-label">HORDE</span>
+                    <span class="sv-seats-wrap" data-sv-live="hb-horde" data-sv-live-key="hb-horde">{% include "_partials/horde_seats.html" with live=panel_live_positions demo=panel_demo_positions paper=panel_paper_positions none=panel_unvenued_positions total=panel_positions %}<span class="sv-seats-n"><span class="sv-n">{{ panel_positions|default:0 }}</span><span class="sv-seats-word"> seat{{ panel_positions|default:0|pluralize }}</span></span></span>
+                    <span class="sv-seat-alarm" id="svBarAlarms" hidden></span>
+                </button>
+                <div class="sv-more">
+                <button type="button" data-sv-cell="more" class="ip-cat sv-sb-more" id="svMoreBtn" aria-expanded="false" aria-controls="svMorePop" aria-label="6 more cells: Positions, Strategies, Funding, Liquidations 24 h, Watchlist, Volatility"><span class="sv-more-n">6 more</span><svg class="sv-ico sv-ico-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-up"/></svg></button>
+                <div class="sv-more-pop" id="svMorePop" role="group" aria-label="More cells" hidden>
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">POSITIONS</span>
                     <span class="ip-count" id="ipPositionsCount" data-sv-live="hb-pos-count" data-sv-live-key="hb-pos-count">{{ panel_positions }}</span>
@@ -1077,110 +1293,6 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
                     </div>
                 </a>
-                {% comment %}
-                OPEN P&L gets its own cell. It used to be the 9px sub-line
-                under the POSITIONS count — the one number on the band an
-                operator glances at most, rendered smallest. The value is the
-                same panel_open_pnl the POSITIONS and PORTFOLIO popups quote,
-                so the three can never disagree. No live mark on any open
-                position is an em-dash: an unmarked book is unknown, not flat.
-                The sub-line says which books the figure adds ("real +
-                paper"), as the PORTFOLIO cell beside it keeps them apart
-                (the Horde's final review, 2026-10-16).
-                {% endcomment %}
-                <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link ip-cat-pnl">
-                    <span class="ip-label">OPEN P&amp;L</span>
-                    <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books: eToro's own figure for each eToro position its holdings list, live marks otherwise. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
-                    {# The count is the positions the figure HOLDS (2026-11-06, the review's probe J): a row the book could not price is in it when eToro's figure for it is (panel_pnl_unpriced), never "0 of 1" under a figure that holds it. #}
-                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_pnl_unpriced and panel_pnl_positions < panel_positions %}real + paper across {{ panel_pnl_positions }} of {{ panel_positions }} positions{% elif panel_pnl_unpriced %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% elif panel_positions_priced < panel_positions %}real + paper across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">OPEN P&amp;L &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
-                        <div data-sv-live="hb-pnl-detail">
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">OPEN P&amp;L</span><span class="dv {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv {% if panel_open_r > 0 %}up{% elif panel_open_r < 0 %}down{% endif %}">{% if panel_open_r_display %}{{ panel_open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LONG</span><span class="dv up">{% if panel_n_long is None %}<span class="sv-unknown" title="A position's side could not be read">&mdash;</span>{% else %}{{ panel_n_long }}{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SHORT</span><span class="dv down">{% if panel_n_short is None %}<span class="sv-unknown" title="A position's side could not be read">&mdash;</span>{% else %}{{ panel_n_short }}{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">GRADED</span><span class="dv">{{ panel_open_r_n }} of {{ panel_positions }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">PRICED</span><span class="dv">{{ panel_positions_priced }} of {{ panel_positions }}</span></div>
-                        </div>
-                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_as_of %} <span data-sv-live-ephemeral>Measured {{ panel_as_of }} UTC.</span>{% endif %}</div>
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
-                    </div>
-                </a>
-                <a href="{% url 'asset_bots_dashboard' %}" class="ip-cat ip-cat-link">
-                    {% comment %}
-                    This cell printed ARMED whenever one config had enabled=True,
-                    and linked to the LEGACY crypto bot page — a different bot
-                    program from the one it was counting. Enabled is not running:
-                    the tick task is @guarded_task, so the platform master switch
-                    and the pipeline_asset_bots component each stop every tick on
-                    their own, a circuit breaker stops a bot opening anything,
-                    shadow mode submits nothing, and the kill switch disables the
-                    lot. The state word below is that whole chain, not one column,
-                    and an unreadable bot program stays an em-dash rather than
-                    being drawn as OFF.
-                    {% endcomment %}
-                    <span class="ip-label">BOT</span>
-                    <span class="ip-count" data-sv-live="hb-bot-state" data-sv-live-key="hb-bot-state">{% if panel_bot %}<span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}" title="{{ panel_bot.reason }}">{{ panel_bot.state }}</span>{% else %}<span class="sv-unknown" title="The bot program's state could not be read — this cell claims nothing">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live · {{ panel_bot.paper }} paper · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">BOT PROGRAM &middot; IS IT RUNNING? <span class="sv-live-chip" data-sv-live-status></span></div>
-                        <div data-sv-live="hb-bot-detail">
-                        {% if panel_bot %}
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">STATE</span><span class="dv"><span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}">{{ panel_bot.state }}</span></span></div>
-                            <div class="ip-dd-cell"><span class="dk">ENABLED</span><span class="dv">{{ panel_bot.enabled }}/{{ panel_bot.configs }}</span></div>
-                            {% comment %} A platform stopped at the master switch means every
-                               bot is idle no matter what its own row says, so it is
-                               named here first. UNSET is not OFF: guarded_task treats
-                               a missing component row as off, but the fix is to seed
-                               the components rather than to flip a switch. {% endcomment %}
-                            <div class="ip-dd-cell"><span class="dk">MASTER SWITCH</span><span class="dv {% if not panel_bot.master_on %}red{% endif %}">{% if panel_bot.master_on %}ON{% elif panel_bot.master_known %}OFF{% else %}UNSET{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">TICK GATE</span><span class="dv {% if not panel_bot.gate_on %}red{% endif %}">{% if panel_bot.gate_on %}ON{% elif panel_bot.gate_known %}OFF{% else %}UNSET{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">ARMED LIVE</span><span class="dv {% if panel_bot.live %}gold{% endif %}">{{ panel_bot.live }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">ARMED PAPER</span><span class="dv">{{ panel_bot.paper }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LAST TICK</span><span class="dv {% if panel_bot.tick_overdue %}red{% endif %}">{% if panel_bot.tick_ago %}{{ panel_bot.tick_ago }} ago{% else %}<span class="sv-unknown" title="No enabled bot has written a heartbeat yet">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">CADENCE</span><span class="dv">{{ panel_bot.cadence_min }} min</span></div>
-                            <div class="ip-dd-cell"><span class="dk">HALTED</span><span class="dv {% if panel_bot.halted %}red{% endif %}">{{ panel_bot.halted }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SHADOW</span><span class="dv {% if panel_bot.shadow %}gold{% endif %}">{{ panel_bot.shadow }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{{ panel_bot.open }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv">{% if panel_bot.open_r_display %}{{ panel_bot.open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">24H FILLS</span><span class="dv">{{ panel_bot.opened_24h }} in &middot; {{ panel_bot.closed_24h }} out</span></div>
-                            <div class="ip-dd-cell"><span class="dk">WIN RATE 24H</span><span class="dv">{% if panel_bot.winrate is not None %}{{ panel_bot.winrate }}%{% else %}<span class="sv-unknown" title="Nothing closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{% if panel_bot.pnl_24h_display %}{{ panel_bot.pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trade closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
-                        </div>
-                        <div class="ip-dd-note">{{ panel_bot.reason }}</div>
-                        {% if panel_bot.kill_at %}
-                        <div class="ip-dd-note"><span class="sv-chip sv-chip--bearish">kill switch</span> fired <span class="sv-age" data-sv-at="{{ panel_bot.kill_at|date:'c' }}">{{ panel_bot.kill_at|timesince }} ago</span>{% if panel_bot.kill_reason %} &middot; {{ panel_bot.kill_reason|truncatechars:60 }}{% endif %}</div>
-                        {% endif %}
-                        {% for b in panel_bot.bots %}
-                        <div class="ip-dd-row">
-                            <span class="ipr-sym">{{ b.name|truncatechars:14 }}</span>
-                            <span class="ipr-kind">{{ b.asset_class }}</span>
-                            {% if b.enabled %}<span class="sv-chip {% if b.mode == 'live' %}sv-chip--warn{% else %}sv-chip--muted{% endif %}">{{ b.mode }}</span>{% else %}<span class="sv-chip sv-chip--muted">off</span>{% endif %}
-                            {% if b.shadow %}<span class="sv-chip sv-chip--warn" title="Shadow mode: decides, submits nothing">shadow</span>{% endif %}
-                            {% if b.halted %}<span class="sv-chip sv-chip--bearish" title="{{ b.halted|join:'; ' }}">breaker</span>{% endif %}
-                            <span class="ipr-qty">{{ b.open }} open</span>
-                            <span class="ipr-age">{% if b.tick_ago %}{{ b.tick_ago }} ago{% else %}<span class="sv-unknown" title="This bot has never recorded a tick">&mdash;</span>{% endif %}</span>
-                        </div>
-                        {% endfor %}
-                        {% if panel_bot.bots_hidden %}<div class="ip-dd-note">+{{ panel_bot.bots_hidden }} more bot{{ panel_bot.bots_hidden|pluralize }} configured.</div>{% endif %}
-                        {% if panel_bot_last %}
-                        <div class="ip-dd-note">
-                            Last close: <strong>{{ panel_bot_last.symbol }}</strong> {{ panel_bot_last.outcome }}{% if panel_bot_last.r is not None %}
-                            <span class="{% if panel_bot_last.r >= 0 %}up{% else %}down{% endif %}">{{ panel_bot_last.r|floatformat:2 }}R</span>{% endif %}
-                            <span class="sv-age" data-sv-at="{{ panel_bot_last.when|date:'c' }}">{{ panel_bot_last.when|timesince }} ago</span>
-                        </div>
-                        {% endif %}
-                        {% else %}
-                        <div class="sv-empty"><b>Bot state unknown</b>The bot program could not be read, so this cell claims nothing about it — not even that it is off.</div>
-                        {% endif %}
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to the bots</div>
-                    </div>
-                </a>
                 <a href="{% url 'strategies_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">STRATEGIES</span>
                     <span class="ip-count" data-sv-live="hb-strategies" data-sv-live-key="hb-strategies">{{ panel_strategies|default:"0" }}</span>
@@ -1198,6 +1310,129 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Strategies</div>
                     </div>
                 </a>
+                <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
+                    <span class="ip-label">FUNDING</span>
+                    <span class="ip-count" data-sv-live="hb-funding" data-sv-live-key="hb-funding">{% if panel_funding_display %}{{ panel_funding_display }}{% else %}<span class="sv-unknown" title="No perpetual funding rate recorded in the last 24 hours">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-funding-sub">24h avg · {% if panel_funding_extreme_count is None %}&mdash;{% else %}{{ panel_funding_extreme_count }}{% endif %} extreme</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">FUNDING RATES</div>
+                        <div data-sv-live="hb-funding-detail">
+                        {% if panel_funding_samples %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">AVG 24H</span><span class="dv">{{ panel_funding_display }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">EXTREME</span><span class="dv gold">{{ panel_funding_extreme_count }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">FLIPS</span><span class="dv">{{ panel_funding_flips }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples }}</span></div>
+                        </div>
+                        {% else %}
+                        {% comment %} Four hardcoded zeros used to sit here, which reads as
+                           "funding is flat everywhere" — the opposite of "the
+                           funding stream is not running". {% endcomment %}
+                        <div class="sv-empty"><b>No funding data</b>No perpetual funding rates recorded in the last 24 hours.</div>
+                        {% endif %}
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</div>
+                    </div>
+                </a>
+                <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
+                    <span class="ip-label">LIQ 24H</span>
+                    <span class="ip-count" data-sv-live="hb-liq" data-sv-live-key="hb-liq">{% if panel_liq_24h_display %}${{ panel_liq_24h_display }}{% else %}<span class="sv-unknown" title="Nothing recorded — the liquidation stream may not be running">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-liq-sub">{% if panel_liq_count is None %}no feed{% else %}{{ panel_liq_count }} events{% endif %}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">LIQUIDATIONS (24H)</div>
+                        <div data-sv-live="hb-liq-detail">
+                        {% if panel_liq_count %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">${{ panel_liq_24h_display }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">COUNT</span><span class="dv">{{ panel_liq_count }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LONGS REKT</span><span class="dv red">${{ panel_liq_long_display }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display }}</span></div>
+                        </div>
+                        {% else %}
+                        {% comment %} $0 across the board is what a calm market looks like.
+                           It is also what a dead websocket looks like, and the
+                           operator cannot tell those apart from a zero. {% endcomment %}
+                        <div class="sv-empty"><b>No liquidation data</b>Nothing recorded in the last 24 hours — the liquidation stream may not be running.</div>
+                        {% endif %}
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
+                    </div>
+                </a>
+                <a href="{% url 'instruments_list' %}?filter=watchlist" class="ip-cat ip-cat-link">
+                    <span class="ip-label">WATCHLIST</span>
+                    <span class="ip-count" id="ipWatchlistCount" data-sv-live="hb-watchlist" data-sv-live-key="hb-watchlist">{{ panel_watchlist|default:"0" }}</span>
+                    <span class="ip-sub">tracked</span>
+                    {% comment %}
+                    THE WATCHLIST RAIL'S OWN LIST (2026-11-06): every star the
+                    rail draws, in its order, under its filters (this
+                    dropdown is a watch host too), instead of six cached
+                    rows. The rows stay inside the live region — their prices
+                    refresh with the sweep — and carry the same facts as the
+                    rail's items; the chips sit outside it.
+                    {% endcomment %}
+                    <div class="ip-dropdown" id="hbWatchDD" data-sv-fhost="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
+                        <div class="ip-dd-head">WATCHLIST</div>
+                        <div class="rail-facets rf-compact" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=False %}</div>
+                        <div data-sv-live="hb-watchlist-detail">
+                        <div class="sv-wl-rows" data-sv-list="watch">
+                        {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cheld:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
+                        {% for w in ui_watchlist %}
+                        <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
+                            <span class="ipr-sym">{{ w.symbol }}</span>
+                            <span class="ipr-qty" data-q="{{ w.symbol }}" data-q-title title="{{ w.q_title }}">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                            {% if w.last %}
+                            <span class="ipr-pct{% if w.change_pct is not None %} {% if w.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ w.symbol }}" data-q-f="chg">{{ w.q_chg }}</span>
+                            {% comment %} No quote, no change: a dash, never 0.00%, which is a different claim. {% endcomment %}
+                            {% else %}<span class="ipr-pct sv-unknown" title="No quote for this instrument">&mdash;</span>{% endif %}
+                        </div>
+                        {% empty %}
+                        <div class="sv-empty"><b>No watchlist</b>Nothing is flagged for tracking yet.</div>
+                        {% endfor %}
+                        {% if ui_watch_facets.more %}<div class="ip-dd-note" style="order:99999999">Showing {{ ui_watch_facets.n }} of {{ ui_watch_facets.total }} starred. /instruments/?filter=watchlist lists every one.</div>{% endif %}
+                        </div>
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
+                    </div>
+                </a>
+                {% comment %}
+                This said "VIX index" and rendered a variable nothing assigns.
+                There is no VIX feed anywhere in this platform, so the label
+                was promising data that could never arrive. It now reports what
+                we can actually measure from our own bars.
+                {% endcomment %}
+                <a href="{% url 'instruments_list' %}" class="ip-cat ip-cat-link">
+                    <span class="ip-label">VOLATILITY</span>
+                    {% comment %} The tone class sits on the INNER span: the refresh swaps
+                       innerHTML and not attributes, so a class on the region
+                       itself would keep the colour of the first render. {% endcomment %}
+                    <span class="ip-count" data-sv-live="hb-vol" data-sv-live-key="hb-vol">{% if panel_vol_pct %}<span class="{% if panel_vol_pct >= 60 %}red{% elif panel_vol_pct >= 30 %}gold{% endif %}">{{ panel_vol_pct }}%</span>{% else %}<span class="sv-unknown" title="Needs at least 21 bars on one instrument">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-vol-sub">{% if panel_vol_symbol %}{{ panel_vol_symbol }} realised{% else %}no bars{% endif %}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">REALISED VOLATILITY</div>
+                        <div data-sv-live="hb-vol-detail">
+                        {% if panel_vol_pct %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">ANNUALISED</span><span class="dv">{{ panel_vol_pct }}%</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SYMBOL</span><span class="dv">{{ panel_vol_symbol }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">WINDOW</span><span class="dv">{{ panel_vol_days }} bars</span></div>
+                            <div class="ip-dd-cell"><span class="dk">BASIS</span><span class="dv">{{ panel_vol_tf }} bars</span></div>
+                        </div>
+                        <div class="ip-dd-note">
+                            Standard deviation of {{ panel_vol_tf }} returns, annualised.
+                            Measured from our own price history — not an implied-volatility index.
+                        </div>
+                        {% else %}
+                        <div class="sv-empty">
+                            <b>Not enough history</b>
+                            Needs at least 21 bars on one instrument.
+                        </div>
+                        {% endif %}
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Instruments</div>
+                    </div>
+                </a>
+                {# Their new homes (the desk v2 board): SIGNALS in the dock and the rail, NEWS in the band, ALERTS in the bell, SAURON AI the Eye. The cells wait here unseen, their regions and hooks kept. #}
+                <div class="sv-more-gone" hidden>
                 <a href="{% url 'signals_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">SIGNALS</span>
                     {% comment %}
@@ -1288,54 +1523,6 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All News</div>
                     </div>
                 </a>
-                <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
-                    <span class="ip-label">FUNDING</span>
-                    <span class="ip-count" data-sv-live="hb-funding" data-sv-live-key="hb-funding">{% if panel_funding_display %}{{ panel_funding_display }}{% else %}<span class="sv-unknown" title="No perpetual funding rate recorded in the last 24 hours">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-funding-sub">24h avg · {% if panel_funding_extreme_count is None %}&mdash;{% else %}{{ panel_funding_extreme_count }}{% endif %} extreme</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">FUNDING RATES</div>
-                        <div data-sv-live="hb-funding-detail">
-                        {% if panel_funding_samples %}
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">AVG 24H</span><span class="dv">{{ panel_funding_display }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">EXTREME</span><span class="dv gold">{{ panel_funding_extreme_count }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">FLIPS</span><span class="dv">{{ panel_funding_flips }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples }}</span></div>
-                        </div>
-                        {% else %}
-                        {% comment %} Four hardcoded zeros used to sit here, which reads as
-                           "funding is flat everywhere" — the opposite of "the
-                           funding stream is not running". {% endcomment %}
-                        <div class="sv-empty"><b>No funding data</b>No perpetual funding rates recorded in the last 24 hours.</div>
-                        {% endif %}
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</div>
-                    </div>
-                </a>
-                <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
-                    <span class="ip-label">LIQ 24H</span>
-                    <span class="ip-count" data-sv-live="hb-liq" data-sv-live-key="hb-liq">{% if panel_liq_24h_display %}${{ panel_liq_24h_display }}{% else %}<span class="sv-unknown" title="Nothing recorded — the liquidation stream may not be running">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-liq-sub">{% if panel_liq_count is None %}no feed{% else %}{{ panel_liq_count }} events{% endif %}</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">LIQUIDATIONS (24H)</div>
-                        <div data-sv-live="hb-liq-detail">
-                        {% if panel_liq_count %}
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">${{ panel_liq_24h_display }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">COUNT</span><span class="dv">{{ panel_liq_count }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LONGS REKT</span><span class="dv red">${{ panel_liq_long_display }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display }}</span></div>
-                        </div>
-                        {% else %}
-                        {% comment %} $0 across the board is what a calm market looks like.
-                           It is also what a dead websocket looks like, and the
-                           operator cannot tell those apart from a zero. {% endcomment %}
-                        <div class="sv-empty"><b>No liquidation data</b>Nothing recorded in the last 24 hours — the liquidation stream may not be running.</div>
-                        {% endif %}
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
-                    </div>
-                </a>
                 <a href="{% url 'notifications_inbox' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">ALERTS</span>
                     <span class="ip-count gold" id="ipAlertsCount" data-sv-live="hb-alerts" data-sv-live-key="hb-alerts">{{ notification_count|default:"0" }}</span>
@@ -1358,124 +1545,15 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Notifications</div>
                     </div>
                 </a>
-                {% comment %}
-                DRAWDOWN and VOLATILITY had no panel at all, and DRAWDOWN
-                rendered `|default:"0"` — so with no snapshot ever taken it
-                showed a confident red 0%, which reads as "no downside".
-                {% endcomment %}
-                <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
-                    <span class="ip-label">DRAWDOWN</span>
-                    <span class="ip-count red" data-sv-live="hb-dd" data-sv-live-key="hb-dd">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="No daily snapshot exists for this book">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub">from peak</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">DRAWDOWN FROM PEAK</div>
-                        <div data-sv-live="hb-dd-detail">
-                        {% if panel_dd_snapshots %}
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">CURRENT</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LIMIT</span><span class="dv">{% if panel_max_dd %}{{ panel_max_dd }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">PEAK VALUE</span><span class="dv">{{ panel_currency_symbol }}{{ panel_dd_peak|floatformat:0 }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">NOW</span><span class="dv">{{ panel_currency_symbol }}{{ panel_dd_current|floatformat:0 }}</span></div>
-                        </div>
-                        <div class="ip-dd-note">
-                            Peak set {{ panel_dd_peak_date|date:"M j, Y" }} · measured over
-                            {{ panel_dd_snapshots }} daily snapshot{{ panel_dd_snapshots|pluralize }}
-                        </div>
-                        {% else %}
-                        {% comment %}
-                        Snapshots are the only input to this number, and the task that
-                        writes them marks the SHARED "Main" portfolio while this band
-                        reads the per-user book — so on most installs this cell is
-                        honestly unmeasurable rather than briefly empty. Saying which
-                        is the difference between a missing feed and a broken page.
-                        {% endcomment %}
-                        <div class="sv-empty">
-                            <b>Not measurable yet</b>
-                            Drawdown comes from daily portfolio snapshots, and none have been taken for this book. Unlike the cells to the left, it does not include bot trades.
-                        </div>
-                        {% endif %}
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Portfolio</div>
-                    </div>
-                </a>
-                <a href="{% url 'instruments_list' %}?filter=watchlist" class="ip-cat ip-cat-link">
-                    <span class="ip-label">WATCHLIST</span>
-                    <span class="ip-count" id="ipWatchlistCount" data-sv-live="hb-watchlist" data-sv-live-key="hb-watchlist">{{ panel_watchlist|default:"0" }}</span>
-                    <span class="ip-sub">tracked</span>
-                    {% comment %}
-                    THE WATCHLIST RAIL'S OWN LIST (2026-11-06): every star the
-                    rail draws, in its order, under its filters (this
-                    dropdown is a watch host too), instead of six cached
-                    rows. The rows stay inside the live region — their prices
-                    refresh with the sweep — and carry the same facts as the
-                    rail's items; the chips sit outside it.
-                    {% endcomment %}
-                    <div class="ip-dropdown" id="hbWatchDD" data-sv-fhost="watch" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.watch kind="watch" %}>
-                        <div class="ip-dd-head">WATCHLIST</div>
-                        <div class="rail-facets rf-compact" data-f-kind="watch" role="toolbar" aria-label="Filter the watchlist">{% include "_partials/rail_watch_chips.html" with p=rail_prefs.watch full=False %}</div>
-                        <div data-sv-live="hb-watchlist-detail">
-                        <div class="sv-wl-rows" data-sv-list="watch">
-                        {% for g in ui_watch_groups %}<div class="sv-grp" data-sv-grp data-asset-class="{{ g.asset_class }}" style="--o-cls:{{ g.o_cls }};--o-cheld:{{ g.o_cls }};--o-sym:0;--o-held:0">{{ g.label }}</div>{% endfor %}
-                        {% for w in ui_watchlist %}
-                        <div class="ip-dd-row sv-wl-row" data-symbol="{{ w.symbol }}" data-sv-row data-asset-class="{{ w.asset_class }}" data-held="{{ w.held|yesno:'1,0' }}" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}" style="--o-sym:{{ w.o_sym|default:0 }};--o-cls:{{ w.o_cls|default:0 }};--o-held:{{ w.o_held|default:0 }};--o-cheld:{{ w.o_cheld|default:0 }}">
-                            <span class="ipr-sym">{{ w.symbol }}</span>
-                            <span class="ipr-qty" data-q="{{ w.symbol }}" data-q-title title="{{ w.q_title }}">{% if w.last %}{% px w.last w.asset_class w.symbol %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
-                            {% if w.last %}
-                            <span class="ipr-pct{% if w.change_pct is not None %} {% if w.change_pct >= 0 %}up{% else %}down{% endif %}{% endif %}" data-q="{{ w.symbol }}" data-q-f="chg">{{ w.q_chg }}</span>
-                            {% comment %} No quote, no change: a dash, never 0.00%, which is a different claim. {% endcomment %}
-                            {% else %}<span class="ipr-pct sv-unknown" title="No quote for this instrument">&mdash;</span>{% endif %}
-                        </div>
-                        {% empty %}
-                        <div class="sv-empty"><b>No watchlist</b>Nothing is flagged for tracking yet.</div>
-                        {% endfor %}
-                        {% if ui_watch_facets.more %}<div class="ip-dd-note" style="order:99999999">Showing {{ ui_watch_facets.n }} of {{ ui_watch_facets.total }} starred. /instruments/?filter=watchlist lists every one.</div>{% endif %}
-                        </div>
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
-                    </div>
-                </a>
-                {% comment %}
-                This said "VIX index" and rendered a variable nothing assigns.
-                There is no VIX feed anywhere in this platform, so the label
-                was promising data that could never arrive. It now reports what
-                we can actually measure from our own bars.
-                {% endcomment %}
-                <a href="{% url 'instruments_list' %}" class="ip-cat ip-cat-link">
-                    <span class="ip-label">VOLATILITY</span>
-                    {% comment %} The tone class sits on the INNER span: the refresh swaps
-                       innerHTML and not attributes, so a class on the region
-                       itself would keep the colour of the first render. {% endcomment %}
-                    <span class="ip-count" data-sv-live="hb-vol" data-sv-live-key="hb-vol">{% if panel_vol_pct %}<span class="{% if panel_vol_pct >= 60 %}red{% elif panel_vol_pct >= 30 %}gold{% endif %}">{{ panel_vol_pct }}%</span>{% else %}<span class="sv-unknown" title="Needs at least 21 bars on one instrument">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-vol-sub">{% if panel_vol_symbol %}{{ panel_vol_symbol }} realised{% else %}no bars{% endif %}</span>
-                    <div class="ip-dropdown">
-                        <div class="ip-dd-head">REALISED VOLATILITY</div>
-                        <div data-sv-live="hb-vol-detail">
-                        {% if panel_vol_pct %}
-                        <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">ANNUALISED</span><span class="dv">{{ panel_vol_pct }}%</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SYMBOL</span><span class="dv">{{ panel_vol_symbol }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">WINDOW</span><span class="dv">{{ panel_vol_days }} bars</span></div>
-                            <div class="ip-dd-cell"><span class="dk">BASIS</span><span class="dv">{{ panel_vol_tf }} bars</span></div>
-                        </div>
-                        <div class="ip-dd-note">
-                            Standard deviation of {{ panel_vol_tf }} returns, annualised.
-                            Measured from our own price history — not an implied-volatility index.
-                        </div>
-                        {% else %}
-                        <div class="sv-empty">
-                            <b>Not enough history</b>
-                            Needs at least 21 bars on one instrument.
-                        </div>
-                        {% endif %}
-                        </div>
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Instruments</div>
-                    </div>
-                </a>
                 <a href="{% url 'ai_chat' %}" class="ip-cat ip-cat-link ip-cat-ai">
                     <span class="ip-label">SAURON AI</span>
                     <span class="ip-count">&#x25B8;</span>
                     <span class="ip-sub">ask anything</span>
                 </a>
+                </div>
+                </div>
+                </div>
+                <button type="button" data-sv-cell="keys" class="ip-cat sv-sb-keys" aria-keyshortcuts="Shift+?" aria-label="The keys: every shortcut (?)"><kbd class="sv-kbd" aria-hidden="true">?</kbd><span class="sbsub">Keys</span></button>
             </div>
             </div>
         </div>
@@ -1505,6 +1583,7 @@
         </div>
 
 
+<span class="sv-skip-to" id="svPage" tabindex="-1"></span>
 <div class="page-content fade-in">
             {% if passation_card %}{% include "_partials/passation_card.html" %}{% endif %}
             {# A Telegram button's page (2026-10-24): what the link opens. #}
@@ -1523,15 +1602,24 @@
   </svg>
 </button>
 
+{# THE DOCK (UI redo B1, the desk v2 board, 2026-11-13): a 40 px column on the right edge, between the band and the status bar. Signals opens the rail as a column that pushes the page (its count and the long/short split ride the sweep); the Council and Activity open their own panels through their own doors (staff only, as the panels are); Ask Sauron opens the answer panel, as the Eye in the status bar does. static/js/sv-frame.js. #}
+<div class="sv-dock" id="svDock" role="toolbar" aria-label="Side panels" aria-orientation="vertical">
+    <button type="button" class="sv-dock-btn" data-sv-dock="signals" aria-controls="signalsRail" aria-expanded="false" title="Signals: open or close the rail (g then s for the page)" aria-label="Signals on the rail: open or close the rail"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg><span class="sv-dock-n" data-sv-live="dock-sig-n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span></button>
+    <div class="sv-dock-dirs" aria-hidden="true" data-sv-live="dock-sig-dirs">{% if not rail.error %}<span class="up">&#9650;{{ rail.long_n|default:"0" }}</span><span class="down">&#9660;{{ rail.short_n|default:"0" }}</span>{% endif %}</div>
+    {% if user.is_staff %}<button type="button" class="sv-dock-btn" data-sv-dock="council" aria-controls="svCouncilBandPanel" aria-expanded="false" aria-keyshortcuts="c" title="The Council (c)" aria-label="The Council (c)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg><span class="sv-dock-n" hidden></span></button>
+    <button type="button" class="sv-dock-btn" data-sv-dock="activity" aria-controls="svActivityPanel" aria-expanded="false" title="Sauron's activity log" aria-label="Sauron's activity log"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-activity"/></svg><span class="sv-dock-n" hidden></span></button>{% endif %}
+    <button type="button" class="sv-dock-btn" data-sv-dock="ask" aria-controls="seChatPanel" aria-expanded="false" aria-keyshortcuts="Control+K" title="Ask Sauron (Ctrl+K)" aria-label="Ask Sauron: the answer panel opens here (Ctrl+K)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></button>
+</div>
+
 {# THE PHONE'S BOTTOM NAV (2026-09-28). The four pages the keeper opens every day and the whole menu, one tap each. #}
 {# Shown at 768px and below only (static/css/sv-responsive.css), and not on the position page, whose close bar owns the bottom edge. #}
 {# aria-current comes from the same page_id tests the sidebar's active row uses; the bell stays in the topbar for alerts. #}
 <nav class="sv-phone-nav" id="svPhoneNav" aria-label="Main">
-    <a class="sv-pn-item" href="{% url 'command_center' %}"{% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">◉</span><span class="sv-pn-label">Home</span></a>
-    <a class="sv-pn-item" href="{% url 'positions_list' %}"{% if page_id == 'positions' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">▣</span><span class="sv-pn-label">Positions</span></a>
-    <a class="sv-pn-item" href="{% url 'portfolio_overview' %}"{% if page_id == 'portfolio' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">◎</span><span class="sv-pn-label">Portfolio</span></a>
-    <a class="sv-pn-item" href="{% url 'briefing_dashboard' %}"{% if page_id == 'briefing' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">✦</span><span class="sv-pn-label">Briefing</span></a>
-    <button type="button" class="sv-pn-item" onclick="toggleMobileSidebar()" aria-controls="mainSidebar"><span class="sv-pn-icon" aria-hidden="true">&#9776;</span><span class="sv-pn-label">Menu</span></button>
+    <a class="sv-pn-item" href="{% url 'command_center' %}"{% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-ops-center"/></svg></span><span class="sv-pn-label">Home</span></a>
+    <a class="sv-pn-item" href="{% url 'positions_list' %}"{% if page_id == 'positions' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-positions"/></svg></span><span class="sv-pn-label">Positions</span></a>
+    <a class="sv-pn-item" href="{% url 'portfolio_overview' %}"{% if page_id == 'portfolio' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-portfolio"/></svg></span><span class="sv-pn-label">Portfolio</span></a>
+    <a class="sv-pn-item" href="{% url 'briefing_dashboard' %}"{% if page_id == 'briefing' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-briefing"/></svg></span><span class="sv-pn-label">Briefing</span></a>
+    <button type="button" class="sv-pn-item" onclick="toggleMobileSidebar()" aria-controls="mainSidebar"><span class="sv-pn-icon" aria-hidden="true"><svg class="sv-ico" viewBox="0 0 24 24" focusable="false"><use href="#svi-menu"/></svg></span><span class="sv-pn-label">Menu</span></button>
 </nav>
 
 <!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->
@@ -6363,6 +6451,7 @@ window.svWheelMarquee = function (frame, track) {
             <div class="kbd-row"><span class="kbd-label">Profile</span><span class="kbd-keys"><kbd>g</kbd><kbd>r</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Bot Console</span><span class="kbd-keys"><kbd>g</kbd><kbd>b</kbd></span></div>
             <div class="kbd-section-title">Actions</div>
+            <div class="kbd-row"><span class="kbd-label">Go to a symbol or a page</span><span class="kbd-keys"><kbd>/</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Show shortcuts</span><span class="kbd-keys"><kbd>?</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Close modal</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Toggle theme</span><span class="kbd-keys"><kbd>t</kbd></span></div>
@@ -6695,7 +6784,7 @@ lore (static/js/sv-gollum.js), and the nav-activity poll tells him what
 changed while the operator looked away — he fidgets and whispers once,
 never nags. He never acts.{% endcomment %}
 <button type="button" class="gollum-fab" id="gollumFab"
-        title="Gollum — the guide. Press /"
+        title="Gollum, the guide"
         aria-label="Gollum, the guide" aria-expanded="false"
         aria-controls="gollumDialog" aria-haspopup="dialog">
     <svg class="gollum-face" viewBox="0 0 60 60" aria-hidden="true">
@@ -6742,11 +6831,11 @@ never nags. He never acts.{% endcomment %}
            placeholder="Where to, precious? briefing · positions · pnl · brain…">
     <div class="gl-whisper" data-gollum-whisper hidden></div>
     <div class="gl-results" data-gollum-results></div>
-    <div class="gl-foot">/ calls him · Esc sends him away · he points, Sauron acts</div>
+    <div class="gl-foot">Esc sends him away · he points, Sauron acts</div>
 </div>
 
 <button type="button" class="se-eye-fab" id="seEyeFab"
-        title="Ask Sauron — press ? to toggle" aria-label="Ask Sauron">
+        title="Ask Sauron (Ctrl+K)" aria-label="Ask Sauron (Ctrl+K)" aria-keyshortcuts="Control+K">
     <svg class="se-fab-eye" viewBox="0 0 60 60" aria-hidden="true">
         {# Palantír — Sauron's seeing-stone. Outer rim, inner ember, drifting smoke, and four vision-flash glyphs (candle / chart / news / ticker) clipped to the orb. #}
         <defs>
@@ -6949,8 +7038,9 @@ never nags. He never acts.{% endcomment %}
 
     function openPanel() {
         panel.classList.add('open'); fab.classList.add('open');
-        /* Every way in comes through here — the orb, the ? key, Ctrl+K,
-           askSauronAbout, [data-ask-sauron], the banner's Open — so this is
+        /* Every way in comes through here — the orb, Ctrl+K (the "?" key
+           is the keys sheet's since the desk v2 board), askSauronAbout,
+           [data-ask-sauron], the banner's Open — so this is
            the one place the unread mark is read. Clearing it on the orb's
            click alone let it survive every other path and come back the
            moment the panel closed over an answer already read. */
@@ -7103,15 +7193,11 @@ never nags. He never acts.{% endcomment %}
     };
     closeBtn && closeBtn.addEventListener('click', closePanel);
 
-    // Keyboard: '?' to toggle, Esc to close.
+    // Keyboard: Esc closes. Ctrl+K opens (the shortcuts block); "?" is
+    // the keys sheet's (the desk v2 board, 2026-11-13: "? Keys").
     document.addEventListener('keydown', function(e) {
-        var typing = e.target && (e.target.tagName === 'INPUT'
-            || e.target.tagName === 'TEXTAREA'
-            || e.target.isContentEditable);
         if (e.key === 'Escape' && panel.classList.contains('open')) {
             e.preventDefault(); closePanel();
-        } else if (e.key === '?' && !typing) {
-            e.preventDefault(); openPanel();
         }
     });
 
