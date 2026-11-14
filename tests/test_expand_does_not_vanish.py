@@ -225,12 +225,16 @@ class TheToolbarIsMeasuredNotAssumedTests(TestCase):
     def test_the_overlays_follow_the_toolbar_instead_of_copying_it(self):
         """The measure readout, legend and countdown each carried their own
         literal 44px. A wrapped toolbar landed on top of all three."""
-        html = widget()
-        self.assertIn("--sv-toolbar-h", html)
+        # The desk v2 (B10, 2026-11-13) moved the widget's <style> into
+        # static/css/sv-chart.css: the widget publishes the measure, the
+        # sheet reads it; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        html = widget() + (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
+        self.assertIn("--sv-toolbar-h", widget())
         self.assertIn("calc(var(--sv-toolbar-h, 36px) + 8px)", html)
+        self.assertIn("calc(var(--sv-toolbar-h, 36px) + 9px)", html, "the legend")
 
     def test_no_overlay_still_hardcodes_the_old_offset(self):
-        html = widget()
+        html = widget() + (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")   # the widget and its sheet (the desk v2)
         for dead in ("top: 44px;", "top: 36px; /* below toolbar */"):
             self.assertNotIn(dead, html, dead)
 
@@ -311,22 +315,27 @@ class TheChartPaintsFromTokensInBothThemesTests(TestCase):
         """`--bg-elevated` is defined nowhere on the platform, so its
         hardcoded near-black fallback always won — and light mode paints
         --text-primary #1a2a1a on it. Black on black."""
-        html = widget()
+        html = widget() + (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")   # the widget and its sheet (the desk v2)
         self.assertNotIn("var(--bg-elevated", html)
 
     def test_the_active_tint_is_mixed_from_the_live_accent(self):
         """rgba(0,232,104,0.08) is the DARK accent frozen into a literal;
         light mode sets --accent #00994d."""
-        html = widget()
+        # The desk v2 (B10, 2026-11-13): a pressed control is raised (bg-4)
+        # with the Eye's underline, both tokens of both themes, in
+        # static/css/sv-chart.css; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        html = widget() + (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
         self.assertNotIn("rgba(0, 232, 104, 0.08)", html)
-        self.assertIn("color-mix(in srgb, var(--accent) 12%, transparent)",
-                      html)
+        pressed = html.split(".sv-chart-toolbar .sv-tf-btn.active,", 1)[1].split("}", 1)[0]
+        self.assertIn("background: var(--sv-bg-4);", pressed)
+        self.assertIn("box-shadow: inset 0 -2px 0 var(--sv-eye);", pressed)
 
     def test_the_measure_r_uses_the_gold_that_prints(self):
         """--accent-gold fails contrast on white at this size; the ink
         token is defined in both themes, and this widget's own JS already
         prefers it when picking a marker colour."""
-        html = widget()
-        self.assertIn(
-            ".sv-chart-measure .sv-m-r { color: var(--accent-gold-ink,",
-            html)
+        # The desk v2 (B10, 2026-11-13): the R prints in the desk's ink-1
+        # token, defined in both themes, in static/css/sv-chart.css; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!".
+        html = widget() + (Path(settings.BASE_DIR) / "static" / "css" / "sv-chart.css").read_text(encoding="utf-8")
+        self.assertIn(".sv-chart-measure .sv-m-r { color: var(--sv-ink-1); }", html)

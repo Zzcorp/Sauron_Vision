@@ -100,31 +100,25 @@ first render passes rail_initial and renders those rows itself.
                         title="Pass — takes it off your rail on every device; the engine still sees it"
                         aria-label="Pass on {{ s.instrument.symbol }} signal"
                         onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">&times;</button>
-                <a href="{{ signals_url }}" class="sr-signal" aria-haspopup="dialog" aria-expanded="false" style="text-decoration:none;">
-                    <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
+                {% comment %}THE CARD (the desk v2's board, its review F2): the symbol,
+                the side in words (its colour on the arrow only), the score as a
+                figure, the age in short words; then why and its rule; then
+                whose stage it is at and, when he holds the symbol, the world he
+                holds it in. The dot (.sr-dot) is the collapsed rail's mark, in
+                the side's tone by its class.{% endcomment %}
+                <a href="{{ signals_url }}" class="sr-signal" aria-haspopup="dialog" aria-expanded="false">
+                    <div class="sr-dot sr-dot--{{ s.direction }}" aria-hidden="true"></div>
                     <div class="sr-detail">
                         <div class="sr-row1">
                             <span class="sr-sym">{{ s.instrument.symbol }}</span>
-                            <span class="sr-badge sr-badge-{{ s.direction }}">{{ s.direction|upper|slice:":4" }}</span>
-                            <span class="sr-age">{{ s.created_at|timesince|default:"—"|truncatechars:8 }}</span>
+                            <span class="sr-side sr-side--{{ s.direction }}">{% if s.direction == "bullish" %}▲ Long{% elif s.direction == "bearish" %}▼ Short{% else %}{{ s.direction|capfirst }}{% endif %}</span>
+                            <span class="sr-score-num" title="Its score, 0 to 1">{{ s.score|floatformat:2 }}</span>
+                            <span class="sr-age" title="{{ s.created_at|date:'Y-m-d H:i' }} UTC">{{ s.created_at|short_age }}</span>
                         </div>
-                        <div class="sr-row2">
-                            {# 5-dot score gauge: each dot ON when score crosses 0.2*i #}
-                            <span class="sr-gauge" aria-label="score {{ s.score|floatformat:2 }}">
-                                {% with sc=s.score %}
-                                    <span class="sr-gauge-dot {% if sc >= 0.2 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.4 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.6 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.8 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.95 %}on{% endif %}"></span>
-                                {% endwith %}
-                            </span>
-                            <span class="sr-score-num">{{ s.score|floatformat:2 }}</span>
-                            {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}">{{ s.urgency|upper|slice:":3" }}</span>{% endif %}
-                        </div>
+                        <div class="sr-row2 sr-why">{% if s.title %}<span class="sr-why-t">{{ s.title|truncatechars:60 }}</span>{% endif %}{% if s.rule_name %}{% if s.title %} · {% endif %}<span class="sr-rule">{{ s.rule_name|truncatechars:28 }}</span>{% endif %}</div>
                         <div class="sr-row3">
+                            {% if s.rail.held %}<span class="sr-hold">You hold {% with w=s.rail.held_venue|lower %}{% if w == "book" %}<span class="sr-hold-w">in the book</span>{% else %}{% money_world w "compact" %}{% endif %}{% endwith %}</span>{% endif %}
                             {% if s.rail.stage_label %}<span class="sr-stage sr-stage-{{ s.rail.stage_tone }}" title="{{ s.rail.stage_reason }}">{{ s.rail.stage_label }}</span>{% endif %}
-                            {% if s.rule_name %}<span class="sr-rule">{{ s.rule_name|truncatechars:28 }}</span>{% endif %}
                         </div>{% if s.rail.market == 'shut' %}{# THE MARKET IS SHUT (2026-11-12): said on the card, with the hour it opens; the card stays, and its ticket says the same. Written on one line with the tag above so an open market's card keeps its bytes. #}
                         <div class="sr-shut" title="{{ s.rail.market_words|capfirst }}. A paper ticket is refused {% if s.instrument.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send."><span class="sr-shut-tag">MARKET SHUT</span>{% if s.rail.opens %} <span class="sr-shut-opens">{{ s.rail.opens }}</span>{% endif %}</div>{% endif %}
                         {% if s.rail.contra %}
@@ -145,8 +139,10 @@ first render passes rail_initial and renders those rows itself.
                 <div class="sr-popup" role="dialog">
                     <div class="sr-pop-head">
                         <span class="sr-pop-sym">{{ s.instrument.symbol }}</span>
-                        <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{{ s.direction|upper }}</span>
-                        {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}" style="margin-left:auto;">{{ s.urgency|upper }}</span>{% endif %}
+                        <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{% if s.direction == "bullish" %}▲ LONG{% elif s.direction == "bearish" %}▼ SHORT{% else %}{{ s.direction|upper }}{% endif %}</span>
+                        <span class="sr-pop-score">{{ s.score|floatformat:2 }}</span>
+                        <span class="sr-pop-age">{{ s.created_at|short_age }}</span>
+                        {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}">{{ s.urgency }}</span>{% endif %}
                         <button type="button" class="sv-pop-x" aria-label="Close this card" title="Close (Esc)">&times;</button>
                     </div>
                     {% if s.acted %}
@@ -190,9 +186,16 @@ first render passes rail_initial and renders those rows itself.
                     {% if s.title %}
                     <div class="sr-pop-title">{{ s.title|truncatechars:140 }}</div>
                     {% endif %}
+                    {% comment %}Its entry, its stop, its target first, side by side
+                    (the board): each by its own class, never by its place among
+                    the facts (the review of B10, m4).{% endcomment %}
+                    <div class="sr-pop-lead">
+                        <div class="sr-pop-f sr-pop-f-entry"><span class="sr-pop-k">Its entry</span><span class="sr-pop-v">{% px s.suggested_entry s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        <div class="sr-pop-f sr-pop-f-stop"><span class="sr-pop-k">Its stop</span><span class="sr-pop-v down">{% px s.suggested_stop s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        <div class="sr-pop-f sr-pop-f-target"><span class="sr-pop-k">Its target</span><span class="sr-pop-v up">{% px s.suggested_target s.instrument.asset_class s.instrument.symbol %}</span></div>
+                    </div>
                     <div class="sr-pop-grid">
                         <div><span class="sr-pop-k">type</span><span class="sr-pop-v">{{ s.signal_type|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">score</span><span class="sr-pop-v">{{ s.score|floatformat:2 }}</span></div>
                         <div><span class="sr-pop-k">rule</span><span class="sr-pop-v">{{ s.rule_name|default:"—"|truncatechars:18 }}</span></div>
                         <div><span class="sr-pop-k">when</span><span class="sr-pop-v">{{ s.created_at|date:"M d H:i" }}</span></div>
                         {% comment %}
@@ -202,17 +205,14 @@ first render passes rail_initial and renders those rows itself.
                         past what the venue quotes. {% px %} is the one
                         convention — see core/price_format.
                         {% endcomment %}
-                        <div><span class="sr-pop-k">entry</span><span class="sr-pop-v">{% px s.suggested_entry s.instrument.asset_class s.instrument.symbol %}</span></div>
                         <div><span class="sr-pop-k">R:R</span><span class="sr-pop-v">{% if s.risk_reward_ratio %}{{ s.risk_reward_ratio|floatformat:2 }}{% else %}&mdash;{% endif %}</span></div>
-                        <div><span class="sr-pop-k">stop</span><span class="sr-pop-v down">{% px s.suggested_stop s.instrument.asset_class s.instrument.symbol %}</span></div>
-                        <div><span class="sr-pop-k">target</span><span class="sr-pop-v up">{% px s.suggested_target s.instrument.asset_class s.instrument.symbol %}</span></div>
                         {% comment %}The mark the levels above are measured
                         against. Without it the operator has to guess whether
                         a suggested entry is still reachable.{% endcomment %}
                         <div><span class="sr-pop-k">mark</span><span class="sr-pop-v" data-q="{{ s.instrument.symbol }}" data-q-title title="{% q_title s.instrument.symbol %}">{% q s.instrument.symbol %}</span></div>
-                        <div><span class="sr-pop-k">age</span><span class="sr-pop-v">{{ s.created_at|timesince }}</span></div>
+
                         <div><span class="sr-pop-k">R:R now</span><span class="sr-pop-v"{% if s.rail.rr_order %} data-q="{{ s.instrument.symbol }}" data-q-f="rr" data-q-o="{{ s.rail.rr_order }}" data-q-stop="{{ s.rail.rr_stop }}" data-q-target="{{ s.rail.rr_target }}" data-q-max="{{ s.rail.rr_max }}"{% endif %}>{% if s.rail.rr_order %}{{ s.rail.rr_text }}{% elif s.rail.rr_now is not None %}{{ s.rail.rr_now|floatformat:2 }}{% else %}<span class="sv-unknown" title="No fresh quote, or no levels to weigh">&mdash;</span>{% endif %}</span></div>
-                        <div><span class="sr-pop-k">leaves</span><span class="sr-pop-v" title="{{ s.rail.leaves_words }}">{{ s.rail.leaves_at|timeuntil|truncatechars:10 }}</span></div>
+                        <div><span class="sr-pop-k">leaves</span><span class="sr-pop-v" title="{{ s.rail.leaves_words }}">in {{ s.rail.leaves_at|short_age:"until" }}</span></div>
                     </div>
                     {% comment %}Can anything act on it, and what is its
                     rule worth: the stage badge (signal_surface.stage_badge,
@@ -222,10 +222,10 @@ first render passes rail_initial and renders those rows itself.
                     it, whatever the scanner re-matched since; the words say
                     "a default bot", whose age limit that is.{% endcomment %}
                     <div class="sr-pop-facts">
-                        <div class="sr-pop-fact"><span class="sr-pop-k">stage</span> {{ s.rail.stage_label|default:"—" }} · {{ s.rail.vote_words }}</div>
-                        <div class="sr-pop-fact"><span class="sr-pop-k">graded</span> {{ s.rail.record_words }}</div>
+                        <div class="sr-pop-fact"><span class="sr-pop-k">The bots</span> {{ s.rail.stage_label|default:"—" }} · {{ s.rail.vote_words }}</div>
+                        <div class="sr-pop-fact"><span class="sr-pop-k">Its rule</span> {{ s.rail.record_words }}</div>
                         {% if s.rail.live_words %}<div class="sr-pop-fact"><span class="sr-pop-k">real money</span> {{ s.rail.live_words }}</div>{% endif %}
-                        {% if s.rail.held %}<div class="sr-pop-fact"><span class="sr-pop-k">held</span> you hold {{ s.instrument.symbol }} ({{ s.rail.held_venue }})</div>{% endif %}{% if s.rail.market == 'shut' %}<div class="sr-pop-fact sr-pop-fact-shut"><span class="sr-pop-k">market</span> shut{% if s.rail.opens %} · {{ s.rail.opens }}{% endif %} · a paper ticket is refused {% if s.instrument.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send</div>{% endif %}
+                        {% if s.rail.held %}<div class="sr-pop-fact"><span class="sr-pop-k">You hold</span> {% with w=s.rail.held_venue|lower %}{% if w == "book" %}{{ s.instrument.symbol }} in the book{% else %}{% money_world w "compact" %} {{ s.instrument.symbol }}{% endif %}{% endwith %}</div>{% endif %}{% if s.rail.market == 'shut' %}<div class="sr-pop-fact sr-pop-fact-shut"><span class="sr-pop-k">market</span> shut{% if s.rail.opens %} · {{ s.rail.opens }}{% endif %} · a paper ticket is refused {% if s.instrument.asset_class == 'index' %}outside its cash session{% else %}until it has opened and settled{% endif %}; a live ticket warns and is yours to send</div>{% endif %}
                     </div>
                     {% comment %}Reaction row (take trade / pass) — primary
                     decisions. TAKE TRADE only for directional signals: a
@@ -265,12 +265,12 @@ first render passes rail_initial and renders those rows itself.
                     </div>
                     {# Explore row — secondary deep-dive actions. #}
                     <div class="sr-pop-actions">
-                        <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">▸ INSTRUMENT</a>
-                        <a href="{{ signals_url }}" class="sr-pop-btn">▸ ALL SIGNALS</a>
+                        <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">INSTRUMENT</a>
+                        <a href="{{ signals_url }}" class="sr-pop-btn">ALL SIGNALS</a>
                         <button type="button" class="sr-pop-btn"
                                 data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
                                 data-ask-kind="signal">
-                            ▸ ASK SAURON
+                            ASK SAURON
                         </button>
                     </div>
                     </div>
@@ -281,8 +281,7 @@ first render passes rail_initial and renders those rows itself.
             note above says so, and nothing here claims the rail is empty
             (2026-11-06, the review).{% endcomment %}
             {% if not rail.error %}
-            <div class="sr-empty" style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
-                <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
+            <div class="sr-empty">
                 No signal on the rail{% if rail.gone_n %} · {{ rail.gone_n }} left in the last 24h{% endif %}
             </div>
             {% endif %}

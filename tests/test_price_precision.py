@@ -269,8 +269,14 @@ class TheHeaderIsTwoRowsNotFourTests(TestCase):
                                  source="ibkr")
 
     def test_the_metadata_rides_the_title_row(self):
+        # The desk v2 (B10, 2026-11-13): the instrument's name rides the
+        # page's title row ("BRNUSD — Brent Crude Oil"), and the header
+        # under it is one row of 52 px with no metadata row of its own; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!".
         body = self.client.get("/instruments/BRNUSD/").content.decode()
-        self.assertIn("detail-meta-inline", body)
+        self.assertIn("BRNUSD — Brent Crude Oil", body)
+        self.assertIn('<section class="sv-ih"', body)
+        self.assertNotIn('class="detail-meta', body)
 
     def test_the_book_sits_on_the_buttons(self):
         """It used to sit BESIDE them as a loose strip, which left the

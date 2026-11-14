@@ -732,6 +732,17 @@
     return p && p.src === 'etoro' ? '#d8b020' : '#7aaa8a';
   }
 
+  /* The chart's own look for its "now" line, when its handle names one
+     (chart_widget's nowLook, the desk v2, 2026-11-13): the line in the
+     chart's ink, its axis label on the chart's raised surface in ink.
+     Else the colours it always had. Display only: the price, the title,
+     the weld and the caption are the engine's as before. */
+  function lineLook(h, p) {
+    var look = null;
+    try { look = (h && typeof h.nowLook === 'function') ? h.nowLook(p ? p.src : '') : null; } catch (e) { look = null; }
+    return (look && look.color) ? look : { color: lineColor(p) };
+  }
+
   /* The forming candle takes the price the numbers print, when the chart
      says it may (chart_widget tickRefusal: the candles' own feed and side,
      a forming bar, a fresh reading inside it, within the class's jump
@@ -768,19 +779,23 @@
       return;
     }
     var title = stateAt(p, at) === 'shut' ? 'closed · ' + head(p, '') : head(p, '');
-    var color = lineColor(p);
-    var sig = v + '|' + title + '|' + color;
+    var look = lineLook(h, p);
+    var color = look.color;
+    var sig = v + '|' + title + '|' + color + '|' + (look.label || '') + '|' + (look.text || '');
     if (h._svLine && h._svSig === sig) {
       /* unchanged: no write */
     } else if (h._svLine && typeof h._svLine.applyOptions === 'function') {
-      h._svLine.applyOptions({ price: v, title: title, color: color });
+      h._svLine.applyOptions({ price: v, title: title, color: color,
+                               axisLabelColor: look.label || '', axisLabelTextColor: look.text || '' });
     } else {
       if (h._svLine) {
         try { series.removePriceLine(h._svLine); } catch (e) { /* gone with its series */ }
       }
       h._svLine = series.createPriceLine({ price: v, title: title, color: color,
                                            lineWidth: 1, lineStyle: 2,
-                                           axisLabelVisible: true, lineVisible: true });
+                                           axisLabelVisible: true, lineVisible: true,
+                                           axisLabelColor: look.label || '',
+                                           axisLabelTextColor: look.text || '' });
     }
     h._svSig = sig;
     weld(h, p, v, at);

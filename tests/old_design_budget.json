@@ -843,39 +843,23 @@
   },
   "/instruments/BTCUSD/": {
    "chrome_over_content": 3,
-   "eye_border": 11,
-   "eye_fill": 4,
-   "eye_text": 18,
-   "eye_wash": 2,
-   "figs": 1,
+   "eye_text": 1,
    "first_line_low": 1,
-   "font_other": 1,
    "glow": 2,
-   "glyph_face": 6,
+   "glyph_face": 3,
    "gradient": 4,
-   "inline_visual": 12,
-   "prose_mono": 1,
-   "radius": 16,
-   "shadow": 6,
-   "tiny": 49
+   "radius": 3,
+   "shadow": 2
   },
   "/instruments/EURUSD/": {
    "chrome_over_content": 3,
-   "eye_border": 11,
-   "eye_fill": 4,
-   "eye_text": 16,
-   "eye_wash": 2,
-   "figs": 1,
+   "eye_text": 1,
    "first_line_low": 1,
-   "font_other": 1,
    "glow": 2,
-   "glyph_face": 6,
+   "glyph_face": 3,
    "gradient": 4,
-   "inline_visual": 8,
-   "prose_mono": 4,
-   "radius": 17,
-   "shadow": 6,
-   "tiny": 51
+   "radius": 3,
+   "shadow": 2
   },
   "/intelligence/": {
    "chrome_over_content": 3,
@@ -1607,21 +1591,14 @@
   },
   "390:/instruments/EURUSD/": {
    "chrome_over_content": 2,
-   "eye_border": 13,
-   "eye_fill": 4,
-   "eye_text": 16,
-   "eye_wash": 2,
-   "figs": 1,
+   "eye_border": 2,
+   "eye_text": 4,
    "first_line_low": 1,
-   "font_other": 1,
    "glow": 5,
    "gradient": 2,
-   "inline_visual": 6,
-   "prose_mono": 3,
-   "radius": 15,
-   "shadow": 6,
-   "target_small": 3,
-   "tiny": 46
+   "radius": 3,
+   "shadow": 2,
+   "target_small": 3
   },
   "390:/ops/": {
    "chrome_over_content": 2,
@@ -1773,21 +1750,13 @@
   "hover:/instruments/EURUSD/": {
    "border_off": 2,
    "chrome_over_content": 4,
-   "eye_border": 51,
-   "eye_fill": 8,
-   "eye_text": 72,
-   "eye_wash": 4,
-   "figs": 2,
+   "eye_text": 2,
    "first_line_low": 2,
-   "font_other": 2,
    "glow": 5,
    "gradient": 6,
-   "inline_visual": 16,
-   "prose_mono": 8,
-   "radius": 31,
+   "radius": 4,
    "see_through": 1,
-   "shadow": 12,
-   "tiny": 102
+   "shadow": 2
   },
   "hover:/knowledge/": {
    "chrome_over_content": 2,
@@ -1951,22 +1920,17 @@
   "hover:state:take_trade_paper": {
    "border_off": 4,
    "chrome_over_content": 4,
-   "eye_border": 51,
-   "eye_fill": 10,
-   "eye_text": 76,
-   "eye_wash": 4,
-   "figs": 2,
+   "eye_fill": 2,
+   "eye_text": 2,
    "first_line_low": 2,
-   "font_other": 2,
    "glass": 2,
    "glow": 5,
    "gradient": 6,
-   "inline_visual": 24,
-   "prose_mono": 24,
-   "radius": 29,
+   "prose_mono": 22,
+   "radius": 4,
    "see_through": 13,
-   "shadow": 12,
-   "tiny": 170
+   "shadow": 2,
+   "tiny": 72
   },
   "light:/command/": {
    "red_fill": 1
@@ -2464,32 +2428,28 @@
    "tiny": 145
   },
   "state:rail_bearish": {
-   "bg_off": 3,
+   "bg_off": 1,
    "chrome_over_content": 3,
-   "color_off": 2,
    "contrast": 4,
    "eye_border": 1,
-   "eye_fill": 8,
    "eye_text": 3,
    "first_line_low": 1,
-   "glow": 10,
-   "glyph_face": 7,
+   "glow": 2,
+   "glyph_face": 6,
    "gradient": 18,
    "inline_visual": 17,
    "radius": 3,
    "shadow": 2
   },
   "state:rail_bullish": {
-   "bg_off": 3,
+   "bg_off": 1,
    "chrome_over_content": 3,
-   "color_off": 2,
    "contrast": 4,
    "eye_border": 1,
-   "eye_fill": 8,
    "eye_text": 3,
    "first_line_low": 1,
-   "glow": 10,
-   "glyph_face": 7,
+   "glow": 2,
+   "glyph_face": 6,
    "gradient": 18,
    "inline_visual": 17,
    "radius": 3,
@@ -2563,64 +2523,49 @@
   },
   "state:take_trade_live": {
    "chrome_over_content": 3,
-   "eye_border": 11,
-   "eye_fill": 5,
-   "eye_text": 16,
-   "eye_wash": 2,
-   "figs": 1,
+   "eye_fill": 1,
+   "eye_text": 1,
    "first_line_low": 1,
-   "font_other": 1,
    "glass": 1,
    "glow": 2,
-   "glyph_face": 6,
+   "glyph_face": 3,
    "gradient": 4,
-   "inline_visual": 8,
-   "prose_mono": 15,
-   "radius": 17,
+   "prose_mono": 11,
+   "radius": 3,
    "see_through": 6,
-   "shadow": 6,
-   "tiny": 89
+   "shadow": 2,
+   "tiny": 38
   },
   "state:take_trade_paper": {
    "chrome_over_content": 3,
-   "eye_border": 11,
-   "eye_fill": 5,
-   "eye_text": 18,
-   "eye_wash": 2,
-   "figs": 1,
+   "eye_fill": 1,
+   "eye_text": 1,
    "first_line_low": 1,
-   "font_other": 1,
    "glass": 1,
    "glow": 2,
-   "glyph_face": 6,
+   "glyph_face": 3,
    "gradient": 4,
-   "inline_visual": 12,
-   "prose_mono": 12,
-   "radius": 16,
+   "prose_mono": 11,
+   "radius": 3,
    "see_through": 6,
-   "shadow": 6,
-   "tiny": 85
+   "shadow": 2,
+   "tiny": 36
   },
   "state:take_trade_short": {
    "border_off": 1,
    "chrome_over_content": 3,
-   "eye_border": 11,
-   "eye_fill": 5,
-   "eye_text": 18,
-   "eye_wash": 2,
-   "figs": 1,
+   "eye_fill": 1,
+   "eye_text": 1,
    "first_line_low": 1,
-   "font_other": 1,
    "glass": 1,
    "glow": 3,
-   "glyph_face": 6,
+   "glyph_face": 3,
    "gradient": 5,
-   "inline_visual": 12,
-   "prose_mono": 13,
-   "radius": 16,
+   "prose_mono": 12,
+   "radius": 3,
    "see_through": 6,
-   "shadow": 6,
-   "tiny": 92
+   "shadow": 2,
+   "tiny": 43
   },
   "state:tour": {
    "bg_off": 2,
@@ -2845,17 +2790,6 @@
    "inline_visual": 5,
    "sub11": 2
   },
-  "templates/_partials/chart_widget.html": {
-   "accent_role": 12,
-   "eye_literal": 1,
-   "glyph_icon": 4,
-   "gradient": 1,
-   "infinite": 3,
-   "inline_visual": 16,
-   "mono_generic": 2,
-   "old_literal": 4,
-   "sub11": 19
-  },
   "templates/_partials/council_band.html": {
    "glyph_icon": 1
   },
@@ -2882,8 +2816,7 @@
    "sub11": 2
   },
   "templates/_partials/signal_rail_items.html": {
-   "glyph_icon": 8,
-   "inline_visual": 4
+   "glyph_icon": 5
   },
   "templates/_partials/the_horde.html": {
    "glyph_icon": 3
@@ -3233,15 +3166,6 @@
    "glyph_icon": 1,
    "inline_visual": 15
   },
-  "templates/dashboard/instrument_detail.html": {
-   "accent_role": 12,
-   "eye_literal": 1,
-   "glyph_icon": 3,
-   "inline_visual": 15,
-   "old_literal": 1,
-   "old_token": 1,
-   "sub11": 8
-  },
   "templates/dashboard/instruments_list.html": {
    "accent_role": 7,
    "eye_literal": 3,
@@ -3563,7 +3487,11 @@
  },
  "strict": {
   "measured": [],
-  "source": []
+  "source": [
+   "static/css/sv-chart.css",
+   "templates/_partials/chart_widget.html",
+   "templates/dashboard/instrument_detail.html"
+  ]
  },
  "unreached": {
   "/login/pin/forgot/": "status 302: a GET is sent back to /login/pin/ (the view acts on a POST only; its form is on /login/pin/, measured there)"

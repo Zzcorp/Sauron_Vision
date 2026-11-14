@@ -50,6 +50,25 @@ jobs:
           fi
           redis-server --version
 
+      # The suite's measured tests draw the kit's text in the faces the site
+      # serves, Inter and JetBrains Mono, with the preference for Inter the
+      # old-design-measured job below installs too (the redis step above has
+      # updated the package lists). Without them Chromium draws DejaVu Sans,
+      # about a tenth wider, and a row the design holds on one line wraps
+      # (#112's CI on 4a7131c: the instrument header's feed row).
+      - name: Install the faces the site serves (Inter, JetBrains Mono)
+        run: |
+          sudo apt-get install -y -qq fonts-inter fonts-jetbrains-mono
+          sudo cp tests/old_design/fonts/56-prefer-inter.conf /etc/fonts/conf.d/
+          sudo fc-cache -f > /dev/null
+          fc-list : family > "$RUNNER_TEMP/faces.txt"
+          for face in "Inter" "JetBrains Mono"; do
+            if ! grep -q "^$face" "$RUNNER_TEMP/faces.txt"; then
+              echo "no $face face after the install" >&2; exit 1
+            fi
+          done
+          echo "sans-serif: $(fc-match -f '%{family[0]}' sans-serif)"
+
       # WhiteNoise serves from STATIC_ROOT; a test asserts every template
       # asset was actually collected, so CI must collect like a deploy does.
       - name: Collect static assets

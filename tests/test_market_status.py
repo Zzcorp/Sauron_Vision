@@ -222,7 +222,14 @@ class MarketBadgeOnPageTests(TestCase):
         _instrument("AAPL", "stock", "NASDAQ")
         resp = self.client.get("/instruments/AAPL/")
         body = resp.content.decode()
-        self.assertLess(body.index("dtl-mkt"), body.index("detail-meta"))
+        # The desk v2 (B10, 2026-11-13): there is no metadata line any more;
+        # the badge rides the one header row, beside whose price it is and
+        # how old; the operator approved the board: "amazing work, bravo, I need it fast!!".
+        head = body.index('<section class="sv-ih"')
+        self.assertLess(head, body.index("dtl-mkt"))
+        self.assertLess(body.index("dtl-mkt"), body.index("</section>", head))
+        self.assertLess(body.index('data-hero="src"'), body.index("dtl-mkt"))
+        self.assertNotIn('class="detail-meta', body)
 
     def test_the_instruments_list_states_each_rows_market(self):
         """The table-level answer: every row carries the compact cell the
