@@ -49,7 +49,10 @@ window holds as many frames as it does at 60 Hz (a starved renderer gives it
 more time, never fewer frames); a phase starts where the hand's input reaches
 the page (an input landed up to 150 ms after it was sent). The wall clock
 stays the hand's: the marks, the waits, the finger's three seconds, and what
-the eye sees (never faster than the speed).
+the eye sees (never faster than the speed). One fault under load was the
+driver's (2026-11-14): when the machine drew every other frame for a second
+it took 33.3 ms for the screen's interval, and the news lost its rhythm; a
+busy machine's frame clock is replayed on the driver (CLOCK).
 
 The review of the first build (2026-11-13), each point measured here, red on
 e4e8a2d: Shift+Tab into a strip left the focus off screen (the clip's scroll
@@ -68,6 +71,7 @@ synthetic. Skipped without Chromium.
 Run with:  python manage.py test tests.test_marquee
 """
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -212,7 +216,9 @@ TITLES = (
 #: that answers what the test queued, the driver's frame requests counted
 #: by its file, the timestamp each of its frames moved the strips by (the
 #: samples' clock) and how many it ran, and a tab whose visibility the test
-#: sets (headless Chromium is always visible).
+#: sets (headless Chromium is always visible). A tab opened with #mq-clock
+#: runs the driver's frames on the test's clock instead: each frame it asks
+#: for waits until __mqClock.step(t) runs it with the timestamp t.
 STUBS = r"""<script>
 (function () {
   window.WebSocket = function (u) { this.url = u; this.readyState = 0; };
@@ -228,16 +234,32 @@ STUBS = r"""<script>
     }
     return Promise.reject(new TypeError('offline'));
   };
-  var raf = window.requestAnimationFrame.bind(window);
+  var raf = window.requestAnimationFrame.bind(window), caf = window.cancelAnimationFrame.bind(window);
   window.__mqRaf = 0;
   window.__mqTick = null;
   window.__mqTicks = 0;
+  window.__mqClock = location.hash === '#mq-clock' ? { held: [], n: 0 } : null;
   window.requestAnimationFrame = function (cb) {
     if (String((new Error()).stack || '').indexOf('sv-marquee.js') >= 0) {
       window.__mqRaf++;
-      return raf(function (t) { window.__mqTick = t; window.__mqTicks++; return cb(t); });
+      var run = function (t) { window.__mqTick = t; window.__mqTicks++; return cb(t); };
+      var c = window.__mqClock;
+      if (!c) return raf(run);
+      c.held.push({ id: --c.n, run: run });
+      return c.n;
     }
     return raf(cb);
+  };
+  window.cancelAnimationFrame = function (id) {
+    var c = window.__mqClock;
+    if (c && id < 0) c.held = c.held.filter(function (h) { return h.id !== id; });
+    else caf(id);
+  };
+  if (window.__mqClock) window.__mqClock.step = function (t) {
+    var due = this.held;
+    this.held = [];
+    due.forEach(function (h) { h.run(t); });
+    return due.length;
   };
   window.__mqHidden = false;
   Object.defineProperty(Document.prototype, 'hidden', { configurable: true,
@@ -377,6 +399,27 @@ window.__mq = (function () {
         setTimeout(poll, 25);
       })();
     });
+  }
+  /* The driver's frames on the test's clock (a tab opened with #mq-clock):
+     each [t, phase, to] of seq runs the frame the driver asked for with the
+     timestamp t (phase: a new phase starts; to: both strips first put at
+     that offset), then each strip is read as the sampler reads it, with how
+     many frames ran and the frame interval the driver holds. */
+  function clock(seq) {
+    var out = { dh: [], ticker: [] }, m = -1;
+    seq.forEach(function (s) {
+      if (s[1]) m++;
+      if (s[2] !== null) {
+        ['dh', 'ticker'].forEach(function (n) { SVMarquee.to(parts(n).t, -s[2]); });
+      }
+      var ran = window.__mqClock.step(s[0]);
+      ['dh', 'ticker'].forEach(function (n) {
+        var p = parts(n);
+        out[n].push({ t: s[0], f: s[0], x: tx(p.t), P: period(p.t), m: m, ran: ran,
+                      fm: SVMarquee.state(p.t).frameMs });
+      });
+    });
+    return JSON.stringify(out);
   }
   /* Armed before the hand acts: the next event of `types` (one or more,
      space-separated) on a strip's frame (or 'window', or 'reduced': the
@@ -532,7 +575,7 @@ window.__mq = (function () {
     return Array.prototype.map.call(document.querySelectorAll(sel), function (e) { return e.textContent.trim(); });
   }
   return { start: start, stop: stop, mark: mark, point: point, inside: inside, card: card,
-           waitCard: waitCard, armGone: armGone, frames: frames, ticks: ticks, arm: arm,
+           waitCard: waitCard, armGone: armGone, frames: frames, ticks: ticks, arm: arm, clock: clock,
            away: away, at: at, x: x, items: function (n) { return items(parts(n).t).length; },
            period: function (n) { return period(parts(n).t); }, focusInside: focusInside,
            activeIn: activeIn, stops: stops, glow: glow, shown: shown, text: text, writes: writes,
@@ -1228,6 +1271,39 @@ def _shaky(tab):
     return out
 
 
+# ── a loaded machine's frame clock (2026-11-14) ──────────────────────────
+
+#: The frame clock of a loaded machine, replayed on the driver: each part is
+#: (the screen's Hz, its frames, one drawn in every, the offset both strips
+#: are first put at). A second at 60 Hz (the driver learns the screen's
+#: interval); a second in which the machine draws every other frame, the
+#: strips first put on a whole pixel as at page load (measured under load:
+#: frames 33 to 67 ms apart for a second); two seconds at 60 Hz again; then
+#: another screen, at 50 Hz, for a second and a half. Each part a phase.
+CLOCK = ((60, 60, 1, None), (60, 60, 2, 1000), (60, 120, 1, None), (50, 75, 1, None))
+
+
+def _frames(spec, t0=5000.0):
+    """[timestamp ms, a phase starts, offset or None] per frame drawn: on
+    the screen's grid, at 0.1 ms as Chromium hands them."""
+    out, start = [], t0
+    for hz, n, every, to in spec:
+        first = True
+        for k in range(1, n + 1):
+            if k % every:
+                continue
+            out.append([math.floor((start + k * 1000.0 / hz) * 10 + 0.5) / 10, 1 if first else 0,
+                        to if first else None])
+            first = False
+        start += n * 1000.0 / hz
+    return out
+
+
+def _clock(tab):
+    """The driver's own frames on CLOCK, nothing else moving it."""
+    return json.loads(tab.js("__mq.clock(%s)" % json.dumps(_frames(CLOCK))))
+
+
 # ── reading the samples ──────────────────────────────────────────────────
 
 def _steps(samples):
@@ -1480,6 +1556,7 @@ class TheStripsMeasuredTests(TestCase):
             _guard(got, "fresh", lambda: _fresh(_Tab(chrome, uri), first, str(fresh[0].id)))
             _guard(got, "short", lambda: _short(_Tab(chrome, uri), short))
             _guard(got, "shaky", lambda: _shaky(_Tab(chrome, uri)))
+            _guard(got, "clock", lambda: _clock(_Tab(chrome, uri + "#mq-clock")))
         finally:
             chrome.close()
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1806,6 +1883,36 @@ class TheStripsMeasuredTests(TestCase):
                 self.assertEqual(_rhythm_faults(got[name], SPEED[name]), [])
                 for m in range(1, 5):
                     self.assertSpeed(_phase(got[name], m, skip=0.05), name, label="phase %d" % m)
+
+    def test_frames_a_busy_machine_drops_leave_the_rhythm_even(self):
+        """A busy machine draws every other frame for a while (measured
+        with every core busy: frames 33 to 67 ms apart for a second). Those
+        gaps are two frames of the same screen, not a slower screen: the
+        driver keeps the screen's interval, so the frames that follow at
+        16.7 ms are still one frame each (half a pixel of news) and the
+        steps keep their rhythm. On 82e74c9 the median of the last 40 gaps
+        became 33.3 ms and the driver took it for the screen's interval:
+        the frames at 16.7 ms were then not whole frames, moved by their own
+        time, and the news stood two frames and stepped two, the frame
+        clock's 0.1 ms jitter deciding each rounding (the review's defect of
+        e4e8a2d, back under load: with every core busy the rhythm above
+        failed on it, read on the frame clock). Another screen is still
+        taken: at 50 Hz the strips keep their speed. The driver's own
+        frames, on a clock the test replays (CLOCK): no load needed, the
+        same answer every run."""
+        got = self.scenario("clock")
+        for name in ("dh", "ticker"):
+            with self.subTest(strip=name):
+                samples = got[name]
+                self.assertEqual({s["ran"] for s in samples}, {1}, "not one frame asked for a frame")
+                dropped = [s for s in samples if s["m"] in (1, 2)]
+                self.assertEqual(_rhythm_faults(dropped, SPEED[name]), [])
+                self.assertEqual(sorted({round(s["fm"], 3) for s in dropped}), [16.667],
+                                 "the screen's interval lost to dropped frames")
+                # A driver that never took a longer interval would run at
+                # 16.7 ms a frame of 20: five sixths of its speed.
+                other = [s for s in samples if s["m"] == 3]
+                self.assertSpeed(other[len(other) // 2:], name, label="a 50 Hz screen")
 
     def test_a_long_task_freezes_it_and_it_goes_on_without_a_skip(self):
         """A 300 ms task on the main thread freezes a strip moved by script;
