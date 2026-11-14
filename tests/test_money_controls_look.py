@@ -13,9 +13,11 @@ protective action, REAL the only solid red.
   * THE DEAL TICKET: SELL in coral, BUY in jade, never a fill; the price in
     the number face; a fixed width, so a ticking price never moves a button;
     a stale ticket dashed and its price muted; the REAL chip in the middle.
-  * TAKE TRADE: the confirm is never green on a SELL (S1a makes it neutral:
-    the side's colours arrive with the dialog's markup in S2.1), and a
-    "danger" confirm is the same neutral outline, never the loss coral; a
+  * TAKE TRADE: the confirm is never green on a SELL. S1a made it neutral;
+    S2.1 (desk v2, 2026-11-13, approved by the operator: "amazing work,
+    bravo, I need it fast!!") gives it its side, jade a buy and coral a
+    sell, from the ticket's own markup (data-side). Every other confirm,
+    "danger" or not, is the neutral outline, never the loss coral; a
     dialog that takes the trading PIN (real money) carries the REAL red top
     edge, and no other dialog does (2026-11-07).
   * THE SIGNAL CARD: TAKE TRADE / ADD in the signal's side (a bearish
@@ -213,6 +215,26 @@ class TakeTradeDialogLookTests(SimpleTestCase):
         overlay = read("static/js/sv-overlay.js")
         self.assertIn("var secretHtml = opts.secretLabel", overlay)
         self.assertIn('\'<label class="sv-dialog-confirm-text" data-role="secret-wrap">\'', overlay)
+
+    def test_the_ticket_s_confirm_takes_its_side(self):
+        """S2.1 (desk v2, 2026-11-13; the operator approved Ticket2: "amazing
+        work, bravo, I need it fast!!"). base.html marks the ticket with the
+        side it opens and the kit paints its enabled confirm in it: jade a
+        buy, coral a sell, an outline on an 8 % wash of its own side, no
+        light; disabled (a live ticket before its PIN), the disabled look."""
+        base = read("templates/base.html")
+        self.assertIn("host.setAttribute('data-side', buySide ? 'buy' : 'sell');", base)
+        self.assertIn("var buySide = p.side !== 'SELL';", base)
+        go = ".sv-dialog-btn.sv-dialog-btn--go"
+        for side, hue in (("buy", "--sv-up"), ("sell", "--sv-down")):
+            rule = kit_rule('body:not(.light-mode) .sz-dialog[data-side="%s"] %s:not([disabled])' % (side, go))
+            with self.subTest(side=side):
+                self.assertEqual(rule["color"], "var(%s)" % hue)
+                self.assertEqual(rule["border"], "1.5px solid var(%s)" % hue)
+                self.assertEqual(rule["background"], "color-mix(in srgb, var(%s) 8%%, transparent)" % hue)
+                self.assertEqual(rule["box-shadow"], "none")
+        off = kit_rule("body:not(.light-mode) .sz-dialog %s[disabled]" % go)
+        self.assertEqual((off["color"], off["background"]), ("var(--sv-ink-4)", "var(--sv-bg-2)"))
 
     def test_the_dialog_keeps_its_words_and_steps(self):
         base = read("templates/base.html")
@@ -662,11 +684,18 @@ class MoneyControlsMeasuredTests(TestCase):
                 self.assertTrue(is_neutral(b["bg"]), b)
 
     def test_the_ticket_sides_in_jade_and_coral_on_no_fill(self):
+        """Updated deliberately (desk v2, 2026-11-13). The operator approved
+        the desk v2 boards ("amazing work, bravo, I need it fast!!"): Ticket2
+        prints the bid and the ask in ink, the figure, and gives each side
+        its colour on its label and its outline. A side is still jade or
+        coral, and never a fill."""
         tk = self.got["/instruments/BTCUSD/"]
-        for px in tk["tkLongPx"]:
-            self.assertEqual(px["color"], UP)
-        for px in tk["tkShortPx"]:
-            self.assertEqual(px["color"], DOWN)
+        self.assertTrue(tk["tkLongPx"] and tk["tkShortPx"])
+        for px in tk["tkLongPx"] + tk["tkShortPx"]:
+            self.assertEqual(px["color"], INK1)
+        for buttons, hue in ((tk["tkLong"], UP), (tk["tkShort"], DOWN)):
+            for b in buttons:
+                self.assertEqual((b["color"], b["border"]), (hue, hue))
         for side in tk["tkLong"] + tk["tkShort"]:
             self.assertFalse(is_red(side["bg"], 0.05) or is_green(side["bg"], 0.05), side)
         for chip in tk["tkVenue"]:
@@ -680,6 +709,7 @@ class MoneyControlsMeasuredTests(TestCase):
 # The neutrals are the Eye-lit ones since 2026-11-12 (a look, updated:
 # tests/test_design_tokens.PALETTE holds them, at S1a's lightness).
 REAL, INK1 = rgb_of("#CC3A40"), rgb_of(PALETTE["--sv-ink-1"])
+INK2 = rgb_of(PALETTE["--sv-ink-2"])
 LINE2, LINE3 = rgb_of(PALETTE["--sv-line-2"]), rgb_of(PALETTE["--sv-line-3"])
 WARN, GOLD = rgb_of("#F29B38"), rgb_of("#D6BC5E")
 CLEAR = "rgba(0, 0, 0, 0)"
@@ -723,14 +753,21 @@ DIALOG_PROBE = r"""(async function () {
         return '<div class="sv-dialog-foot"><button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>'
              + '<button type="button" class="sv-dialog-btn sv-dialog-btn--go' + go + '" data-role="ok">OK</button></div>';
     };
-    var head = '<div class="sv-dialog-head"><span class="sv-dialog-title">BUY BTCUSD</span></div>';
+    // The ticket's head as base.html builds it since S2.1 (desk v2): the
+    // trade on its line, the question under it; the host carries its side.
+    var head = '<div class="sv-dialog-head"><div class="sz-head"><span class="sz-trade">'
+        + '<span class="sz-side">▲ LONG</span><span class="sz-sym">BTCUSD</span></span>'
+        + '<span class="sz-q"><span class="sv-dialog-title">Take this trade?</span></span></div></div>';
+    var pin = '<div class="sv-dialog-body"><fieldset class="sz-block sz-pin"><legend>Trading PIN</legend>'
+        + '<input type="password" inputmode="numeric" autocomplete="off"></fieldset></div>';
     var built = {
-        liveTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger">' + head
-            + '<div class="sv-dialog-body"><fieldset class="sz-block sz-pin"><legend>Trading PIN</legend>'
-            + '<input type="password" inputmode="numeric" autocomplete="off"></fieldset></div>' + foot(' is-danger') + '</div>',
-        fundingTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger">' + head
+        liveTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger" data-side="buy">' + head
+            + pin + foot(' is-danger') + '</div>',
+        liveSellTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger" data-side="sell">' + head
+            + pin + foot(' is-danger') + '</div>',
+        fundingTicket: '<div class="sv-dialog sz-dialog sv-dialog--danger" data-side="buy">' + head
             + '<div class="sv-dialog-body"></div>' + foot(' is-danger') + '</div>',
-        paperTicket: '<div class="sv-dialog sz-dialog">' + head + '<div class="sv-dialog-body"></div>' + foot('') + '</div>',
+        paperTicket: '<div class="sv-dialog sz-dialog" data-side="buy">' + head + '<div class="sv-dialog-body"></div>' + foot('') + '</div>',
         lostAnswer: '<div class="sv-dialog sv-dialog--danger" data-sv-persist="">'
             + '<div class="sv-dialog-head"><span class="sv-dialog-title">The order may have gone</span></div>'
             + '<div class="sv-dialog-body"></div><div class="sv-dialog-foot">'
@@ -751,8 +788,9 @@ DIALOG_PROBE = r"""(async function () {
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class DialogsMeasuredTests(TestCase):
     """The confirm dialogs as the browser paints them (2026-11-07): every
-    confirm, "danger" or not, is the neutral-strong outline; the REAL red
-    top edge sits on the dialogs that take the trading PIN (the LIVE
+    confirm, "danger" or not, is the neutral-strong outline, but TAKE
+    TRADE's, which wears its side since S2.1 (desk v2, 2026-11-13); the REAL
+    red top edge sits on the dialogs that take the trading PIN (the LIVE
     ticket, a live close, arming a live bot) and on no other: not a paper
     close, not the funding ticket (paper), not the lost answer."""
 
@@ -765,8 +803,19 @@ class DialogsMeasuredTests(TestCase):
         cls.got = _measure(pages, ((1440, 900),), DIALOG_PROBE,
                            "sv-s1a-dialogs-")[("/command/", 1440)]
 
+    #: TAKE TRADE's own dialogs, built as base.html builds them, and the
+    #: side each one opens.
+    TICKETS = {"liveTicket": UP, "liveSellTicket": DOWN, "fundingTicket": UP, "paperTicket": UP}
+
     def test_every_confirm_is_the_neutral_strong_outline(self):
+        """Updated deliberately (desk v2, 2026-11-13). S1a kept TAKE TRADE's
+        confirm neutral "until S2.1"; S2.1 is here, approved by the operator
+        on the desk v2 boards ("amazing work, bravo, I need it fast!!"), and
+        the ticket's confirm wears its side (the test below). Every other
+        confirm keeps the neutral-strong outline and the ink-1 title."""
         for name, d in sorted(self.got.items()):
+            if name in self.TICKETS:
+                continue
             with self.subTest(dialog=name):
                 self.assertEqual(d["goColor"], INK1, d)
                 self.assertEqual(d["goBorder"], INK1, d)
@@ -774,8 +823,20 @@ class DialogsMeasuredTests(TestCase):
                 self.assertEqual(d["goImg"], "none", d)
                 self.assertEqual(d["title"], INK1, d)
 
+    def test_take_trade_s_confirm_wears_its_side(self):
+        """S2.1 (desk v2, 2026-11-13): jade for a buy, coral for a sell, an
+        outline on a faint wash of its own side, never a fill and never the
+        other side; the question sits under the trade's line in ink-2."""
+        for name, hue in sorted(self.TICKETS.items()):
+            d = self.got[name]
+            with self.subTest(dialog=name):
+                self.assertEqual((d["goColor"], d["goBorder"]), (hue, hue), d)
+                self.assertEqual(d["goImg"], "none", d)
+                self.assertFalse(is_red(d["goBg"]) or is_green(d["goBg"]), d)
+                self.assertEqual(d["title"], INK2, d)
+
     def test_the_real_edge_is_on_the_dialogs_that_take_the_trading_pin(self):
-        for name in ("liveTicket", "liveClose", "armLive"):
+        for name in ("liveTicket", "liveSellTicket", "liveClose", "armLive"):
             with self.subTest(dialog=name):
                 d = self.got[name]
                 self.assertEqual((d["top"], d["topColor"]), ("3px", REAL), d)
