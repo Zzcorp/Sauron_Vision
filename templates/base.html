@@ -1877,11 +1877,29 @@
      sticky (static/css/sv-rail.css); its top sits on the card's top, slid
      up only as far as the bottom band requires and never above the top
      band; the arrow points at the card; a narrow window caps its width to
-     the room left of the rail. A pinned card follows the rail's scroll. */
+     the room left of the rail. A pinned card follows the rail's scroll.
+
+     Docked (B10: the open rail shows a pinned card in its card's place,
+     static/css/sv-chart.css), the card's room is the rail's visible part,
+     not the screen's: capped at the screen's height there, its sticky foot
+     hung under the rail's fold and TAKE TRADE and PASS were out of view
+     (the desk v2 polish, D3). Capped at the rail's visible part, it
+     scrolls inside between its head and its foot, as a floating card
+     does, and a pin brings it whole into the rail's view. */
+  function dockOf(pop) {
+    var body = pop.closest('.rail-body');
+    return body && getComputedStyle(pop).position === 'static' ? body : null;
+  }
+  function dockRoom(body, pop) {
+    var cs = getComputedStyle(pop);
+    return Math.floor(body.clientHeight - (parseFloat(cs.marginTop) || 0) - (parseFloat(cs.marginBottom) || 0));
+  }
   function placePopup(wrap, pop) {
     var rect = wrap.getBoundingClientRect();
     var cb = chromeBounds();
     var space = Math.max(120, cb.bottom - cb.top);
+    var dock = dockOf(pop);
+    if (dock) space = Math.max(120, dockRoom(dock, pop));
     pop.style.maxHeight = space + 'px';
     pop.style.overflowY = 'auto';
     var room = rect.left - 24;
@@ -1938,6 +1956,14 @@
        hidden was placed as if it had no height. */
     pop.classList.add('sv-pinned');
     showPopup(wrap);
+    var dock = dockOf(pop);
+    if (dock) {
+      var cs = getComputedStyle(pop), view = dock.getBoundingClientRect().top + dock.clientTop;
+      var below = pop.getBoundingClientRect().bottom + (parseFloat(cs.marginBottom) || 0) - (view + dock.clientHeight);
+      if (below > 0) dock.scrollTop += below;
+      var above = view - (pop.getBoundingClientRect().top - (parseFloat(cs.marginTop) || 0));
+      if (above > 0) dock.scrollTop -= above;
+    }
     var a = wrap.querySelector('a.sr-signal');
     if (a) a.setAttribute('aria-expanded', 'true');
     if (window.SV && SV.popup) SV.popup.opened(pop);
@@ -2047,6 +2073,9 @@
     }
     railBody.addEventListener('scroll', replace);
     window.addEventListener('resize', replace);
+    /* The rail's split moves with its handle, and a docked card's room
+       with it. */
+    if (window.ResizeObserver) new ResizeObserver(replace).observe(railBody);
   }
   /* A row of the headband SIGNALS popup opens its card in the rail: the
      rail opens and SIGNALS un-collapses if they were not, the card scrolls
