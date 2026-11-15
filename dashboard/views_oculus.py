@@ -1,14 +1,16 @@
 """THE OCULUS — /oculus/, every cycle on one screen.
 
-Thirty dashboards answered thirty questions. This one answers the
+Every other page answers its own question. This one answers the
 question none of them could: *is the machine turning, and which of its
 wheels is actually engaged?*
 
-It owns no data and adds no arithmetic of its own. Each panel is one
-cycle — the switches, the scan, the ladder, the signals, the evolution,
-the personalities, the allocation, the horizon, the backtests, the
-trust — and each panel carries three things the thirty pages never had
-to carry together:
+It owns no data and adds no arithmetic of its own. Eleven cycles and the
+book: the viewer's own book on top — REAL money, the broker's DEMO and
+PAPER, side by side and never summed, with the desk's two venues beside
+them — then one panel per cycle: the forge, the switches, the scan, the
+ladder, the signals, the evolution, the personalities, the allocation,
+the horizon, the backtests, the confidence. Each panel carries three
+things the other pages never had to carry together:
 
 1. THE GATE. Every count is rendered beside the switch of the component
    that writes it. A number produced by a task nobody has turned on is a
@@ -28,7 +30,13 @@ to carry together:
    because "measured zero" and "not measurable" are different answers
    and an operator acts differently on each.
 
-Read-only: it places no orders, writes no rows and flips no switch.
+Read-only: it places no orders, writes no rows and flips no switch. It
+carries no form and no POST; an action is a link to the page that holds
+it. No broker and no model is called to draw it. Every count names its
+window, and every stored reading (the forge's scan and plan, the probe,
+three ten-minute aggregates, the broker equity cell behind the desk's
+governor) prints its age; each is keyed by the build, since the cache
+outlives a deploy.
 Fenced like /shares/ and /personas/ — a page that 500s because one table
 is mid-migration hides the nine panels that were healthy.
 

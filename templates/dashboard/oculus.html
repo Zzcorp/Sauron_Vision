@@ -27,22 +27,33 @@
   }
   .ocu-l { font-size: 12px; }
   .ocu-qual { display: block; color: var(--text-muted); font-size: 10.5px; margin-top: 2px; line-height: 1.35; }
+  /* The window a count is counted over, beside its label: "all time" is not "now". */
+  .ocu-win { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
   tr.inert .ocu-v, tr.inert .ocu-l { color: var(--text-muted); }
-  tr.caution .ocu-v { color: #d9a441; }
+  /* AMBER NEEDS A THRESHOLD. A value is painted only when its stated
+     threshold is crossed (oculus.py, alert_when), always with its glyph and
+     its words; a caution row is read twice through its qualifier, not its
+     colour, and a dash is never painted. */
+  .ocu-v.alert { color: #d9a441; }
+  .ocu-v.alert.danger { color: #c9605f; }
+  .ocu-alert { display: block; color: #d9a441; font-size: 11px; margin-top: 2px; }
+  .ocu-alert.danger { color: #c9605f; }
   .ocu-caveat { color: var(--text-muted); font-size: 11px; padding: 10px 16px 14px; line-height: 1.45;
                 border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-note { color: var(--text-muted); font-size: 11px; padding: 0 16px 8px; line-height: 1.45; max-width: 110ch; }
   .ocu-spark { display: flex; align-items: flex-end; gap: 1px; height: 34px; padding: 8px 16px 0; }
   .ocu-bar { flex: 1 1 0; background: var(--accent, #5b8def); min-height: 1px; opacity: .75; border-radius: 1px 1px 0 0; }
   .ocu-bar.zero { background: var(--border, #333); opacity: .5; }
   .ocu-sparkcap { color: var(--text-muted); font-size: 10px; padding: 3px 16px 12px; }
   .ocu-dead { color: #c9605f; font-size: 12px; padding: 12px 16px; }
 
-  /* THE BOOK. Two columns that never become one sum. The live column
+  /* THE BOOK. Columns that never become one sum. The REAL MONEY column
      carries the only coloured edge, the convention sauron.css states:
      "an account whose connected broker routes to real money gets the only
      coloured edge on the grid. Everything else is monochrome so this one
      thing is findable at a glance." */
   .ocu-book { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .ocu-book--3 { grid-template-columns: repeat(3, 1fr); }
   .ocu-venue { padding: 0 0 8px; border-top: 1px solid var(--border, #2a2a2a); }
   .ocu-venue + .ocu-venue { border-left: 1px solid var(--border, #2a2a2a); }
   .ocu-venue--live { border-left: 2px solid var(--accent-red, #e83030); }
@@ -51,6 +62,7 @@
     padding: 10px 16px 6px; color: var(--text-muted);
   }
   .ocu-venue--live .ocu-venue-head { color: var(--accent-red, #e83030); }
+  .ocu-block-head { border-top: 1px solid var(--border, #2a2a2a); padding-top: 12px; }
   .ocu-gaps { width: 100%; border-collapse: collapse; font-size: 11.5px; }
   .ocu-gaps th {
     text-align: right; font-weight: 600; color: var(--text-muted);
@@ -65,6 +77,7 @@
   .ocu-gaps td.dash { color: var(--text-muted); }
   .ocu-gaps td.neg { color: var(--accent-red, #e83030); }
   .ocu-gaps td.pos { color: #7fd18b; }
+  .ocu-gaps .ocu-floor { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
 
   /* THE WAY OUT. A panel that reports a count and offers no way into it
      is a report, not a command post. These are the existing pages,
@@ -91,7 +104,7 @@
 <div class="card fade-in-up" style="margin-bottom: 20px;">
   <div class="card-header"><span class="card-title">What this page promises, and what it refuses to do</span></div>
   <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 100ch; line-height: 1.55;">
-    Thirty dashboards each answer their own question well. This one answers the question none of them could carry alone:
+    Every other page of this platform answers its own question well. This one answers the question none of them could carry alone:
     <strong>is the machine turning, and which of its wheels are actually engaged?</strong>
     It owns no data and invents no calculation — it puts the cycles side by side without letting the comparison lie.
   </p>
@@ -101,7 +114,8 @@
     the common failure here is not a wrong number, it is a right number that reads backwards — "26 rules registered" sounds
     like coverage when a research-stage rule cannot place an order <em>and</em> has its signals dropped from the vote.
     And <strong>a dash is not a zero</strong>: "—" means not measurable, <code>0</code> means measured at zero, and you do not
-    act the same way on the two.
+    act the same way on the two. Every count says what it counts over (<em>now</em>, <em>7 d</em>, <em>30 d</em>,
+    <em>all time</em>), a code constant says <em>constant</em>, and a value turns amber only past its stated threshold, with ⚠ and its words.
   </p>
 </div>
 
@@ -130,34 +144,77 @@
     <div class="ocu-gates"><span class="ocu-gate off" title="the switches are platform-wide and staff's, as on /health/ and /ops/">switches · staff only</span></div>
     {% endif %}
 
+    {% comment %} THE OPEN BOOK IN ITS THREE MONEY WORLDS, by position_summary.world_of: a demo row is the
+       broker's simulated money and never prints as real. Side by side, never added: there is no total. {% endcomment %}
+    <div class="ocu-venue-head ocu-block-head">THE OPEN BOOK, BY MONEY WORLD — never summed: there is no total</div>
+    {% if c.worlds %}
+    <div class="ocu-book ocu-book--3">
+      {% for w in c.worlds %}
+      <div class="ocu-venue {% if w.world == 'live' %}ocu-venue--live{% endif %}">
+        <div class="ocu-venue-head">{% if w.world == 'live' %}REAL MONEY{% elif w.world == 'demo' %}DEMO · a broker's demo account{% else %}PAPER · the simulator{% endif %}</div>
+        <table class="ocu-facts">
+          {% for f in w.facts %}
+          <tr class="{{ f.tone }}">
+            {% if f.value is None %}
+              <td class="ocu-v dash" title="not measurable — this is not a zero{% if f.why %}: {{ f.why }}{% endif %}">—</td>
+            {% elif f.kind == "money" %}
+              <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.display }}</td>
+            {% else %}
+              <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.value }}</td>
+            {% endif %}
+            <td class="ocu-l">{{ f.label }}{% if f.currency %} ({{ f.currency }}){% endif %} <span class="ocu-win">· {{ f.when }}</span>
+              {% if f.alert %}<span class="ocu-alert {{ f.alert_level }}">{% if f.alert_level == "danger" %}⨯{% else %}⚠{% endif %} {{ f.alert_words }}</span>{% endif %}
+              {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="ocu-dead">The open book could not be split by money world. No number is shown rather than a wrong one.</p>
+    {% endif %}
+
+    {% comment %} WHAT THE DESK SIZES WITH: its own two venues, exactly as capital_desk.budget_for answers them.
+       Labelled as the desk's: its live venue is paper=False, which still counts the broker's demo rows. {% endcomment %}
+    <div class="ocu-venue-head ocu-block-head">WHAT THE DESK SIZES WITH — its own two venues, as the desk reads them</div>
+    {% if c.desk.sentence %}<p class="ocu-note">{{ c.desk.sentence }}</p>{% endif %}
     <div class="ocu-book">
       {% for v in c.venues %}
-      <div class="ocu-venue {% if v.venue == 'live' %}ocu-venue--live{% endif %}">
-        <div class="ocu-venue-head">{% if v.venue == 'live' %}LIVE · REAL MONEY{% else %}PAPER · SIMULATION{% endif %}</div>
+      <div class="ocu-venue">
+        <div class="ocu-venue-head">{% if v.venue == 'live' %}THE DESK · LIVE VENUE{% else %}THE DESK · PAPER VENUE{% endif %}{% if v.currency %} · IN {{ v.currency }}{% endif %}</div>
+        {% if v.reason %}<p class="ocu-note">the desk: {{ v.reason }}{% if v.equity %} · {{ v.equity.words }}{% endif %}</p>{% endif %}
         {% if v.facts %}
         <table class="ocu-facts">
           {% for f in v.facts %}
           <tr class="{{ f.tone }}">
             {% if f.value is None %}
-              <td class="ocu-v dash" title="not measurable — this is not a zero">—</td>
+              <td class="ocu-v dash" title="not measurable — this is not a zero{% if f.why %}: {{ f.why }}{% endif %}">—</td>
             {% elif f.text %}
               <td class="ocu-v ocu-v--text">{{ f.value }}</td>
+            {% elif f.kind == "money" %}
+              <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.display }}</td>
             {% else %}
-              <td class="ocu-v">{{ f.value }}</td>
+              <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.value }}</td>
             {% endif %}
-            <td class="ocu-l">{{ f.label }}{% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}</td>
+            <td class="ocu-l">{{ f.label }} <span class="ocu-win">· {{ f.when }}</span>
+              {% if f.alert %}<span class="ocu-alert {{ f.alert_level }}">{% if f.alert_level == "danger" %}⨯{% else %}⚠{% endif %} {{ f.alert_words }}</span>{% endif %}
+              {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
+            </td>
           </tr>
           {% endfor %}
         </table>
         {% else %}
-        <p class="ocu-dead">This book could not be read. No number is shown rather than a wrong one.</p>
+        <p class="ocu-dead">This venue could not be read. No number is shown rather than a wrong one.</p>
         {% endif %}
       </div>
       {% endfor %}
     </div>
+    {% if c.desk.paper_sentence %}<p class="ocu-note" style="padding-top: 8px;">{{ c.desk.paper_sentence }}</p>{% endif %}
 
     {% if c.gaps %}
-    <div class="ocu-venue-head" style="border-top: 1px solid var(--border, #2a2a2a); padding-top: 12px;">
+    <div class="ocu-venue-head ocu-block-head">
       WHAT THE SIMULATOR PROMISED, AGAINST WHAT EXECUTION RETURNED
     </div>
     <div style="overflow-x: auto;">
@@ -175,7 +232,7 @@
           <td class="{% if g.paper is None %}dash{% endif %}">{% if g.paper is None %}—{% else %}{{ g.paper|floatformat:2 }}{% endif %}</td>
           <td>{{ g.n_live }}</td>
           <td class="{% if g.live is None %}dash{% endif %}">{% if g.live is None %}—{% else %}{{ g.live|floatformat:2 }}{% endif %}</td>
-          <td class="{% if g.gap is None %}dash{% elif g.gap < 0 %}neg{% elif g.gap > 0 %}pos{% endif %}">{% if g.gap is None %}—{% else %}{{ g.gap|floatformat:2 }}{% endif %}</td>
+          <td class="{% if g.gap is None %}dash{% elif not g.judged %}{% elif g.gap < 0 %}neg{% elif g.gap > 0 %}pos{% endif %}">{% if g.gap is None %}—{% else %}{{ g.gap|floatformat:2 }}{% if not g.judged %} <span class="ocu-floor">n &lt; {{ c.gap_floor }} · not judged</span>{% endif %}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -185,6 +242,8 @@
       half-spread but never queues, never gaps through the stop, and is never partially executed. A heavily negative gap does not mean a rule
       that stopped working — it means a rule whose edge is smaller than its costs, and the two call for opposite fixes.
       A dash means one of the two venues closed nothing: that is not a small gap, it is the absence of measurement.
+      Below {{ c.gap_floor }} closed trades on either venue (the desk's own evidence floor) a gap is printed and not judged: it is not coloured.
+      "Live" here is the venue, paper=False over 180 days: the broker's demo fills count in it, as the desk counts them.
     </p>
     {% endif %}
 
@@ -230,15 +289,21 @@
         {% for f in c.facts %}
         <tr class="{{ f.tone }}">
           {% if f.value is None %}
-            <td class="ocu-v dash" title="not measurable — this is not a zero">—</td>
+            <td class="ocu-v dash" title="not measurable — this is not a zero{% if f.why %}: {{ f.why }}{% endif %}">—</td>
           {% elif f.text %}
             <td class="ocu-v ocu-v--text">{{ f.value }}</td>
+          {% elif f.kind == "money" %}
+            <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.display }}</td>
           {% else %}
-            <td class="ocu-v">{{ f.value }}</td>
+            <td class="ocu-v{% if f.alert %} alert {{ f.alert_level }}{% endif %}">{{ f.value }}</td>
           {% endif %}
           <td class="ocu-l">
-            {{ f.label }}
+            {{ f.label }} <span class="ocu-win">· {{ f.when }}</span>
+            {% if f.alert %}<span class="ocu-alert {{ f.alert_level }}">{% if f.alert_level == "danger" %}⨯{% else %}⚠{% endif %} {{ f.alert_words }}</span>{% endif %}
             {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
+            {% comment %} A stored reading counted "now" prints its age in the window's place, above;
+               one counted over a longer window prints it here, once per reading. {% endcomment %}
+            {% if f.age and f.window != "now" %}{% ifchanged f.age.words %}<span class="ocu-qual">{{ f.age.words }}</span>{% endifchanged %}{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -269,20 +334,27 @@
   {% endfor %}
 </div>
 
-{% if oculus.degraded %}
+{% if oculus.not_measured %}
 <div class="card fade-in-up" style="margin-top: 20px;">
-  <div class="card-header"><span class="card-title">What could not be measured — {{ oculus.degraded|length }}</span></div>
-  <p style="color: var(--text-muted); padding: 0 16px 14px; max-width: 100ch; line-height: 1.5;">
-    Each of these counters renders "—" above. The normal causes are a table a migration has not created yet,
-    or a subsystem that has never run on this deployment. This block exists so that a dash never passes for a quiet zero:
-    <code style="font-size: 11px;">{{ oculus.degraded|join:" · " }}</code>
+  <div class="card-header"><span class="card-title">What could not be measured — {{ oculus.not_measured|length }}</span></div>
+  <p style="color: var(--text-muted); padding: 0 16px 10px; max-width: 100ch; line-height: 1.5;">
+    Each of these renders "—" above, the book's included. A dash is not a zero: it says the number could not be measured,
+    and this block says why, in words — the kind of failure, never its message — with the command that fixes it when there is one.
   </p>
+  <table class="ocu-facts">
+    {% for r in oculus.not_measured %}
+    <tr>
+      <td class="ocu-l" style="white-space: nowrap;"><code style="font-size: 11px;">{{ r.place }}</code></td>
+      <td class="ocu-l">{{ r.why }}{% if r.fix %}<span class="ocu-qual">fix: <code style="font-size: 11px;">{{ r.fix }}</code></span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
 </div>
 {% endif %}
 
 {% if oculus.generated_at %}
 <p style="color: var(--text-muted); font-size: 11px; padding: 14px 4px;">
-  Read {{ oculus.generated_at|date:"Y-m-d H:i" }} UTC. Nothing is cached: every number is counted at load time.
+  Read {{ oculus.generated_at|date:"Y-m-d H:i" }} UTC. Counted at load; a stored reading prints its age.
 </p>
 {% endif %}
 

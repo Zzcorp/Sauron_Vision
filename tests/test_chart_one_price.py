@@ -668,20 +668,19 @@ class TheHeroSaysWhosePriceTests(_Logged):
         self.assertIsNone(d["venue"], "not routed to a venue: no venue price")
         self.assertEqual(d["decimals"], 2)
 
-    def test_the_venues_last_candle_rides_beside_it(self):
+    def test_an_unheld_instrument_shows_one_price(self):
+        """ONE PRICE EVERYWHERE (2026-11-12): the venue's last candle no
+        longer rides beside an instrument nobody holds as a second price
+        (the chart draws the candles); the hero prints its one quote."""
         end = _grid_now(H)
         _bar(self.inst, "1h", end - timedelta(hours=1), 4005, 4012, 4001,
              4010, "etoro")
         _bar(self.inst, "4h", _grid_now() - timedelta(hours=8), 3990, 4000,
              3980, 3995, "etoro")
         d = self._preview()
-        v = d["venue"]
-        self.assertEqual(v["price"], 4010.0)
-        self.assertEqual(v["label"], "eToro")
-        self.assertEqual(v["price_text"], "4010.00")
-        self.assertIsNotNone(v["age_s"])
-        self.assertAlmostEqual(d["gap_pct"], (4036.40 / 4010 - 1) * 100,
-                               places=4)
+        self.assertIsNone(d["venue"])
+        self.assertEqual(d["price"], "4036.40")
+        self.assertEqual(d["q"]["who"], "Yahoo GC=F, the front-month future")
 
     def test_a_real_rows_newer_venue_mark_wins(self):
         from bot_program.models import AssetBotConfig, AssetBotTrade
@@ -698,8 +697,12 @@ class TheHeroSaysWhosePriceTests(_Logged):
                 "price": 4012.5, "source": "etoro", "via": "tick",
                 "at": (timezone.now() - timedelta(seconds=40)).isoformat()}})
         d = self._preview()
-        self.assertEqual(d["venue"]["price"], 4012.5)
-        self.assertLess(d["venue"]["age_s"], 120)
+        # ONE PRICE EVERYWHERE (2026-11-12): held at eToro, the hero is
+        # eToro's newest reading; Yahoo's future is the outside slot.
+        self.assertEqual(d["price"], "4012.50")
+        self.assertEqual((d["q"]["src"], d["q"]["side"]), ("etoro", "last"))
+        self.assertEqual(d["venue"]["p"], "4036.40")
+        self.assertEqual(d["venue"]["gap"], "+0.60")
 
     def test_the_page_paints_it_at_first_load(self):
         _bar(self.inst, "1h", _grid_now(H) - timedelta(hours=1), 4005, 4012,
@@ -711,7 +714,9 @@ class TheHeroSaysWhosePriceTests(_Logged):
         self.assertIn('data-hero="src"', hero)
         self.assertIn("Yahoo GC=F", hero)
         self.assertIn('data-hero="venue"', hero)
-        self.assertIn("4010.00", hero)
+        # one price everywhere: nobody holds it, the hero is its one quote
+        self.assertIn("4036.40", hero)
+        self.assertNotIn("4010.00", hero)
 
 
 # ═══ F7. The hero repaints at the instrument's own precision ══════════

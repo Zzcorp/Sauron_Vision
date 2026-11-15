@@ -42,6 +42,10 @@ from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+# The query-count tests' shared cold cache; tests/test_rail_market_shut.py
+# imports it from here.
+from tests.cold_cache import _cold_cache
+
 HOST = "127.0.0.1"
 NODE = shutil.which("node")
 DJANGO_TAG_RE = re.compile(r"\{%|\{\{")
@@ -133,6 +137,7 @@ def _upgrade3():
 
 class EverySignalIsOnTheRailTests(TestCase):
     def setUp(self):
+        _cold_cache()
         self.user = _user()
         self.client.force_login(self.user)
 
@@ -227,7 +232,7 @@ class EverySignalIsOnTheRailTests(TestCase):
             _quote(inst, "1.08000")
         for inst in insts[:3]:
             _sig(inst, rule="rl_qc")
-        _partial(self.client)                     # warm the session
+        _partial(self.client)              # warm the session and the cache
         with CaptureQueriesContext(connection) as three:
             self.assertEqual(len(_cards(_partial(self.client))), 3)
         for inst in insts[3:]:

@@ -3,6 +3,8 @@ THE CARD TO THE LETTER (2026-09-28, core/passation.py): rendered on every
 logged-in page while `passation_card` is true — from the hour the letter
 opens, for the length of the watch. Dismissable per browser (localStorage);
 the letter itself stays at /passation/ whatever the card does.
+Its faces are the shell's tokens (2026-11-12): named literally, its sentence
+took the nav rows' face once the shell loaded it again.
 {% endcomment %}
 <div class="sv-passation-card" id="svPassationCard" role="note" aria-label="A letter for Gandalf">
     <svg class="sv-passation-eye" viewBox="0 0 48 30" width="30" height="19" aria-hidden="true" focusable="false">
@@ -23,9 +25,9 @@ the letter itself stays at /passation/ whatever the card does.
     .sv-passation-card.hidden{display:none}
     .sv-passation-eye{flex:0 0 auto;filter:drop-shadow(0 0 6px rgba(0,232,104,0.5))}
     .sv-passation-text{display:flex;flex-direction:column;gap:3px;flex:1 1 auto;min-width:0}
-    .sv-passation-kicker{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px}
-    .sv-passation-line{font-family:'Rajdhani',sans-serif;font-size:15px;color:var(--text,#c8e8d8)}
-    .sv-passation-open{flex:0 0 auto;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:#020804;background:linear-gradient(135deg,var(--accent-dim,#0a5028),var(--accent,#00e868));padding:9px 14px;border-radius:6px;text-decoration:none;white-space:nowrap}
+    .sv-passation-kicker{font-family:var(--sv-font-display);font-size:11px;font-weight:700;letter-spacing:3px}
+    .sv-passation-line{font-family:var(--sv-font-sans);font-size:15px;color:var(--text,#c8e8d8)}
+    .sv-passation-open{flex:0 0 auto;font-family:var(--sv-font-mono);font-size:11px;letter-spacing:2px;color:#020804;background:linear-gradient(135deg,var(--accent-dim,#0a5028),var(--accent,#00e868));padding:9px 14px;border-radius:6px;text-decoration:none;white-space:nowrap}
     .sv-passation-dismiss{flex:0 0 auto;background:none;border:0;color:var(--text3,#3a6850);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px}
     .sv-passation-dismiss:hover{color:var(--accent,#00e868)}
     @media (max-width:768px){.sv-passation-card{flex-wrap:wrap;gap:10px}.sv-passation-open{width:100%;text-align:center}}

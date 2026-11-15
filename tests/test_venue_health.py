@@ -398,6 +398,28 @@ class TheOrderThatDidNotComeBackTests(SimpleTestCase):
                                         "is the venue's failure")
                 self.assertIn("not sent", s["failures"][-1]["detail"])
 
+    def test_a_connection_never_made_says_so_on_the_exception(self):
+        """`not_sent` rides the exception, read duck-typed as `in_doubt` is
+        (the review of 2026-11-12): the engine writes no 12-hour note for
+        an order that never left, and must not tell that from the words,
+        which carry eToro's own body when eToro answered. An answer eToro
+        gave carries no such flag, whatever its body says."""
+        vh.reset()
+        t, fake = _seq_client({("POST", ORDERS): [
+            requests.ConnectTimeout("connect timed out")]},
+            routes=[SEARCH_AAPL])
+        with self.assertRaises(RuntimeError) as cm:
+            self._order(t)
+        self.assertIs(getattr(cm.exception, "not_sent", None), True)
+        vh.reset()
+        t, fake = _client([SEARCH_AAPL, ("POST", ORDERS, 400, {
+            "errorMessage": "the order was not sent to the market"})])
+        with self.assertRaises(RuntimeError) as cm:
+            self._order(t)
+        self.assertIn("eToro refused (400)", str(cm.exception))
+        self.assertIn("was not sent", str(cm.exception))
+        self.assertFalse(getattr(cm.exception, "not_sent", False))
+
     def test_a_5xx_or_429_on_the_post_keeps_its_words_and_sickens_the_venue(self):
         for status in (503, 429):
             with self.subTest(status=status):

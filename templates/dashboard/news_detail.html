@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ article.title|truncatechars:60 }} — Sauron Vision{% endblock %}
+{% load quote_tags %}{% block title %}{{ article.title|truncatechars:60 }} — Sauron Vision{% endblock %}
 {% block page_title %}▤ NEWS ANALYSIS{% endblock %}
 {% block content %}
 <div class="nd-wrap">
@@ -183,7 +183,7 @@
               <td><a href="{% url 'instrument_detail' r.symbol %}" class="nd-tbl-sym">{{ r.symbol }}</a></td>
               <td class="r nd-tone-{{ r.since_tone }}">{% if r.since_pct is not None %}{{ r.since_pct|floatformat:2 }}%{% else %}<span class="sv-unknown" title="No daily close on or before publication, or no live quote">&mdash;</span>{% endif %}</td>
               <td class="r nd-tone-{{ r.day_tone }}">{% if r.day_pct is not None %}{{ r.day_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-              <td class="r">{% if r.last is not None %}{{ r.last|floatformat:2 }}<span class="nd-tbl-age">{% if r.quote_age %}{{ r.quote_age }}{% endif %}</span>{% else %}<span class="sv-unknown" title="No live quote">&mdash;</span>{% endif %}</td>
+              <td class="r">{% if r.last is not None %}<span data-q="{{ r.symbol }}">{% q r.symbol %}</span><span class="nd-tbl-age" data-q="{{ r.symbol }}" data-q-f="age">{% q r.symbol "age" %}</span>{% else %}<span class="sv-unknown" title="No live quote">&mdash;</span>{% endif %}</td>
             </tr>
           {% endfor %}
           </tbody>

@@ -1,4 +1,4 @@
-{# PORTFOLIO tab — strategic snapshot enriched with sparkline + donut. #}
+{% load quote_tags %}{# PORTFOLIO tab — strategic snapshot enriched with sparkline + donut. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
 {# Every cell here used to print a 0 when it had nothing to measure: a 0.0% #}
@@ -133,7 +133,7 @@
                         <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
                         <td>{{ p.quantity|floatformat:4 }}</td>
                         <td>{{ p.entry_price|floatformat:4 }}</td>
-                        <td>{% if p.current_price is not None %}{{ p.current_price|floatformat:4 }}{% else %}—{% endif %}</td>
+                        <td>{% if p.current_price is not None %}<span data-q="{{ p.instrument.symbol }}" data-q-side="{{ p.direction|q_side }}" data-q-title title="{% q_title p.instrument.symbol p.direction %}">{% q p.instrument.symbol side=p.direction %}</span>{% else %}—{% endif %}</td>
                         <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}"{% if p.pnl_title %} title="{{ p.pnl_title }}"{% endif %}>{% if p.unrealized_pnl is not None %}{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% endif %}{% else %}—{% endif %}{% if p.pnl_words %}<span class="pnl-pct sv-muted" style="display:block;font-size:.7em;">{{ p.pnl_words }}</span>{% endif %}</td>
                         <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{% if p.unrealized_pnl_pct is not None %}{{ p.unrealized_pnl_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
                         <td><span class="badge badge-medium">{% if p.source == 'bot' %}bot{% else %}portfolio{% endif %}</span></td>
@@ -154,3 +154,4 @@
         <p class="oc-empty">No open positions.</p>
     {% endif %}
 </div>
+{% q_json %}

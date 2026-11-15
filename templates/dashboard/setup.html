@@ -215,6 +215,26 @@
                 </div>
             </div>
             <div style="margin-bottom: 16px;">
+                {# 2026-11-12, the operator: "je veux tous mes bots live right now", #}
+                {# "qu'il soit smart pour s'ajuster au marché et y pouvoir rentrer". #}
+                {# Read only while bots_venue_floor_live is ON (base.bot_floor_risk_pct). #}
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX BOT FLOOR RISK (%)</label>
+                <input type="number" step="any" min="0.1" max="7" required name="max_bot_floor_risk" value="{{ limits.max_bot_floor_risk_pct }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    Used only while the switch Bots: Venue Floor is on
+                    (/ops/, with your PIN). A bot whose order is under
+                    the smallest size eToro takes then opens at that
+                    size, when its loss at the stop is at most this
+                    percentage of the bot&#x27;s pool; above it the order
+                    is refused, as it is today. A bot normally risks
+                    0.25% of its pool per trade, so this is more risk
+                    per position. 0.1 to 7, never above 7, the hard cap
+                    of every trade. Never the hand-taken TAKE TRADE
+                    ticket, which has its own smallest size.
+                </div>
+            </div>
+            <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX OPEN RISK (%)</label>
                 <input type="number" step="any" min="1" max="100" required name="max_open_risk" value="{{ limits.max_open_risk_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">

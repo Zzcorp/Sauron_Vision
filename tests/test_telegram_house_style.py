@@ -669,6 +669,12 @@ class NotifierTests(_Base):
             ("evidence_chain_cold", lambda: N.notify_evidence_chain_cold(
                 u, cold=["pipeline_promotion"],
                 blockers=["pipeline_promotion is off."])),
+            # live trading by decision, said once (2026-11-12): a notice,
+            # never the alarm's mark
+            ("live_by_decision", lambda: N.notify_live_by_decision(
+                u, armed=["actuator_mode_live"], live_configs=2,
+                hand_lanes=1, paper_configs=0,
+                fingerprint="f00dfeed0001")),
             # a withdrawal asked for in advance (2026-09-28)
             ("withdrawal", lambda: N.notify_withdrawal(
                 u, SimpleNamespace(

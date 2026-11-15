@@ -122,10 +122,22 @@ class BidAskSitsBesideTheButtonsThatUseItTests(TestCase):
                                  source="ibkr")
 
     def test_bid_and_ask_are_on_the_page_head(self):
+        """Updated deliberately (desk v2, 2026-11-13; the operator approved
+        the boards: "amazing work, bravo, I need it fast!!"): the ticket now
+        brings its own sheet and names the quote each side trades at, which
+        moved the ask past the first 1,200 characters of the head. The head
+        is read whole now, up to its next group (the aux buttons), so both
+        hooks must still be on the page head, before anything else: inside
+        the head's own ticket, and the head no longer than the ticket needs
+        (1,391 characters measured; the cap was 2,400, tightened on review)."""
         body = self.client.get("/instruments/BRNUSD/").content.decode()
-        head = body.split("dtl-actions")[1][:1200]
+        head = body.split("dtl-actions")[1].split("dtl-aux")[0]
         self.assertIn('data-dq="bid"', head)
         self.assertIn('data-dq="ask"', head)
+        ticket = head.split('class="sv-ticket', 1)[1]
+        self.assertIn('data-dq="bid"', ticket)
+        self.assertIn('data-dq="ask"', ticket)
+        self.assertLess(len(head), 1600)
 
     def test_the_spread_is_shown_and_correct(self):
         body = self.client.get("/instruments/BRNUSD/").content.decode()
@@ -269,8 +281,14 @@ class TheHeaderIsTwoRowsNotFourTests(TestCase):
                                  source="ibkr")
 
     def test_the_metadata_rides_the_title_row(self):
+        # The desk v2 (B10, 2026-11-13): the instrument's name rides the
+        # page's title row ("BRNUSD — Brent Crude Oil"), and the header
+        # under it is one row of 52 px with no metadata row of its own; the
+        # operator approved the board: "amazing work, bravo, I need it fast!!".
         body = self.client.get("/instruments/BRNUSD/").content.decode()
-        self.assertIn("detail-meta-inline", body)
+        self.assertIn("BRNUSD — Brent Crude Oil", body)
+        self.assertIn('<section class="sv-ih"', body)
+        self.assertNotIn('class="detail-meta', body)
 
     def test_the_book_sits_on_the_buttons(self):
         """It used to sit BESIDE them as a loose strip, which left the

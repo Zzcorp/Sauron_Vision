@@ -545,6 +545,25 @@ def _fact(label, value, sub=""):
     return {"label": label, "value": value, "sub": sub}
 
 
+def _closing_side(direction):
+    from market_data.one_quote import closing_side
+    return closing_side(direction)
+
+
+def _one_price(trade, symbol, now):
+    """The instrument's one price for the trade's owner at `now`
+    (market_data.one_quote.shown), or None when it cannot be read: a
+    price cell, never the page."""
+    try:
+        from market_data.one_quote import shown
+        user = getattr(getattr(trade, "config", None), "user", None)
+        return shown(symbol, user=user, now=now)
+    except Exception:  # noqa: BLE001 — the valuation's price stands
+        logger.warning("[position page] the one price was not read for #%s",
+                       getattr(trade, "id", "?"), exc_info=True)
+        return None
+
+
 # ── the summary ──────────────────────────────────────────────────────────
 
 def build_summary(trade, now=None):
@@ -722,7 +741,31 @@ def build_summary(trade, now=None):
             price(trade.entry_price),
             ("placed " if kind == "working" else "opened ")
             + utc_clock(held_from, True)))
-        if mark is not None:
+        # ONE PRICE EVERYWHERE (the review, 2026-11-12): "Price now" is the
+        # instrument's one price, the number the band, the rails, the Horde
+        # and /positions/ print on this very page (market_data.one_quote, at
+        # the row's closing side), a painted cell with its words; it printed
+        # the valuation's older stamp (1.08447 beside 1.08715). The size and
+        # the P&L keep the valuation mark; the hover says so when the two
+        # differ. Display only.
+        sh = _one_price(trade, sym, now)
+        side = _closing_side(trade.side)
+        if sh is not None and sh.price is not None:
+            text = sh.text(side)
+            tail = ""
+            if mark is not None and price(mark) != text:
+                tail = ("valued for profit and loss at %s (the position's "
+                        "own venue mark)" % price(mark))
+            facts.append({
+                "label": "Price now", "value": text,
+                "sub": sh.words(now, side=side),
+                "q": {"s": sh.symbol, "side": side, "tail": tail,
+                      "title": sh.title(now, side=side, tail=tail)}})
+            from market_data.one_quote import json_script
+            summary["q_block"] = json_script({
+                "t": int(round(now.timestamp() * 1000)),
+                "q": {sh.symbol: sh.payload()}})
+        elif mark is not None:
             facts.append(_fact("Price now", price(mark),
                                ("the venue's own rate, as of "
                                 if mark_src in ("venue", "venue_stale")
@@ -746,8 +789,18 @@ def build_summary(trade, now=None):
 
         stop = _num(trade.stop_loss)
         target = _num(trade.take_profit)
-        stop_away = _away(mark, stop, is_long) if stop is not None else ""
-        target_away = (_away(mark, target, not is_long)
+        # The distances to the levels are worked out from the price "Price
+        # now" prints, as the positions card's are (the review, 2026-11-12:
+        # "0.5% away" was the valuation stamp's, beside a newer price).
+        # Display only: the size above keeps the valuation mark.
+        dist_from = mark
+        if sh is not None and sh.price is not None:
+            shown_v = sh.value(side or None)
+            if shown_v is not None:
+                dist_from = float(shown_v)
+        stop_away = (_away(dist_from, stop, is_long)
+                     if stop is not None else "")
+        target_away = (_away(dist_from, target, not is_long)
                        if target is not None else "")
         facts.append(_fact("Stop", price(stop) if stop is not None
                            else "Not set", stop_away))

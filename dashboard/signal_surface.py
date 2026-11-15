@@ -18,6 +18,10 @@ Six questions, and the first did not exist anywhere:
     (e) DID ANYONE ACT?           `acted_index`
     (f) ITS OWN GRADE             on the Signal row itself
 
+And one more since 2026-11-12, because a signal is announced the moment it
+fires whether or not its market is open: CAN ITS MARKET TRADE NOW —
+`market_block`, the MARKET SHUT badge with the hour the market opens.
+
 NO SECOND IMPLEMENTATION OF ANYTHING. (a) calls
 `signals.rule_actuator.stage_policy` and `is_rule_active` — the same two
 functions the ENTRY path calls, so the badge cannot drift from the gate. (b)
@@ -506,6 +510,119 @@ COST_SYMBOL_CAVEAT = (
 # An unknown VALUE is ignored rather than raising. A filter value arrives in a
 # URL an operator typed, a bookmark that outlived a vocabulary change, or a
 # link someone pasted; a 500 there teaches nothing and loses the page.
+
+# ── (g) CAN ITS MARKET TRADE NOW? ─────────────────────────────────────────
+
+#: What a shut market means for a ticket, said beside the badge. The
+#: paper venue refuses a market's first quarter hour too, hence "and
+#: settled". An index reads shut only while its cash session and the
+#: futures week both are, and the hour it opens is the futures week's;
+#: the paper venue reads the cash session alone, so an index has words of
+#: its own (the review of 2026-11-12).
+MARKET_TICKET_WORDS = ("A paper ticket is refused until it has opened and "
+                       "settled; a live ticket warns and is yours to send.")
+INDEX_TICKET_WORDS = ("A paper ticket is refused outside its cash session; "
+                      "a live ticket warns and is yours to send.")
+
+
+def market_ticket_words(asset_class) -> str:
+    return (INDEX_TICKET_WORDS if (asset_class or "") == "index"
+            else MARKET_TICKET_WORDS)
+
+
+def market_block(signal, now=None) -> dict:
+    """{"shut", "opens", "title"} — whether the signal's market is shut
+    NOW, for the MARKET SHUT badge of /signals/ and the `signals` command
+    (2026-11-12). The operator keeps receiving every signal the moment it
+    fires, so one whose market is shut says so, with the hour it opens
+    ("opens Sun 22:00 UTC", "" when the clock does not know it).
+
+    One clock: signals.market_hold.market_state, the bots' own, which
+    reads no table. A signal the engine has closed is no longer something
+    to act on and carries no badge; a market in its first quarter hour is
+    open. Never raises."""
+    out = {"shut": False, "opens": "", "title": ""}
+    try:
+        if not getattr(signal, "is_active", False):
+            return out
+        from signals.market_hold import market_state
+        inst = signal.instrument
+        st = market_state(inst, now=now)
+    except Exception as e:  # noqa: BLE001 — a badge is never worth a page
+        logger.warning("[signals] market state unread for signal #%s: %s",
+                       getattr(signal, "pk", None), e)
+        return out
+    if st.get("state") != "shut":
+        return out
+    words = str(st.get("words") or "its market is shut")
+    ticket = market_ticket_words(getattr(inst, "asset_class", ""))
+    return {"shut": True, "opens": st.get("opens") or "",
+            "title": f"{words[:1].upper()}{words[1:]}. {ticket}"}
+
+
+#: The day and the month of a hold's line, from fixed tables: no locale
+#: can change the words.
+_DAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTH_ABBR = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+               "Oct", "Nov", "Dec")
+
+
+def _dated(moment) -> str:
+    """"Sun 8 Nov 22:20 UTC" for an aware datetime, "" for None. A
+    /signals/ row stays listed for weeks: a weekday alone would not say
+    which Sunday (the review of 2026-11-12)."""
+    if moment is None:
+        return ""
+    from datetime import timezone as dt_timezone
+    m = moment.astimezone(dt_timezone.utc)
+    return (f"{_DAY_ABBR[m.weekday()]} {m.day} {_MONTH_ABBR[m.month - 1]} "
+            f"{m.strftime('%H:%M')} UTC")
+
+
+def hold_blocks(signals) -> dict:
+    """{signal_id: {"text", "title"}} for the signals whose announcement
+    the optional market hold kept for their market's open (2026-11-12,
+    signals.models.SignalHold; the switch signal_market_hold). One query
+    for the page, never one a row; a signal announced at its birth has no
+    row and no entry, so with the switch never turned on this is empty
+    and the page draws nothing. Never raises."""
+    from core.exchange_status import utc_words
+    ids = [s.pk for s in signals if getattr(s, "pk", None)]
+    if not ids:
+        return {}
+    try:
+        from signals.models import SignalHold
+        holds = list(SignalHold.objects.filter(signal_id__in=ids))
+    except Exception as e:  # noqa: BLE001 — the list renders regardless
+        logger.warning("[signals] market holds unreadable: %s", e)
+        return {}
+    out = {}
+    for h in holds:
+        born = ("born while its market was shut" if h.reopens_at is not None
+                else "born while its market could not trade")
+        words = str(h.words or "")
+        when = _dated(h.decided_at)
+        if h.state == SignalHold.HELD:
+            text = f"announcement held: {born}" + (
+                f" · it opens {utc_words(h.reopens_at)}"
+                if h.reopens_at is not None else "")
+        elif h.state == SignalHold.RELEASED:
+            # A release nobody heard says so: the pass writes that reason
+            # when the banner, the bell and the channels all failed.
+            unheard = h.reason == SignalHold.ANNOUNCE_FAILED
+            text = (f"{born} · "
+                    + ("released" if unheard else "announced")
+                    + " at the open" + (f", {when}" if when else "")
+                    + (", but its announcement failed" if unheard else ""))
+        else:
+            said = (f"{words[:1].lower()}{words[1:]}" if words
+                    else "never announced")
+            text = (f"{born} · {said.rstrip('.')} ({when})." if when
+                    else f"{born} · {said}")
+        out[h.signal_id] = {"text": text,
+                            "title": f"{words[:1].upper()}{words[1:]}"}
+    return out
+
 
 STATES = ("active", "closed", "graded", "ungraded")
 ACTED = ("yes", "no")

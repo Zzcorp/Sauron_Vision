@@ -5,6 +5,10 @@ from typing import NamedTuple, Optional
 
 from django.conf import settings
 
+# THE ONE VENUE-SOURCE RULE (the eToro feed spec, F1): standard library
+# only, imported with this module so the P&L tier can never fail on it
+from market_data.venue_source import is_venue_source
+
 logger = logging.getLogger(__name__)
 
 # How a per-user book is named, and the name of the shared one. These are the
@@ -1029,7 +1033,9 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
 #: eToro's own figure. The sync reads the holdings every 300 s
 #: (config/celery.py "sync-etoro-accounts"): 900 s is three passes, the
 #: count after which the stall alert says the sync has stopped answering
-#: (bot_program.tasks.BROKER_MISS_ALERT_AFTER).
+#: (bot_program.tasks.BROKER_MISS_ALERT_AFTER). A wall-clock window: the
+#: sync beats every 30 s since 2026-11-13 and the stall alert still waits
+#: fifteen minutes (tasks.ETORO_STALL_AFTER_S), so it stays 900 s.
 ETORO_PNL_MAX_AGE_S = 900
 #: How old an eToro-written quote may be and still value a row at its
 #: closing side: the bound a venue print must meet to value a real row as
@@ -1085,13 +1091,6 @@ def _pnl_pid(raw) -> str:
     if isinstance(raw, (int, str)):
         return str(raw).strip()
     return ""
-
-
-def _is_etoro_source(source) -> bool:
-    """A LiveQuote written by an eToro reader ("etoro", or a future
-    "etoro_..." feed)."""
-    s = str(source or "").strip().lower()
-    return s == _ETORO or s.startswith((_ETORO + "_", _ETORO + "-"))
 
 
 class _Holdings(NamedTuple):
@@ -1222,8 +1221,12 @@ def _etoro_side(trade, quote, now):
     """(the closing side's price, its time, "bid" | "ask") of an
     eToro-written quote younger than ETORO_QUOTE_MAX_AGE_S — the bid for a
     long, the ask for a short, as eToro values an open position — or None.
-    A quote of another feed is never the closing side, sides or not."""
-    if quote is None or not _is_etoro_source(getattr(quote, "source", "")):
+    A quote of another feed is never the closing side, sides or not.
+    eToro-written: the one venue-source rule (the eToro feed spec, F1,
+    market_data.venue_source.is_venue_source): "etoro", or "etoro_" /
+    "etoro-" and a channel, trimmed, in any case — exactly this tier's
+    test before it."""
+    if quote is None or not is_venue_source(getattr(quote, "source", "")):
         return None
     long_ = str(getattr(trade, "side", "") or "").upper() in ("BUY", "LONG")
     word = "bid" if long_ else "ask"

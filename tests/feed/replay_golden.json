@@ -1,0 +1,1239 @@
+{
+ "a15_door": {
+  "closing_buy": "switch_off",
+  "closing_sell": "switch_off",
+  "conversion_usd": "switch_off",
+  "executable_buy": "switch_off",
+  "executable_sell": "switch_off"
+ },
+ "m10_levels": {
+  "fresh_stamp": {
+   "absent": {
+    "mark": "1.0999",
+    "reasons": []
+   },
+   "agreeing_stream": {
+    "mark": "1.0999",
+    "reasons": []
+   },
+   "disagreeing_poller": {
+    "mark": "1.0999",
+    "reasons": []
+   },
+   "disagreeing_stream": {
+    "mark": "1.0999",
+    "reasons": []
+   },
+   "stale_poller": {
+    "mark": "1.0999",
+    "reasons": []
+   },
+   "stale_stream": {
+    "mark": "1.0999",
+    "reasons": []
+   },
+   "venue_own_interim": {
+    "mark": "1.0999",
+    "reasons": []
+   }
+  },
+  "no_stamp": {
+   "absent": {
+    "mark": null,
+    "reasons": []
+   },
+   "agreeing_stream": {
+    "mark": "1.1002",
+    "reasons": []
+   },
+   "disagreeing_poller": {
+    "mark": "1.11",
+    "reasons": []
+   },
+   "disagreeing_stream": {
+    "mark": "1.11",
+    "reasons": []
+   },
+   "stale_poller": {
+    "mark": null,
+    "reasons": []
+   },
+   "stale_stream": {
+    "mark": null,
+    "reasons": []
+   },
+   "venue_own_interim": {
+    "mark": "1.1001",
+    "reasons": []
+   }
+  },
+  "stale_stamp": {
+   "absent": {
+    "mark": null,
+    "reasons": []
+   },
+   "agreeing_stream": {
+    "mark": "1.1002",
+    "reasons": []
+   },
+   "disagreeing_poller": {
+    "mark": "1.11",
+    "reasons": []
+   },
+   "disagreeing_stream": {
+    "mark": "1.11",
+    "reasons": []
+   },
+   "stale_poller": {
+    "mark": null,
+    "reasons": []
+   },
+   "stale_stream": {
+    "mark": null,
+    "reasons": []
+   },
+   "venue_own_interim": {
+    "mark": "1.1001",
+    "reasons": []
+   }
+  }
+ },
+ "m11_review": {
+  "EURUSD": {
+   "absent": null,
+   "agreeing_stream": null,
+   "disagreeing_poller": null,
+   "disagreeing_stream": null,
+   "stale_poller": null,
+   "stale_stream": null,
+   "venue_own_interim": null
+  },
+  "XAUUSD": {
+   "absent": [
+    null,
+    "the venue's last price is 20 min old and is not live \u2014 no decision on it"
+   ],
+   "future": [
+    null,
+    "the venue's last price is 20 min old and is not live \u2014 no decision on it"
+   ]
+  }
+ },
+ "m12_conversion": {
+  "with_a_bar": {
+   "absent": 1.09,
+   "agreeing_stream": 1.1002,
+   "disagreeing_poller": 1.11,
+   "disagreeing_stream": 1.11,
+   "stale_poller": 1.09,
+   "stale_stream": 1.09,
+   "venue_own_interim": 1.1001
+  },
+  "without_a_bar": {
+   "absent": null,
+   "agreeing_stream": 1.1002,
+   "disagreeing_poller": 1.11,
+   "disagreeing_stream": 1.11,
+   "stale_poller": null,
+   "stale_stream": null,
+   "venue_own_interim": 1.1001
+  }
+ },
+ "m13_stress": {
+  "absent": [
+   1990.0,
+   1995.0,
+   2000.0
+  ],
+  "fresh_future": [
+   1990.0,
+   1995.0,
+   2000.0,
+   2010.0
+  ],
+  "interim": [
+   1990.0,
+   1995.0,
+   2000.0,
+   2005.0
+  ],
+  "old_future": [
+   1990.0,
+   1995.0,
+   2000.0
+  ]
+ },
+ "m14_morgul": {
+  "absent": [],
+  "agreeing_stream": [],
+  "disagreeing_poller": [],
+  "disagreeing_stream": [],
+  "old_stream": [
+   [
+    "feeds:forex",
+    "Morgul \u2014 no fresh quotes for a live market",
+    [
+     "Freshest mark of the live bots' 1 symbol: EURUSD, 3 h ago (OANDA (stream))",
+     "Market: Forex Market, open",
+     "The bars and marks the bots decide on are stale while the market trades; an eToro order is priced by eToro"
+    ]
+   ]
+  ],
+  "stale_poller": [
+   [
+    "feeds:forex",
+    "Morgul \u2014 no fresh quotes for a live market",
+    [
+     "Freshest mark of the live bots' 1 symbol: EURUSD, 1 h ago (Yahoo Finance)",
+     "Market: Forex Market, open",
+     "The bars and marks the bots decide on are stale while the market trades; an eToro order is priced by eToro"
+    ]
+   ]
+  ],
+  "stale_stream": [],
+  "venue_own_interim": []
+ },
+ "m15_alerts": {
+  "absent": false,
+  "agreeing_stream": false,
+  "disagreeing_poller": true,
+  "disagreeing_stream": true,
+  "stale_poller": false,
+  "stale_stream": true,
+  "venue_own_interim": false
+ },
+ "m16_paper": {
+  "absent": {
+   "lastPrice": "0"
+  },
+  "agreeing_stream": {
+   "lastPrice": "1.10020000"
+  },
+  "disagreeing_poller": {
+   "lastPrice": "1.11000000"
+  },
+  "disagreeing_stream": {
+   "lastPrice": "1.11000000"
+  },
+  "stale_poller": {
+   "lastPrice": "0"
+  },
+  "stale_stream": {
+   "lastPrice": "0"
+  },
+  "venue_own_interim": {
+   "lastPrice": "1.10010000"
+  }
+ },
+ "m18_nl_trader": {
+  "absent": {
+   "entry": null,
+   "message": "No live price for EURUSD",
+   "status": "error"
+  },
+  "agreeing_stream": {
+   "entry": "1.1002",
+   "message": null,
+   "status": "executed"
+  },
+  "disagreeing_poller": {
+   "entry": "1.11",
+   "message": null,
+   "status": "executed"
+  },
+  "disagreeing_stream": {
+   "entry": "1.11",
+   "message": null,
+   "status": "executed"
+  },
+  "stale_poller": {
+   "entry": "1.11",
+   "message": null,
+   "status": "executed"
+  },
+  "stale_stream": {
+   "entry": "1.11",
+   "message": null,
+   "status": "executed"
+  },
+  "venue_own_interim": {
+   "entry": "1.1001",
+   "message": null,
+   "status": "executed"
+  }
+ },
+ "m19_orcs": {
+  "absent": {
+   "dossier_mark": [
+    "venue_stale",
+    1200.0,
+    1.1,
+    null
+   ],
+   "drum_last": null,
+   "quote": {
+    "dash": "\u2014 (no live quote)",
+    "value": null
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "\u2014 (no live quote)",
+     "value": null
+    }
+   },
+   "spread": [
+    null,
+    null
+   ],
+   "usd_per_eur": null
+  },
+  "agreeing_stream": {
+   "dossier_mark": [
+    "quote",
+    0.0,
+    1.1002,
+    "oanda_stream"
+   ],
+   "drum_last": 1.1002,
+   "quote": {
+    "dash": "",
+    "value": {
+     "ask": 1.1003,
+     "at": "2026-11-04 12:00:00+00:00",
+     "bid": 1.1001,
+     "change_pct": 0.0,
+     "last": 1.1002
+    }
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "",
+     "value": {
+      "ask": 1.1003,
+      "at": "2026-11-04 12:00:00+00:00",
+      "bid": 1.1001,
+      "change_pct": 0.0,
+      "last": 1.1002
+     }
+    }
+   },
+   "spread": [
+    0.0002,
+    "live_quote"
+   ],
+   "usd_per_eur": 1.1002
+  },
+  "disagreeing_poller": {
+   "dossier_mark": [
+    "quote",
+    0.0,
+    1.11,
+    "yfinance"
+   ],
+   "drum_last": 1.11,
+   "quote": {
+    "dash": "",
+    "value": {
+     "ask": null,
+     "at": "2026-11-04 12:00:00+00:00",
+     "bid": null,
+     "change_pct": 0.0,
+     "last": 1.11
+    }
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "",
+     "value": {
+      "ask": null,
+      "at": "2026-11-04 12:00:00+00:00",
+      "bid": null,
+      "change_pct": 0.0,
+      "last": 1.11
+     }
+    }
+   },
+   "spread": [
+    null,
+    null
+   ],
+   "usd_per_eur": 1.11
+  },
+  "disagreeing_stream": {
+   "dossier_mark": [
+    "quote",
+    0.0,
+    1.11,
+    "oanda_stream"
+   ],
+   "drum_last": 1.11,
+   "quote": {
+    "dash": "",
+    "value": {
+     "ask": 1.1101,
+     "at": "2026-11-04 12:00:00+00:00",
+     "bid": 1.1099,
+     "change_pct": 0.0,
+     "last": 1.11
+    }
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "",
+     "value": {
+      "ask": 1.1101,
+      "at": "2026-11-04 12:00:00+00:00",
+      "bid": 1.1099,
+      "change_pct": 0.0,
+      "last": 1.11
+     }
+    }
+   },
+   "spread": [
+    0.0002,
+    "live_quote"
+   ],
+   "usd_per_eur": 1.11
+  },
+  "stale_poller": {
+   "dossier_mark": [
+    "venue_stale",
+    1200.0,
+    1.1,
+    "yfinance"
+   ],
+   "drum_last": 1.11,
+   "quote": {
+    "dash": "",
+    "value": {
+     "ask": null,
+     "at": "2026-11-04 10:53:20+00:00",
+     "bid": null,
+     "change_pct": 0.0,
+     "last": 1.11
+    }
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "",
+     "value": {
+      "ask": null,
+      "at": "2026-11-04 10:53:20+00:00",
+      "bid": null,
+      "change_pct": 0.0,
+      "last": 1.11
+     }
+    }
+   },
+   "spread": [
+    null,
+    null
+   ],
+   "usd_per_eur": null
+  },
+  "stale_stream": {
+   "dossier_mark": [
+    "quote",
+    1000.0,
+    1.11,
+    "oanda_stream"
+   ],
+   "drum_last": 1.11,
+   "quote": {
+    "dash": "",
+    "value": {
+     "ask": 1.1101,
+     "at": "2026-11-04 11:43:20+00:00",
+     "bid": 1.1099,
+     "change_pct": 0.0,
+     "last": 1.11
+    }
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "",
+     "value": {
+      "ask": 1.1101,
+      "at": "2026-11-04 11:43:20+00:00",
+      "bid": 1.1099,
+      "change_pct": 0.0,
+      "last": 1.11
+     }
+    }
+   },
+   "spread": [
+    0.0002,
+    "live_quote"
+   ],
+   "usd_per_eur": null
+  },
+  "venue_own_interim": {
+   "dossier_mark": [
+    "quote",
+    0.0,
+    1.1001,
+    "etoro"
+   ],
+   "drum_last": 1.1001,
+   "quote": {
+    "dash": "",
+    "value": {
+     "ask": 1.1002,
+     "at": "2026-11-04 12:00:00+00:00",
+     "bid": 1.1,
+     "change_pct": 0.0,
+     "last": 1.1001
+    }
+   },
+   "quotes": {
+    "EURUSD": {
+     "dash": "",
+     "value": {
+      "ask": 1.1002,
+      "at": "2026-11-04 12:00:00+00:00",
+      "bid": 1.1,
+      "change_pct": 0.0,
+      "last": 1.1001
+     }
+    }
+   },
+   "spread": [
+    0.0002,
+    "live_quote"
+   ],
+   "usd_per_eur": 1.1001
+  }
+ },
+ "m1_tick": {
+  "confirmed": {
+   "closed": 0,
+   "last_mark": 1.0801,
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": null,
+    "inferred": null,
+    "pnl": "0",
+    "status": "CLOSE_PENDING",
+    "unpriced": false
+   },
+   "suspect": false
+  },
+  "inside_the_levels": {
+   "closed": 0,
+   "last_mark": 1.1,
+   "row": {
+    "exit_fill_source": null,
+    "exit_mark_age_s": null,
+    "exit_price": null,
+    "inferred": null,
+    "pnl": "0",
+    "status": "OPEN",
+    "unpriced": false
+   },
+   "suspect": false
+  },
+  "jump_through_the_stop": {
+   "closed": 0,
+   "last_mark": 1.1,
+   "row": {
+    "exit_fill_source": null,
+    "exit_mark_age_s": null,
+    "exit_price": null,
+    "inferred": null,
+    "pnl": "0",
+    "status": "OPEN",
+    "unpriced": false
+   },
+   "suspect": true
+  },
+  "requests": [
+   "ticker",
+   "ticker",
+   "ticker",
+   "close_position"
+  ],
+  "writes": [
+   [
+    "close_position",
+    "p-1",
+    "EURUSD",
+    "1.0"
+   ]
+  ]
+ },
+ "m2_jump": {
+  "accepted": {
+   "last_mark": 1.1,
+   "ok": true,
+   "suspect": false,
+   "why": ""
+  },
+  "confirmed": {
+   "last_mark": 1.1101,
+   "ok": true,
+   "suspect": false,
+   "why": ""
+  },
+  "jump": {
+   "last_mark": 1.1,
+   "ok": false,
+   "suspect": true,
+   "why": "suspect mark: the mark 1.11 is 0.9% from the last accepted 1.1 (bar 0.5%); print 1 of 2"
+  }
+ },
+ "m2_stand_in": {
+  "check": {
+   "last_mark": null,
+   "ok": false,
+   "suspect": true,
+   "why": "suspect mark: the venue's mark 2000 is 4.8% from the platform's quote 2100 (bar 2.0%)"
+  },
+  "second_opinion": 2100.0
+ },
+ "m2_t10": {
+  "absent": {
+   "check": {
+    "last_mark": 1.1,
+    "ok": true,
+    "suspect": false,
+    "why": ""
+   },
+   "second_opinion": null
+  },
+  "agreeing_stream": {
+   "check": {
+    "last_mark": 1.1,
+    "ok": true,
+    "suspect": false,
+    "why": ""
+   },
+   "second_opinion": 1.1002
+  },
+  "disagreeing_poller": {
+   "check": {
+    "last_mark": null,
+    "ok": false,
+    "suspect": true,
+    "why": "suspect mark: the venue's mark 1.1 is 0.9% from the platform's quote 1.11 (bar 0.5%)"
+   },
+   "second_opinion": 1.11
+  },
+  "disagreeing_stream": {
+   "check": {
+    "last_mark": null,
+    "ok": false,
+    "suspect": true,
+    "why": "suspect mark: the venue's mark 1.1 is 0.9% from the platform's quote 1.11 (bar 0.5%)"
+   },
+   "second_opinion": 1.11
+  },
+  "stale_poller": {
+   "check": {
+    "last_mark": 1.1,
+    "ok": true,
+    "suspect": false,
+    "why": ""
+   },
+   "second_opinion": null
+  },
+  "stale_stream": {
+   "check": {
+    "last_mark": 1.1,
+    "ok": true,
+    "suspect": false,
+    "why": ""
+   },
+   "second_opinion": null
+  },
+  "venue_own_interim": {
+   "check": {
+    "last_mark": 1.1,
+    "ok": true,
+    "suspect": false,
+    "why": ""
+   },
+   "second_opinion": null
+  }
+ },
+ "m3_entry_gate": {
+  "absent": {
+   "ok": true,
+   "unread": false,
+   "why": ""
+  },
+  "agreeing_stream": {
+   "ok": true,
+   "unread": false,
+   "why": ""
+  },
+  "disagreeing_poller": {
+   "ok": false,
+   "unread": false,
+   "why": "the venue's quote 1.1 is 0.9% from the platform's 1.11 (bar 0.5%)"
+  },
+  "disagreeing_stream": {
+   "ok": false,
+   "unread": false,
+   "why": "the venue's quote 1.1 is 0.9% from the platform's 1.11 (bar 0.5%)"
+  },
+  "requests": [],
+  "stale_poller": {
+   "ok": true,
+   "unread": false,
+   "why": ""
+  },
+  "stale_stream": {
+   "ok": true,
+   "unread": false,
+   "why": ""
+  },
+  "venue_own_interim": {
+   "ok": true,
+   "unread": false,
+   "why": ""
+  }
+ },
+ "m4_ticket": {
+  "absent": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": true,
+   "reason": "",
+   "spread_pct": 0.0182
+  },
+  "agreeing_stream": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": true,
+   "reason": "",
+   "spread_pct": 0.0182
+  },
+  "disagreeing_poller": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": false,
+   "reason": "the venue's quote 1.1 is 0.9% from the platform's 1.11 (bar 0.5%)",
+   "spread_pct": 0.0182
+  },
+  "disagreeing_stream": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": false,
+   "reason": "the venue's quote 1.1 is 0.9% from the platform's 1.11 (bar 0.5%)",
+   "spread_pct": 0.0182
+  },
+  "requests": [],
+  "stale_poller": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": true,
+   "reason": "",
+   "spread_pct": 0.0182
+  },
+  "stale_stream": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": true,
+   "reason": "",
+   "spread_pct": 0.0182
+  },
+  "venue_own_interim": {
+   "ask": 1.1001,
+   "bid": 1.0999,
+   "budget_ok": true,
+   "budget_reason": "",
+   "half_spread_r": 0.01,
+   "ok": true,
+   "reason": "",
+   "spread_pct": 0.0182
+  }
+ },
+ "m5_dead": {
+  "execute": {
+   "error": "No usable price mark for EURUSD \u2014 the position is still OPEN rather than booked at a price nobody quoted",
+   "still_open": true
+  },
+  "preview": "No usable price mark for EURUSD \u2014 closing now would book the exit at a price nobody quoted",
+  "requests": [
+   "ticker",
+   "ticker"
+  ],
+  "row": {
+   "exit_fill_source": null,
+   "exit_mark_age_s": null,
+   "exit_price": null,
+   "inferred": null,
+   "pnl": "0",
+   "status": "OPEN",
+   "unpriced": false
+  },
+  "writes": []
+ },
+ "m5_live": {
+  "execute": {
+   "error": "The broker rejected the close for EURUSD. The position is STILL OPEN at the broker; the row is CLOSE_PENDING and the retry task will keep trying every 5 minutes",
+   "pending": true,
+   "trade_id": true
+  },
+  "requests": [
+   "ticker",
+   "close_position"
+  ],
+  "row": {
+   "exit_fill_source": "mark",
+   "exit_mark_age_s": null,
+   "exit_price": null,
+   "inferred": null,
+   "pnl": "0",
+   "status": "CLOSE_PENDING",
+   "unpriced": false
+  },
+  "writes": [
+   [
+    "close_position",
+    "p-1",
+    "EURUSD",
+    "1.0"
+   ]
+  ]
+ },
+ "m6_kill_switch": {
+  "accept": {
+   "closed": 0,
+   "errors": 1,
+   "requests": [
+    "ticker",
+    "get_positions",
+    "close_position"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": null,
+    "inferred": null,
+    "pnl": "0",
+    "status": "CLOSE_PENDING",
+    "unpriced": false
+   },
+   "writes": [
+    [
+     "close_position",
+     "p-accept",
+     "EURUSD",
+     "1.0"
+    ]
+   ]
+  },
+  "fail": {
+   "closed": 0,
+   "errors": 1,
+   "requests": [
+    "ticker",
+    "get_positions",
+    "close_position"
+   ],
+   "row": {
+    "exit_fill_source": null,
+    "exit_mark_age_s": null,
+    "exit_price": null,
+    "inferred": null,
+    "pnl": "0",
+    "status": "OPEN",
+    "unpriced": false
+   },
+   "writes": [
+    [
+     "close_position",
+     "p-fail",
+     "EURUSD",
+     "1.0"
+    ]
+   ]
+  }
+ },
+ "m7_drain": {
+  "closed": true,
+  "requests": [
+   "instrument_id",
+   "get_positions",
+   "ticker"
+  ],
+  "row": {
+   "exit_fill_source": "mark",
+   "exit_mark_age_s": null,
+   "exit_price": "1.099",
+   "inferred": null,
+   "pnl": "-0.001",
+   "status": "CLOSED",
+   "unpriced": false
+  },
+  "writes": []
+ },
+ "m8_reconcile": {
+  "absent": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.1",
+    "inferred": true,
+    "pnl": null,
+    "status": "CLOSED",
+    "unpriced": true
+   }
+  },
+  "agreeing_stream": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.1002",
+    "inferred": true,
+    "pnl": "0.0002",
+    "status": "CLOSED",
+    "unpriced": false
+   }
+  },
+  "disagreeing_poller": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.11",
+    "inferred": true,
+    "pnl": "0.01",
+    "status": "CLOSED",
+    "unpriced": false
+   }
+  },
+  "disagreeing_stream": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.11",
+    "inferred": true,
+    "pnl": "0.01",
+    "status": "CLOSED",
+    "unpriced": false
+   }
+  },
+  "stale_poller": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.1",
+    "inferred": true,
+    "pnl": null,
+    "status": "CLOSED",
+    "unpriced": true
+   }
+  },
+  "stale_stream": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.1",
+    "inferred": true,
+    "pnl": null,
+    "status": "CLOSED",
+    "unpriced": true
+   }
+  },
+  "venue_own_interim": {
+   "booked": true,
+   "requests": [
+    "ticker"
+   ],
+   "row": {
+    "exit_fill_source": "mark",
+    "exit_mark_age_s": null,
+    "exit_price": "1.1001",
+    "inferred": true,
+    "pnl": "0.0001",
+    "status": "CLOSED",
+    "unpriced": false
+   }
+  }
+ },
+ "m9_gap": {
+  "fresh_stamp": {
+   "bookable": true,
+   "for_booking": {
+    "age_s": 60,
+    "price": "1.0999",
+    "source": "venue",
+    "stand_in": ""
+   },
+   "resolve": {
+    "age_s": 60,
+    "price": "1.0999",
+    "source": "venue",
+    "stand_in": ""
+   }
+  },
+  "quote_newer_than_stamp": {
+   "bookable": true,
+   "for_booking": {
+    "age_s": 600,
+    "price": "1.105",
+    "source": "quote",
+    "stand_in": ""
+   },
+   "resolve": {
+    "age_s": 600,
+    "price": "1.105",
+    "source": "quote",
+    "stand_in": ""
+   }
+  },
+  "quote_older_than_stamp": {
+   "bookable": true,
+   "for_booking": {
+    "age_s": 1200,
+    "price": "1.0999",
+    "source": "venue_stale",
+    "stand_in": ""
+   },
+   "resolve": {
+    "age_s": 1200,
+    "price": "1.0999",
+    "source": "venue_stale",
+    "stand_in": ""
+   }
+  }
+ },
+ "m9_stand_in": {
+  "answers": {
+   "bookable": false,
+   "for_booking": null,
+   "resolve": {
+    "age_s": 7200,
+    "price": "2000",
+    "source": "venue_stale",
+    "stand_in": "future"
+   }
+  },
+  "no_stamp": {
+   "bookable": false,
+   "for_booking": null,
+   "resolve": {
+    "age_s": null,
+    "price": null,
+    "source": "awaiting_venue",
+    "stand_in": "future"
+   }
+  }
+ },
+ "regression_index_overnight": {
+  "answers": {
+   "bookable": true,
+   "for_booking": {
+    "age_s": 3600,
+    "price": "4999",
+    "source": "venue_stale",
+    "stand_in": "cash index"
+   },
+   "resolve": {
+    "age_s": 3600,
+    "price": "4999",
+    "source": "venue_stale",
+    "stand_in": "cash index"
+   }
+  },
+  "check": {
+   "ok": false,
+   "why": "suspect mark: the venue's mark 5000 is 2.0% from the platform's quote 4900 (bar 1.5%)"
+  },
+  "market_shut": null,
+  "second_opinion": 4900.0,
+  "stand_in": "cash index"
+ },
+ "t19_gate": {
+  "live_n": 1,
+  "live_realized": -50.0,
+  "n": 1,
+  "realized": -50.0,
+  "unmeasured": 1
+ },
+ "t21": {
+  "after_hold": {
+   "last": "1.1006",
+   "pnl_tier2_side": [
+    "1.1005",
+    "bid"
+   ],
+   "second_opinion": null,
+   "source": "etoro",
+   "stand_in": ""
+  },
+  "after_interim": {
+   "last": "1.1",
+   "pnl_tier2_side": [
+    "1.0999",
+    "bid"
+   ],
+   "second_opinion": null,
+   "source": "etoro",
+   "stand_in": ""
+  },
+  "after_stream": {
+   "last": "1.1002",
+   "pnl_tier2_side": null,
+   "second_opinion": 1.1002,
+   "source": "oanda_stream",
+   "stand_in": ""
+  },
+  "interim_back_after_hold": true,
+  "interim_refused_while_held": false,
+  "interim_writes": true,
+  "poller_refused": false,
+  "resolve": {
+   "age_s": 0,
+   "price": "1.1006",
+   "source": "quote",
+   "stand_in": ""
+  },
+  "stream_takes": true
+ },
+ "t21_index": {
+  "after_interim": {
+   "last": "5000",
+   "pnl_tier2_side": [
+    "4999",
+    "bid"
+   ],
+   "second_opinion": null,
+   "source": "etoro",
+   "stand_in": ""
+  },
+  "after_poller": {
+   "last": "4900",
+   "pnl_tier2_side": null,
+   "second_opinion": 4900.0,
+   "source": "yfinance",
+   "stand_in": "cash index"
+  },
+  "interim_writes": true,
+  "poller_refused": false,
+  "poller_takes_after_hold": true,
+  "resolve_interim": {
+   "age_s": 0,
+   "price": "5000",
+   "source": "quote",
+   "stand_in": ""
+  },
+  "resolve_poller": {
+   "age_s": 1501,
+   "price": "5000",
+   "source": "venue_stale",
+   "stand_in": "cash index"
+  }
+ },
+ "t7_weekend": {
+  "saturday": {
+   "BTCUSD": {
+    "answers": {
+     "bookable": true,
+     "for_booking": {
+      "age_s": 0,
+      "price": "50100",
+      "source": "quote",
+      "stand_in": ""
+     },
+     "resolve": {
+      "age_s": 0,
+      "price": "50100",
+      "source": "quote",
+      "stand_in": ""
+     }
+    },
+    "market_shut": null,
+    "paper": {
+     "lastPrice": "50100.00000000"
+    }
+   },
+   "EURUSD": {
+    "answers": {
+     "bookable": true,
+     "for_booking": {
+      "age_s": 0,
+      "price": "1.1003",
+      "source": "quote",
+      "stand_in": ""
+     },
+     "resolve": {
+      "age_s": 0,
+      "price": "1.1003",
+      "source": "quote",
+      "stand_in": ""
+     }
+    },
+    "market_shut": {
+     "closed": "2026-11-06T21:00:00+00:00",
+     "reopens": "2026-11-08T22:00:00+00:00"
+    },
+    "paper": {
+     "lastPrice": "1.10030000"
+    }
+   }
+  },
+  "sunday_reopen": {
+   "EURUSD": {
+    "answers": {
+     "bookable": false,
+     "for_booking": null,
+     "resolve": {
+      "age_s": 122520,
+      "price": "1.1003",
+      "source": "quote",
+      "stand_in": ""
+     }
+    },
+    "market_shut": null,
+    "paper": {
+     "lastPrice": "0"
+    }
+   }
+  }
+ }
+}

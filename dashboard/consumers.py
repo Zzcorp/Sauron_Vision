@@ -160,6 +160,35 @@ def push_quote_update(symbol, price, change_pct, source=""):
         )
 
 
+def push_shown(shown, *, t=None):
+    """ONE PRICE EVERYWHERE (2026-11-12): the rule's value for one symbol
+    (market_data.one_quote.Shown) to every dashboard socket, through the
+    EXISTING quote_update handler (no new message type): the legacy fields
+    a page without the one painter reads (symbol, price in its own digits,
+    source, a day change only when the price's own source measured it),
+    the server's clock `t` (epoch ms), and the payload itself under `q`,
+    which static/js/sv-venue.js ingests as a server value (newer wins).
+    The dashboard socket refuses investor and locked sockets (connect)."""
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+
+    layer = get_channel_layer()
+    if not layer:
+        return False
+    if t is None:
+        from market_data.one_quote import now as _now
+        t = _now()
+    ms = int(round(t.timestamp() * 1000)) if hasattr(t, "timestamp") else int(t)
+    data = {"symbol": shown.symbol,
+            "price": shown.text() if shown.price is not None else None,
+            "source": shown.source,
+            "change_pct": None if shown.chg is None else str(shown.chg),
+            "t": ms, "q": shown.payload()}
+    async_to_sync(layer.group_send)(
+        "dashboard_live", {"type": "quote_update", "data": data})
+    return True
+
+
 def push_signal_notification(signal_data):
     """Push a new signal to all connected clients."""
     from channels.layers import get_channel_layer

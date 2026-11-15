@@ -70,4 +70,15 @@ def run_signal_lifecycle():
             counts["no_price"] += 1
         elif outcome != "active":
             counts["closed"] += 1
+    # THE MARKET HOLD'S RELEASE PASS (2026-11-12, signals/market_hold): the
+    # announcements the optional signal_market_hold switch kept for their
+    # market's open are released or dropped here, after the grading and in
+    # their own try, so a failing release never stops a grade. It reads the
+    # held rows only: with nothing held it costs one query and says so.
+    try:
+        from signals.market_hold import release_due
+        counts["market_hold"] = release_due()
+    except Exception:
+        logger.exception("the market hold's release pass failed")
+        counts["market_hold"] = "failed"
     return counts

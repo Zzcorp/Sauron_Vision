@@ -151,7 +151,15 @@ class LandingPageSmokeTests(TestCase):
         self.assertIn('href="#demo"', body)
 
     def test_platform_base_has_pupil_tracking(self):
-        """The platform pages (base.html) also get the cursor-tracking pupil."""
+        """The platform pages (base.html) also get the cursor-tracking pupil.
+
+        (2026-11-12, the magic kept) A look, updated. The inline tracker
+        moved the pupil of the background eye, which S1a hides on every
+        platform page: it ran on each pointer move and showed nothing. The
+        gaze now belongs to the eye the operator does see, the sidebar's
+        mark: its iris group, moved by static/js/sv-moments.js (the node
+        and Chromium tests of tests/test_magic_layer.py measure the move).
+        """
         from django.contrib.auth.models import User
         u = User.objects.create_user(username="pupil_u", password="x")
         self.client.force_login(u)
@@ -159,8 +167,11 @@ class LandingPageSmokeTests(TestCase):
         r = self.client.get("/eye/")
         body = r.content.decode("utf-8", errors="ignore")
         self.assertIn('id="globePupilGroup"', body)
-        # Tracking JS marker (range constant)
-        self.assertIn("PUPIL_RANGE_X", body)
+        # The mark's iris, and the script that moves it toward the pointer.
+        self.assertIn('class="sv-brand-iris"', body)
+        self.assertIn("js/sv-moments", body)
+        # The tracker of the hidden eye is gone with its range constant.
+        self.assertNotIn("PUPIL_RANGE_X", body)
 
     def test_redesigned_icons_use_sigil_geometry(self):
         """Icons should use square line-caps + miter joins (Sauron sigil aesthetic),

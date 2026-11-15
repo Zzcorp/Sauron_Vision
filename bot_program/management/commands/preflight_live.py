@@ -444,6 +444,63 @@ def _attack_lines(w, cfg, kind, venue, now, blockers, warnings) -> None:
             f"is charged by NOTHING here — the cost filter is spread only")
 
 
+def _floor_lines(w, cfg, kind, warnings) -> None:
+    """Section 4's leverage line for a config with NO extras['leverage'].
+
+    As it always read ("the adapter sends 1") unless THE VENUE FLOOR FOR
+    BOTS is ON for it (2026-11-12, the review: the line said 1 for a bot
+    whose raised entries then left at 20x). ON, on a live bot eToro
+    carries: an entry raised to the venue's smallest size lets the
+    engine's chooser pick its multiplier (AssetBot._order_leverage,
+    floor_auto). Said here per instrument class with the most it may pick
+    — the class ceiling under MAX BOT LEVERAGE, 1 while etoro_leverage_live
+    is OFF — judged by the engine's own rule (judge_order_leverage with
+    the pick), and the financing warning the attack mode's lines carry.
+    Never a blocker: a refusal of the pick refuses raised entries only,
+    and the bot's own size goes as before. Nothing here asks a broker."""
+    from bot_program.asset_engine.base import (
+        LEVERAGE_SWITCH_KEY, MAX_ORDER_LEVERAGE, ORDER_LEVERAGE_CEILING,
+        bot_cap_words, bot_leverage_cap, judge_order_leverage,
+        venue_floor_on)
+    from bot_program.manual_trade import MANUAL_CONFIG_NAME
+    from core.platform_control import is_component_enabled
+    if (cfg.name == MANUAL_CONFIG_NAME or kind != "etoro"
+            or not venue_floor_on()):
+        w("        leverage —  (no extras['leverage']; the "
+          "adapter sends 1)")
+        return
+    w("        leverage —  (no extras['leverage']; the adapter sends 1, "
+      "except an entry raised to the venue's smallest size: the chooser "
+      "picks its multiplier, up to MAX BOT LEVERAGE and the class ceiling)")
+    on = is_component_enabled(LEVERAGE_SWITCH_KEY)
+    cap = bot_leverage_cap(cfg)
+    for icls in _instrument_classes(cfg):
+        ceiling = min(int(MAX_ORDER_LEVERAGE),
+                      int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        capped = on and cap is not None and cap < ceiling
+        most = (min(ceiling, cap) if capped else ceiling) if on else 1
+        w(f"          {icls}: a raised entry goes at up to {most}x"
+          + (f" ({bot_cap_words(cap)})" if capped else "")
+          + ", on eToro's LIVE list and inside the stop band"
+          + ("" if on else f" ({LEVERAGE_SWITCH_KEY} is OFF: every order "
+                           f"goes at 1x)"))
+        if most <= 1:
+            continue
+        _lev, why = judge_order_leverage(cfg, icls, kind, floor_pick=most)
+        if why:
+            w(f"            ← {why}")
+            warnings.append(
+                f"config {cfg.id} ({cfg.name}), an entry raised to the "
+                f"venue's smallest size, {icls} at {most}x: {why}")
+            continue
+        warnings.append(
+            f"config {cfg.id} ({cfg.name}): an entry raised to the venue's "
+            f"smallest size goes at up to {most}x on {icls}: financing "
+            f"(overnight/weekend fees on a levered CFD) is charged by "
+            f"NOTHING here — the cost filter is spread only — and a stock "
+            f"or crypto buy above 1x is a CFD, not the asset")
+
+
 def _primary_classes(row) -> str:
     out = []
     for c in _VENUE_CLASSES:
@@ -566,8 +623,11 @@ class Command(BaseCommand):
 
         from django.db.models import Q
 
-        from bot_program.capital_truth import (account_equity, broker_backed,
-                                               broker_env, broker_kind)
+        from bot_program.capital_truth import (account_equity,
+                                               allocate_shares, broker_backed,
+                                               broker_env, broker_kind,
+                                               followers_of, foreign_venue,
+                                               tracks_broker)
         from bot_program.models import AssetBotConfig, IBKRAccount
         from core.platform_control import PlatformComponent, is_component_enabled
         from market_data.models import PriceData
@@ -935,16 +995,87 @@ class Command(BaseCommand):
                     same_ccy = (reading["currency"] and cfg.base_currency
                                 and reading["currency"].upper()
                                 == cfg.base_currency.upper())
-                    if not same_ccy and reading["currency"]:
+                    # WHOSE FIGURE IT IS (2026-11-12). A pool that follows
+                    # the account takes its figure from the account's
+                    # reading: only its label is wrong, and the sync writes
+                    # the reading's currency over it
+                    # (tasks._follow_the_account). Any other pool carries a
+                    # figure typed in its own label.
+                    # ASKED WITH THE SYNC'S OWN TWO TESTS (the review of
+                    # 2026-11-12), never the class flags above: the sync
+                    # retunes no follower that trades at another venue than
+                    # the book (capital_truth.foreign_venue, every symbol,
+                    # any venue the router names), and nothing at all while
+                    # the followers' shares do not fit in one account
+                    # (allocate_shares, with this one counted in). Only
+                    # where both say yes does a sync write the label.
+                    _follows = tracks_broker(cfg)
+                    _foreign, _fits = "", True
+                    if (not same_ccy and reading["currency"] and _follows
+                            and book is not None):
+                        _foreign = foreign_venue(user, cfg, broker_kind(book))
+                        if not _foreign:
+                            _fits = bool(allocate_shares(followers_of(
+                                user, include=cfg))["ok"])
+                    _etoro_book = (book is not None
+                                   and broker_kind(book) == "etoro")
+                    if (not same_ccy and reading["currency"] and _follows
+                            and not _foreign and _fits):
+                        _when = ("the next sync" if cfg.enabled else
+                                 "the first sync after it is enabled")
+                        w(f"        ^ CURRENCY MISMATCH: pool labelled "
+                          f"{cfg.base_currency}, account reads in "
+                          f"{reading['currency']} — this pool follows the "
+                          f"account: only its label is wrong, and {_when} "
+                          f"writes {reading['currency']}")
+                        blockers.append(
+                            f"config {cfg.id} ({cfg.name}) follows the "
+                            f"account and is labelled {cfg.base_currency} "
+                            f"while the account reads in "
+                            f"{reading['currency']}: its figure is taken "
+                            f"from the account's reading (the whole of it, "
+                            f"or its share), so the label is wrong, not the "
+                            f"figure — {_when} writes {reading['currency']}"
+                            + (" (until then the cash check refuses its "
+                               "eToro orders)" if _etoro_book else ""))
+                    elif (not same_ccy and reading["currency"] and _follows
+                            and not _foreign):
+                        w(f"        ^ CURRENCY MISMATCH: pool labelled "
+                          f"{cfg.base_currency}, account reads in "
+                          f"{reading['currency']} — this pool follows the "
+                          f"account, but the sync retunes nothing until the "
+                          f"followers' shares fit in 100%: its label stays "
+                          f"{cfg.base_currency}")
+                        blockers.append(
+                            f"config {cfg.id} ({cfg.name}) follows the "
+                            f"account and is labelled {cfg.base_currency} "
+                            f"while the account reads in "
+                            f"{reading['currency']}, and the sync retunes "
+                            f"nothing, its label included, until the "
+                            f"followers' shares fit in 100%: its label stays "
+                            f"{cfg.base_currency} until then"
+                            + (" and the cash check refuses its eToro orders"
+                               if _etoro_book else ""))
+                    elif not same_ccy and reading["currency"]:
+                        try:
+                            _pool_words = f"{float(cfg.capital):,.2f}"
+                        except (TypeError, ValueError):
+                            _pool_words = str(cfg.capital)
                         w(f"        ^ CURRENCY MISMATCH: pool declared in "
                           f"{cfg.base_currency}, account reads in "
                           f"{reading['currency']}")
                         blockers.append(
-                            f"config {cfg.id} ({cfg.name}) declares its pool "
-                            f"in {cfg.base_currency} while the account is in "
-                            f"{reading['currency']} — every limit derived from "
-                            f"`capital` is wrong by the FX rate, and nothing "
-                            f"here converts")
+                            f"config {cfg.id} ({cfg.name}) "
+                            + (f"follows the account but trades at "
+                               f"{_foreign}, so the sync never writes its "
+                               f"pool: its pool of {_pool_words}"
+                               if tracks_broker(cfg) else
+                               f"does not follow the account: its typed pool "
+                               f"of {_pool_words}")
+                            + f" is read in {cfg.base_currency} while the "
+                            f"account is in {reading['currency']} — every "
+                            f"limit derived from `capital` is wrong by the FX "
+                            f"rate, and nothing here converts")
                     try:
                         pool = float(cfg.capital)
                     except (TypeError, ValueError):
@@ -968,8 +1099,7 @@ class Command(BaseCommand):
                 _extras = cfg.extras or {}
                 from bot_program.asset_engine.base import leverage_is_auto
                 if "leverage" not in _extras:
-                    w("        leverage —  (no extras['leverage']; the "
-                      "adapter sends 1)")
+                    _floor_lines(w, cfg, kind, warnings)
                 elif leverage_is_auto(_extras):
                     _attack_lines(w, cfg, kind, venue, now, blockers,
                                   warnings)
@@ -1096,6 +1226,13 @@ class Command(BaseCommand):
                       "on the bots' multiplier)" if _bcap is None else
                       f"        MAX BOT LEVERAGE {_bcap}x (/setup/) — this "
                       f"bot's multiplier at eToro is at most {_bcap}x")
+                # THE VENUE FLOOR FOR BOTS (2026-11-12), beside the cap: the
+                # switch's state and MAX BOT FLOOR RISK, the engine's own
+                # readers (base.venue_floor_words). A line, never a
+                # blocker: OFF is the default and a decision.
+                from bot_program.asset_engine.base import venue_floor_words
+                _vfw = venue_floor_words(cfg, venue=kind)
+                w("        VENUE FLOOR" + _vfw[len("venue floor"):])
                 if cfg.enabled and not list(cfg.symbols or []):
                     if cfg.name != MANUAL_CONFIG_NAME:
                         blockers.append(f"config {cfg.id} ({cfg.name}) is LIVE "

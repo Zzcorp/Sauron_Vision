@@ -86,6 +86,22 @@ class Portfolio(models.Model):
     # on the card) is no cap — what every bot did before it existed — and
     # the migration adds it NULL, so nothing changes on deploy.
     max_bot_leverage = models.IntegerField(null=True, blank=True)
+    # MAX BOT FLOOR RISK (2026-11-12): the most a bot's entry RAISED TO THE
+    # VENUE'S SMALLEST SIZE may risk at its stop, as a percentage of the
+    # bot's pool. Read by asset_engine.base.bot_floor_risk_pct, and only
+    # while the live-money switch bots_venue_floor_live is ON: with it OFF
+    # (the default) no bot order is ever raised and nothing reads this.
+    # The operator, 2026-11-12: "je veux tous mes bots live right now",
+    # "qu'il soit smart pour s'ajuster au marché et y pouvoir rentrer tout
+    # du moins". A bot risks 0.25% of its pool per trade by default
+    # (sizing.DEFAULT_RISK_FRACTION), and on a small account that size is
+    # under eToro's minimum exposure; the floor opens at the venue's
+    # minimum instead, and this is the ceiling on what that may risk.
+    # Default 2; bounds 0.1 to 7 on the card, the upper one the platform's
+    # hard per-trade cap (sizing.MAX_RISK_FRACTION) and never above it. A
+    # value outside the bounds reads as no ceiling at all, which is no
+    # floor entry (it fails closed).
+    max_bot_floor_risk_pct = models.FloatField(default=2.0)
 
     updated_at = models.DateTimeField(auto_now=True)
 

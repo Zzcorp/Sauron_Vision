@@ -6,9 +6,10 @@ riding through that half of each pass opened nothing on hover. The data
 headband has always included its full dh_item.html twice; so does this.
 The card (.ticker-popup) stays hidden inside the item until base.html's
 popup engine portals it to <body> on hover, and goes back into the item
-when it closes.
+when it closes. The second half's copy (`twin`) is for the eye only: out
+of the tab order, hidden from screen readers (2026-11-13).
 {% endcomment %}
-<a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}"{% if item.news_id %} data-news-id="{{ item.news_id }}"{% endif %}>
+<a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}"{% if item.news_id %} data-news-id="{{ item.news_id }}"{% endif %}{% if twin %} aria-hidden="true" tabindex="-1"{% endif %}>
     {% comment %}Signals were removed from this band by
     request — the rail is their home; the ticker is news
     only (quote/strategy branches remain for the payloads
@@ -18,7 +19,8 @@ when it closes.
     <span class="t-price">{{ item.price }}</span>
     <span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
     {% elif item.type == "news" %}
-    <span class="t-badge news">NEWS</span>
+    {# Its time, as the board's band says it ("12:30"), never a NEWS badge under the lane's own News label (the desk v2 board, 2026-11-13). #}
+    {% if item.published_at %}<span class="t-time">{{ item.published_at }}</span>{% endif %}
     <span>{{ item.title|truncatechars:50 }}</span>
     {% elif item.type == "strategy" %}
     <span class="t-badge strat">STRAT</span>

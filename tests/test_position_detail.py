@@ -27,6 +27,7 @@ What this file pins, in order:
 Run with:  python manage.py test tests.test_position_detail
 """
 import pathlib
+import re
 from decimal import Decimal
 
 from django.conf import settings
@@ -112,7 +113,10 @@ class RowContractTests(TestCase):
         """The card's whole reason to exist: not the levels, which the table
         already prints, but how far the mark is from each of them."""
         self.assertEqual(_attr(self.html, "entry"), "60000")
-        self.assertEqual(_attr(self.html, "mark"), "61000")
+        # The MARK rung is the row's Current cell (2026-11-12, ONE PRICE
+        # EVERYWHERE): the instrument's one price, in its px digits, the
+        # same text every screen prints for it.
+        self.assertEqual(_attr(self.html, "mark"), "61000.00")
         self.assertEqual(_attr(self.html, "stop"), "59000")
         self.assertEqual(_attr(self.html, "target"), "62000")
         self.assertEqual(_attr(self.html, "stop-pct"), "3.28")
@@ -239,7 +243,8 @@ class UnknownsRenderAsGapsTests(TestCase):
         html = self.client.get(POSITIONS).content.decode("utf-8", "replace")
         self.assertEqual(_attr(html, "entry"), "0.000012")
         self.assertEqual(_attr(html, "stop"), "0.00001")
-        self.assertEqual(_attr(html, "mark"), "0.000013")
+        # The mark in the instrument's px digits (the one price, 2026-11-12).
+        self.assertEqual(_attr(html, "mark"), "0.00001300")
 
     def test_a_never_scored_trade_shows_no_score_rather_than_zero(self):
         """composite_score defaults to 0 and a hand-taken entry never sets
@@ -310,8 +315,14 @@ class NoSignalDegradesCleanlyTests(TestCase):
         row must render with empty attributes rather than 500."""
         from portfolio.models import Position
         from portfolio.services import get_or_create_default_portfolio
+        # The user's own book (2026-11-13): the page's style block, whose
+        # [data-pos-href=""] selector this assertion used to find, moved
+        # into the desk's sheet (S2.2, the desk v2 the operator approved:
+        # "amazing work, bravo, I need it fast!!"), so the row itself must
+        # render and carry the empty attribute.
         Position.objects.create(
-            portfolio=get_or_create_default_portfolio(), instrument=self.inst,
+            portfolio=get_or_create_default_portfolio(user=self.user),
+            instrument=self.inst,
             direction="long", quantity=Decimal("1"),
             entry_price=Decimal("60000"), current_price=Decimal("61000"),
             opened_at=timezone.now())
@@ -319,7 +330,11 @@ class NoSignalDegradesCleanlyTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8", "replace")
         # No timeline is offered for a row that has none.
-        self.assertIn('data-pos-href=""', html)
+        row = re.search(r"(<tr data-sv-position-row[^>]*>)(.*?)</tr>", html, re.S)
+        self.assertIsNotNone(row, "the book position is not on the page")
+        self.assertIn('data-pos-href=""', row.group(1))
+        # and no CLOSE on it: nothing on this platform can flatten it
+        self.assertNotIn("data-sv-close-trade", row.group(2))
 
 
 class CloseActionTests(TestCase):

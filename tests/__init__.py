@@ -16,6 +16,7 @@ from bot_program.engine import etoro_client as _etoro_client
 from bot_program.engine import etoro_rates as _etoro_rates
 from bot_program.engine import paper_trader as _paper_trader
 from bot_program.management.commands import etoro_smoke as _etoro_smoke
+from signals import market_hold as _market_hold
 
 _paper_trader.MARKET_HOURS_GATE = False
 # The same reason, one layer up (2026-10-06): the entry timing refuses a
@@ -24,6 +25,16 @@ _paper_trader.MARKET_HOURS_GATE = False
 # run at whatever instant they run. tests/test_entry_timing.py turns it
 # back on at a fixed clock.
 _entry_timing.GATE = False
+# The same reason for a signal's announcement (2026-11-12,
+# signals/market_hold.GATE): a signal announced while its market is shut
+# says so, and with the signal_market_hold switch on its announcement
+# waits for the open. Hundreds of tests here create and announce signals
+# at whatever instant they run, and pin the words: on a Saturday a forex
+# signal's message would gain a line, and a test that turned the switch
+# on would depend on the hour. Off, no market reads shut and the release
+# pass does nothing; tests/test_signal_market_hold.py turns it back on at
+# a fixed clock.
+_market_hold.GATE = False
 # THE /search MEMO (2026-10-06, etoro_client.SEARCH_MEMO) keeps an id for
 # the UTC day across EtoroTrader instances, and the suite's fake wires
 # answer /search with ids per test and count the calls: kept on, a test

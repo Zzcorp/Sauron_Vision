@@ -188,6 +188,12 @@ class BothMarqueeStripsAnswerTheWheelTests(TestCase):
     back after 1.5s, undoing the operator's positioning while they were
     still reading it, and the data headband moved twelve pixels per
     wheel notch, which is working and indistinguishable from broken.
+
+    Since 2026-11-13 the strips are moved by static/js/sv-marquee.js (one
+    position per strip, the wheel and the drag move it): these source
+    checks read the wheel block of base.html, whose fallback (the file did
+    not load) keeps the old rules; the live path is measured in Chromium
+    by tests/test_marquee.py.
     """
 
     def _shell(self):
@@ -219,17 +225,40 @@ class BothMarqueeStripsAnswerTheWheelTests(TestCase):
 
     def test_it_lets_go_at_the_ends(self):
         """At either end the wheel belongs to the page, not to a strip
-        38 pixels tall."""
-        seg = self._shell().split("window.svWheelMarquee = function")[1][:1400]
+        38 pixels tall.
+
+        Since 2026-11-13 (the operator's decision: the two strips scroll
+        again, continuously, and the hand still moves them) a strip that
+        loops has no end: over it the wheel moves the strip, whichever way
+        it turns, and the auto-scroll goes on from there. A strip with
+        nothing to reveal (no loop) is still an end and the page has the
+        wheel. Both measured in tests/test_marquee.py (the short ticker)."""
+        shell = self._shell()
+        seg = shell.split("window.svWheelMarquee = function")[1][:1400]
         self.assertIn("if (next === offset) return;", seg)
+        rule = shell.split("window.svWheelMarquee = function")[0][-1600:]
+        self.assertIn("Nothing to reveal (no loop) is the end: the page has", rule)
+        self.assertIn("A strip that loops has no end", rule)
 
     def test_leaving_the_strip_hands_it_back_to_the_marquee(self):
+        """Without static/js/sv-marquee.js (the file did not load) leaving
+        clears the paused transform, the old keyframe marquee's rule. With
+        it, the live path since 2026-11-13, release() returns first: the
+        strip keeps the place the hand chose and scrolls on from there
+        (measured in tests/test_marquee.py)."""
         seg = self._shell().split("window.svWheelMarquee = function")[1][:1400]
         self.assertIn("mouseleave", seg)
         self.assertIn("animationPlayState = ''", seg)
+        self.assertIn("if (one()) return;", seg)
 
     def test_the_arrow_buttons_keep_their_own_crawl(self):
         """dhStep was written for a slow crawl on arrow hover — that is
-        what it is good at, and it keeps that job."""
+        what it is good at, and it keeps that job.
+
+        No template renders .dh-arrow or .tb-arrow buttons today (the
+        review of 2026-11-13 found none, nor on 349b1ca): the crawl is kept,
+        moving the one position, for a template that brings them back;
+        nothing measures it while no button exists."""
         shell = self._shell()
         self.assertIn("setInterval(function(){ dhStep(dir); }, 16)", shell)
+        self.assertIn("No template renders .dh-arrow or .tb-arrow", shell)

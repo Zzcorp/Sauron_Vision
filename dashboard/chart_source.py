@@ -79,6 +79,16 @@ INTRADAY_LIMIT = 240
 MINUTE_CACHE_S = 60
 #: The gap between the quote and the venue's last price the hero names.
 GAP_WORDS_PCT = 0.05
+#: WHICH SIDE A FAMILY'S CANDLE CLOSES ON (2026-11-12, one price
+#: everywhere): a public feed's candle closes on its last trade; eToro's
+#: candle close side is unmeasured until M5 (the eToro feed spec, 4.6.3:
+#: "welded only once M5 has measured eToro's candle close, and only on an
+#: eToro series"), so no price is welded onto an eToro candle before then.
+#: The chart welds a live price onto its forming candle only when the
+#: price is the candles' own feed AND side.
+ETORO_CANDLE_CLOSE_SIDE = None
+CLOSE_SIDES = {"yahoo": "last", "binance": "last",
+               "etoro": ETORO_CANDLE_CLOSE_SIDE}
 
 # ── The chart's frames (2026-11-01) ─────────────────────────────────────
 #: The chart's timeframe on the wire -> its interval. "1min" etc., never a
@@ -381,6 +391,7 @@ def _source(instrument, fam, route, notes):
             "stand_in": si, "route": route,
             "same_feed_only": (instrument.asset_class or "") == "crypto",
             "tick_bar": tick_bar(instrument.asset_class),
+            "close_side": CLOSE_SIDES.get(fam),
             "notes": notes, "positions": ""}
 
 

@@ -144,6 +144,22 @@ class TraderProfile(models.Model):
         ("dark", "Dark Mode"),
         ("light", "Light Mode"),
     ])
+    # ── Ambience ─────────────────────────────────
+    # How much of Sauron's own theme the pages show (the magic kept,
+    # 2026-11-12): "magic" is all of it (the embers, the light, the Eye's
+    # breath, the moments), "calm" keeps the still light and nothing moves,
+    # "off" is the approved look exactly. Printed onto <body
+    # data-sv-ambience> by {% get_ambience %} and set from the user menu
+    # (dashboard.views.set_ambience). DISPLAY ONLY: no engine, bot, Orc,
+    # alert, gate or ticket reads it (tests/test_ambience_pref.py scans
+    # every module of the project).
+    AMBIENCE_CHOICES = [("magic", "Magic"), ("calm", "Calm"), ("off", "Off")]
+    # db_default (review 2026-11-12): code that does not know the column
+    # (the old containers while the migrate step runs, a rollback that keeps
+    # the migration) still creates a profile; the database answers "magic".
+    ambience = models.CharField(
+        max_length=8, default="magic", db_default="magic", choices=AMBIENCE_CHOICES,
+        help_text="Display only: embers, light and moments.")
 
     access_pin_hash = models.CharField(max_length=128, blank=True, default="", help_text="Hashed PIN code (2nd-factor)")
     # ── Idle PIN lock ────────────────────────────────

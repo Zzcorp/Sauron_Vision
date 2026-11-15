@@ -175,7 +175,7 @@ class RailOverlapMeasuredTests(TestCase):
         var rail = document.querySelector(".signals-rail");
         var page = document.querySelector(".page-content");
         var main = document.querySelector(".main-content");
-        var out = { width: window.innerWidth };
+        var out = { width: window.innerWidth, client: document.documentElement.clientWidth };
         var states = ["closed", "open"];
         for (var i = 0; i < states.length; i++) {
             rail.classList.toggle("open", states[i] === "open");
@@ -210,14 +210,24 @@ class RailOverlapMeasuredTests(TestCase):
                                      "bar" % url)
         cls.got = _measure(pages, cls.VIEWPORTS, cls.PROBE, "sv-s0-rail-")
 
+    #: Updated deliberately (the desk v2 board, approved 2026-11-13:
+    #: "amazing work, bravo, I need it fast!!"): the rail is a column that
+    #: pushes the page, 300 px under 1440 and 340 px from there (380 from
+    #: 2560), or, shut, not on the screen at all (laid out past the
+    #: window's edge and hidden; the dock's Signals button opens it), no
+    #: longer a 44 px strip and a 280 px panel.
+    OPEN_WIDE = {1280: 300, 1440: 340, 1920: 340}
+
     def test_the_probe_sees_the_rail_it_set(self):
         for (url, width), got in sorted(self.got.items()):
             with self.subTest(url=url, width=width):
                 self.assertEqual(got["width"], width)
-                for state, wide in (("closed", 44), ("open", 280)):
+                for state in ("closed", "open"):
                     self.assertTrue(got[state]["railShown"], got)
-                    self.assertAlmostEqual(got[state]["railWidth"], wide,
-                                           delta=0.5, msg=got)
+                self.assertAlmostEqual(got["open"]["railWidth"], self.OPEN_WIDE[width],
+                                       delta=0.5, msg=got)
+                self.assertLess(got["open"]["railLeft"], got["client"], got)
+                self.assertGreaterEqual(got["closed"]["railLeft"], got["client"] - 0.5, got)
 
     def test_the_page_stops_at_the_rail(self):
         for (url, width), got in sorted(self.got.items()):
@@ -344,6 +354,13 @@ class CloseInViewMeasuredTests(TestCase):
         row.querySelector(".sv-sel-box").checked = phase === "tick";
         await frame();
         finish();
+        // The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+        // "amazing work, bravo, I need it fast!!") puts each position's
+        // detail in a row of its own under it, the book's even row; since
+        // the review of 2026-11-13 (its F9) that row's one cell runs to the
+        // end, so the row has two cells. A middle cell is read where the
+        // row has one; what the checks compare (the row's ground, its last
+        // cell, a ticked row's middle cell) is read as before.
         function paint(tr) {
             var cells = tr.querySelectorAll(":scope > td");
             function one(el) {
@@ -352,7 +369,7 @@ class CloseInViewMeasuredTests(TestCase):
                          position: c.position };
             }
             return { row: one(tr), last: one(cells[cells.length - 1]),
-                     other: one(cells[2]) };
+                     other: cells.length > 2 ? one(cells[2]) : null };
         }
         var r = row.querySelectorAll(":scope > td")[2].getBoundingClientRect();
         var cells = row.querySelectorAll(":scope > td");
@@ -489,10 +506,21 @@ class CloseInViewMeasuredTests(TestCase):
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class PositionCardsMeasuredTests(TestCase):
-    """/positions/' row of small cards (direction, asset class, monthly
-    realized P&L): no card narrower than 300 px while the column is wider
-    than that, and the asset-class table whole without a sideways scroll,
-    at 1280, 1440 and 1920, rail shut and open."""
+    """/positions/' row of small cards: no card narrower than the board
+    draws it while the column is wider than that, and its tables whole
+    without a sideways scroll, at 1280, 1440 and 1920, rail shut and open.
+
+    The desk v2 (S2.2, the board the operator approved on 2026-11-13:
+    "amazing work, bravo, I need it fast!!") replaced the old row
+    (direction, asset class, monthly realized P&L) with its lower row:
+    closed in 24 h, the REAL exposure by class and by side, closed in 30
+    days by world. The same measures stand, on that row; the floor is the
+    board's own width for each card (the review of 2026-11-13: S0's 300 px
+    came from the old asset-class card, and the board holds the exposure at
+    248 px and the 30 days' table whole at 274)."""
+
+    #: The board's width for each card of the row (Desk2.dc.html).
+    FLOORS = (300, 248, 274)
 
     VIEWPORTS = ((1280, 800), (1440, 900), (1920, 1080))
 
@@ -508,7 +536,7 @@ class PositionCardsMeasuredTests(TestCase):
             });
         }
         var rail = document.querySelector(".signals-rail");
-        var grid = document.querySelector(".grid.grid-3");
+        var grid = document.querySelector(".pd-lower");
         var out = { width: window.innerWidth, states: {} };
         var states = ["closed", "open"];
         for (var i = 0; i < states.length; i++) {
@@ -523,10 +551,12 @@ class PositionCardsMeasuredTests(TestCase):
                     return c.getBoundingClientRect().width;
                 }),
                 tables: Array.prototype.map.call(
-                    grid.querySelectorAll(".table-wrapper"), function (w) {
-                        return { head: w.querySelector("thead").textContent
+                    grid.querySelectorAll("table"), function (t) {
+                        var w = t.parentElement;
+                        return { head: t.querySelector("thead").textContent
                                          .replace(/\s+/g, " ").trim(),
-                                 scrollWidth: w.scrollWidth,
+                                 scrollWidth: Math.max(w.scrollWidth,
+                                     Math.ceil(t.getBoundingClientRect().width)),
                                  clientWidth: w.clientWidth };
                     })
             };
@@ -540,30 +570,45 @@ class PositionCardsMeasuredTests(TestCase):
         _quote("BTCUSD", 60600)
         _trade(user)
         _legacy(user)
+        # The lower row's three cards with something in each: a REAL
+        # position for the exposure, a close in the last 24 hours.
+        _trade(user, paper=False, qty="0.1")
+        from bot_program.models import AssetBotTrade
+        closed = _trade(user, status="CLOSED", qty="0.2")
+        AssetBotTrade.objects.filter(pk=closed.pk).update(
+            exit_price=Decimal("61200"), pnl=Decimal("240"),
+            closed_at=timezone.now() - timedelta(hours=3))
         client = Client()
         client.force_login(user)
         page = _get(client, "/positions/")
-        if "By asset class" not in page:
-            raise AssertionError("/positions/ no longer shows the asset-class "
-                                 "card this measures")
+        if 'aria-label="Closed in thirty days, by world"' not in page:
+            raise AssertionError("/positions/ no longer shows the lower row "
+                                 "this measures")
         cls.got = _measure({"/positions/": page}, cls.VIEWPORTS, cls.PROBE,
                            "sv-s0-cards-")
 
     def test_the_asset_class_table_is_there(self):
+        # The lower row's tables (S2.2, 2026-11-13: "amazing work, bravo, I
+        # need it fast!!"): the 24 h closes and the 30 days by world.
         for (url, width), got in sorted(self.got.items()):
             for state, row in sorted(got["states"].items()):
                 with self.subTest(width=width, rail=state):
                     self.assertEqual(len(row["cards"]), 3, row)
-                    self.assertTrue(any("unreal" in t["head"].lower()
-                                        for t in row["tables"]), row)
+                    heads = [t["head"].lower() for t in row["tables"]]
+                    self.assertTrue(any("exit" in h for h in heads), row)
+                    self.assertTrue(any("won" in h for h in heads), row)
 
-    def test_no_card_is_squeezed_under_300_px(self):
+    def test_no_card_is_squeezed_under_the_board_s_width(self):
+        """Updated deliberately (the review of 2026-11-13, the board the
+        operator approved: "amazing work, bravo, I need it fast!!"): each
+        card's floor is the board's width for it, the 24 hours keeping S0's
+        300; the tables stay whole (the test below)."""
         for (url, width), got in sorted(self.got.items()):
             for state, row in sorted(got["states"].items()):
                 with self.subTest(width=width, rail=state):
-                    for card in row["cards"]:
+                    for card, floor in zip(row["cards"], self.FLOORS):
                         self.assertGreaterEqual(
-                            card, min(300, row["grid"]) - 0.5,
+                            card, min(floor, row["grid"]) - 0.5,
                             "at %d px, rail %s: a card %.0f px wide" %
                             (width, state, card))
 
@@ -585,9 +630,10 @@ class PositionCardsMeasuredTests(TestCase):
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class TicketFaceMeasuredTests(TestCase):
-    """Every price and label on every ticket of the instrument page (the
-    header's and the chart's compact one) computes to the mono token, the
-    face the spread between them already wore."""
+    """Every price on every ticket of the instrument page (the header's and
+    the chart's compact one) computes to the mono token, the face the spread
+    between them already wore; the side labels compute to the word face
+    (desk v2, 2026-11-13: see the test). None of them is Arial any more."""
 
     PROBE = r"""(function () {
         function face(el) { return getComputedStyle(el).fontFamily; }
@@ -626,9 +672,19 @@ class TicketFaceMeasuredTests(TestCase):
             self.assertEqual(face, self.got["mono"], self.got)
 
     def test_so_do_the_side_labels_and_the_spread(self):
+        """Updated deliberately (desk v2, 2026-11-13). The operator approved
+        the desk v2 boards ("amazing work, bravo, I need it fast!!"): Ticket2
+        draws the side labels as words, ▼ SHORT · BID and ▲ LONG · ASK in the
+        word face (Inter 11/600), as plan §4.2 has every word, and keeps the
+        bid, the ask and the spread in the number face. What S0 fixed holds:
+        a label computes to the page's own word face, never the button's
+        Arial, and the spread to the mono token."""
         self.assertGreaterEqual(len(self.got["labels"]), 2, self.got)
-        for face in self.got["labels"] + self.got["spreads"]:
+        for face in self.got["spreads"]:
             self.assertEqual(face, self.got["mono"], self.got)
+        for face in self.got["labels"]:
+            self.assertEqual(face, self.got["body"], self.got)
+            self.assertNotIn("Arial", face)
 
 
 # ══════════════════════════════════════════════════════════════════════════

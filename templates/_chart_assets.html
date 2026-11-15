@@ -56,10 +56,15 @@ include tries again.
     var border = token("--border", "#133020");
     var text   = token("--text-secondary", "#7aaa8a");
 
+    // The number face (UI plan S1a, 2026-11-06): axis ticks, legends and
+    // tooltips are data, so JetBrains Mono, read from the token like the
+    // colours; the old face is the fallback where the token sheet is absent.
+    var numberFace = token("--sv-font-mono", token("--font-mono", "'Share Tech Mono', monospace"));
+
     function theme() {
       w.Chart.defaults.color = text;
       w.Chart.defaults.borderColor = border;
-      w.Chart.defaults.font.family = "'Share Tech Mono', monospace";
+      w.Chart.defaults.font.family = numberFace;
       w.Chart.defaults.font.size = 11;
     }
     w.SAURON_CHART_COLORS = {

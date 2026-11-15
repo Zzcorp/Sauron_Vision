@@ -13,7 +13,9 @@
  *     dispatches sv:nav-activity with the unseen map, so Gollum learns
  *     what the dots learn without a second poll
  *
- * Keyboard: "/" (outside inputs) opens him; Esc closes;
+ * Keyboard: "/" (outside inputs) opens him where the page has no
+ * command field (the top bar's "/ Symbol or command" owns "/" since the
+ * desk v2 board, 2026-11-13); Esc closes;
  * arrows walk the results; Enter follows.
  */
 (function (w, d) {
@@ -240,7 +242,7 @@
     }
     if (e.href === "#keys") {
       ev.preventDefault();
-      say("? asks Sauron · / calls me · Ctrl+K opens the orb · Esc sends us away.");
+      say("? shows the keys · / goes to a symbol or a page · Ctrl+K asks Sauron · Esc sends us away.");
       return;
     }
     close();
@@ -311,7 +313,8 @@
                        || t.isContentEditable);
     /* Ctrl+K is the Palantír's chord (base.html routes it to Ask
        Sauron). Two owners on one chord means neither works. */
-    if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey
+        && !d.getElementById("svCmd")) {
       e.preventDefault(); openDialog();
     }
   });

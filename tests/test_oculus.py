@@ -165,8 +165,9 @@ class OculusPageTests(TestCase):
         self.client.force_login(self.user)
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
-        # Django escapes the apostrophe to &#x27;, so compare unescaped —
-        # four of these ten titles start with "L'".
+        # Django escapes apostrophes to &#x27;, so compare unescaped. (The
+        # titles were French once, four of them starting with "L'"; they are
+        # English now, and the page's qualifiers still carry apostrophes.)
         body = _html.unescape(resp.content.decode())
         for title in ("The switches", "The scan", "The promotion ladder",
                       "The signals", "Evolution", "Personalities",
@@ -212,15 +213,21 @@ class OculusMarkTests(SimpleTestCase):
         self.assertIn("page_id == 'oculus'", base)
 
     def test_its_mark_is_used_nowhere_else(self):
-        """The sidebar's convention: one glyph, one row. U+25CE was the
-        obvious pick for an eye and Trade Forensics already holds it."""
+        """The sidebar's convention: one mark, one row. U+25CE was the
+        obvious pick for an eye and Trade Forensics already holds it.
+
+        Updated deliberately (UI redo B2, the desk v2 board, approved 2026-11-13: "amazing work, bravo, I need it fast!!"):
+        the marks are the one icon family's symbols, not glyphs. The Oculus
+        row names #svi-oculus, no other row does, and Trade Forensics keeps
+        a symbol of its own."""
         import re
         base = _base_html()
         icons = re.findall(r'<span class="icon">(.+?)</span>', base)
-        self.assertEqual(icons.count("⦿"), 1,
-                         "the Oculus mark U+29BF is not unique in the sidebar")
-        self.assertGreater(icons.count("◎"), 0,
-                           "U+25CE moved — recheck which glyph is free")
+        refs = [r for i in icons for r in re.findall(r'<use href="#(svi-[\w-]+)"', i)]
+        self.assertEqual(refs.count("svi-oculus"), 1,
+                         "the Oculus mark is not unique in the sidebar")
+        self.assertEqual(refs.count("svi-forensics"), 1,
+                         "Trade Forensics lost its own mark")
 
 
 class TheBookIsPerViewerAndNeverPooledTests(TestCase):
@@ -550,6 +557,13 @@ class TheSwitchesAndTheForgeAreStaffsTests(TestCase):
         self.assertEqual([d for d in data["degraded"]
                           if d.startswith(("forge", "gates"))], [])
 
+        # Staff, on a COLD cache. Since O0 the scan and the plan are read
+        # once per build and stored (tests/test_oculus_truth pins the warm
+        # half), so "staff reads them" holds for the first render of a
+        # build, which an empty cache is. The meaning pinned here, never
+        # for a viewer, is unchanged.
+        from django.core.cache import cache
+        cache.clear()
         with mock.patch("pathlib.Path.rglob", return_value=iter(())) as scan, \
                 mock.patch("django.db.migrations.executor.MigrationExecutor"
                            ) as plan:

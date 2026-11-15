@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ slot.label }} — Sauron Vision{% endblock %}
-{% block page_title %}{{ slot.label }} · {{ orc.symbol }} {% if orc.side == "BUY" %}LONG{% else %}SHORT{% endif %}{% endblock %}
+{# A money word never prints in the title's display face: .sv-plain is the word face (2026-11-12). #}
+{% block page_title %}{{ slot.label }} · {{ orc.symbol }} <span class="sv-plain">{% if orc.side == "BUY" %}LONG{% else %}SHORT{% endif %}</span>{% endblock %}
 
 {% block content %}
 {# One Orc (O1d, spec §9.2): its thesis, plan, journal, arms, wakes and #}

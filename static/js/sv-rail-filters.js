@@ -4,7 +4,8 @@
  * the signals and for the watchlist, by asset class or otherwise. They run
  * here, in the browser, on facts the server renders on every row
  * (data-asset-class, data-side, data-score-b, data-votes, data-live,
- * data-held, data-rule-key), so a click acts at once, with no refetch.
+ * data-held, data-rule-key, and data-market="shut" on a row whose market
+ * is shut now), so a click acts at once, with no refetch.
  *
  * STATE ON THE HOST, FACTS ON THE ROW. The state is a set of data-f-*
  * attributes on the hosts no refresh replaces — the signals rail section
@@ -36,14 +37,22 @@
 
   var DEFAULTS = {
     signals: { cls: [], side: 'all', score: 0, stage: 'all', held: 'all',
-               rules_off: [], sort: 'new', group: false, dense: false, gone: false },
+               rules_off: [], sort: 'new', group: false, dense: false, gone: false,
+               /* 2026-11-12: true hides the cards whose market is shut now
+                  (data-market="shut"); the SHUT chip is pressed while false. */
+               shut_off: false,
+               /* The MARKET SHUT section shown (the optional market hold):
+                  its host attribute is written by the server only while
+                  that switch is on, or when the stored choice is "shown". */
+               shut: false },
     watch: { cls: [], held: 'all', sort: 'class', group: false, dense: false }
   };
   var SECTION = { signals: 'sig', watch: 'watch' };
   var ATTR = { cls: 'data-f-class', side: 'data-f-side', score: 'data-f-score',
                stage: 'data-f-stage', held: 'data-f-held', sort: 'data-f-sort',
-               group: 'data-f-group', dense: 'data-f-dense', gone: 'data-f-gone' };
-  var BOOL = { group: true, dense: true, gone: true };
+               group: 'data-f-group', dense: 'data-f-dense', gone: 'data-f-gone',
+               shut_off: 'data-f-shutoff', shut: 'data-f-shut' };
+  var BOOL = { group: true, dense: true, gone: true, shut_off: true, shut: true };
   var SAVE_MS = 500;
 
   var state = {}, peeking = {}, ruleKeys = {};
@@ -169,13 +178,19 @@
     var rows = host ? arr(host.querySelectorAll('[data-sv-list] > [data-sv-row]'))
       .filter(function (r) { return !r.hasAttribute('data-sv-out'); }) : [];
     var shown = rows.filter(visible).length;
-    var goneHidden = 0;
+    var goneHidden = 0, shutHidden = 0;
     if (host && host.getAttribute('data-f-gone') === '1') {
       goneHidden = arr(host.querySelectorAll('[data-sv-gone] [data-sv-row]'))
         .filter(function (r) { return !visible(r); }).length;
     }
+    /* MARKET SHUT's rows count the same way while it is open (2026-11-12). */
+    if (host && host.getAttribute('data-f-shut') === '1') {
+      shutHidden = arr(host.querySelectorAll('[data-sv-shut] [data-sv-row]'))
+        .filter(function (r) { return !visible(r); }).length;
+    }
     return { total: rows.length, shown: shown, goneHidden: goneHidden,
-             hidden: rows.length - shown + goneHidden };
+             shutHidden: shutHidden,
+             hidden: rows.length - shown + goneHidden + shutHidden };
   }
   function count(kind) {
     arr(document.querySelectorAll('[data-f-kind="' + kind + '"] [data-f-status]')).forEach(function (st) {
@@ -185,7 +200,8 @@
       if (peeking[kind]) text = 'showing all ' + n.total + ' ·';
       else if (n.hidden > 0) {
         text = n.shown + ' shown · ' + n.hidden + ' hidden by your filters'
-          + (n.goneHidden ? ' (' + n.goneHidden + ' in LEFT THE RAIL)' : '') + ' ·';
+          + (n.goneHidden ? ' (' + n.goneHidden + ' in LEFT THE RAIL)' : '')
+          + (n.shutHidden ? ' (' + n.shutHidden + ' in MARKET SHUT)' : '') + ' ·';
       }
       else text = n.total + ' shown';
       if (unsaved) text += ' · not saved';

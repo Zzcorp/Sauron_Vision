@@ -323,5 +323,20 @@ def diagnose(cfg) -> str:
                         "every night at 03:40 UTC, and the detail names "
                         "the numbers",
     }.get(top, "")
-    return (f"{top} accounts for {share:.0%} of {total} skips"
+    told = (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))
+    if top in (VENUE_MIN_SIZE, SIZED_TO_ZERO):
+        # THE VENUE FLOOR FOR BOTS (2026-11-12, the review): while its
+        # switch is ON the advice above ("nothing was resized") is not the
+        # whole of it — a live bot's order under the venue's minimum opens
+        # at that size inside MAX BOT FLOOR RISK, and the last skip's own
+        # detail says why this one did not. OFF, or unreadable: the
+        # sentence is the one it was.
+        try:
+            from bot_program.asset_engine.base import venue_floor_on
+            if getattr(cfg, "mode", "paper") == "live" and venue_floor_on():
+                told += (". The venue floor is ON: the detail says why this "
+                         "one was not raised")
+        except Exception:  # noqa: BLE001 — diagnostics never raise
+            pass
+    return told

@@ -104,6 +104,55 @@ button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* ── MARKET SHUT (2026-11-12): a signal whose market is shut stays a
+   card and says so, with the hour the market opens. Its own line, so the
+   compact density (which drops row 3) keeps it. ───────────────────────── */
+.sr-shut {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 3px;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: .5px;
+    color: var(--accent-gold-ink, #e8a33d);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sr-shut-tag {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border: 1px solid rgba(232, 163, 61, 0.45);
+    border-radius: 2px;
+    font-size: 7.5px;
+    letter-spacing: .8px;
+}
+.sr-shut-opens { color: var(--text-secondary); }
+.sr-pop-fact-shut { color: var(--accent-gold-ink, #e8a33d); }
+/* The headband row: the badge on a line of its own under the row. */
+.ip-dropdown .sv-sig-row[data-market="shut"] { flex-wrap: wrap; }
+.ipr-shut {
+    flex-basis: 100%;
+    font-size: 8.5px;
+    letter-spacing: .5px;
+    color: var(--accent-gold-ink, #e8a33d);
+}
+/* /signals/: beside the stage badge. */
+.sig-shut { margin-left: 4px; }
+.sig-shut-opens {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+/* /signals/: what the optional market hold did with its announcement. */
+.sig-hold {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
 .sr-pop-facts {
     display: flex;
     flex-direction: column;
@@ -220,6 +269,34 @@ button.rf-chip:hover { color: var(--text-secondary); border-color: var(--border-
 }
 .signals-rail:not(.open) .sr-gone { display: none; }
 
+/* ── MARKET SHUT (the optional market hold): the signals whose market
+   cannot trade now, hidden unless the rail section says so. Rendered only
+   while the switch signal_market_hold is on. Its rows are LEFT THE RAIL's
+   in shape. ─────────────────────────────────────────────────────────── */
+[data-sv-fhost="signals"]:not([data-f-shut="1"]) [data-sv-shut] { display: none; }
+.sr-shut-sec {
+    border-bottom: 1px solid var(--border-glow);
+    background: rgba(0, 0, 0, 0.18);
+}
+.sr-wait-row {
+    padding: 7px 12px;
+    border-top: 1px dashed rgba(19, 48, 32, 0.6);
+    opacity: .82;
+}
+.sr-wait-row:hover { opacity: 1; background: var(--bg-card-hover); }
+.sr-gone-tag-market_shut, .sr-gone-tag-market_settling { color: var(--accent-gold-ink, #e8a33d); border-color: rgba(232, 163, 61, 0.45); }
+.sr-wait-rule {
+    margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+}
+.signals-rail:not(.open) .sr-shut-sec { display: none; }
+
 /* ── the headband SIGNALS popup: the rail's own rows ─────────────────── */
 .sv-sig-rows { display: flex; flex-direction: column; }
 .sv-sig-rows > * { flex-shrink: 0; }
@@ -318,7 +395,8 @@ body.light-mode .sr-pop-foot { background: var(--bg-card, #fff); }
    dropdown, rendered from the operator's prefs and rewritten by
    static/js/sv-rail-filters.js), facts on the row (data-asset-class,
    data-side, data-score-b, data-votes, data-live, data-held,
-   data-rule-key). A refresh replaces rows, never a host, so a choice
+   data-rule-key, and data-market="shut" on a row whose market is shut
+   now). A refresh replaces rows, never a host, so a choice
    survives every refresh by construction. "show all" (data-f-peek) pauses
    every rule at once. A muted rule is one generated rule in
    <style id="svRuleOff">.
@@ -343,6 +421,9 @@ body.light-mode .sr-pop-foot { background: var(--bg-card, #fff); }
 [data-sv-fhost]:not([data-f-peek="1"])[data-f-stage="live"] [data-sv-row][data-live="0"],
 [data-sv-fhost]:not([data-f-peek="1"])[data-f-held="held"] [data-sv-row][data-held="0"],
 [data-sv-fhost]:not([data-f-peek="1"])[data-f-held="not"] [data-sv-row][data-held="1"]{display:none!important}
+/* The SHUT chip (2026-11-12): un-pressed, the rows whose market is shut
+   now (data-market="shut", the ones badged MARKET SHUT) are hidden. */
+[data-sv-fhost]:not([data-f-peek="1"])[data-f-shutoff="1"] [data-sv-row][data-market="shut"]{display:none!important}
 
 /* The lists order by CSS: the DOM stays newest first (and Tab with it),
    each row carrying its rank for every sort. A host can be the list

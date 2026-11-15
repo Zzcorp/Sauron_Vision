@@ -484,7 +484,10 @@ class TheTruthTests(_Base):
             self.assertEqual(seat["mark"]["t"],
                              format_price(row["current_price"], seat["instrument_class"],
                                           seat["symbol"]))
-            self.assertEqual(seat["mark"]["word"], row["mark_word"])
+            # The words are the one price rule's (2026-11-12): the Current
+            # cell's on /positions/, the same row's.
+            self.assertEqual(seat["mark"]["word"],
+                             row["q_words"] or row["mark_word"])
             self.assertEqual(seat["mark"]["wait"], row["mark_wait"])
 
     def test_the_seat_count_is_the_strips(self):
@@ -1349,7 +1352,10 @@ class TheCeilingTests(_Base):
         cache.clear()
         big = self._board_warm()
         self.assertEqual(small, big)
-        self.assertEqual(big, 10)
+        # 11 since one price everywhere (2026-11-12): the seats' prices by
+        # the one rule read the instruments with their quotes once
+        # (market_data.one_quote.shown_from), whatever the seat count.
+        self.assertEqual(big, 11)
 
     def _with_orcs(self):
         from bot_program.models import AssetBotTrade
@@ -1374,7 +1380,7 @@ class TheCeilingTests(_Base):
         cache.clear()
         big = self._board_warm()
         self.assertEqual(small, big)
-        self.assertEqual(big, 13)
+        self.assertEqual(big, 14)      # one price everywhere: +1, above
 
     def test_the_seat_detail_with_an_orc_stays_within_16(self):
         from dashboard import horde
@@ -1394,7 +1400,7 @@ class TheCeilingTests(_Base):
         cache.clear()
         five = self._board_warm()
         self.assertEqual(one, five)
-        self.assertEqual(five, 11)
+        self.assertEqual(five, 12)     # one price everywhere: +1, above
 
     def test_a_cold_board_costs_the_same_for_3_and_30_seats(self):
         """Block B cold. The first read ever also creates the shared Main

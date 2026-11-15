@@ -19,7 +19,13 @@ initial render.
                 {% endfor %}
                 {% comment %}The loop's second half: the SAME item, card
                 included — what makes the scroll seamless must hover the
-                same too.{% endcomment %}
+                same too. It is there for the eye (2026-11-13): `twin`
+                takes it out of the tab order and hides it from screen
+                readers, so the keyboard and a reader meet each headline
+                once and focus never lands a loop away; the hand still
+                hovers and clicks it.{% endcomment %}
+                {% with twin=True %}
                 {% for item in ticker_items %}
                 {% include "_partials/ticker_item.html" %}
                 {% endfor %}
+                {% endwith %}

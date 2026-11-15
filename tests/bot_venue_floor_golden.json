@@ -1,0 +1,1281 @@
+{
+ "commodity_under_min": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F commodity_under_min \u00b7 XAUUSD: the venue will not take this size",
+    "commodity config 'F commodity_under_min' sized 0.0833 units of XAUUSD from its stop distance. The venue's minimum there is 0.5, so nothing was sent \u2014 and nothing was resized: trading 0.5 would be 6.0x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 166.6,
+   "per_unit_risk": 30.0,
+   "price": 2000.0,
+   "qty_default": 0.0833,
+   "risk_dollars_default": 2.499,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 0.08333333333333333,
+    "risk_dollars": 2.5,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1970.0,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 1970.0,
+   "target": 2060.0,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "XAUUSD",
+   "XAUUSD",
+   "XAUUSD"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 0.0833 units from the stop distance; this venue's minimum is 0.5. Refused rather than traded at 0.5, which is 6.0x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "crypto_clear": {
+  "audit": [
+   {
+    "asset_class": "crypto",
+    "broker_order_id": "o-1",
+    "entry_price": "50000.0",
+    "mode": "live",
+    "qty": "0.001",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "stop_loss": "47500.0",
+    "symbol": "BTCUSD",
+    "take_profit": "57499.99999999999",
+    "trade_id": "<run>",
+    "world": "demo"
+   }
+  ],
+  "bell": [],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 50.0,
+   "per_unit_risk": 2500.0,
+   "price": 50000.0,
+   "qty_default": 0.001,
+   "risk_dollars_default": 2.5,
+   "sizing": {
+    "notional_fraction": 0.05,
+    "qty": 0.001,
+    "risk_dollars": 2.5,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 47500.0,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 47500.0,
+   "target": 57499.99999999999,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks"
+  ],
+  "fill_arguments": [
+   [
+    "asset_class",
+    "attack",
+    "entry_price",
+    "qty",
+    "rule_name",
+    "side",
+    "slippage",
+    "stop_moved",
+    "symbol",
+    "trade",
+    "trade_id"
+   ]
+  ],
+  "fill_words": [
+   {
+    "asset_class": "crypto",
+    "attack": "",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "slippage": "",
+    "stop_moved": "",
+    "symbol": "BTCUSD"
+   }
+  ],
+  "orders": [
+   [
+    "BTCUSD",
+    "BUY",
+    0.001,
+    {
+     "stop_loss": 47500.0,
+     "take_profit": 57499.99999999999
+    }
+   ]
+  ],
+  "quotes_asked": 2,
+  "result": {
+   "entry": 50000.0,
+   "qty": 0.001,
+   "score": 0.9,
+   "side": "BUY",
+   "symbol": "BTCUSD"
+  },
+  "rows_asked": [
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD"
+  ],
+  "skip": {},
+  "skip_counts": {},
+  "trades": [
+   {
+    "broker_order_id": "o-1",
+    "entry_price": "50000.00000000",
+    "metadata": {
+     "broker": "etoro",
+     "broker_env": "paper",
+     "broker_position_id": "p-1",
+     "cost_check": "edge 150.0x cost, net R:R 2.92",
+     "cost_fraction_charged": 0.021,
+     "cost_note": "assumed 0.100% round trip \u2014 the venue quoted no usable, current two-sided market",
+     "cost_source": "assumed",
+     "entry_quote": {
+      "age_s": "<run>",
+      "ask": null,
+      "bid": null,
+      "half_spread_r": null,
+      "last_price": 50000.0,
+      "mid": 50000.0,
+      "proposal_price": 50000.0
+     },
+     "fill_source": "broker",
+     "initial_stop_loss": 47500.0,
+     "levels_source": "pct",
+     "notional_fraction": 0.05,
+     "promotion_stage": "live_full",
+     "risk_dollars": 2.5,
+     "risk_fraction": 0.0025,
+     "slippage": {
+      "fill": 50000.0,
+      "points": 0.0,
+      "proposal": 50000.0,
+      "r_fraction": 0.0
+     },
+     "value_per_unit": 1.0,
+     "venue_fee_fraction": 0.02,
+     "venue_mark": {
+      "at": "<time>",
+      "price": 50000.0,
+      "source": "etoro",
+      "via": "fill"
+     }
+    },
+    "paper": false,
+    "qty": "0.00100000",
+    "reason": "bull 0.90 vs bear 0.00 \u00b7 floor_rule: t",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "status": "OPEN",
+    "stop_loss": "47500.00000000",
+    "symbol": "BTCUSD",
+    "take_profit": "57500.00000000"
+   }
+  ],
+  "wire": 0
+ },
+ "crypto_under_min": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F crypto_under_min \u00b7 BTCUSD: the venue will not take this size",
+    "crypto config 'F crypto_under_min' sized 8e-05 units of BTCUSD from its stop distance. The venue's minimum there is 0.0002, so nothing was sent \u2014 and nothing was resized: trading 0.0002 would be 2.5x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 4.0,
+   "per_unit_risk": 2500.0,
+   "price": 50000.0,
+   "qty_default": 8e-05,
+   "risk_dollars_default": 0.2,
+   "sizing": {
+    "notional_fraction": 0.004,
+    "qty": 8e-05,
+    "risk_dollars": 0.2,
+    "risk_fraction": 0.0002,
+    "skipped_by_stop_floor": false,
+    "stop": 47500.0,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 47500.0,
+   "target": 57499.99999999999,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "BTCUSD",
+   "BTCUSD",
+   "BTCUSD"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 8e-05 units from the stop distance; this venue's minimum is 0.0002. Refused rather than traded at 0.0002, which is 2.5x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "forex_auto_leverage": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F forex_auto_leverage \u00b7 EURUSD: the venue will not take this size",
+    "forex config 'F forex_auto_leverage' sized 200 units of EURUSD from its stop distance. The venue's minimum there is 925.926, so nothing was sent \u2014 and nothing was resized: trading 925.926 would be 4.6x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 216.0,
+   "per_unit_risk": 0.016199999999999992,
+   "price": 1.08,
+   "qty_default": 200.0,
+   "risk_dollars_default": 3.2399999999999984,
+   "sizing": {
+    "attack": {
+     "capped": false,
+     "config_risk_fraction": 0.0025,
+     "high_from": 0.8667,
+     "risk_fraction": 0.001875,
+     "scale": 0.75,
+     "score": 0.9,
+     "strong_from": 0.7333,
+     "tier": "STRONG",
+     "why": "score 0.9000 in the HIGH band; edge not yet measured \u2014 floor_rule on forex, pooled (paper and live): n 0, win \u2014, avg R \u2014; HIGH needs n >= 20"
+    },
+    "notional_fraction": 0.125,
+    "qty": 231.48148148148158,
+    "risk_dollars": 3.75,
+    "risk_fraction": 0.001875,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0638,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 1.0638,
+   "target": 1.1124,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "EURUSD",
+   "EURUSD",
+   "EURUSD"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 200 units from the stop distance; this venue's minimum is 925.926. Refused rather than traded at 925.926, which is 4.6x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "forex_paper_config": {
+  "audit": [
+   {
+    "asset_class": "forex",
+    "broker_order_id": "",
+    "entry_price": "1.080108",
+    "mode": "paper",
+    "qty": "300.0",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "stop_loss": "1.0639063800000002",
+    "symbol": "EURUSD",
+    "take_profit": "1.1125112400000001",
+    "trade_id": "<run>",
+    "world": "paper"
+   }
+  ],
+  "bell": [],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 324.0324,
+   "per_unit_risk": 0.016201619999999917,
+   "price": 1.080108,
+   "qty_default": 300.0,
+   "risk_dollars_default": 4.860485999999975,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 308.61111419722386,
+    "risk_dollars": 5.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0639063800000002,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 1.0639063800000002,
+   "target": 1.1125112400000001,
+   "venue": "paper"
+  },
+  "config_notes": [
+   "entry_marks"
+  ],
+  "fill_arguments": [
+   [
+    "asset_class",
+    "attack",
+    "entry_price",
+    "qty",
+    "rule_name",
+    "side",
+    "slippage",
+    "stop_moved",
+    "symbol",
+    "trade",
+    "trade_id"
+   ]
+  ],
+  "fill_words": [
+   {
+    "asset_class": "forex",
+    "attack": "",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "slippage": "",
+    "stop_moved": "",
+    "symbol": "EURUSD"
+   }
+  ],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": {
+   "entry": 1.080108,
+   "qty": 300.0,
+   "score": 0.9,
+   "side": "BUY",
+   "symbol": "EURUSD"
+  },
+  "rows_asked": [],
+  "skip": {},
+  "skip_counts": {},
+  "trades": [
+   {
+    "broker_order_id": "",
+    "entry_price": "1.08010800",
+    "metadata": {
+     "cost_applied_fraction": 0.0001,
+     "cost_check": "edge 150.0x cost, net R:R 1.96",
+     "cost_fraction_charged": 0.0002,
+     "cost_note": "assumed 0.020% round trip \u2014 the venue quoted no usable, current two-sided market",
+     "cost_source": "assumed",
+     "initial_stop_loss": 1.06390638,
+     "levels_source": "pct",
+     "market_price": 1.08,
+     "notional_fraction": 0.166667,
+     "paper_fill": true,
+     "promotion_stage": "live_full",
+     "risk_dollars": 5.0,
+     "risk_fraction": 0.0025,
+     "value_per_unit": 1.0
+    },
+    "paper": true,
+    "qty": "300.00000000",
+    "reason": "bull 0.90 vs bear 0.00 \u00b7 floor_rule: t",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "status": "OPEN",
+    "stop_loss": "1.06390638",
+    "symbol": "EURUSD",
+    "take_profit": "1.11251124"
+   }
+  ],
+  "wire": 0
+ },
+ "forex_paper_stage": {
+  "audit": [
+   {
+    "asset_class": "forex",
+    "broker_order_id": "",
+    "entry_price": "1.08",
+    "mode": "paper",
+    "qty": "300.0",
+    "rule_name": "floor_rule_paper",
+    "side": "BUY",
+    "stop_loss": "1.0638",
+    "symbol": "EURUSD",
+    "take_profit": "1.1124",
+    "trade_id": "<run>",
+    "world": "paper"
+   }
+  ],
+  "bell": [],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 324.0,
+   "per_unit_risk": 0.016199999999999992,
+   "price": 1.08,
+   "qty_default": 300.0,
+   "risk_dollars_default": 4.859999999999998,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 308.64197530864215,
+    "risk_dollars": 5.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0638,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": true,
+    "live_size_factor": 0.0,
+    "may_trade": true,
+    "reason": "paper stage \u2014 full size on the paper venue",
+    "stage": "paper"
+   },
+   "stop": 1.0638,
+   "target": 1.1124,
+   "venue": "paper"
+  },
+  "config_notes": [
+   "entry_marks"
+  ],
+  "fill_arguments": [
+   [
+    "asset_class",
+    "attack",
+    "entry_price",
+    "qty",
+    "rule_name",
+    "side",
+    "slippage",
+    "stop_moved",
+    "symbol",
+    "trade",
+    "trade_id"
+   ]
+  ],
+  "fill_words": [
+   {
+    "asset_class": "forex",
+    "attack": "",
+    "rule_name": "floor_rule_paper",
+    "side": "BUY",
+    "slippage": "",
+    "stop_moved": "",
+    "symbol": "EURUSD"
+   }
+  ],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": {
+   "entry": 1.08,
+   "qty": 300.0,
+   "score": 0.9,
+   "side": "BUY",
+   "symbol": "EURUSD"
+  },
+  "rows_asked": [],
+  "skip": {},
+  "skip_counts": {},
+  "trades": [
+   {
+    "broker_order_id": "",
+    "entry_price": "1.08000000",
+    "metadata": {
+     "cost_check": "edge 150.0x cost, net R:R 1.96",
+     "cost_fraction_charged": 0.0002,
+     "cost_note": "assumed 0.020% round trip \u2014 the venue quoted no usable, current two-sided market",
+     "cost_source": "assumed",
+     "initial_stop_loss": 1.0638,
+     "levels_source": "pct",
+     "market_price": 1.08,
+     "notional_fraction": 0.166667,
+     "paper_fill": true,
+     "promotion_stage": "paper",
+     "risk_dollars": 5.0,
+     "risk_fraction": 0.0025,
+     "value_per_unit": 1.0
+    },
+    "paper": true,
+    "qty": "300.00000000",
+    "reason": "bull 0.90 vs bear 0.00 \u00b7 floor_rule_paper: t",
+    "rule_name": "floor_rule_paper",
+    "side": "BUY",
+    "status": "OPEN",
+    "stop_loss": "1.06380000",
+    "symbol": "EURUSD",
+    "take_profit": "1.11240000"
+   }
+  ],
+  "wire": 0
+ },
+ "forex_probation": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F forex_probation \u00b7 EURUSD: the venue will not take this size",
+    "forex config 'F forex_probation' sized 100 units of EURUSD from its stop distance. The venue's minimum there is 925.926, so nothing was sent \u2014 and nothing was resized: trading 925.926 would be 9.3x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 108.0,
+   "per_unit_risk": 0.016199999999999992,
+   "price": 1.08,
+   "qty_default": 100.0,
+   "risk_dollars_default": 1.6199999999999992,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 308.64197530864215,
+    "risk_dollars": 5.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0638,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 0.25,
+    "may_trade": true,
+    "reason": "live_small \u2014 quarter size",
+    "stage": "live_small"
+   },
+   "stop": 1.0638,
+   "target": 1.1124,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "EURUSD",
+   "EURUSD",
+   "EURUSD"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 100 units from the stop distance; this venue's minimum is 925.926. Refused rather than traded at 925.926, which is 9.3x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "forex_typed_leverage": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F forex_typed_leverage \u00b7 EURUSD: the venue will not take this size",
+    "forex config 'F forex_typed_leverage' sized 300 units of EURUSD from its stop distance. The venue's minimum there is 925.926, so nothing was sent \u2014 and nothing was resized: trading 925.926 would be 3.1x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 324.0,
+   "per_unit_risk": 0.016199999999999992,
+   "price": 1.08,
+   "qty_default": 300.0,
+   "risk_dollars_default": 4.859999999999998,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 308.64197530864215,
+    "risk_dollars": 5.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0638,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 1.0638,
+   "target": 1.1124,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "EURUSD",
+   "EURUSD",
+   "EURUSD"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 300 units from the stop distance; this venue's minimum is 925.926. Refused rather than traded at 925.926, which is 3.1x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "forex_under_min": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F forex_under_min \u00b7 EURUSD: the venue will not take this size",
+    "forex config 'F forex_under_min' sized 300 units of EURUSD from its stop distance. The venue's minimum there is 925.926, so nothing was sent \u2014 and nothing was resized: trading 925.926 would be 3.1x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 324.0,
+   "per_unit_risk": 0.016199999999999992,
+   "price": 1.08,
+   "qty_default": 300.0,
+   "risk_dollars_default": 4.859999999999998,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 308.64197530864215,
+    "risk_dollars": 5.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0638,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 1.0638,
+   "target": 1.1124,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "EURUSD",
+   "EURUSD",
+   "EURUSD"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 300 units from the stop distance; this venue's minimum is 925.926. Refused rather than traded at 925.926, which is 3.1x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "forex_unmeasured": {
+  "audit": [
+   {
+    "asset_class": "forex",
+    "broker_order_id": "o-1",
+    "entry_price": "1.08",
+    "mode": "live",
+    "qty": "300.0",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "stop_loss": "1.0638",
+    "symbol": "EURUSD",
+    "take_profit": "1.1124",
+    "trade_id": "<run>",
+    "world": "demo"
+   }
+  ],
+  "bell": [],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 324.0,
+   "per_unit_risk": 0.016199999999999992,
+   "price": 1.08,
+   "qty_default": 300.0,
+   "risk_dollars_default": 4.859999999999998,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 308.64197530864215,
+    "risk_dollars": 5.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 1.0638,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 1.0638,
+   "target": 1.1124,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks"
+  ],
+  "fill_arguments": [
+   [
+    "asset_class",
+    "attack",
+    "entry_price",
+    "qty",
+    "rule_name",
+    "side",
+    "slippage",
+    "stop_moved",
+    "symbol",
+    "trade",
+    "trade_id"
+   ]
+  ],
+  "fill_words": [
+   {
+    "asset_class": "forex",
+    "attack": "",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "slippage": "",
+    "stop_moved": "",
+    "symbol": "EURUSD"
+   }
+  ],
+  "orders": [
+   [
+    "EURUSD",
+    "BUY",
+    300.0,
+    {
+     "stop_loss": 1.0638,
+     "take_profit": 1.1124
+    }
+   ]
+  ],
+  "quotes_asked": 2,
+  "result": {
+   "entry": 1.08,
+   "qty": 300.0,
+   "score": 0.9,
+   "side": "BUY",
+   "symbol": "EURUSD"
+  },
+  "rows_asked": [
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD",
+   "EURUSD"
+  ],
+  "skip": {},
+  "skip_counts": {},
+  "trades": [
+   {
+    "broker_order_id": "o-1",
+    "entry_price": "1.08000000",
+    "metadata": {
+     "broker": "etoro",
+     "broker_env": "paper",
+     "broker_position_id": "p-1",
+     "cost_check": "edge 150.0x cost, net R:R 1.96",
+     "cost_fraction_charged": 0.0002,
+     "cost_note": "assumed 0.020% round trip \u2014 the venue quoted no usable, current two-sided market",
+     "cost_source": "assumed",
+     "entry_quote": {
+      "age_s": "<run>",
+      "ask": null,
+      "bid": null,
+      "half_spread_r": null,
+      "last_price": 1.08,
+      "mid": 1.08,
+      "proposal_price": 1.08
+     },
+     "fill_source": "broker",
+     "initial_stop_loss": 1.0638,
+     "levels_source": "pct",
+     "notional_fraction": 0.166667,
+     "promotion_stage": "live_full",
+     "risk_dollars": 5.0,
+     "risk_fraction": 0.0025,
+     "slippage": {
+      "fill": 1.08,
+      "points": 0.0,
+      "proposal": 1.08,
+      "r_fraction": 0.0
+     },
+     "value_per_unit": 1.0,
+     "venue_mark": {
+      "at": "<time>",
+      "price": 1.08,
+      "source": "etoro",
+      "via": "fill"
+     }
+    },
+    "paper": false,
+    "qty": "300.00000000",
+    "reason": "bull 0.90 vs bear 0.00 \u00b7 floor_rule: t",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "status": "OPEN",
+    "stop_loss": "1.06380000",
+    "symbol": "EURUSD",
+    "take_profit": "1.11240000"
+   }
+  ],
+  "wire": 0
+ },
+ "index_under_min": {
+  "audit": [],
+  "bell": [
+   [
+    "\u2715 F index_under_min \u00b7 NAS100: the venue will not take this size",
+    "stock config 'F index_under_min' sized 0.0083 units of NAS100 from its stop distance. The venue's minimum there is 0.05, so nothing was sent \u2014 and nothing was resized: trading 0.05 would be 6.0x the risk this entry was sized for, which is a different trade. What raises the unit count is more capital, a higher extras['risk_per_trade_pct'], or a TIGHTER stop \u2014 widening the stop buys FEWER units and makes this worse. Moving the whole asset class off this venue on /brokers/ also works, but it moves every symbol in the class and an open position there would have its exit routed to a venue that does not hold it, so close those first. Said once per pool per symbol per day; the skip counter keeps counting."
+   ]
+  ],
+  "candidate": {
+   "fractional_units": true,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 166.0,
+   "per_unit_risk": 300.0,
+   "price": 20000.0,
+   "qty_default": 0.0083,
+   "risk_dollars_default": 2.49,
+   "sizing": {
+    "notional_fraction": 0.166667,
+    "qty": 0.008333333333333333,
+    "risk_dollars": 2.5,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 19700.0,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 19700.0,
+   "target": 20600.0,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [
+   "NAS100",
+   "NAS100",
+   "NAS100",
+   "NAS100",
+   "NAS100"
+  ],
+  "skip": {
+   "code": "venue_min_size",
+   "detail": "sized 0.0083 units from the stop distance; this venue's minimum is 0.05. Refused rather than traded at 0.05, which is 6.0x the chosen risk"
+  },
+  "skip_counts": {
+   "venue_min_size": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "index_whole_units": {
+  "audit": [],
+  "bell": [],
+  "candidate": null,
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [],
+  "skip": {
+   "code": "sized_to_zero",
+   "detail": "risk budget 0.25% of 1000 is below one tradeable unit"
+  },
+  "skip_counts": {
+   "sized_to_zero": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "stock_clear": {
+  "audit": [
+   {
+    "asset_class": "stock",
+    "broker_order_id": "o-1",
+    "entry_price": "100.0",
+    "mode": "live",
+    "qty": "5.0",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "stop_loss": "95.0",
+    "symbol": "AAPL",
+    "take_profit": "114.99999999999999",
+    "trade_id": "<run>",
+    "world": "demo"
+   }
+  ],
+  "bell": [],
+  "candidate": {
+   "fractional_units": null,
+   "level_meta": {
+    "levels_source": "pct"
+   },
+   "notional_default": 500.0,
+   "per_unit_risk": 5.0,
+   "price": 100.0,
+   "qty_default": 5.0,
+   "risk_dollars_default": 25.0,
+   "sizing": {
+    "notional_fraction": 0.05,
+    "qty": 5.0,
+    "risk_dollars": 25.0,
+    "risk_fraction": 0.0025,
+    "skipped_by_stop_floor": false,
+    "stop": 95.0,
+    "stop_widened": false,
+    "value_per_unit": 1.0
+   },
+   "stage": {
+    "force_paper": false,
+    "live_size_factor": 1.0,
+    "may_trade": true,
+    "reason": "live_full \u2014 full size",
+    "stage": "live_full"
+   },
+   "stop": 95.0,
+   "target": 114.99999999999999,
+   "venue": "live"
+  },
+  "config_notes": [
+   "entry_marks"
+  ],
+  "fill_arguments": [
+   [
+    "asset_class",
+    "attack",
+    "entry_price",
+    "qty",
+    "rule_name",
+    "side",
+    "slippage",
+    "stop_moved",
+    "symbol",
+    "trade",
+    "trade_id"
+   ]
+  ],
+  "fill_words": [
+   {
+    "asset_class": "stock",
+    "attack": "",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "slippage": "",
+    "stop_moved": "",
+    "symbol": "AAPL"
+   }
+  ],
+  "orders": [
+   [
+    "AAPL",
+    "BUY",
+    5.0,
+    {
+     "stop_loss": 95.0,
+     "take_profit": 114.99999999999999
+    }
+   ]
+  ],
+  "quotes_asked": 2,
+  "result": {
+   "entry": 100.0,
+   "qty": 5.0,
+   "score": 0.9,
+   "side": "BUY",
+   "symbol": "AAPL"
+  },
+  "rows_asked": [
+   "AAPL",
+   "AAPL",
+   "AAPL",
+   "AAPL",
+   "AAPL",
+   "AAPL",
+   "AAPL",
+   "AAPL",
+   "AAPL"
+  ],
+  "skip": {},
+  "skip_counts": {},
+  "trades": [
+   {
+    "broker_order_id": "o-1",
+    "entry_price": "100.00000000",
+    "metadata": {
+     "broker": "etoro",
+     "broker_env": "paper",
+     "broker_position_id": "p-1",
+     "cost_check": "edge 300.0x cost, net R:R 2.96",
+     "cost_fraction_charged": 0.0045,
+     "cost_note": "assumed 0.050% round trip \u2014 the venue quoted no usable, current two-sided market",
+     "cost_source": "assumed",
+     "entry_quote": {
+      "age_s": "<run>",
+      "ask": null,
+      "bid": null,
+      "half_spread_r": null,
+      "last_price": 100.0,
+      "mid": 100.0,
+      "proposal_price": 100.0
+     },
+     "fill_source": "broker",
+     "initial_stop_loss": 95.0,
+     "levels_source": "pct",
+     "notional_fraction": 0.05,
+     "promotion_stage": "live_full",
+     "risk_dollars": 25.0,
+     "risk_fraction": 0.0025,
+     "slippage": {
+      "fill": 100.0,
+      "points": 0.0,
+      "proposal": 100.0,
+      "r_fraction": 0.0
+     },
+     "value_per_unit": 1.0,
+     "venue_fee_fraction": 0.004,
+     "venue_mark": {
+      "at": "<time>",
+      "price": 100.0,
+      "source": "etoro",
+      "via": "fill"
+     }
+    },
+    "paper": false,
+    "qty": "5.00000000",
+    "reason": "bull 0.90 vs bear 0.00 \u00b7 floor_rule: t",
+    "rule_name": "floor_rule",
+    "side": "BUY",
+    "status": "OPEN",
+    "stop_loss": "95.00000000",
+    "symbol": "AAPL",
+    "take_profit": "115.00000000"
+   }
+  ],
+  "wire": 0
+ },
+ "stock_under_one_share": {
+  "audit": [],
+  "bell": [],
+  "candidate": null,
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [],
+  "skip": {
+   "code": "sized_to_zero",
+   "detail": "risk budget 0.25% of 1000 is below one tradeable unit"
+  },
+  "skip_counts": {
+   "sized_to_zero": 1
+  },
+  "trades": [],
+  "wire": 0
+ },
+ "stock_unread_row": {
+  "audit": [],
+  "bell": [],
+  "candidate": null,
+  "config_notes": [
+   "entry_marks",
+   "skip_counts",
+   "skips"
+  ],
+  "fill_arguments": [],
+  "fill_words": [],
+  "orders": [],
+  "quotes_asked": 1,
+  "result": null,
+  "rows_asked": [],
+  "skip": {
+   "code": "sized_to_zero",
+   "detail": "risk budget 0.25% of 1000 is below one tradeable unit"
+  },
+  "skip_counts": {
+   "sized_to_zero": 1
+  },
+  "trades": [],
+  "wire": 0
+ }
+}

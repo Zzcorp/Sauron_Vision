@@ -148,6 +148,15 @@ def record_trade_open(user, *, trade) -> None:
             "world": _world(trade),
             "broker_order_id": trade.broker_order_id or "",
         }
+        # THE VENUE FLOOR FOR BOTS (2026-11-12): an entry raised to the
+        # venue's smallest size says so on the chain, with the size it
+        # replaced and the risk it carries (the row's own record). The key
+        # is ABSENT on every other entry, so their payload and its hash
+        # are what they were.
+        meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+        floor = meta.get("venue_floor")
+        if isinstance(floor, dict) and floor.get("floored"):
+            data["venue_floor"] = dict(floor)
         record_event("trade_open", data, user=user)
         from brain.observations import record_observation
         record_observation(kind="audit_event", payload={"audit_kind": "trade_open", **data},

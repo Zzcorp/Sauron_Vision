@@ -55,7 +55,7 @@
 </div>
 
 <div class="card fade-in-up" style="margin-bottom: 24px;">
-    <div class="card-header"><span class="card-title">By side — long against short, per rule and class</span></div>
+    <div class="card-header"><span class="card-title"><span class="sv-plain">By side — long against short, per rule and class</span></span></div>
     <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 88ch;">Each rule's record split by the side it took: graded signals (by the instrument's class), paper and live fills (by the config's class, as Aragorn reads them; an option's side is the decision it bought premium on), and the proving ground's newest verdict for that class and side. The gap is the short's average R less the long's, shown once each side has {{ gap_min }} graded signals. Display only: no gate reads this table.</p>
     {% if sides_error %}
     <p style="font-size: 12px; color: var(--accent-red, #c33); padding: 0 16px 16px;">{{ sides_error }}</p>

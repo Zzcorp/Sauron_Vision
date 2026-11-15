@@ -200,8 +200,9 @@ old environment.
 > live-money switch
 > OFF — `actuator_mode_live`, `meta_allocator_mode_live`,
 > `share_allocator_mode_live`, `share_allocator_auto_derisk`,
-> `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`
-> — and the Morgul brake with them; the page says so beside the button.
+> `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`,
+> `bots_venue_floor_live` and every other one the page names beside the
+> button — and the Morgul brake with them.
 > Each of those is its own decision: a live-money switch is turned on
 > from its own toggle on `/ops/` with your trading PIN (the shell refuses
 > it, and never asks for a PIN), the brake by its own toggle or
@@ -914,17 +915,20 @@ one position the platform's own row cannot see.
 
 ## The Oculus (/oculus/)
 
-The page above the other thirty. They each answer their own subsystem's
+The page above the others. They each answer their own subsystem's
 question well; this one answers the operator's — **is the machine
 turning, and which of its wheels are actually engaged?** It owns no data,
-adds no arithmetic, caches nothing, and writes nothing. Ten panels, one
-per cycle: the switches, the scan, the ladder, the signals, the
-evolution, the personalities, the allocation, the horizon, the backtests,
-the trust. The switches and the forge are platform-wide and follow
+adds no arithmetic of its own, and writes nothing. Eleven cycles and the
+book: the viewer's own book on top, then one panel per cycle — the forge,
+the switches, the scan, the ladder, the signals, the evolution, the
+personalities, the allocation, the horizon, the backtests, the
+confidence. The switches and the forge are platform-wide and follow
 `/health/`'s rule — staff only, as on `/ops/`: any other login reads the
 other cycles and its own book, with no switch state on any panel, and
 the forge's source-tree scan and migration plan run only for the reader
-who gets their answer.
+who gets their answer. It carries no form and no POST: every action is a
+link to the page that holds it, behind its own PIN, and no broker or
+model is called to draw it.
 
 What it does that no single page could:
 
@@ -948,8 +952,88 @@ What it does that no single page could:
    everything to 0 because it is the public login gateway and must never
    raise; behind auth the duty is the opposite, because an operator acts
    differently on each. Every counter that renders `—` is also listed by
-   name at the foot of the page, so a dash can never pass for a quiet
-   zero.
+   name at the foot of the page — the book's included — with its reason
+   in words (the kind of failure, never its message) and the command that
+   fixes it, so a dash can never pass for a quiet zero.
+
+4. **Every count names its window, and amber needs a threshold.** Each
+   count says what it is counted over: `now`, `7 d`, `30 d` or
+   `all time`; a code constant says `constant`; a stored reading counted
+   `now` prints its age there instead (`probed 3 h ago`). A value turns
+   amber (⚠) or coral (⨯) only past its stated threshold, with its
+   words — a budget below zero, a late resolver, a call nobody grades —
+   and a dash never does. The threshold reads the value as computed, not
+   as rounded: a budget of −0.004 prints `-0.00` with its amber, and a
+   governor of 0.998 prints 99, never the 100 that means "no drawdown".
+   "Not due yet" is not late, and neither is "due, waiting for the next
+   pass": detections inside their horizon (the resolver's own `not_due`),
+   signals still live and calls whose due date is ahead are counted
+   apart, and so is what fell due since the resolver's last scheduled
+   pass (the flags' at 23:15 UTC, the calls' grader at 03:30 UTC, read
+   from the beat, given five minutes to finish). Only what fell due
+   before that pass and is still open is late, in amber.
+
+**The book, in three money worlds.** REAL MONEY, DEMO and PAPER side by
+side, never summed — there is no total. The split is
+`dashboard.position_summary.world_of`, the rule the Horde and the
+headband count REAL with: a row at a broker's demo account (`paper`
+False, `broker_env` "paper") is simulated money and never counts as
+REAL. Each world prints its open positions, its risk at the stops (the
+desk's own `book_risk` arithmetic, per currency, never added across
+currencies), the positions with no readable stop and, for REAL, the
+closes pending at the venue. A world with open rows none of which has a
+readable stop prints a dash for its risk, named at the foot, never 0.00.
+Below sits **what the desk sizes with**:
+its two venues, live and paper, exactly as `capital_desk.budget_for`
+answers them, with its reason (the governor's "100" says which of its two
+meanings it is), its currency and what it left aside. The governor and
+the reason print the age of the broker equity cell they rest on
+(`equity read 3 d ago`, and `stale` past an hour); an unreadable
+governor's cause stays in the desk's log, never on the page. The desk's
+live venue is `paper=False`, so it still counts the demo rows: a sentence
+says how many, from the desk's own count, and their risk from the DEMO
+rows themselves, under the desk's currency rule — in its currency, with
+any demo row in another currency named as left out of its budget, and
+per currency when no live config is enabled (after the kill switch, the
+brake or `bot off` the desk adds every row whatever its currency). When
+C1–C3 takes demo out of the desk the same sentence reads "counts REAL
+rows only" by itself. The paper venue divides by the paper AND the live
+pools, and the page says so in numbers. Money keeps its cents.
+
+**What is stored, and how it is dated.** The page counts at load, except
+these readings, each printed with its age. Redis keeps its data across
+a deploy (the compose file runs it with an appendonly volume), so every
+key the page stores carries the build, `<build>` = the image's sha and
+build time: a new image, a same-sha rebuild included, reads afresh.
+
+- the forge's guard scan, once per image (`oculus:forge:guards:<build>`;
+  an unstamped image keeps it ten minutes): "scan checked at this build";
+- the forge's migration plan, ten minutes
+  (`oculus:forge:migrations:<build>`), because `migrate` can run on the
+  same image;
+- the backtests' "signals a run could not simulate", ten minutes
+  (`oculus:slow:unsimulated:<build>`), counted again at once when a run
+  completes;
+- the confidence counts and the desk passes' lifetime counts, ten minutes
+  each (`oculus:slow:predictions:<build>`,
+  `oculus:slow:desk_passes:<build>`): the two whole-table reads with no
+  index for their filter;
+- the probe's two counts, which are `manage.py probe_routes`' own tally
+  with its own time (kept seven days): a tally older than this build is
+  a dash that says "no probe since this build" — the forge exists to
+  catch the pages a deploy broke — and no tally at all is a dash that
+  says "no probe stored: never run, cleared, or older than 7 days". The
+  probe only GETs, as a superuser; after a deploy, fill the two counts
+  with `./deploy/dc exec -T web python manage.py probe_routes`;
+- the governor's broker equity cell, which the sync writes: its age.
+
+A cache that cannot be read never costs the page: it counts instead.
+A warm render (the readings above in place) reads 27 queries for staff
+and 26 for any other login; a login whose broker account is keyed adds
+the desk governor's two reads (the withdrawals and the equity history).
+A cold render (none in place: the first GET of a build, then one GET
+every ten minutes, when four readings expire) reads five more for staff
+and three more for any other login. Both are tested.
 
 Each panel is fenced on its own: a cycle whose table is mid-migration is
 reported **dead**, never dropped — a vanished panel reads as "there is no
@@ -963,8 +1047,8 @@ the page — one shared axis would flatten every slow cycle into a flat
 line and read as "dead" when the honest reading is "slower than the
 scanner, by design".
 
-Nothing to run. Open the page; `tests/test_oculus.py` holds it to the
-three rules above.
+Nothing to run. Open the page; `tests/test_oculus.py` and
+`tests/test_oculus_truth.py` hold it to the rules above.
 
 ---
 
@@ -2477,6 +2561,93 @@ for is written from the keyless public feed instead, tagged `*_public` so
 with too little daily history for any evaluator; give it a year at once:
 `./deploy/dc exec web python manage.py backfill_bars --from-configs
 --intervals 1d,4h --bars 300`, then the indicator recalculation it prints.
+
+**The venue floor for bots (`bots_venue_floor_live`, OFF on arrival).** A
+bot risks a small share of its pool per trade (`extras["risk_per_trade_pct"]`,
+0.25% unless set). On a small account the size that gives is often under
+eToro's smallest size: 1,000 USD of exposure on forex, indices and
+commodities, 10 USD on stocks and crypto, and one whole share on a stock
+while Fractional Units is off. The bot then opens nothing and records
+`venue_min_size` or `sized_to_zero`. With the switch ON, such an order opens
+at the venue's smallest size instead.
+
+- *The size it opens at.* eToro's minimum for that order plus 1% (the order
+  leaves minutes after it is sized, and a quote a hair lower would put the
+  exact minimum under it), rounded up to the bot's own step: 100 units on
+  forex and one whole share on a stock while Fractional Units is off, 1 unit
+  and 0.0001 share with it on. A pair whose base is the dollar (USDJPY) opens
+  at eToro's figure in units, 1,000, with nothing added: no price is in it.
+  A bot with a typed multiplier opens at the larger of eToro's minimum
+  exposure and that multiplier's minimum margin (at 2x a crypto order is at
+  least 20 USD).
+- *What bounds it.* The loss at the stop of that size must be at most
+  **MAX BOT FLOOR RISK (%)** of the bot's pool, set on `/setup/` beside MAX
+  BOT LEVERAGE (2 by default, 0.1 to 7, never above the 7% hard cap of every
+  trade). It is a percentage of the pool's own figure, at the stop the order
+  is sent with; where eToro then holds a wider stop than the one sent, the
+  fill message says so and the loss can pass the ceiling. Its notional must
+  also stay inside the class's own cap (4 times the pool on forex, 2 on
+  indices and commodities, 0.2 on stocks and crypto, or the bot's
+  `extras["max_notional_fraction"]`). The smallest pool that can be raised
+  is the larger of two figures: the minimum exposure times the stop's
+  percentage divided by the ceiling (1,010 USD with a 1.5% stop at 2%: a pool
+  of about 760), and the minimum exposure divided by the class's cap (about
+  505 on an index or a commodity, 250 to 280 on forex). Then every other
+  limit judges the raised size as it judges any size: the single position,
+  the open risk, the notional multiple, duplicates, theme legs, eToro's own
+  row, the fees, the cash, the margin and the pledge ceiling, the last look.
+- *What is never raised.* A paper bot, and a live bot's entry that its rule's
+  stage sends to paper. The hand-taken TAKE TRADE ticket, which has its own
+  smallest size. A bot routed to another venue than eToro. An instrument
+  whose minimum eToro did not state today, and a minimum the operator
+  declared (`extras["venue_min_notional"]`). A size that was zero before any
+  rounding (a risk per trade of zero, a setup the stop floor skipped). An
+  instrument that is not quoted in US dollars, outside forex. A day past MAX
+  DAILY LOSS, read at the proposal and again at the order. A symbol eToro
+  refused in the last 12 hours, on that bot or on another bot of the account.
+- *Leverage.* A bot with no `extras["leverage"]` lets the chooser of the
+  attack mode pick the multiplier for such an entry, inside every leverage
+  rule (the switch `etoro_leverage_live`, the class ceilings, eToro's list,
+  MAX BOT LEVERAGE, the posture's cap). MAX SINGLE POSITION then counts the
+  margin at the multiplier chosen, so the class's notional cap and MAX
+  NOTIONAL MULTIPLE are what bound the notional of a raised entry. A bot with
+  no multiplier whose own size already clears the minimum still goes at 1x,
+  as before. A stock or crypto buy is the asset itself at 1x and a CFD above
+  it: eToro charges a fee each night it is held, and no filter here counts
+  that fee. The fill message says "as a CFD" when the chooser levered such a
+  buy. MAX BOT LEVERAGE 1 keeps every raised entry unlevered. With
+  `etoro_leverage_live` off it goes unlevered too, and the full notional must
+  then fit the single-position limit and the free cash. A bot with a typed
+  number keeps it.
+- *Fractional Units decides the step.* Off, a stock bot sends whole units:
+  a stock is raised to one whole share, and an index (one unit is far above
+  any small pool's ceiling) is not raised at all. On, eToro's own minimum is
+  the size: an index can be raised, and a stock's 10 USD minimum is then too
+  small to carry eToro's flat fee of 1 USD a side, so the fee filter refuses
+  it. The refusal's words name eToro's minimum and the switch.
+- *The first pass after turning it on.* Every bot under its minimum is raised
+  on the same pass. Each entry is bounded as above, and the pass as a whole by
+  the account's own limits: on the default limits it can take an account
+  from flat to 4 times its size in notional and 15% at the stops. Lower MAX
+  OPEN RISK or the ceiling first for a slower start.
+- *Where it is said.* The fill message carries a line "Smallest size: raised
+  to ..." that says whose size it is (eToro's minimum plus 1%, or the least
+  this bot sends, with eToro's own minimum beside it), the risk in percent of
+  the pool beside the bot's usual risk, and the multiplier the chooser
+  picked. The trade row keeps the whole record (`metadata["venue_floor"]`)
+  and so does the audit log. `why_no_trade` and `preflight_live` print one
+  line under each bot: the switch's state and the ceiling; `preflight_live`
+  also prints the most the chooser may pick for a raised entry. When the
+  switch is ON and an order is still refused for its size, the skip keeps its
+  code and its words begin with the reason, for example "the venue's smallest
+  size would risk 4.63% of the pool, above your 2% ceiling", or "this bot's
+  smallest size would risk ..." when the bot's own step is the cause.
+- *Turning it on.* From `/ops/` (Switches, System, "Bots: Venue Floor") with
+  your trading PIN. The shell and "all on" never turn it on; turning it off
+  is free and takes effect on the next order. Set the ceiling on `/setup/`
+  first. Each raised entry risks more than the bot's own setting, up to the
+  ceiling, and MAX OPEN RISK still bounds what all open positions may lose
+  together.
 
 **Watch `/health/` and `/forensics/`** rather than tailing logs: the first
 answers "is the machine running", the second answers "why did it do that".

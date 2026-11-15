@@ -45,6 +45,9 @@ from datetime import timedelta
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from bot_program import feed_fence
+from market_data.venue_source import PREFIX, is_venue_source
+
 logger = logging.getLogger(__name__)
 
 #: The move, as a fraction of the last accepted mark, past which one print
@@ -61,6 +64,8 @@ SECOND_OPINION_MAX_AGE_S = 900
 #: The same mark for this long in an open market is a dead feed.
 FROZEN_MINUTES = 45
 #: Sources whose quote is the venue's own rate: no second opinion there.
+#: Read by the one venue-source rule (market_data.venue_source
+#: .is_venue_source, the PREFIX reading: any source that begins with one).
 VENUE_SOURCES = ("etoro",)
 #: Classes never judged.
 NEVER_JUDGED = frozenset({"options"})
@@ -192,8 +197,11 @@ def second_opinion(symbol, *, now=None, max_age_s=SECOND_OPINION_MAX_AGE_S):
         return None
     if q is None or q.updated_at is None:
         return None
-    src = str(q.source or "").lower()
-    if any(src.startswith(v) for v in VENUE_SOURCES):
+    # THE ONE VENUE-SOURCE RULE (the eToro feed spec, F1), read as before:
+    # a source that begins with a venue's name, in any case, untrimmed
+    # (imported with this module: it can never fail here and fall open)
+    if any(is_venue_source(q.source, v, reading=PREFIX)
+           for v in VENUE_SOURCES):
         return None
     if (now - q.updated_at).total_seconds() > max_age_s:
         return None
@@ -227,6 +235,12 @@ def check(bot, trade, price, client=None, *, now=None) -> dict:
             return {"ok": True, "why": ""}
         logger.warning("[mark] %s #%s: %s — nothing managed on this row this "
                        "tick", trade.symbol, trade.id, verdict["why"])
+        # THE HARM COUNTER (the eToro feed spec, F1, bot_program
+        # .feed_harms): a real row's skip, its why, its levels and whether
+        # the closing side crossed them, written after the tick's own work
+        # commits. Through the fence: it can never flip this verdict.
+        feed_fence.count("mark sanity", "on_mark_verdict", bot, trade, price,
+                         reference, verdict)
         try:
             from bot_program.asset_engine import skips
             skips.record(bot.cfg, trade.symbol, skips.SUSPECT_MARK,

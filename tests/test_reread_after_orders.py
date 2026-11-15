@@ -955,8 +955,10 @@ class AMissedCellsPassTests(TestCase):
     the equity nor last_sync (above), and counts as a missed sync: three
     such passes running raised the stall alert, the cash cells being what
     the order gate reads. A good pass clears the count. Fifteen passes
-    since 2026-11-06 (tasks.broker_miss_alert_after): the walk beats every
-    60 s, and fifteen passes are the fifteen minutes three made at 300 s."""
+    from 2026-11-06 (tasks.broker_miss_alert_after): the walk beat every
+    60 s, and fifteen passes were the fifteen minutes three made at 300 s.
+    Thirty since 2026-11-13, at its 30 s ("je suggère 20-30 secondes
+    non?"): fifteen minutes still."""
 
     def setUp(self):
         cache.clear()
@@ -1013,7 +1015,7 @@ class AMissedCellsPassTests(TestCase):
         order is judged on are, and nothing about the keys."""
         from bot_program import notifications
         from bot_program.tasks import broker_miss_alert_after
-        after = broker_miss_alert_after("etoro")   # 15 since 2026-11-06
+        after = broker_miss_alert_after("etoro")   # 30 since 2026-11-13
         with patch.object(notifications, "dispatch_notification",
                           return_value=True) as sent, \
                 self.assertLogs("bot_program.tasks", level="WARNING") as logs:
@@ -1065,9 +1067,12 @@ class TheMinutesFollowEachWalkTests(TestCase):
     """The stall alert said "since {misses x 15} minutes ago" for every
     broker: at the eToro walk's 300 s, three missed passes are fifteen
     minutes, not forty-five. The Treasury's "the sync runs every 15" is
-    each walk's own figure too. At its 60 s since 2026-11-06 the alert
-    waits fifteen passes (tasks.broker_miss_alert_after): fifteen minutes
-    again."""
+    each walk's own figure too. At its 60 s from 2026-11-06 the alert
+    waited fifteen passes (tasks.broker_miss_alert_after): fifteen minutes
+    again. At its 30 s since 2026-11-13 ("je suggère 20-30 secondes non?")
+    thirty, and the minutes are counted from the beat's seconds
+    (broker_vision.sync_seconds): sync_minutes rounded 30 s to one minute,
+    and thirty misses would have read "about 30 minutes"."""
 
     def setUp(self):
         self.user = User.objects.create_user("rr_min", password="x")
@@ -1082,14 +1087,14 @@ class TheMinutesFollowEachWalkTests(TestCase):
         return d.call_args.kwargs
 
     def test_the_alert_counts_each_walks_beat(self):
-        from bot_program.broker_vision import sync_minutes
+        from bot_program.broker_vision import sync_seconds
         from bot_program.tasks import broker_miss_alert_after
-        self.assertEqual(sync_minutes("etoro"), 1)
-        self.assertEqual(sync_minutes("ibkr"), 15)
-        self.assertEqual(sync_minutes("saxo"), 15)
+        self.assertEqual(sync_seconds("etoro"), 30.0)
+        self.assertEqual(sync_seconds("ibkr"), 900.0)
+        self.assertEqual(sync_seconds("saxo"), 900.0)
         kw = self._alert("etoro", misses=broker_miss_alert_after("etoro"))
         self.assertIn("since 15 minutes ago", kw["body"])
-        self.assertIn("Silent for 15 syncs running (about 15 minutes)",
+        self.assertIn("Silent for 30 syncs running (about 15 minutes)",
                       kw["row_data"]["items"])
         kw = self._alert("ibkr")
         self.assertIn("since 45 minutes ago", kw["body"])
@@ -1097,14 +1102,17 @@ class TheMinutesFollowEachWalkTests(TestCase):
                       kw["row_data"]["items"])
 
     def test_an_unreadable_beat_says_fifteen(self):
-        from bot_program.broker_vision import sync_minutes
-        self.assertEqual(sync_minutes("nobody"), 15)
+        # fifteen minutes, in the beat's seconds since 2026-11-13
+        from bot_program.broker_vision import sync_every, sync_seconds
+        self.assertEqual(sync_seconds("nobody"), 900.0)
+        self.assertEqual(sync_every("nobody"), "15 min")
 
     def test_the_switch_and_the_broker_card_say_the_etoro_minutes(self):
         """The broker_account_sync row (/health/) and the broker card's
-        hover said "every 15 min" for all three walks. Every minute since
+        hover said "every 15 min" for all three walks. Every minute from
         2026-11-06 (the operator: "augmenter to the maximum le taux de
-        refresh ... de eToro surtout"; it was every 5 min)."""
+        refresh ... de eToro surtout"; it was every 5 min), every 30 s since
+        2026-11-13 ("je suggère 20-30 secondes non?")."""
         from pathlib import Path
 
         from django.conf import settings
@@ -1112,18 +1120,19 @@ class TheMinutesFollowEachWalkTests(TestCase):
         from core.platform_control import DEFAULT_COMPONENTS
         row = next(c for c in DEFAULT_COMPONENTS
                    if c["key"] == "broker_account_sync")
-        self.assertIn("eToro every minute", row["description"])
+        self.assertIn("eToro every 30 s", row["description"])
         card = (Path(settings.BASE_DIR) / "templates" / "_partials"
                 / "broker_account.html").read_text(encoding="utf-8")
-        self.assertIn("eToro every minute", card)
+        self.assertIn("eToro every 30 s", card)
         self.assertNotIn("written by the broker sync every 15 min", card)
 
     def test_the_treasury_says_the_etoro_walks_minutes(self):
         from bot_program.broker_vision import vision
         _account(self.user, age_s=3 * 3600)
         notes = " ".join(vision(self.user)["notes"])
-        # every minute since 2026-11-06 (every 5 from 2026-10-31)
-        self.assertIn("minutes old; the sync runs every 1.", notes)
+        # every 30 s since 2026-11-13, said in seconds ("every 1." at the
+        # minute from 2026-11-06, every 5 from 2026-10-31)
+        self.assertIn("minutes old; the sync runs every 30 s.", notes)
         self.assertNotIn("every 15.", notes)
 
 
@@ -1133,14 +1142,16 @@ class TheCadencesTests(TestCase):
     the re-read rides the fast queue. And faster on 2026-11-06 ("augmenter
     to the maximum le taux de refresh ... de eToro surtout"): the sync
     every 60 s; the reconcile stays every 5 minutes
-    (tests.test_faster_refresh)."""
+    (tests.test_faster_refresh). And again on 2026-11-13 ("aussi le
+    refresh etoro par minute est toujours trop long, je suggère 20-30
+    secondes non?"): the sync every 30 s (tests.test_etoro_sync_30s)."""
 
     def test_the_beats_and_the_route(self):
         from celery.schedules import crontab
 
         from config.celery import app
         beat = app.conf.beat_schedule
-        self.assertEqual(beat["sync-etoro-accounts"]["schedule"], 60.0)
+        self.assertEqual(beat["sync-etoro-accounts"]["schedule"], 30.0)
         self.assertEqual(beat["reconcile-asset-bot-trades"]["schedule"],
                          crontab(minute="*/5"))
         self.assertEqual(

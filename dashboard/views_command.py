@@ -815,6 +815,16 @@ def command_tab_portfolio(request):
                                                     open_positions)
     if shown_venues:
         total_unrealized = shown_unrealized(shown_positions)
+    # ONE PRICE EVERYWHERE (2026-11-12): the table's `last` cells are the
+    # rule's ({% q %}); its answers for every row, in one read.
+    try:
+        from market_data.one_quote import for_request
+        for_request(request).many(sorted({
+            getattr(getattr(p, "instrument", None), "symbol", "") or ""
+            for p in shown_positions} - {""}))
+    except Exception:  # noqa: BLE001 — the cells ask one by one
+        logger.warning("[command] one-price answers not primed",
+                       exc_info=True)
     # The PORTFOLIO VALUE cell and its shares as the table prints (the
     # review, 2026-11-06): eToro's own P&L inside the value for an eToro
     # position its holdings list. A display copy; `book` is not handed on.

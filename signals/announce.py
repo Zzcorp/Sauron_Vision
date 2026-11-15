@@ -20,6 +20,25 @@ announce_new_signal does what the rule engine always did, in its order:
 Each step is wrapped, and logged at the level the rule engine used: a
 broken notifier never aborts a creator whose row is already written.
 
+A SHUT MARKET IS SAID, NEVER HELD BACK (2026-11-12). The operator asked
+to keep receiving every signal the moment it fires ("faites que l'on
+reçoive quand même les signaux live"), so a signal born while its
+instrument's market is shut is announced at once like any other, and each
+step says so in plain words with the hour the market opens: the banner's
+line, the bell's body, one line of the Telegram message and one clause of
+the email and WhatsApp copies (signals/market_hold.shut_label, no switch).
+An open market's announcement keeps its bytes.
+
+THE OPTIONAL HOLD (the switch signal_market_hold, OFF on arrival). With
+it on, announce_new_signal first asks signals/market_hold.hold_at_birth:
+a signal whose market cannot trade now is not announced, one SignalHold
+row is written, and the caller gets {"signal_id", "held": the words}. The
+signal lifecycle task's release pass announces it once at the open
+through announce_released, the same three steps with one more sentence
+("fired Sunday 09:00 UTC, while its market was shut"), or drops it with a
+named reason. With the switch off, or a hold that cannot be written,
+nothing is held.
+
 WHO CALLS IT
   signals/tasks.py          _create_signals_and_notify, after each create
   signals/opportunity_scanner.py
@@ -45,9 +64,16 @@ from functools import partial
 logger = logging.getLogger(__name__)
 
 
-def banner_payload(signal) -> dict:
-    """The "new_signal" event the live banner draws."""
-    return {
+def banner_payload(signal, note: str = "") -> dict:
+    """The "new_signal" event the live banner draws.
+
+    A signal announced while its market is shut says so (2026-11-12,
+    signals/market_hold): one more key, "market", with the words the
+    banner adds to its line ("market shut · opens Sun 22:00 UTC"). An
+    open market's payload has no such key and keeps its bytes. A signal
+    released by the optional hold carries its `note` under the same key
+    ("fired Sunday 09:00 UTC, while its market was shut")."""
+    payload = {
         "signal_id": signal.pk,
         "symbol": signal.instrument.symbol,
         "title": signal.title,
@@ -60,6 +86,11 @@ def banner_payload(signal) -> dict:
         "rr": signal.risk_reward_ratio,
         "url": "/signals/",
     }
+    from signals.market_hold import shut_label
+    market = note or shut_label(signal.instrument)
+    if market:
+        payload["market"] = market
+    return payload
 
 
 def announce_new_signal(signal) -> dict:
@@ -67,10 +98,42 @@ def announce_new_signal(signal) -> dict:
 
     Returns what each step did: {"signal_id", "banner": the staff users
     pushed or "failed", "bell": "ok" or "failed", "channels": what
-    dispatch_signal_alert reported or "failed"}.
+    dispatch_signal_alert reported or "failed"}; or, when the optional
+    hold kept the announcement for the market's open, {"signal_id",
+    "held": why}.
     """
     pk = getattr(signal, "pk", None)
+    # THE OPTIONAL HOLD (signals/market_hold, the switch
+    # signal_market_hold): "" unless the switch is on and this signal's
+    # market cannot trade now. A hold that cannot be read announces.
+    try:
+        from signals.market_hold import hold_at_birth
+        held = hold_at_birth(signal)
+    except Exception as e:  # noqa: BLE001 — a signal is never swallowed
+        logger.warning("[announce] signal #%s: the market hold could not "
+                       "be asked (%s): announced now", pk, e)
+        held = ""
+    if held:
+        return {"signal_id": pk, "held": held}
+    return _announce(signal)
+
+
+def announce_released(signal, note: dict) -> dict:
+    """Announce a signal the optional hold kept for its market's open
+    (signals/market_hold.release_due): the three steps of a birth, in the
+    same order, each with one more sentence. `note` is {"clause": for the
+    banner and the bell, "line": for the Telegram message and its email
+    and WhatsApp copies}. Never raises."""
+    return _announce(signal, note=note)
+
+
+def _announce(signal, note=None) -> dict:
+    """The three steps. A birth (note None) keeps its one-argument calls
+    of the bell and the channels; a release hands each its sentence."""
+    pk = getattr(signal, "pk", None)
     out = {"signal_id": pk}
+    clause = str((note or {}).get("clause") or "")
+    line = str((note or {}).get("line") or "")
 
     # 1. The live banner. Best-effort: a broken socket must never abort a
     # creator that has already persisted its row.
@@ -78,7 +141,8 @@ def announce_new_signal(signal) -> dict:
         from django.contrib.auth.models import User
 
         from dashboard.consumers import push_eye_event
-        payload = banner_payload(signal)
+        payload = (banner_payload(signal) if note is None
+                   else banner_payload(signal, note=clause))
         pushed = 0
         for u in User.objects.filter(is_active=True, is_staff=True):
             if push_eye_event(u, "new_signal", payload):
@@ -91,7 +155,10 @@ def announce_new_signal(signal) -> dict:
     # 2. The bell.
     try:
         from alerts.notify import notify_new_signal
-        notify_new_signal(signal)
+        if note is None:
+            notify_new_signal(signal)
+        else:
+            notify_new_signal(signal, note=clause)
         out["bell"] = "ok"
     except Exception:  # noqa: BLE001
         logger.exception("notify_new_signal failed for signal pk=%s", pk)
@@ -111,7 +178,8 @@ def announce_new_signal(signal) -> dict:
         pass
     try:
         from alerts.dispatch import dispatch_signal_alert
-        sent = dispatch_signal_alert(signal)
+        sent = (dispatch_signal_alert(signal) if note is None
+                else dispatch_signal_alert(signal, note=line))
         out["channels"] = sent if isinstance(sent, dict) else "ok"
     except Exception:  # noqa: BLE001
         logger.exception("dispatch_signal_alert failed for signal pk=%s", pk)

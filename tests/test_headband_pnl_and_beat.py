@@ -92,12 +92,21 @@ class OpenPnlCellTests(TestCase):
     def _page(self):
         return self.client.get(LIVE_SOURCE, HTTP_HOST=HOST).content.decode()
 
-    def test_the_open_pnl_cell_sits_right_after_positions_with_its_own_regions(self):
+    def test_the_open_pnl_cell_sits_right_after_portfolio_with_its_own_regions(self):
+        """Updated deliberately (was ..._right_after_positions_...; the desk
+        v2 board, approved 2026-11-13: "amazing work, bravo, I need it
+        fast!!", with the Horde in place of POSITIONS): OPEN P&L sits right
+        after PORTFOLIO in the REAL group, its own regions kept; POSITIONS
+        lives in "N more"."""
         body = self._page()
         found = regions(body)
         for name in ("hb-pnl", "hb-pnl-sub", "hb-pnl-detail"):
             self.assertIn(name, found, name)
-        self.assertLess(body.index('data-sv-live="hb-pos-detail"'),
+        self.assertLess(body.index('data-sv-live="hb-pf-value"'),
+                        body.index('data-sv-live="hb-pnl"'))
+        self.assertLess(body.index('data-sv-live="hb-real-equity"'),
+                        body.index('data-sv-live="hb-real-pnl"'))
+        self.assertLess(body.index('data-sv-live="hb-real-pnl"'),
                         body.index('data-sv-live="hb-pnl"'))
         self.assertLess(body.index('data-sv-live="hb-pnl"'),
                         body.index('data-sv-live="hb-bot-state"'))

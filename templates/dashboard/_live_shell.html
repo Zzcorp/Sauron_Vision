@@ -15,4 +15,4 @@ a refreshed cell can only ever say what the first render would have said.
 The page template puts its slow half behind a "not live_only" branch, so this
 response carries the regions that move and not the closed-trade history
 underneath them.
-{% endcomment %}{% block content %}{% endblock %}
+{% endcomment %}{% load quote_tags %}{% block content %}{% endblock %}{% q_json %}

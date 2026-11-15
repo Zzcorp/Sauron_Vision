@@ -237,5 +237,6 @@
 </div>
 
 <p style="text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
-    Auto-refresh every 10s · {{ now|date:"Y-m-d H:i:s" }}
+    {# A figure never sits on the void: in the dark theme the note is on a solid pill (sv-kit.css, .sv-void-pill). #}
+    <span class="sv-void-pill">Auto-refresh every 10s · {{ now|date:"Y-m-d H:i:s" }}</span>
 </p>

@@ -11,11 +11,14 @@ Covers both execution stacks:
   - legacy crypto  : ``BotConfig`` / ``BotTrade``        (routed via ``_client_for``)
   - multi-asset    : ``AssetBotConfig`` / ``AssetBotTrade`` (routed via ``client_for_symbol``)
 """
+import functools
 import logging
+import time
 from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program import feed_fence
 from bot_program.engine import etoro_budget
 from bot_program.etoro_cells import one_read_per_pass
 
@@ -41,6 +44,26 @@ def _push_close_event(user, trade, kind):
         logger.warning("[KILL SWITCH] eye push failed: %s", e)
 
 
+def _harms_after_the_sweep(fn):
+    """THE HARM COUNTERS WAIT FOR THE LAST CLOSE (the eToro feed spec, F1,
+    bot_program.feed_harms): every harm row a sweep produces — each close's
+    price wait, each exit it books or leaves pending — is held in memory
+    and written once the sweep is over, so no counter's write ever stands
+    between two closes. Through the fence (bot_program.feed_fence): a hold
+    that cannot start, or a write that fails at the end, leaves the sweep
+    and its results exactly as they were."""
+    @functools.wraps(fn)
+    def sweep(*args, **kwargs):
+        held = feed_fence.count("kill switch", "hold")
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            if held is not None:
+                feed_fence.count("kill switch", "release", held)
+    return sweep
+
+
+@_harms_after_the_sweep
 @one_read_per_pass()
 @etoro_budget.scoped(etoro_budget.P0, "kill switch")
 def execute_kill_switch(user=None, reason="manual"):
@@ -148,6 +171,9 @@ def execute_kill_switch(user=None, reason="manual"):
             msg = f"legacy trade {trade.id} ({trade.symbol}): {e}"
             results["errors"].append(msg)
             logger.error("[KILL SWITCH] %s", msg)
+        # THE HARM COUNTER (the eToro feed spec, F1): this row's price wait
+        # before its close, held until the sweep is over; through the fence
+        feed_fence.count("kill switch", "on_kill_switch_wait", trade)
 
     # ── 3. Close open multi-asset trades ─────────────────────────────────────
     open_asset = AssetBotTrade.objects.filter(status__in=("OPEN", "CLOSE_PENDING"))
@@ -178,6 +204,8 @@ def execute_kill_switch(user=None, reason="manual"):
                                       "close_pending")
             except Exception:  # noqa: BLE001
                 pass
+        # THE HARM COUNTER: as for a legacy row above
+        feed_fence.count("kill switch", "on_kill_switch_wait", trade)
 
     # ── 4. Mark portfolio positions closed ───────────────────────────────────
     positions = Position.objects.filter(closed_at__isnull=True)
@@ -662,8 +690,11 @@ def _close_legacy_trade(trade, now):
             raise RuntimeError(
                 "broker unavailable (PaperTrader fallback) — no close was "
                 "sent and the position is still open at the broker")
+        _mark_t0 = time.monotonic()
         exit_price, _unpriced, _age = _market_exit_price(
             trade.symbol, trade.entry_price, client=client)
+        # the price read's seconds, noted on the row for the harm counter
+        feed_fence.count("kill switch", "note_wait", trade, _mark_t0)
         result = _try_broker_close(
             client, trade.symbol, trade.side, trade.qty,
             client_order_id=_kill_order_id(trade), trade=trade)
@@ -834,6 +865,7 @@ def _close_asset_trade(trade, now):
     # print that priced it (None otherwise). Both stay OUT of the row
     # until the CLOSED booking below decides with the fills.
     unpriced, mark_age = False, None
+    _mark_t0 = time.monotonic()
     if is_options:
         # Premium-denominated trade: LiveQuote holds the UNDERLYING's price,
         # which is the wrong scale — mark at the option's own premium. With
@@ -852,6 +884,8 @@ def _close_asset_trade(trade, now):
     else:
         exit_price, unpriced, mark_age = _market_exit_price(
             trade.symbol, trade.entry_price, client=client, trade=trade)
+    # the price read's seconds, noted on the row for the harm counter
+    feed_fence.count("kill switch", "note_wait", trade, _mark_t0)
 
     # The sweep also picks up CLOSE_PENDING rows, and one of those may
     # already have had part of its close filled. Flattening `trade.qty` there

@@ -54,6 +54,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program import feed_fence
 from bot_program.engine import etoro_budget
 
 logger = logging.getLogger(__name__)
@@ -365,6 +366,11 @@ def preview_close(user, trade) -> dict:
         logger.warning("[manual-close] mark failed for #%s: %s", trade.id, e)
         mark = None
     if mark is None or float(mark) <= 0:
+        # THE HARM COUNTER (the eToro feed spec, F1, bot_program.feed_harms):
+        # the refusal counted after the request's work commits, through the
+        # fence; the answer is exactly as before.
+        feed_fence.count("CLOSE dialog", "on_close_refused", trade,
+                         "preview")
         return {"error": f"No usable price mark for {trade.symbol} — closing "
                          f"now would book the exit at a price nobody quoted"}
 
@@ -566,6 +572,8 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
             logger.warning("[manual-close] mark failed for #%s: %s", trade.id, e)
             mark = None
         if mark is None or Decimal(str(mark)) <= 0:
+            # THE HARM COUNTER (as in preview_close), through the fence
+            feed_fence.count("CLOSE", "on_close_refused", trade, "execute")
             return {"error": f"No usable price mark for {trade.symbol} — the "
                              f"position is still OPEN rather than booked at a "
                              f"price nobody quoted",

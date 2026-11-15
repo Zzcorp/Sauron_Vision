@@ -135,11 +135,15 @@ class TheHordeOffTests(TestCase):
                             for s in g["seats"]))
 
     def test_horde_board_off_costs_today(self):
+        """Today's cost, plus ONE read since 2026-11-12: the board prints
+        each seat's price by the one rule (market_data.one_quote, the
+        seats' quote rows in one query), so the Horde and every other
+        screen print one number. Still flat in the seats."""
         self.bots(3)
         _orcs(False)
-        self.assertEqual(self.warm(), 10)
-        _legacy(self.user, "AAPL")
         self.assertEqual(self.warm(), 11)
+        _legacy(self.user, "AAPL")
+        self.assertEqual(self.warm(), 12)
 
     def test_horde_seat_detail_off_is_byte_identical(self):
         from dashboard import horde

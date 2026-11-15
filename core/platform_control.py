@@ -107,6 +107,7 @@ LIVE_MONEY_SWITCHES = (
     "aragorn",                      # benches/promotes pairs, closes positions
     "crisis_mode",                  # the market posture binds real money
     "smart_money",                  # moves stops, sizes real-money entries
+    "bots_venue_floor_live",        # a bot opens at the venue's smallest size
 )
 
 #: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and
@@ -149,9 +150,19 @@ PIN_SWITCHES = LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES
 #: switches (ORC_MIND_SWITCHES) are in this set with their seeded rows
 #: (2026-11-05, the Orcs' O2 spec A.1, §4 Q1): one tap never starts AI
 #: spend (tests/test_ops_cockpit.py wants every key here seeded).
+#: The operator's-choice switches (2026-11-12, the review of the signal
+#: market hold) are here for another reason. Each moves no money, spends
+#: none and takes no PIN, and its ON undoes something the operator asked
+#: to keep: signal_market_hold makes a shut market's announcement wait
+#: for the open, and he keeps receiving every signal the moment it fires
+#: (his word of 2026-11-12). One tap of the Pipeline group's "all on"
+#: must not decide that for him: the row's own toggle does, or
+#: `manage.py component on signal_market_hold`.
 LORE_READER_SWITCHES = ("lore_staff", "lore_background")
+OPERATOR_CHOICE_SWITCHES = ("signal_market_hold",)
 BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
-                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES})
+                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES,
+                                *OPERATOR_CHOICE_SWITCHES})
 
 
 # ── Default components to register ───────────────────────
@@ -309,7 +320,7 @@ DEFAULT_COMPONENTS = [
     # account, every follower's capital IS this reading times its share, and
     # the entry path freezes a follower whose reading has gone stale.
     {"key": "broker_account_sync", "name": "Broker Account Sync (Saxo · eToro · IBKR)",
-     "description": "Caches equity and holdings of every keyed Saxo, eToro and IBKR account (eToro every minute, the others every 15) and eToro's own quotes for the open real positions every 30 s. ONE switch for all THREE walks: unticking it stops them all. Each following pool's capital is this reading times its share.",
+     "description": "Caches equity and holdings of every keyed Saxo, eToro and IBKR account (eToro every 30 s, the others every 15) and eToro's own quotes for the open real positions every 15 s. ONE switch for all THREE walks: unticking it stops them all. Each following pool's capital is this reading times its share.",
      "category": "pipeline"},
 
     # ── Share allocator ───────────────────────────────────────
@@ -552,8 +563,11 @@ DEFAULT_COMPONENTS = [
     # green and goes cold on day twelve spends seventy-eight days producing
     # nothing, and the only thing that would notice is somebody choosing to
     # run the command again. Nothing on this platform chose to.
+    # 2026-11-12: it said "one notification when a link goes cold" while a
+    # standing blocker came back every one to two days, and it alarmed on a
+    # live operator's own decision. The words below are what it does now.
     {"key": "pipeline_campaign_watch", "name": "Evidence Chain Watchdog",
-     "description": "Daily read-only check that the paper-campaign evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is still complete, and one notification when a link goes cold. Writes nothing and makes no broker call.",
+     "description": "Daily read-only check that the evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is complete. Speaks once when a link is off, missing or starved, again only when that changes, weekly while it lasts. Live trading by decision is said once, never alarmed. Writes nothing.",
      "category": "pipeline"},
 
     # ── eToro leverage (2026-09-23; the words 2026-09-26) ──────
@@ -588,6 +602,24 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED; 'auto' and the TAKE TRADE ticket go at 1x. On: up to the class ceiling (forex 30x, index 20x, commodity 10x, stock 5x, crypto 2x) if in the LIVE leverageValues, its class in the proven set. MAX BOT LEVERAGE (/setup/) caps bots only.",
      "category": "system"},
 
+    # ── The venue floor for bots (2026-11-12) ──────────────────────────
+    # The operator: "je veux tous mes bots live right now", "qu'il soit
+    # smart pour s'ajuster au marché et y pouvoir rentrer tout du moins".
+    # A bot risks 0.25% of its pool per trade, and on a small account that
+    # size is under eToro's minimum exposure (venue_min_size) or rounds to
+    # zero (sized_to_zero). ON, asset_engine/base.AssetBot._venue_floor
+    # raises such an order to the venue's MEASURED smallest size at the
+    # proposal, when its risk at the stop is inside MAX BOT FLOOR RISK on
+    # /setup/ (base.bot_floor_risk_pct) and its notional inside the class's
+    # cap; every gate then judges the raised size. LIVE MONEY: more and
+    # larger real entries, so it is in LIVE_MONEY_SWITCHES (the trading
+    # PIN at /ops/, never "all on", never the shell). OFF on arrival (no
+    # is_enabled key); a missing row reads OFF and nothing changes.
+    # Description measured at 295 chars (< 300).
+    {"key": "bots_venue_floor_live", "name": "Bots: Venue Floor",
+     "description": "Off (default): a bot order under the venue's smallest size is refused, as before. On: it opens at that size when its loss at the stop is at most MAX BOT FLOOR RISK (/setup/, 2% of its pool by default) and every other limit passes on that size; a bot with no multiplier lets the chooser pick one.",
+     "category": "system"},
+
     # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ──
     # The operator: "je veux les short possible entierement svp". A beat
     # every 15 min sends at most ONE step, 25 min after the last, on
@@ -602,6 +634,31 @@ DEFAULT_COMPONENTS = [
     {"key": "short_proofs_demo", "name": "Demo Short Proofs (eToro demo)",
      "description": "On (default): at most one step every 25 min, on eToro's DEMO account only, never the real one: a short of the venue minimum on a class no code proves, filled, closed and recorded; a clean one lets the bots short that class at that multiplier. Off: nothing is sent. /short-proofs/ revokes.",
      "category": "pipeline", "is_enabled": True},
+
+    # ── The signal market hold (2026-11-12, signals/market_hold.py) ──────
+    # The operator, 2026-11-11: signals announced while their market is
+    # shut. Told the announcements would wait for the open, he asked to
+    # keep receiving every signal live (2026-11-12), so a shut market is
+    # SAID on every announcement, with no switch, and the hold itself is
+    # this option. OFF on arrival: a signal is announced at birth, as
+    # before. ON: hold_at_birth keeps the announcement of a signal whose
+    # market cannot trade, and the lifecycle task's release pass sends it
+    # once, 15 minutes after the open, or drops it (closed, aged, or its
+    # first price past its plan). ON also moves such a signal's card off
+    # the rail, under MARKET SHUT (the rail's own display module), until
+    # its market has opened and settled: the description says so, and
+    # that the section is hidden until shown, because a card that leaves
+    # the rail unannounced reads as a lost signal. It gates no task of
+    # its own (the pass writes its counts on this row when something is
+    # held), reads no order path and writes no Signal field, so it is not
+    # a live-money switch and not a PIN switch. A group's "all on" leaves
+    # it OFF all the same (OPERATOR_CHOICE_SWITCHES, above; the review of
+    # 2026-11-12): he keeps every signal live, so its own row or
+    # `component on` turns it on, never a bulk button. Description
+    # measured at 295 chars (< 300).
+    {"key": "signal_market_hold", "name": "Signal Market Hold",
+     "description": "Off (default): every signal is announced as it fires; one on a shut market says so. On: its banner, bell and Telegram wait for the open, then go out once, or it is dropped if 24h old or its first price broke its plan; its rail card waits under MARKET SHUT, hidden until shown. It moves no money.",
+     "category": "pipeline"},
 
     # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────
     # Information only: no order, size, stop or gate reads it, so it is not

@@ -32,6 +32,13 @@ halves of the ticker, both halves of the data headband, the watchlist
 rail — and exactly one card must open, under its item, and close when the
 hand leaves. All of it fails on 8db05d5.
 
+Since 2026-11-13 the two strips are moved by static/js/sv-marquee.js, which
+these node runs do not load: the wheel / collapse block runs here on its
+fallback path (the file did not load). The hover cards these tests are about
+do not depend on it; the strips' motion, the one position the wheel and the
+drag move, and the cards holding the strip are measured in Chromium by
+tests/test_marquee.py.
+
 jsdom is not installed on this machine: the DOM here is the smallest one
 the three scripts need (innerHTML parse and serialise, selectors with
 :hover, bubbling events with relatedTarget, isConnected, a fixed geometry).
