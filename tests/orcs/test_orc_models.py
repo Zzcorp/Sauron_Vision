@@ -12,12 +12,14 @@ on purpose), one CreateModel, reversible; its allowed values are tuples
 in constants.py, never `choices`.
 
 O2c (2026-11-07, the O2 spec §1.3.2): its own migration, right after
-O2b's, adds the Captain, its orders in shadow, the drums' waves and the
-temperaments' grade (moved out of the O2 set on purpose), and
-Orc.temperament: four CreateModel and one AddField, each reversible; its
-allowed values are tuples in constants.py, never `choices`; no money
+the tree's latest, adds the Captain, its orders in shadow, the drums'
+waves and the temperaments' grade (moved out of the O2 set on purpose),
+and Orc.temperament: four CreateModel and one AddField, each reversible;
+its allowed values are tuples in constants.py, never `choices`; no money
 column but a wave's AI spend (USD, staff pages only). Nothing reads the
-tables yet.
+tables yet. Renumbered on purpose (2026-11-15): main's
+0051_feed_harm_event, right after O2b's 0050, landed first, so O2c's is
+0052_orcs_o2c, right after the feed's.
 
 Run with:  python manage.py test tests.orcs.test_orc_models
 """
@@ -114,19 +116,30 @@ class TheMigrationTests(TestCase):
             self.assertTrue(op.reversible, type(op).__name__)
         self.assertEqual({op.name for op in mig.operations}, O2B_TABLES)
 
-    def test_o2c_ships_its_own_migration_right_after_o2bs(self):
+    def test_o2c_ships_its_own_migration_right_after_the_feeds(self):
         """O2c (2026-11-07, the O2 spec §1.0 item 4, §1.3.2): one migration
-        right after O2b's (0050), its only bot_program dependency, with
-        four CreateModel (its tables) and one AddField (Orc.temperament),
-        each reversible; the field a column of default '' (on PostgreSQL a
-        change of the catalogue only, no table rewrite)."""
+        with four CreateModel (its tables) and one AddField
+        (Orc.temperament), each reversible; the field a column of default
+        '' (on PostgreSQL a change of the catalogue only, no table
+        rewrite). Renumbered on purpose (2026-11-15): main's
+        0051_feed_harm_event (the feed's harm counters, right after O2b's
+        0050) landed first, so O2c's is 0052_orcs_o2c, right after the
+        feed's, its only bot_program dependency, and the plan still runs
+        O2b's, then the feed's, then O2c's."""
         from importlib import import_module
 
         from django.db import migrations
-        mig = import_module("bot_program.migrations.0051_orcs_o2c").Migration
+        from django.db.migrations.loader import MigrationLoader
+        mig = import_module("bot_program.migrations.0052_orcs_o2c").Migration
         others = [d for d in mig.dependencies if d[0] == "bot_program"]
-        self.assertEqual(others, [("bot_program", "0050_orcs_o2b")],
-                         "one migration, right after O2b's")
+        self.assertEqual(others, [("bot_program", "0051_feed_harm_event")],
+                         "one migration, right after the feed's")
+        graph = MigrationLoader(None, ignore_no_migrations=True).graph
+        plan = [name for app, name in graph.forwards_plan(
+            ("bot_program", "0052_orcs_o2c")) if app == "bot_program"]
+        self.assertEqual(plan[-3:], ["0050_orcs_o2b", "0051_feed_harm_event",
+                                     "0052_orcs_o2c"],
+                         "O2b's, the feed's, then O2c's")
         for op in mig.operations:
             self.assertIsInstance(op, (migrations.CreateModel,
                                        migrations.AddField),

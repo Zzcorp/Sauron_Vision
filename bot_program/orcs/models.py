@@ -8,12 +8,12 @@ it. The tables only O2 writes ship in O2's own migrations (§10.7): O2a's
 (2026-11-05, migration 0049) adds OrcIntent, the proposals in shadow, and
 OrcWake's first send (`queued_at`) with the claim's index; O2b's
 (2026-11-06, migration 0050) adds OrcTierGrade, the probe pairs; O2c's
-(2026-11-07, migration 0051, the O2 spec §1.3.2) adds the Captain, its
-orders in shadow (CaptainOrder), the drums' waves (OrcWave), the
-temperaments' grade (OrcTemperamentGrade) and Orc.temperament, which
-nothing reads until the O2c commits that write them, each behind its own
-switch, OFF on arrival; the other 2026-10-09 additions marked O2 come with
-O2d.
+(2026-11-07, migration 0052, after main's 0051_feed_harm_event since
+2026-11-15; the O2 spec §1.3.2) adds the Captain, its orders in shadow
+(CaptainOrder), the drums' waves (OrcWave), the temperaments' grade
+(OrcTemperamentGrade) and Orc.temperament, which nothing reads until the
+O2c commits that write them, each behind its own switch, OFF on arrival;
+the other 2026-10-09 additions marked O2 come with O2d.
 
 No `choices=` on any status or kind column: the allowed values are tuples
 in bot_program/orcs/constants.py, so a later PR adds one without a
