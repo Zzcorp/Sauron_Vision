@@ -26,7 +26,14 @@ claim and at each of the pair's sends): OFF, an extreme wake routes r4,
 which answers it while the router's switch is ON (r0 answers every wake
 while that one is OFF, as it ships; 2026-11-06, completing O2b). In O2 the
 gate cannot open whatever it says (the pair's bound is above the money the
-Orcs may hold in flight)."""
+Orcs may hold in flight).
+
+THE TEMPERAMENTS' SWITCH (O2c, 2026-11-15, the O2 spec C.4, N2):
+`orcs_temperaments`, read by `temperaments_on`, decides whether a newborn
+draws a temperament (bot_program/orcs/temperament.py), just after its
+birth commits. It is no model caller's switch and no gate: it sends no
+call, and changes only what a model reads of the Orcs born while it is ON
+(PS9). The tick never reads it."""
 import logging
 
 logger = logging.getLogger(__name__)
@@ -136,6 +143,17 @@ def frontier_on() -> bool:
     off). The tick never reads it."""
     from bot_program.orcs.constants import FRONTIER_SWITCH
     return _component_on(FRONTIER_SWITCH)
+
+
+def temperaments_on() -> bool:
+    """The temperaments' switch (`orcs_temperaments`; O2c, 2026-11-15, the
+    O2 spec C.4, N2), OFF when unreadable. Read once per draw, by the
+    on-commit step of a birth (temperament.draw_quietly): OFF, the newborn
+    draws none and nothing is written; ON, it draws one, fixed for life.
+    The switch governs new draws only: an Orc keeps what it drew, or its
+    '', whatever it says later."""
+    from bot_program.orcs.constants import TEMPERAMENTS_SWITCH
+    return _component_on(TEMPERAMENTS_SWITCH)
 
 
 def caller_code(caller, rung=None) -> str:

@@ -19,7 +19,12 @@ hooks missed. Every path goes through `ensure`, which:
   6. writes the thesis, the army type, the stamp on the row, the care
      ghost, the journal's first lines and the observer's memory;
   7. after the commit, tells the operator of an adopted REAL-MONEY row
-     (never a paper or demo one).
+     (never a paper or demo one);
+  8. after the commit too (O2c, 2026-11-15, the O2 spec C.4), draws the
+     newborn's temperament while `orcs_temperaments` is ON
+     (bot_program/orcs/temperament.py), in a transaction of its own that
+     locks the Orc's row alone, never the trade row's (N1.2); OFF, nothing
+     is drawn or written. _create itself is unchanged.
 All of it writes the Orc tables and the one stamp; nothing is sent to a
 venue and no model is called.
 """
@@ -244,6 +249,12 @@ def ensure(trade, *, adopted=False, now=None):
             if adopted and orc.seat.venue == VENUE_LIVE:
                 transaction.on_commit(partial(notify_adopted, orc.pk),
                                       robust=True)
+            # O2c (2026-11-15, the O2 spec C.4, N1.2): the temperament's
+            # draw, once _create's transaction has committed, on the Orc's
+            # row alone (never under the trade row's lock)
+            from bot_program.orcs import temperament
+            transaction.on_commit(partial(temperament.draw_quietly, orc.pk),
+                                  robust=True)
     except IntegrityError:
         # another process made it between our check and our create (the
         # one-to-ones from the row to its Orc and its leg)

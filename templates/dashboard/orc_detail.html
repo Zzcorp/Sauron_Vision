@@ -8,7 +8,7 @@
 {# grade, read by code. The one form is the operator's own thesis. From #}
 {# O2a (the O2 spec A.62): each wake's status and rung, the proposals in #}
 {# shadow with the officer's would-verdict, the refusals. O2b (B.16c, #}
-{# 2026-11-06): beside the rung sent, the router's choice in shadow. #}
+{# 2026-11-06): beside the rung sent, the router's choice in shadow. O2c (2026-11-15): the temperament and the shadow breaches by code, each glued to a line that was there, so an Orc with neither renders the bytes it rendered before. #}
 <div class="orc-page">
 <div style="margin-bottom:12px;"><a href="{% url 'orcs_list' %}" class="orc-muted">← every Orc</a></div>
 {% if messages %}<ul class="orc-messages">{% for m in messages %}<li class="card">{{ m }}</li>{% endfor %}</ul>{% endif %}
@@ -23,7 +23,7 @@
     <div class="orc-kv"><span class="k">Next wake</span><span>{{ slot.next_wake_t }}</span></div>
     <div class="orc-kv"><span class="k">Complexity</span><span>{% if slot.intellect %}{{ slot.intellect.score_t }} · the day {{ slot.intellect.day_class|default:"—" }} · {{ slot.intellect.rung_t }}{% else %}Not read yet: no wake has been detected.{% endif %}</span></div>
     <div class="orc-kv"><span class="k">Dossier</span><span>{% if slot.integrity %}{{ slot.integrity.t }}{% else %}Not read yet: no wake has been detected.{% endif %}</span></div>
-    {% if slot.latest_note %}<div class="orc-kv"><span class="k">Last reading</span><span>{{ slot.latest_note }}</span></div>{% endif %}
+    {% if slot.latest_note %}<div class="orc-kv"><span class="k">Last reading</span><span>{{ slot.latest_note }}</span></div>{% endif %}{% if temperament_t %}<div class="orc-kv"><span class="k">Temperament</span><span>{{ temperament_t }}</span></div>{% endif %}
 </div>
 
 <div class="card fade-in-up" id="orc-thesis" style="margin-bottom:18px;">
@@ -144,7 +144,7 @@
 <div class="card fade-in-up" id="orc-grade" style="margin-bottom:18px;">
     <div class="card-header"><span class="card-title">Grade</span></div>
     {% if grade %}
-    <p>Graded in shadow: {{ grade_t }}.</p>
+    <p>Graded in shadow: {{ grade_t }}.</p>{% if breaches_t %}<p class="orc-muted">{{ breaches_t }}</p>{% endif %}
     <p class="orc-muted">Bar source {{ grade.bar_source|default:"—" }} · {% if grade.counts_for_seat %}counts for its seat{% else %}does not count for its seat{% endif %}.</p>
     {% else %}<p class="orc-muted">Not graded yet: an idea is graded once it has ended and every arm has walked out.</p>{% endif %}
 </div>

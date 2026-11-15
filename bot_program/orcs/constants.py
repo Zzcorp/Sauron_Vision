@@ -968,3 +968,14 @@ CAPTAIN_STATES = (CAPTAIN_SEATED, CAPTAIN_IDLE)
 #: open, its deliveries are journaled only, as in O1, and it records why.
 WAVE_BREAKER_CLOSED, WAVE_BREAKER_OPEN = "closed", "open"
 WAVE_BREAKER_STATES = (WAVE_BREAKER_CLOSED, WAVE_BREAKER_OPEN)
+
+# ── O2c: honor and the temperaments (2026-11-15, the O2 spec C.1-C.6) ─────
+# Honor's audits (bot_program/orcs/honor.py) need no switch: code, no model,
+# run at every grade whatever the switches say, in shadow. The temperaments
+# (bot_program/orcs/temperament.py) are drawn behind their own switch, OFF
+# on arrival, exempt from "all on" and turned on only with the trading PIN
+# (N2): no model caller of its own, a temperament changes what a model reads
+# (PS9) and how the grades are kept (OrcTemperamentGrade).
+
+#: C.4: the draw's switch (core/platform_control.py ORC_MIND_SWITCHES).
+TEMPERAMENTS_SWITCH = "orcs_temperaments"

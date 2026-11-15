@@ -2189,6 +2189,42 @@ $0.
   Orc's latest stored wake and is refused with the clause that fails;
   nothing is reserved or sent.
 
+### The Orcs' temperaments (O2c)
+
+Honor first, because it needs nothing from you: at every grade, the code
+of honor audits the dead idea's shadow record, whatever the switches say,
+with no model. H1 is an unacknowledged miss (the first decision that saw a
+missed expectation did not cite it), H2 an unacted signpost (a met
+predicate or the thesis check's exit with no exit, trim or tighten proposed
+within one bar of the decision frame), H3 the tripwire (the Orc's shadow
+arm, in would mode, closed below -1.2R: the stop did not hold). Each one
+found is a `breach` line in the Orc's journal, a `shadow_breach` tag on
+its grade and a line under the grade on its page. None binds: the grade's
+class is still the code's own, and no idea is classed a fault in O2. A
+refused proposal never counts.
+
+A temperament is the one lead voice an Orc leans on, drawn just after its
+birth and fixed for life: the Striker, the Fixer, the Skeptic, the
+Awakened, the Executioner or the Champion (each voice's lane, copied word
+for word from the council's prompts), or a control with none. The draw
+takes the temperament with the fewest Orcs on the newborn's seat, so the
+grades compare temperaments, not the situations they were chosen for. A
+model reading the Orc's wakes sees it in PS9 as a view ("may be wrong;
+facts win"); the Orc's page shows it; and once its idea is graded, the
+grades are kept per temperament, money world, class and bar source
+(OrcTemperamentGrade), against the control's. It moves no stop and sends
+no order, and it adds no model call: only the few words of PS9 a wake
+already sends.
+
+The switch `orcs_temperaments` ("Orc Temperaments (in shadow)", System, OFF
+on arrival, left OFF by "all on") decides whether a newborn draws one. To
+turn it on: on /ops/ (Switches, System), turn on "Orc Temperaments (in
+shadow)" with your trading PIN. The shell's `component on` refuses this key
+and points to /ops/, and the Django admin will not turn it on either. To
+stop it: turning `orcs_temperaments` OFF takes no PIN; the next newborn
+draws none, and every Orc keeps the temperament it drew, or none: an Orc
+born while it was OFF is never graded as a temperament.
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live

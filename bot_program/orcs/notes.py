@@ -38,8 +38,10 @@ the card's, in tier words once a model was sent the wake; the next wake's
 words take `minds` from the page, read once; every sentence is true with
 the minds and the Orcs line on or off.
 
-THE SEAMS. effective_level is O3/O4a's §3.1 min(); temperament, honor and
-the lineage's record are O2's later commits'.
+THE SEAMS. effective_level is O3/O4a's §3.1 min(). The temperament and
+honor's shadow breaches arrive with O2c (2026-11-15): the Orc's page shows
+them (dashboard/views_orcs.py) and the slot does not carry them yet; the
+slot's temperament and the lineage's record are O2d's (the O2 spec D.18).
 """
 import logging
 import math

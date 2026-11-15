@@ -88,7 +88,11 @@ def track_ghosts():
 @shared_task
 @guarded_task("orcs")
 def grade_closed():
-    """Every dead idea whose arms all resolved and that has no grade."""
+    """Every dead idea whose arms all resolved and that has no grade. O2c
+    (2026-11-15, the O2 spec C.6): after its grades, the OrcTemperamentGrade
+    rows of the keys it touched (grading.temperament_grades), counted under
+    `temperament_grades`; when no idea it graded drew a temperament, nothing
+    is written and the result is O1's."""
     from django.utils import timezone
 
     from bot_program.orcs import grading
@@ -100,17 +104,31 @@ def grade_closed():
         return {"idle": "no dead idea waits for its grade"}
     now = timezone.now()
     graded = waiting = 0
+    keys = set()
     for orc in todo:
         try:
-            if grading.grade(orc, now=now) is not None:
+            g = grading.grade(orc, now=now)
+            if g is not None:
                 graded += 1
+                key = grading.temperament_key(orc, g)
+                if key is not None:
+                    keys.add(key)
             else:
                 waiting += 1
         except Exception as e:  # noqa: BLE001 — one idea never stops it
             logger.warning("[orcs] Orc %s was not graded: %s", orc.pk, e)
     if not graded:
         return {"idle": f"{waiting} idea(s) wait for an arm to resolve"}
-    return {"status": "success", "graded": graded, "waiting": waiting}
+    out = {"status": "success", "graded": graded, "waiting": waiting}
+    if keys:
+        try:
+            out["temperament_grades"] = grading.temperament_grades(keys,
+                                                                   now=now)
+        except Exception as e:  # noqa: BLE001 — the grades stand
+            logger.warning("[orcs] the temperaments' grades were not "
+                           "written: %s", e)
+            out["temperament_grades"] = 0
+    return out
 
 
 @shared_task

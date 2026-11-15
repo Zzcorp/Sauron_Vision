@@ -30,8 +30,12 @@ debate stores).
        stop and any refusal, the last 10 stop moves, Aragorn's actions
   PS7  the reviewer's verdicts of 24 h, the reasoning as a view
   PS8  the war drums heard since the last wake
-  PS9-PS11  dashes, each saying what is not there yet (the temperament,
-       the lessons, the Captain), true whatever the minds' switches say
+  PS9  (O2c, 2026-11-15) the temperament drawn just after the birth, fixed
+       for life: its lead voices' names and lane texts as a view; the
+       control's dash; "— (no temperament drawn)" for an Orc born while
+       `orcs_temperaments` was OFF
+  PS10-PS11  dashes, each saying what is not there yet (the lessons, the
+       Captain), true whatever the minds' switches say
   PS12 (tail) the menu, each row with its `watch` (O2a: may a plan clause
        watch it, at least PLAN_WATCH_MIN_ATR1H x ATR(1h) from the mark) and
        BE with its cost, the candidates (unordered, after the F5 shrink),
@@ -478,13 +482,35 @@ def ps(orc, row, ctx) -> dict:
            "ps7": {"reviews": _ps7(row, now),
                    "thesis_check": _thesis_check(row)},
            "ps8": _ps8(orc, ctx)}
-    # O2: PS9 the temperament's lead voices and lane texts (§4.6), PS10
-    # the lessons and weapons of the lineage (§6.10-6.11), PS11 the
-    # Captain's orders and the Emperor's theme orders (§4.2, §4.6).
-    out["ps9"] = "— (no temperament drawn)"
+    # O2: PS10 the lessons and weapons of the lineage (§6.10-6.11), PS11
+    # the Captain's orders and the Emperor's theme orders (§4.2, §4.6).
+    out["ps9"] = _ps9(orc)
     out["ps10"] = "— (no lesson yet)"
     out["ps11"] = "— (no Captain seated yet)"
     return out
+
+
+#: PS9's dashes (O2c, 2026-11-15, the O2 spec C.5): an Orc that drew no
+#: temperament (born while `orcs_temperaments` was OFF, or undrawn), and the
+#: control.
+PS9_NONE = "— (no temperament drawn)"
+PS9_CONTROL = "— (control: no lead voice)"
+
+
+def _ps9(orc) -> str:
+    """PS9 (C.5; P25's twin: as of the wake, the temperament being fixed
+    for life, drawn just after the birth): the lead voices' names and lane
+    texts as a T1 view (fence.view, FENCE_CAPS["temperament"]); the
+    control's dash; PS9_NONE for an Orc that drew none, or a name of no
+    table."""
+    from bot_program.orcs import temperament
+    name = str(getattr(orc, "temperament", "") or "")
+    if name == temperament.CONTROL:
+        return PS9_CONTROL
+    text = temperament.lanes_text(name)
+    if not text:
+        return PS9_NONE
+    return fence.view("temperament", text, FENCE_CAPS["temperament"])
 
 
 def _recovery(ctx, row) -> object:

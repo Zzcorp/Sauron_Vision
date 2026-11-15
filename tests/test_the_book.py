@@ -1703,19 +1703,22 @@ class TheBookFollowsTheCode(SimpleTestCase):
             # K-B8 (2026-11-05, the Orcs' O2 spec N2): "a second switch",
             # the Orcs' minds, ships off and is no live-money switch; grown
             # on purpose (2026-11-06, O2b): the router's, the probes' and
-            # the frontier's switches too
-            "orcs_minds", "orcs_router", "orcs_probes", "orcs_frontier"}
+            # the frontier's switches too; and (2026-11-15, O2c) the
+            # temperaments' switch, whose ON changes what a model reads
+            "orcs_minds", "orcs_router", "orcs_probes", "orcs_frontier",
+            "orcs_temperaments"}
         for key in named:
             self.assertIn(key, rows, "%s is no longer a component: rewrite the safeguards" % key)
             row = rows[key]
             self.assertFalse(row.get("is_enabled") or row.get("enabled"),
                              "%s ships on: rewrite every 'off on arrival'" % key)
         for key in ("council_bots", "council_ticket", "orcs", "orcs_minds",
-                    "orcs_router", "orcs_probes", "orcs_frontier"):
+                    "orcs_router", "orcs_probes", "orcs_frontier",
+                    "orcs_temperaments"):
             self.assertNotIn(key, LIVE_MONEY_SWITCHES,
                              "%s moves money now: rewrite 'The council', 'The Orcs' and the lexicon's 'Shadow'" % key)
         for key in ("orcs_minds", "orcs_router", "orcs_probes",
-                    "orcs_frontier"):
+                    "orcs_frontier", "orcs_temperaments"):
             self.assertIn(key, BULK_ENABLE_EXEMPT,
                           "the Orcs' minds arrive by 'all on': rewrite 'The Orcs'")
 

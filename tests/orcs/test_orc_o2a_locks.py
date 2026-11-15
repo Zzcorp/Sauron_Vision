@@ -66,14 +66,20 @@ PG = connection.vendor == "postgresql"
 NOT_PG = "N8's lock proof needs PostgreSQL's row locks (SQLite has none)"
 
 #: The functions that take an Orc's row lock, each through orc_lock.
+#: Grown on purpose (2026-11-15, O2c): the temperament's draw just after a
+#: birth (temperament.draw_quietly) locks the newborn's row alone.
 LOCKERS = (("journal", "append"), ("journal", "remember"),
            ("journal", "merge_seen"), ("lifecycle", "_close_leg"),
-           ("lifecycle", "kill_all"), ("thesis", "complete_provenance"))
-#: The real-money paths and what each one runs inside the budget.
+           ("lifecycle", "kill_all"), ("thesis", "complete_provenance"),
+           ("temperament", "draw_quietly"))
+#: The real-money paths and what each one runs inside the budget. Grown on
+#: purpose (2026-11-15, O2c): the draw runs on the entry path (the birth's
+#: commit), so it waits within the same budget (N8.3) as the provenance.
 MONEY_PATHS = (("observe", "after_care", "TICK_STEPS"),
                ("lifecycle", "_closed_quietly", "on_leg_closed"),
                ("lifecycle", "kill_all", "orc_lock"),
-               ("thesis", "complete_provenance", "orc_lock"))
+               ("thesis", "complete_provenance", "orc_lock"),
+               ("temperament", "draw_quietly", "append"))
 #: The hooks of the order path that call those paths, and the call.
 HOOK_CALLS = (("bot_program.asset_engine.base", "AssetBot.manage_positions",
                "_orc_after_care"),

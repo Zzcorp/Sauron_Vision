@@ -35,6 +35,13 @@ while that is another rung: r0 answers every wake a model reads while the
 router's switch (orcs_router) is OFF, and with it ON the rung sent may
 still differ (one effort per model until the smoke's PASS).
 
+HONOR AND THE TEMPERAMENT (O2c, 2026-11-15, the O2 spec C.1-C.5, §1.3.7).
+The Orc's page shows the temperament its Orc drew just after its birth
+(temperament.page_line), and under its grade the shadow breaches the code
+of honor found, by code (the grade's shadow_breach tags): each only when
+there is one, so an Orc with neither reads the page it read before. Both
+are read from the Orc and its grade: no query of their own.
+
 THE LADDER (O2b's probes, 2026-11-06, the O2 spec B.16b). /orcs/seats/ (staff)
 adds the probe pairs' table (OrcTierGrade, read through probes.ladder):
 one row per kind, boundary and money world, each pair a wake read on its
@@ -139,6 +146,21 @@ def _grade_t(g):
     return (f"{arm} {_r(g.orc_r_gross)}, the care ghost "
             f"{_r(g.ghost_r)}, Δ {_r(g.delta_care)}"
             + (f" ({g.exit_label})" if g.exit_label else ""))
+
+
+def _breaches_t(g) -> str:
+    """The shadow breaches of grade `g` by code, from its tags (O2c, C.2):
+    "Shadow breaches (in shadow, none binds): H2 an unacted signpost.";
+    "" for none."""
+    from bot_program.orcs.honor import WORDS
+    tags = getattr(g, "tags", None) if g is not None else None
+    codes = [str(t).split(":", 1)[1] for t in tags or ()
+             if str(t).startswith("shadow_breach:")]
+    codes = [c for c in codes if c in WORDS]
+    if not codes:
+        return ""
+    return ("Shadow breaches (in shadow, none binds): "
+            + ", ".join(f"{c} {WORDS[c]}" for c in codes) + ".")
 
 
 def _tracks(orc_ids, arms=None) -> dict:
@@ -357,8 +379,9 @@ def orc_detail(request, trade_id):
     operator's beside it) with its predicates, the plan, the intents in
     shadow with the officer's would-verdicts and the refusals, the journal
     (facts and notes drawn apart), the arms, the wakes with their status
-    and rung, and the grade."""
-    from bot_program.orcs import notes
+    and rung, and the grade; from O2c its temperament and its shadow
+    breaches by code, each only when there is one."""
+    from bot_program.orcs import notes, temperament
     from bot_program.orcs.constants import (ARM_CARE, ARM_ORC,
                                             PAGE_JOURNAL_MAX, PAGE_WAKES_MAX,
                                             STATE_DEAD, THESIS_OPERATOR_MAX)
@@ -401,6 +424,8 @@ def orc_detail(request, trade_id):
         "intents": _intent_rows(orc), "refusals": refusals,
         "arms": _arm_rows(tracks, orc), "wakes": _wake_rows(wakes),
         "grade": _grade(orc), "grade_t": _grade_t(_grade(orc)),
+        "temperament_t": temperament.page_line(orc.temperament),
+        "breaches_t": _breaches_t(_grade(orc)),
     })
 
 

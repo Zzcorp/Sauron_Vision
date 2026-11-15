@@ -66,9 +66,12 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: the scheduler's tickets. O2a's light (2026-11-05) adds no module: it
 #: wires the render pass to the scheduler and rewrites the words. O2b's
 #: route in shadow (2026-11-06) adds the pure router (router.py); O2b's
-#: probes (2026-11-06) the probes and their forward grade (probes.py).
+#: probes (2026-11-06) the probes and their forward grade (probes.py). O2c's
+#: honor and temperaments (2026-11-15) add the code of honor's audits in
+#: shadow (honor.py) and the temperaments' table and draw (temperament.py).
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
-              "mind", "scheduler", "intents", "router", "probes")
+              "mind", "scheduler", "intents", "router", "probes", "honor",
+              "temperament")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
 O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
@@ -93,14 +96,23 @@ O2_CODE = {
                  "probes_on", "caller_code",
                  # O2b's frontier (2026-11-06): the frontier's switch, the
                  # twin's own and r5's beside the wake's (B.15c)
-                 "frontier_on"),
+                 "frontier_on",
+                 # O2c's temperaments (2026-11-15): the draw's switch
+                 "temperaments_on"),
     "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
-                         "ps5_notes"),
+                         "ps5_notes",
+                         # O2c's temperaments (2026-11-15): PS9 (C.5)
+                         "_ps9"),
     "grading": ("_usd_per", "mind_counts", "mind_tags",
                 # completing O2a (2026-11-05): the grade's arm:would tag
-                "graded_would"),
+                "graded_would",
+                # O2c's honor (2026-11-15, C.1, C.2): the shadow record read
+                # for the audits, the breaches' tags; O2c's temperaments
+                # (C.4, C.6): the grade's tag, its key, the table's rows
+                "shadow_findings", "_breach_tags", "temperament_tag",
+                "temperament_key", "temperament_grades"),
     "wake": ("_minds_on", "_evidence", "_render",
              # O2a's queue (2026-11-05): the facts hash v2, the plan's
              # watches, the army's metronome, F6's reference, the render

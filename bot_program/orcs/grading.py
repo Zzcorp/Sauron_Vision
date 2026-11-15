@@ -36,6 +36,25 @@ forward-only, once every arm has resolved.
 No idea is excluded by its outcome, nor by the operator's hand (flagged
 hand_touched). The grade never touches OrcSeat: seats are computed in O2,
 in shadow. The grade's journal line carries R only.
+
+HONOR IN SHADOW (O2c, 2026-11-15, the O2 spec C.1, C.2). Before its
+transaction the grade reads the idea's shadow record (shadow_findings) and
+runs the code of honor's audits over it (bot_program/orcs/honor.py: H1 an
+unacknowledged miss, H2 an unacted signpost, H3 the tripwire), whatever the
+switches say. Inside its `created` block each finding becomes a `breach`
+entry by code (body {code, mode: "shadow", evidence}), before the grade's
+own line; only when there is one, the tags gain shadow_breach:<code> (the
+codes found, sorted) and the grade's body gains `shadow`, the class
+tribunal.classify gives the idea with its breaches counted. KEEP: the
+binding class still passes breaches=0, signpost_unacted=False and
+exit_available=False, so no idea is FAULT in O2, and fell and sub_label
+are that class. Refusals never count (honor.py). A record that cannot be
+read grades the idea all the same, tagged honor_unread, with no finding.
+
+THE TEMPERAMENT (O2c, C.4, C.6). An idea whose Orc drew one is tagged
+temperament:<name>:<version> (temperament.py); none is never graded as a
+temperament. After its grades, tasks.grade_closed refreshes the
+OrcTemperamentGrade rows of the keys it touched (temperament_grades).
 """
 import logging
 from decimal import Decimal
@@ -46,8 +65,8 @@ from django.utils import timezone
 from bot_program.orcs.constants import (ARM_CARE, ARM_ORC, ARM_PLAYBOOK,
                                         CAPTURE_MIN_AVAIL_R, FELL_FAULT,
                                         FELL_HONOURABLE, FELL_WON,
-                                        MULTI_GHOST_POLICIES, SEED_LATE,
-                                        STATE_DEAD)
+                                        MODE_SHADOW, MULTI_GHOST_POLICIES,
+                                        SEED_LATE, STATE_DEAD)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +79,12 @@ FELL_WORDS = {FELL_WON: "Won.", FELL_HONOURABLE: "Honourable defeat."}
 ARM_POSITION_T = "the position"
 ARM_WOULD_T = "the Orc's shadow arm"
 WOULD_TAG = "arm:would"
+#: O2c's tags (2026-11-15): a shadow breach by its code (C.2), the
+#: temperament the idea's Orc drew (C.4), and an audit that could not read
+#: the record.
+BREACH_TAG = "shadow_breach:{code}"
+TEMPERAMENT_TAG = "temperament:{name}:{version}"
+HONOR_UNREAD_TAG = "honor_unread"
 
 
 def _f(x):
@@ -238,6 +263,107 @@ def _first_divergence(o_state) -> str:
     return str(fd.get("kind") or "") if isinstance(fd, dict) else ""
 
 
+# ── honor and the temperament (O2c, 2026-11-15) ──────────────────────────
+
+def shadow_findings(orc, tracks=None) -> list:
+    """C.1: the idea's shadow record, read here (its facts and decisions,
+    its proposals, its wakes and its O arm), and honor's pure audits over
+    it: [{code, evidence, at, t}], in time order. Reads only."""
+    from bot_program.orcs import dossier, honor
+    from bot_program.orcs.models import OrcIntent, OrcJournal, OrcTrack, OrcWake
+    if tracks is None:
+        tracks = list(OrcTrack.objects.filter(orc=orc))
+    entries = list(OrcJournal.objects.filter(
+        orc=orc, kind__in=("fact", "decision")).order_by("at", "id")
+        .only("id", "kind", "author", "fact_id", "body", "at", "wake_id"))
+    intents = list(OrcIntent.objects.filter(orc=orc)
+                   .only("id", "kind", "created_at"))
+    wakes = list(OrcWake.objects.filter(orc=orc)
+                 .only("id", "status", "created_at", "components"))
+    o_track = next((t for t in tracks if t.arm == ARM_ORC), None)
+    return honor.audit(entries=entries, intents=intents, wakes=wakes,
+                       o_track=o_track, decision_tf=dossier.decision_tf(orc),
+                       died_at=orc.died_at)
+
+
+def _breach_tags(findings) -> list:
+    """shadow_breach:<code>, each code found once, sorted (C.2)."""
+    return [BREACH_TAG.format(code=c)
+            for c in sorted({f["code"] for f in findings})]
+
+
+def temperament_tag(orc) -> str:
+    """The grade's tag of the temperament the idea's Orc drew (C.4), or ""
+    for an Orc that drew none."""
+    from bot_program.orcs.temperament import VERSION
+    name = str(getattr(orc, "temperament", "") or "")
+    return TEMPERAMENT_TAG.format(name=name, version=VERSION) if name else ""
+
+
+def temperament_key(orc, g):
+    """OrcTemperamentGrade's key of grade `g` (C.6): (temperament, version,
+    venue, class, bar source) from its temperament tag, or None for an idea
+    with none."""
+    for tag in getattr(g, "tags", None) or ():
+        parts = str(tag).split(":")
+        if len(parts) == 3 and parts[0] == "temperament" and parts[1]:
+            return (parts[1], parts[2], str(g.venue or ""),
+                    str(orc.asset_class or "")[:12], str(g.bar_source or ""))
+    return None
+
+
+def temperament_grades(keys, *, now=None) -> int:
+    """C.6: OrcTemperamentGrade for each (temperament, version, venue,
+    class, bar source) in `keys`, written again from the grades: the block
+    statistics (tribunal.block_stats) of Δ against the care over the
+    counted grades of that key whose idea a model read (counts_for_seat,
+    n_llm > 0), and its mean less the control's of the same version,
+    venue, class and bar source (None for the control itself, or with no
+    control). Venues, classes and bar sources are never pooled. When the
+    control's row moves, every row of its group is written again (their
+    difference moved with it). A key with no counted grade writes no row.
+    `block`: the full blocks of SEAT_WINDOW grades its n holds. Returns the
+    rows written."""
+    from bot_program.orcs import tribunal
+    from bot_program.orcs.constants import SEAT_WINDOW
+    from bot_program.orcs.models import OrcGrade, OrcTemperamentGrade
+    from bot_program.orcs.temperament import CONTROL
+    now = now or timezone.now()
+    keys = {tuple(k) for k in keys or () if k}
+    written = 0
+    for group in sorted({k[1:] for k in keys}):
+        version, venue, cls, source = group
+        deltas = {}
+        for name, tags, delta in (OrcGrade.objects.filter(
+                venue=venue, bar_source=source, orc__asset_class=cls,
+                counts_for_seat=True, n_llm__gt=0)
+                .exclude(orc__temperament="")
+                .values_list("orc__temperament", "tags", "delta_care")):
+            if TEMPERAMENT_TAG.format(name=name, version=version) in (
+                    tags or ()):
+                deltas.setdefault(name, []).append(delta)
+        control = tribunal.block_stats(deltas.get(CONTROL, ()))
+        todo = {k[0] for k in keys if k[1:] == group}
+        if CONTROL in todo:
+            todo |= set(deltas)
+        for name in sorted(todo):
+            st = tribunal.block_stats(deltas.get(name, ()))
+            if not st["n"]:
+                continue
+            vs = (None if name == CONTROL or st["mean"] is None
+                  or control["mean"] is None
+                  else st["mean"] - control["mean"])
+            OrcTemperamentGrade.objects.update_or_create(
+                temperament=name, version=version, venue=venue,
+                asset_class=cls, bar_source=source,
+                defaults={"n": st["n"], "mean": st["mean"], "se": st["se"],
+                          "lb80": st["lb80"], "ub80": st["ub80"],
+                          "vs_control_mean": vs,
+                          "block": st["n"] // SEAT_WINDOW, "at": now})
+            written += 1
+    return written
+
+
 def grade(orc, *, now=None):
     """The idea's one grade, once every arm resolved; None before. A second
     call returns the grade already written. Never touches OrcSeat."""
@@ -282,6 +408,25 @@ def grade(orc, *, now=None):
         orc_r_gross=nums["orc_r_gross"], ghost_r=nums["ghost_r"],
         delta_care=nums["delta_care"], first_divergence=first,
         breaches=0, signpost_unacted=False, exit_available=False))
+    # O2c (C.1, C.2): honor's audits, before the transaction; the class the
+    # idea would get if its breaches bound, kept beside the binding one
+    try:
+        findings = shadow_findings(orc, tracks)
+    except Exception as e:  # noqa: BLE001 — never loses the grade
+        logger.warning("[orcs] Orc %s: honor did not read its record: %s",
+                       orc.pk, e)
+        findings = []
+        tags.append(HONOR_UNREAD_TAG)
+    shadow = None
+    if findings:
+        sv = tribunal.classify(tribunal.IdeaFacts(
+            orc_r_gross=nums["orc_r_gross"], ghost_r=nums["ghost_r"],
+            delta_care=nums["delta_care"], first_divergence=first,
+            breaches=len(findings), signpost_unacted=False,
+            exit_available=False))
+        shadow = {"fell": sv.fell, "sub_label": sv.sub_label,
+                  "causes": list(sv.causes)}
+    tags += [t for t in (temperament_tag(orc),) if t] + _breach_tags(findings)
     seeds = {a: (by[a].state or {}).get("seed") for a in (ARM_ORC, ARM_CARE)
              if a in by}
     late = SEED_LATE in seeds.values()
@@ -339,6 +484,12 @@ def grade(orc, *, now=None):
                 "army_type": str(orc.army_type or "")[:16],
                 "first_divergence": first[:8], "graded_at": now})
             if created:
+                for f in findings:
+                    journal.append(orc, "breach", f["t"],
+                                   body={"code": f["code"],
+                                         "mode": MODE_SHADOW,
+                                         "evidence": list(f["evidence"])},
+                                   at=f["at"])
                 journal.append(orc, "grade", grade_line(
                     nums, verdict, would=would),
                                body={**{k: v for k, v in nums.items()
@@ -347,7 +498,9 @@ def grade(orc, *, now=None):
                                      "sub_label": verdict.sub_label,
                                      "causes": list(verdict.causes),
                                      "counts_for_seat": counts,
-                                     "flags": flags})
+                                     "flags": flags,
+                                     **({"shadow": shadow} if shadow
+                                        else {})})
     except IntegrityError:
         g = OrcGrade.objects.filter(orc=orc).first()
     return g

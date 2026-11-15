@@ -125,6 +125,7 @@ ORC_MIND_SWITCHES = (
     "orcs_router",                  # the routed rung (Opus among them) answers
     "orcs_probes",                  # a neighbouring rung reads a paper wake
     "orcs_frontier",                # Fable's gate (r5 beside its r4 twin)
+    "orcs_temperaments",            # a newborn draws a lead voice (PS9)
 )
 
 #: Every switch whose ON takes the trading PIN, at every door
@@ -415,6 +416,21 @@ DEFAULT_COMPONENTS = [
     {"key": "orcs_frontier",
      "name": "Orc Frontier (Fable and its blind twin in shadow)",
      "description": "Off (default). On, with the router on: a real-money extreme wake may be answered by r5 beside an r4 blind twin, under a daily quota (0 by default). In O2 the pair cannot run: its bound is above what the Orcs may hold in flight. Turning it on takes the PIN.",
+     "category": "system"},
+    # THE ORCS' TEMPERAMENTS (2026-11-15, the Orcs' O2 spec C.3-C.6, N2):
+    # just after its birth commits, each newborn Orc draws one temperament,
+    # a council voice's lane (the Striker, the Fixer, the Skeptic, the
+    # Awakened, the Executioner, the Champion) or a control with none,
+    # balanced on its seat and fixed for life (bot_program/orcs/
+    # temperament.py). A model reading its wakes sees it in PS9 as a view,
+    # and the grades are kept by temperament (OrcTemperamentGrade). No
+    # model call of its own, nothing applied. OFF on arrival (no is_enabled
+    # key), exempt from "all on" and turned on only with the trading PIN at
+    # /ops/ (ORC_MIND_SWITCHES: it changes what a model reads); OFF takes
+    # no PIN, and the next newborn draws none. Description measured below
+    # 300.
+    {"key": "orcs_temperaments", "name": "Orc Temperaments (in shadow)",
+     "description": "Off (default). On: each newborn Orc draws a temperament (one council voice's lane, or a control with none), fixed for life. A model reading the Orc's wakes sees it in PS9 as a view; grades are kept by temperament, in shadow. It sends no order. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.
