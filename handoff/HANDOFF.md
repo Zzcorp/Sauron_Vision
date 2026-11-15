@@ -141,6 +141,7 @@ STACKING. Every branch touches `core/wall_facts.py` TESTS_GREEN, so merging one 
   4. No monthly realized P&L chart.
   5. Positions stay in purchase order, oldest first.
 - Nothing to build for these. His deploy outputs for the bureau v2 note are still awaited.
+- Then, after using the new desk: "non the way the tabs and headbands open and close is hideous restore the old system only, of opening and closing icons, their old sizes too for the horde tab too and the council and the activity... you understand? Its truly horrible, hideous, bad work for sure", and a minute later "okay i start to understand how it works, make it better and easier to use please". DECIDED: keep the desk v2 frame and make opening and closing every panel and band easy and obvious, with what the old system did better: visible open/close icons at the OLD sizes (Horde, Council, Activity, Signals, the headbands), one click to open and one to close in the same place, a clear state, remembered across pages, Esc to close. Run `wf_c28f82aa-9db` (`scratchpad/openclose/`, branch `claude/ui-open-close`).
 
 **2026-11-13 (afternoon)**
 - "aussi le refresh etoro par minute est toujours trop long, je suggère 20-30 secondes non?": the eToro account sync goes to 30 s, eToro's own held quotes to 15 s, inside the request budget (PR #109). Decided for him: the automated decisions (venue health, the shock trigger, the stall alert, history) keep main's cadence; only what he sees gets fresher.
