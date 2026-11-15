@@ -11,6 +11,11 @@ pinned), read here on the pictures' own invented book
       · 10 s") wrapped at any space: "eToro bid · 10" over "s", the unit
       alone on its line. A word, or a number with its unit, never splits:
       the line may take two lines, and only at its separators.
+  D2  THE CHART'S LABELS. The off-scale chips pinned at the pane's top
+      ("Your target", "Signal target") were drawn over the end of the
+      legend's OHLC line, covering "(+0.09%)"; the words of his entry's
+      marker, "LONG @ 0.64500", touched the "Your stop" chip pinned at the
+      bottom. No label covers the legend or another label.
 
 Measured in a headless Chromium on the page the test client serves, every
 request answered here (B0's driver, tests/old_design/measure.py), the
@@ -273,3 +278,187 @@ class TheFeedLineBreaksOnlyAtItsSeparatorsTests(TestCase):
                 self._whole(got, r"^closed · eToro bid \d\d:\d\d · opens Sun 22:00 UTC$")
                 self._inside(got)
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# D2: the chart's labels
+# ══════════════════════════════════════════════════════════════════════════
+
+#: The pane's labels: the legend's two lines (their words' own extent, not
+#: the row's box) and every level chip with its box, its edge and words.
+LABELS = r"""(function () {
+  var ID = '%s';
+  function box(r) { return { x: r.left, y: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; }
+  var card = document.querySelector('.sv-chart-card');
+  var lg = document.getElementById(ID + '-legend');
+  var rows = lg ? Array.prototype.filter.call(lg.querySelectorAll('[data-lg-row]'), function (e) {
+      return e.getBoundingClientRect().height > 0; }).map(function (row) {
+      var rg = document.createRange(); rg.selectNodeContents(row);
+      var o = box(rg.getBoundingClientRect()); o.t = row.textContent.replace(/\s+/g, ' ').trim(); return o; }) : [];
+  var chips = Array.prototype.filter.call(card.querySelectorAll('.sv-mchip'), function (c) {
+      var r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+    .map(function (c) { var o = box(c.getBoundingClientRect()); o.t = c.textContent.replace(/\s+/g, ' ').trim();
+      o.edge = c.getAttribute('data-edge') || ''; return o; });
+  var body = document.getElementById(ID);
+  return JSON.stringify({ rows: rows, chips: chips, body: box(body.getBoundingClientRect()) });
+})()""" % ID
+
+#: The chips' layer hidden (or shown again), so the canvas under them reads.
+CHIPS_SHOWN = r"""(async function (on) {
+  document.querySelectorAll('.sv-mchips').forEach(function (e) { e.style.visibility = on ? '' : 'hidden'; });
+  await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+  return 1;
+})(%s)"""
+
+#: His position's marker ("LONG @ 0.64500") drawn in no colour, every
+#: other marker as it is: the same geometry, its own pixels gone (or put
+#: back as they were). The number of position markers.
+MARK_VEILED = r"""(async function (veil) {
+  var h = window.svCharts && svCharts['%s'], s = h && h.series && h.series();
+  if (!s || !s.markers) return -1;
+  if (veil) window.__svMarks = s.markers();
+  var all = window.__svMarks || [], n = 0;
+  s.setMarkers(all.map(function (m) {
+    if (!/^(LONG|SHORT) @ /.test(m.text || '')) return m;
+    n += 1;
+    return veil ? Object.assign({}, m, { color: 'rgba(0, 0, 0, 0)' }) : m;
+  }));
+  await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+  return n;
+})(%%s)""" % ID
+
+#: Scene 05: the rail's AUDUSD card, clicked (the pictures' own act).
+PIN_CARD = r"""(function () {
+  var rail = document.getElementById('signalsRail');
+  var card = rail && Array.prototype.find.call(rail.querySelectorAll('.sr-signal'), function (e) {
+    return /(^|[^A-Z])%s([^A-Z]|$)/.test(e.textContent) && e.getBoundingClientRect().height > 0; });
+  if (!card) return 'no card';
+  card.scrollIntoView({ block: 'nearest' });
+  card.click();
+  return 'clicked';
+})()""" % S.SYMBOL
+
+#: A label's clear air: no two labels closer than this (px).
+AIR = 2
+
+
+def _marker_ink(desk, sid, body):
+    """The pixels of the pane that his position's marker draws (its arrow
+    and its words), the chips hidden: the pane read with the marker, then
+    with the marker drawn in no colour; the pixels that differ are the
+    marker's own. -> (pixel set in page coordinates, markers found)."""
+    import base64
+    import io
+
+    from PIL import Image, ImageChops
+    clip = {"x": body["x"], "y": body["y"], "width": body["w"], "height": body["h"], "scale": 1}
+
+    def shot():
+        data = desk.driver.call("Page.captureScreenshot", {"format": "png", "clip": clip}, session=sid)["data"]
+        return Image.open(io.BytesIO(base64.b64decode(data))).convert("RGB")
+    desk.js(sid, CHIPS_SHOWN % "false")
+    try:
+        with_mark = shot()
+        found = desk.js(sid, MARK_VEILED % "true")
+        without = shot()
+        desk.js(sid, MARK_VEILED % "false")
+    finally:
+        desk.js(sid, CHIPS_SHOWN % "true")
+    diff = ImageChops.difference(with_mark, without).convert("L")
+    w, _h = diff.size
+    ink = set()
+    for i, v in enumerate(diff.getdata()):
+        if v > 16:
+            ink.add((body["x"] + i % w, body["y"] + i // w))
+    return ink, found
+
+
+def _meets(a, b, air):
+    return (min(a["r"], b["r"]) - max(a["x"], b["x"]) > -air and
+            min(a["b"], b["b"]) - max(a["y"], b["y"]) > -air)
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class TheChartLabelsKeepClearTests(TestCase):
+    """D2. The chart of scenes 04 and 05: the off-scale chips pinned at the
+    pane's top ("Your target 0.66000 ↑ 0.01000", "Signal target 0.65400 ↑
+    0.00400") were drawn over the end of the legend's OHLC line, covering
+    "(+0.09%)"; the words of his entry's marker, "LONG @ 0.64500", touched
+    the "Your stop" chip pinned at the bottom. No label covers the legend or
+    another label: each keeps clear air around it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _held_at_t(cls)
+        desk = _Scene(_scene_user("scene_labels"))
+        cls.labels, cls.ink, cls.found, cls.pinned = {}, {}, {}, None
+        try:
+            for w, h, rail in SIZES:
+                tid, sid = desk.open(w, h, rail)
+                got = desk.read(sid, LABELS)
+                cls.labels[(w, rail)] = got
+                cls.ink[(w, rail)], cls.found[(w, rail)] = _marker_ink(desk, sid, got["body"])
+                if (w, h, rail) == PICTURES:
+                    from tests.old_design.measure import ACT_MS, ADVANCE, SETTLE
+                    cls.pinned = desk.js(sid, PIN_CARD)
+                    desk.js(sid, ADVANCE % ACT_MS)
+                    desk.driver.quiet(sid, still=0.5, cap=15)
+                    desk.js(sid, SETTLE % 300)
+                    got = desk.read(sid, LABELS)
+                    cls.labels["05"] = got
+                    cls.ink["05"], cls.found["05"] = _marker_ink(desk, sid, got["body"])
+                desk.driver.close_tab(tid)
+        finally:
+            desk.close()
+
+    def _keep_off_the_legend(self, got):
+        self.assertEqual(len(got["rows"]), 2, "the legend's two lines")
+        for chip in got["chips"]:
+            for row in got["rows"]:
+                self.assertFalse(_meets(chip, row, AIR), "%r sits on the legend's %r: %r, %r"
+                                 % (chip["t"], row["t"], chip, row))
+
+    def _keep_off_each_other(self, got):
+        chips = got["chips"]
+        for i, a in enumerate(chips):
+            for b in chips[i + 1:]:
+                self.assertFalse(_meets(a, b, 0), "%r on %r" % (a["t"], b["t"]))
+
+    def _keep_off_the_marker(self, key):
+        ink, found = self.ink[key], self.found[key]
+        self.assertEqual(found, 1, "his entry's marker on the chart")
+        self.assertGreater(len(ink), 40, "the marker's arrow and words were read")
+        for chip in self.labels[key]["chips"]:
+            near = [p for p in ink if chip["x"] - AIR <= p[0] < chip["r"] + AIR and chip["y"] - AIR <= p[1] < chip["b"] + AIR]
+            self.assertEqual(near, [], "the marker's words touch %r (%d pixels within %d px of it)"
+                             % (chip["t"], len(near), AIR))
+
+    def test_scene_04_the_off_scale_target_keeps_off_the_legend(self):
+        got = self.labels[PICTURES[0], PICTURES[2]]
+        self.assertTrue(any(c["t"].startswith("Your target") and c["edge"] == "top" for c in got["chips"]),
+                        "Your target pinned at the top: %r" % [c["t"] for c in got["chips"]])
+        self._keep_off_the_legend(got)
+        self._keep_off_each_other(got)
+
+    def test_scene_05_the_signal_s_target_keeps_off_the_legend(self):
+        self.assertEqual(self.pinned, "clicked")
+        got = self.labels["05"]
+        tops = [c["t"] for c in got["chips"] if c["edge"] == "top"]
+        self.assertTrue(any(t.startswith("Signal target") for t in tops), tops)
+        self.assertTrue(any(t.startswith("Your target") for t in tops), tops)
+        self._keep_off_the_legend(got)
+        self._keep_off_each_other(got)
+
+    def test_scenes_04_and_05_the_entry_marker_s_words_keep_clear_of_the_chips(self):
+        got = self.labels[PICTURES[0], PICTURES[2]]
+        self.assertTrue(any(c["t"].startswith("Your stop") and c["edge"] == "bottom" for c in got["chips"]),
+                        "Your stop pinned at the bottom: %r" % [c["t"] for c in got["chips"]])
+        self._keep_off_the_marker((PICTURES[0], PICTURES[2]))
+        self._keep_off_the_marker("05")
+
+    def test_the_labels_keep_clear_at_every_desk(self):
+        for w, _h, rail in SIZES:
+            with self.subTest(width=w, rail=rail):
+                got = self.labels[(w, rail)]
+                self._keep_off_the_legend(got)
+                self._keep_off_each_other(got)
+                self._keep_off_the_marker((w, rail))
