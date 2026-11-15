@@ -87,12 +87,20 @@
 .sv-ih-feed .sv-ih-r1 { font-size: var(--sv-fs-small); color: var(--sv-ink-2); align-items: center; gap: 6px; }
 /* Whose price and how old: whole, always (the price itself is printed on
    the two sides; its hooks ride hidden beside the words, read with them).
-   A shut market's words are long ("closed · eToro ask 22:00 · opens Sun
-   23:00 UTC"): they wrap between words onto a second line rather than
-   push the two sides out of the row; never cut. */
+   Where the row is tight the words take a second line rather than push
+   the two sides out of the row; never cut, and broken only at a separator
+   (the bureau v2 note's pictures, 2026-11-15: they broke at any space,
+   "eToro bid · 10" over "s"). Each part between two " · " is a span that
+   never wraps (.sv-q-seg: the one painter's data-q-seps, sv-venue.js), so
+   a word, or a number and its unit, never splits: "eToro bid ·" over
+   "10 s", "closed · eToro ask 22:00 ·" over "opens Sun 23:00 UTC". Its
+   figures in tabular numerals: an age that ticks every second keeps its
+   width, and a part that is a figure ("10 s") is set as the kit sets one. */
 .sv-ih > .sv-ih-feed { flex: 0 1 auto; min-width: 0; }
 .sv-ih-feed .sv-ih-r1 { white-space: normal; }
-.sv-ih-feed [data-hero="src"] { flex: 0 1 auto; min-width: 0; white-space: normal; line-height: 15px; }
+.sv-ih-feed [data-hero="src"] { flex: 0 1 auto; min-width: 0; white-space: normal; line-height: 15px;
+    font-variant-numeric: tabular-nums; }
+.sv-ih-feed [data-hero="src"] .sv-q-seg { white-space: nowrap; }
 .sv-ih .dtl-price {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
     overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
@@ -140,10 +148,11 @@
 .sv-ih-icon[aria-pressed="true"] { color: var(--sv-demo); border-color: var(--sv-line-3); }
 .sv-ih-icon svg { width: 15px; height: 15px; display: block; }
 .sv-chart-aux form { margin: 0; display: inline-flex; }
-/* Narrower desks (the old sidebar with the rail open leaves this row 838 px
-   at 1440, 764 at 1366 and 678 at 1280): what another line of the page
-   already says folds first, a whole item at a time, its words kept in its
-   title. Never the quote's words and age, nor the market's state. */
+/* Narrower desks (the desk v2 frame with the rail open leaves this row
+   781 px at 1440, 747 at 1366 and 661 at 1280; the old sidebar left 838,
+   764 and 678): what another line of the page already says folds first, a
+   whole item at a time, its words kept in its title. Never the quote's
+   words and age, nor the market's state. */
 @container svih (max-width: 1000px) {
     .sv-ih > .sv-ih-g { margin-right: 14px; }
     .sv-ih-day .sv-ih-r2 .sv-ih-word { display: none; }
@@ -172,16 +181,26 @@
     .sv-ih .sv-ticket .tk-mid { gap: 0; }
     .sv-ih .sv-ticket .tk-spread { flex-direction: column; align-items: center; gap: 0; line-height: 12px; }
 }
-@container svih (max-width: 720px) {
+/* His R and the day's range fold where the row is under 750 px (1366 with
+   the rail open): beside the day, his position and the compact sides, the
+   feed line had 54 px there, less than its first part ("eToro bid ·"), and
+   ran three lines deep out of the row (the bureau v2 note's scenes, read
+   at the desks' widths, 2026-11-15). At 1440 (759 px) they stay, and the
+   feed line takes its two lines. */
+@container svih (max-width: 750px) {
     .sv-ih-pos .sv-ih-r { display: none; }
     .sv-ih-day .sv-ih-r2 { display: none; }
 }
 /* The narrowest desk (1280 with the rail open): the day folds whole (its
    change is the headband's and the quote panel's too); his position, whose
    price it is and the two sides stay. A shut market's longer words fold
-   the day sooner, on any desk under 1000 px of row. */
+   the day sooner, on any desk under 1000 px of row, and on the narrowest
+   desk the side's word too, its arrow staying ("▲" for "▲ Long", the word
+   in its title): its last part, "opens Sun 22:00 UTC", is wider than the
+   room the row left it, and the words ran three lines deep. */
 @container svih (max-width: 700px) {
     .sv-ih > .sv-ih-day { display: none; }
+    .sv-ih:has(.dtl-mkt.mk-closed) .sv-ih-side-w { display: none; }
 }
 @container svih (max-width: 1000px) {
     .sv-ih:has(.dtl-mkt.mk-closed) > .sv-ih-day { display: none; }

@@ -87,6 +87,26 @@ def q_title(context, symbol, side=None, tail=""):
                                  tail=tail or "")
 
 
+#: The words' separator (one_quote.words: "eToro bid · 25 s").
+_SEP = " · "
+
+
+@register.filter
+def q_seps(words) -> str:
+    """The words as parts that never wrap, for a cell that breaks only at
+    its separators (data-q-seps, the instrument header's whose price and
+    how old: "eToro bid · 10" over "s" in the bureau v2 note's pictures,
+    2026-11-15): each part between two " · " a span (.sv-q-seg), the
+    separator ending the part before it, a plain space between two parts.
+    The same parts the browser's one painter writes (sv-venue.js
+    setParts), and the same text as the words."""
+    from django.utils.html import escape
+    parts = str(words if words is not None else "").split(_SEP)
+    last = len(parts) - 1
+    return mark_safe(" ".join('<span class="sv-q-seg">%s</span>' % escape(part + (" ·" if i < last else ""))
+                              for i, part in enumerate(parts)))
+
+
 @register.filter
 def q_side(direction) -> str:
     """A position's direction as the side its cell prints: "bid" for a
