@@ -133,6 +133,15 @@ STACKING. Every branch touches `core/wall_facts.py` TESTS_GREEN, so merging one 
 
 ## 4. The operator's decisions (log)
 
+**2026-11-15**
+- His answers to the bureau v2 note's five questions, "1 petit, 2 chaque, 3 détail, 4 non, 5 ouverture", all the defaults:
+  1. The Eye's halo stays small (38 px, inside the top bar).
+  2. The strips keep one Tab stop per price and per headline.
+  3. A position's leverage stays in the row's detail, as on the approved board.
+  4. No monthly realized P&L chart.
+  5. Positions stay in purchase order, oldest first.
+- Nothing to build for these. His deploy outputs for the bureau v2 note are still awaited.
+
 **2026-11-13 (afternoon)**
 - "aussi le refresh etoro par minute est toujours trop long, je suggère 20-30 secondes non?": the eToro account sync goes to 30 s, eToro's own held quotes to 15 s, inside the request budget (PR #109). Decided for him: the automated decisions (venue health, the shock trigger, the stall alert, history) keep main's cadence; only what he sees gets fresher.
 - "where is that bloomberg and trading and Sauron Vision version twist please?" then "that you showed me at one point, improve it" and "with the sauron twist...": the 6 November desk (approved "Magnifique attaque") was redrawn and improved as desk v2 on the same canvas (boards 8-11), with the Sauron twist stronger but never on a number: the Eye as the system's pulse (beats when eToro answers, dims without news), light in the void between panels at his Ambience dose, slow embers only in the gaps, one flash per eToro-confirmed fill, the Horde as banners in the bottom bar (REAL first), Orbitron titles, the tower only as a watermark at the menu's foot; numbers crisp and still in JetBrains Mono.
