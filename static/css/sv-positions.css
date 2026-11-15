@@ -978,7 +978,11 @@ body:not(.light-mode) .lvl-dlg input:focus {
 }
 @media (max-width: 768px) {
     .pd-desk .pd-kgrp { height: auto; }
-    .pd-kcells { grid-template-columns: minmax(0, 1fr); }
+    /* One column, the book's three figures with the others (the desk v2
+       polish, D4): the book's own three columns (.pd-kgrp--book
+       .pd-kcells, two classes) outranked this rule's one class, and on the
+       phone "$19,950.00" ran into "1.50%". */
+    .pd-kcells, .pd-kgrp--book .pd-kcells { grid-template-columns: minmax(0, 1fr); }
     .pd-kc { border-right: 0; border-bottom: 1px solid var(--sv-line-1); padding: 8px 14px; }
     .pd-chead { flex-wrap: wrap; height: auto; min-height: var(--sv-card-head); padding: 6px 14px; }
     .pd-keys { display: none; }
