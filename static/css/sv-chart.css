@@ -1034,10 +1034,13 @@
    the card's own: the side's button first, plan §10). The card's face
    gives it its place, all but a shut market's line, which stays above it
    whole with its hour; the face's hover × goes with it (PASS is on the
-   card). A card only hovered still opens beside the rail. */
+   card). A card only hovered still opens beside the rail. Its height is
+   the rail's visible part (templates/base.html, placePopup): it scrolls
+   inside between its sticky head and foot, so TAKE TRADE and PASS stay in
+   view (the desk v2 polish, D3). */
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned {
     position: static !important; inset: auto !important; width: auto !important;
-    max-height: none; margin: 8px 10px 6px; transform: none; overflow-x: hidden;
+    margin: 8px 10px 6px; transform: none; overflow-x: hidden;
 }
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned::after { display: none; }
 .signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal:not(:has(.sr-shut)),
