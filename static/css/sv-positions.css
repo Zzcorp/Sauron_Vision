@@ -976,6 +976,20 @@ body:not(.light-mode) .lvl-dlg input:focus {
 @container pd-desk (max-width: 1059px) {
     .pd-kpis { grid-template-columns: minmax(0, 1fr); }
 }
+/* OPEN POSITIONS fits its card where its figures leave PRICED BY less than
+   its 160 (a desk under 1046 px with the board's book: 1280 px of screen,
+   the menu open, the desk 961): PRICED BY gives its room down to 72 px,
+   enough for the dot and the longest age ("· 59 min"), and its words
+   shorten from their start whatever the price's state, so the age is
+   always whole (the desk v2 polish, D5: the table scrolled sideways at
+   1280 and the ages sat under the pinned CLOSE). Its head takes two lines
+   there, PRICED over BY, inside the head's 28 px. A desk too narrow for
+   the figures themselves still scrolls, CLOSE pinned (S0). */
+@container pd-desk (max-width: 1045px) {
+    .pd-table .pd-c-src { width: 72px; }
+    .pd-desk .pd-src { direction: rtl; text-align: left; }
+    .pd-desk .pd-table > thead > tr > th.pd-th-src { white-space: normal; line-height: 12px; }
+}
 @media (max-width: 768px) {
     .pd-desk .pd-kgrp { height: auto; }
     /* One column, the book's three figures with the others (the desk v2
