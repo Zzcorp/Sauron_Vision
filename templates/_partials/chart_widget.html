@@ -3885,8 +3885,15 @@ or none.{% endcomment %}
        All of them left of the title lane, so they never sit on a title or
        an axis label, and handed to the level layout as keep-outs, so no
        level chip sits on one. Rebuilt with the level layer's paint (the
-       pane's own redraw), written to the page only when one moved. */
-    var MCHIP_H = 20, MCHIP_GAP = 2, MCHIP_EDGE = 4, MCHIP_OFF = 6;
+       pane's own redraw), written to the page only when one moved.
+       A pinned chip keeps clear of what the level chips keep clear of (the
+       bureau v2 note's pictures, 2026-11-15: "Your target" sat on the
+       legend's "(+0.09%)", "LONG @ 0.64500" touched "Your stop"): the
+       page's own boxes (the legend at the top left) and the marks (his
+       entry's arrow and its words, the signal dots), MCHIP_AIR px off each.
+       Like an edge count it slides left from beside the lane, then one row
+       inward; at the top also under the page's boxes there. */
+    var MCHIP_H = 20, MCHIP_GAP = 2, MCHIP_EDGE = 4, MCHIP_OFF = 6, MCHIP_AIR = 2, MCHIP_STEP = 8;
     var mchipHost = null, mchipSig = '', mchipBoxes = [];
     function mchipLayer() {
         if (mchipHost) return mchipHost;
@@ -3912,8 +3919,11 @@ or none.{% endcomment %}
     function chipWidth(text) {
         return Math.ceil(String(text).length * 6.4) + 2 * 7 + 2;
     }
-    function moneyChipPlan(toY, w, h) {
+    function moneyChipPlan(toY, w, h, keep) {
         var api = lvApi(), dp = priceDecimals(0);
+        keep = (keep || []).filter(function (b) {
+            return b && [b.x0, b.x1, b.y0, b.y1].every(function (v) { return typeof v === 'number' && isFinite(v); });
+        });
         var now = (NOW_V !== null && isFinite(NOW_V)) ? NOW_V
                 : (lastBars.length ? lastBars[lastBars.length - 1].close : null);
         var right = w - laneWidth() - MCHIP_OFF, out = [], edges = { top: [], bottom: [] };
@@ -3945,12 +3955,37 @@ or none.{% endcomment %}
                 off('Signal entry', 'sv-mchip--sig sv-mchip--ent', pd.sig.entry);
             }
         }
+        function clear(r) {
+            for (var i = 0; i < keep.length; i++) {
+                var b = keep[i];
+                if (r.x0 < b.x1 + MCHIP_AIR && r.x1 > b.x0 - MCHIP_AIR &&
+                    r.y0 < b.y1 + MCHIP_AIR && r.y1 > b.y0 - MCHIP_AIR) return false;
+            }
+            return true;
+        }
+        /* the page's boxes standing at the pane's top (the legend): the
+           first rows under them are a top chip's too */
+        var under = 0;
+        keep.forEach(function (b) { if (b.y0 <= 2 && b.y1 > under) under = b.y1; });
         ['top', 'bottom'].forEach(function (side) {
-            edges[side].sort(function (a, b) { return a.d - b.d; }).forEach(function (e, k) {
-                var cw = chipWidth(e.text);
-                var y0 = side === 'top' ? MCHIP_EDGE + k * (MCHIP_H + MCHIP_GAP)
-                                        : foot - MCHIP_EDGE - MCHIP_H - k * (MCHIP_H + MCHIP_GAP);
-                out.push({ cls: e.cls, edge: side, html: e.html, x0: right - cw, x1: right, y0: y0, y1: y0 + MCHIP_H });
+            var step = MCHIP_H + MCHIP_GAP;
+            var next = side === 'top' ? MCHIP_EDGE : foot - MCHIP_EDGE - MCHIP_H;
+            edges[side].sort(function (a, b) { return a.d - b.d; }).forEach(function (e) {
+                var cw = chipWidth(e.text), at = null;
+                var ys = side === 'top' ? [next, next + step] : [next, next - step];
+                if (side === 'top' && under) ys.push(under + MCHIP_AIR, under + MCHIP_AIR + step);
+                ys = ys.filter(function (y) { return side === 'top' ? y >= next && y + MCHIP_H <= h : y <= next && y >= 0; })
+                    .sort(function (a, b) { return side === 'top' ? a - b : b - a; });
+                for (var i = 0; i < ys.length && !at; i++) {
+                    for (var x1 = right; x1 - cw >= 4 && !at; x1 -= MCHIP_STEP) {
+                        var r = { x0: x1 - cw, x1: x1, y0: ys[i], y1: ys[i] + MCHIP_H };
+                        if (clear(r)) at = r;
+                    }
+                }
+                /* no clear slot: its own place in the stack, as before */
+                if (!at) at = { x0: right - cw, x1: right, y0: next, y1: next + MCHIP_H };
+                out.push({ cls: e.cls, edge: side, html: e.html, x0: at.x0, x1: at.x1, y0: at.y0, y1: at.y1 });
+                next = side === 'top' ? at.y1 + MCHIP_GAP : at.y0 - MCHIP_GAP - MCHIP_H;
             });
         });
         /* his position's world, left of its entry's title box (the axis
@@ -4521,8 +4556,11 @@ or none.{% endcomment %}
            last-price ROW is the series' line, at the close drawn */
         var last = lastBars.length ? lastBars[lastBars.length - 1].close : null;
         var sb = shownBars(), lastShown = sb.length ? sb[sb.length - 1].close : null;
-        /* the money chips first: the level chips keep off them */
-        try { paintMoneyChips(moneyChipPlan(toY, w, h)); } catch (e) { mchipBoxes = []; }
+        /* the marks (the signal dots, his entry's arrow and its words) and
+           the page's own boxes (the legend): the money chips keep off them,
+           then the level chips keep off all three */
+        var marks = api.markerBoxes(markerPoints(toY), spacing, 10), pageBoxes = overlayBoxes(w);
+        try { paintMoneyChips(moneyChipPlan(toY, w, h, pageBoxes.concat(marks))); } catch (e) { mchipBoxes = []; }
         var g = api.layout(d.items, {
             toY: toY, toX: originX, width: w, height: h,
             theme: c.isDark ? 'dark' : 'light', phone: lvlPhone,
@@ -4533,8 +4571,8 @@ or none.{% endcomment %}
             hover: lvlHover, focus: lvlFocus || lvlFocusPin, pinned: !!pinnedDot(),
             mark: last, money: moneyRows(toY), labels: titledLines(), laneW: laneWidth(), titles: titleRows(toY),
             hlines: hlineRows(toY), lastY: lastShown === null ? null : toY(lastShown),
-            boxes: api.markerBoxes(markerPoints(toY), spacing, 10),
-            overlays: overlayBoxes(w).concat(mchipBoxes), candles: candleBoxes(toY, w, spacing),
+            boxes: marks,
+            overlays: pageBoxes.concat(mchipBoxes), candles: candleBoxes(toY, w, spacing),
             asia: asia, po3: stageEnv(d.po3, d.asia),
             sessions: sessionEnv(d.sessions, aWin, spacing), measure: measureChip
         });

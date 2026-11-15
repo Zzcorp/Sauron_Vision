@@ -56,7 +56,10 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
     <div class="sv-ih-g sv-ih-pos">
         <div class="sv-ih-r1" data-ih-row>
             {% money_world p0 "compact" %}
-            <span class="sv-ih-side">{% if p0.side == "long" %}▲ Long{% else %}▼ Short{% endif %}</span>
+            {% comment %}The side's word folds to its arrow on the narrowest desk
+            when a shut market's longer words need the room (sv-chart.css);
+            its title keeps the word.{% endcomment %}
+            <span class="sv-ih-side" title="{% if p0.side == "long" %}Long{% else %}Short{% endif %}">{% if p0.side == "long" %}▲<span class="sv-ih-side-w"> Long</span>{% else %}▼<span class="sv-ih-side-w"> Short</span>{% endif %}</span>
             <span class="sv-ih-num">{{ p0.qty|qty }}</span>
             {% if p0.pnl is None %}
             <span class="sv-unknown" title="{% if p0.mark_title %}{{ p0.mark_title }}{% else %}No quote for this instrument: the P&amp;L is unmeasured, not zero{% endif %}">&mdash;</span>
@@ -84,9 +87,12 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
             (.dtl-price carries the page's one decimal count, .dtl-last the
             price), read by a screen reader with the words, out of the row's
             width. data-instrument-live (on the chart card below) keeps
-            sv-instrument-live.js polling, so none of it freezes.{% endcomment %}
+            sv-instrument-live.js polling, so none of it freezes. The words
+            break only at their separators (data-q-seps, the bureau v2
+            note's pictures, 2026-11-15: "eToro bid · 10" over "s"): a
+            word, or a number and its unit, never splits.{% endcomment %}
             {% if quote %}<span class="dtl-price" data-decimals="{{ quote_decimals }}"><span class="dtl-last" data-q="{{ instrument.symbol }}">{% px quote.last instrument.asset_class instrument.symbol %}</span></span>{% endif %}
-            <span class="dtl-src" data-hero="src" data-q="{{ instrument.symbol }}" data-q-f="words" data-q-title>{% q instrument.symbol "words" %}</span>
+            {% q instrument.symbol "words" as q_words %}<span class="dtl-src" data-hero="src" data-q="{{ instrument.symbol }}" data-q-f="words" data-q-seps data-q-title>{{ q_words|q_seps }}</span>
         </div>
         <div class="sv-ih-r2 sv-ih-mkt-row" data-ih-row>
             <span class="dtl-venue" data-hero="venue" data-q="{{ instrument.symbol }}" data-q-f="slot"{% if not hero.venue %} hidden{% endif %}>{% q instrument.symbol "slot" %}</span>
