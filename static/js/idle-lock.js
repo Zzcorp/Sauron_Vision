@@ -36,6 +36,18 @@
 
     var overlay = d.getElementById("idleLockOverlay");
     var isLocked = false;
+    /* When the lock last showed, on the events' own clock (performance.now,
+       which Event.timeStamp shares): a key pressed before that moment was
+       pressed at the page, not at the lock, and neither the router nor the
+       wake takes it. Gollum's Enter on "Lock the screen" is still being
+       dispatched when the lock shows: it reached the router as a submit,
+       and the lock opened on "Enter at least 4 digits.". */
+    var lockedSince = 0;
+
+    function beforeTheLock(e) {
+        /* An engine with no event clock (timeStamp 0) guards nothing. */
+        return !!(e && e.timeStamp && e.timeStamp < lockedSince);
+    }
     var lastActivity = Date.now();
     var lastStamp = 0, lastMove = 0, lastPing = Date.now();
 
@@ -87,6 +99,58 @@
        there to press it. */
     var wakeTimer = null;
 
+    /* ── The PIN takes the keys ──────────────────────────────────────────
+       The operator, 2026-11-15: "when sauron is locked and the pin appears
+       the user should be able to input straight up from his keyboard the
+       numbers". Measured on main (tests/test_lock_pin_focus.py): the focus
+       stayed where it was behind the veil (on the lock button itself when
+       the lock was asked for, on a link when the clock locked, on a
+       dialog's button), and the document router leaves a link or a button
+       its own keys, so every digit was dropped until a box was clicked.
+       The wake's one focus() always missed too: the card is
+       visibility:hidden until its wake transition starts (its .04s delay,
+       then the frame that starts it), and a hidden box refuses the focus.
+
+       So the lock takes the keys off the page the moment it shows
+       (dropKeys), the PIN's first empty box takes them the moment the PIN
+       shows, asked again each frame until it holds them (takeKeys), and a
+       focus taken behind the veil while the lock is up comes straight back
+       (the focusin guard, under the wiring). The same boxes, the same
+       router, the same submission: only where the keys go. */
+    var keysFrame = 0;
+
+    function inGate(el) {
+        /* A control of the gate itself (a box, the pad, Unlock,
+           Disconnect), not the veil around them. */
+        return !!(overlay && el && el !== overlay && overlay.contains(el));
+    }
+
+    function dropKeys() {
+        /* Nothing behind the veil keeps the keys: a key on <body> reaches
+           the router below, a key on a button behind it never did. */
+        var a = d.activeElement;
+        if (overlay && a && a !== d.body && !overlay.contains(a) && a.blur) {
+            try { a.blur(); } catch (e) {}
+        }
+    }
+
+    function takeKeys() {
+        if (!overlay) return;
+        if (keysFrame) cancelAnimationFrame(keysFrame);
+        var frames = 0;
+        (function attempt() {
+            keysFrame = 0;
+            if (!isLocked || !overlay.classList.contains("is-awake")) return;
+            /* A box has them, or the operator moved to a control of the
+               gate himself (Tab to Disconnect): that stands. */
+            if (inGate(d.activeElement)) return;
+            focusFirstEmpty();
+            if (inGate(d.activeElement)) return;
+            dropKeys();
+            if (++frames < 120) keysFrame = requestAnimationFrame(attempt);
+        })();
+    }
+
     function sleep() {
         if (!overlay) return;
         overlay.classList.remove("is-awake");
@@ -100,9 +164,10 @@
             overlay.classList.add("is-awake");
             var standby = d.getElementById("ilStandby");
             if (standby) standby.hidden = true;
-            var first = overlay.querySelector("[data-il-pin]");
-            if (first) { try { first.focus(); } catch (e) {} }
         }
+        /* The PIN shows: its first empty box takes the keys, once the card
+           can hold them (takeKeys, above). */
+        takeKeys();
         /* Back to sleep if the person left again. Long enough that reading
            the card is not a race, short enough that the pad does not sit
            lit on an unattended machine. */
@@ -124,8 +189,12 @@
     setInterval(tickClock, 15000);
 
     ["mousemove", "keydown", "touchstart", "pointerdown"].forEach(function (ev) {
-        d.addEventListener(ev, function () { if (isLocked) wake(); },
-                           { passive: true });
+        /* Not the gesture that asked for the lock (Gollum's Enter on "Lock
+           the screen" is still being dispatched when the lock shows): it
+           locks asleep like the lock button's click does. */
+        d.addEventListener(ev, function (e) {
+            if (isLocked && !beforeTheLock(e)) wake();
+        }, { passive: true });
     });
 
     /* ── Lock now ────────────────────────────────────────────────────────
@@ -164,6 +233,7 @@
     function engage(tellServer) {
         if (isLocked || !overlay) return;
         isLocked = true;
+        lockedSince = w.performance && performance.now ? performance.now() : 0;
         if (tellServer !== false) {
             /* Server first: the flag is the lock, the overlay is paint.
                Fire-and-forget — the server-side gap backstop covers a
@@ -190,6 +260,9 @@
         } catch (e) {}
         overlay.classList.remove("il-out");
         if (w.SV && w.SV.overlay) w.SV.overlay.open(overlay);
+        /* AFTER the open, which keeps the element that had the focus to
+           give it back on release; the PIN takes the keys when it shows. */
+        dropKeys();
         /* Choreography: the veil is OPAQUE from this very frame (leaking
            the book through a fading sheet is the bug the opacity tests
            exist for) — only the eye arrives on the next frame, which is
@@ -382,6 +455,7 @@
            keystroke itself lands in the first box. */
         d.addEventListener("keydown", function (e) {
             if (!isLocked) return;
+            if (beforeTheLock(e)) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             var t = e.target;
             if (t && t.closest && t.closest("a, button")) return;
@@ -414,6 +488,24 @@
         });
         var unlockBtn = d.getElementById("ilUnlockBtn");
         if (unlockBtn) unlockBtn.addEventListener("click", submitPin);
+        /* A focus taken behind the veil while the lock is up (a dialog
+           closing onto its trigger, a field a shortcut opens, a palette's
+           late focus) comes straight back: to the PIN when it shows, else
+           off the page, so the next key still reaches the router. */
+        d.addEventListener("focusin", function (e) {
+            if (!isLocked || overlay.contains(e.target)) return;
+            if (overlay.classList.contains("is-awake")) focusFirstEmpty();
+            if (!inGate(d.activeElement)) { dropKeys(); takeKeys(); }
+        }, true);
+        /* A press on the veil's empty parts (the eye, the hour, the card's
+           margins; a phone's waking tap lands there, and its mousedown came
+           after the PIN had the keys) is no choice of where the keys go: it
+           does not take them from the PIN. A control keeps its own press. */
+        overlay.addEventListener("mousedown", function (e) {
+            var t = e.target;
+            if (!isLocked || (t && t.closest && t.closest("input, button, a, label, select, textarea"))) return;
+            e.preventDefault();
+        });
     }
 
     /* Cross-tab + health-poll hook (see the 423 branch in base.html). */
