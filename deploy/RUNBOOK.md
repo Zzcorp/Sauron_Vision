@@ -575,6 +575,29 @@ left, never deleted, and then the command does not say "No off-grid 4h
 duplicates of the public feed.". A venue's bars, and off-grid history
 with nothing overlapping it, stay.
 
+**Once, after the update of 2026-11-19** (weekend venue bars): until then
+the bar pass stored a 1h and a 4h eToro candle for every weekend slot of a
+currency pair or a commodity, and the stops and sizes read the ATR of
+those candles for about 44 hours after each reopen. The bar writer now
+drops a candle whose whole span the market was shut for; eToro's all-week
+instruments (gold, oil, silver, natural gas) keep theirs, since eToro
+trades them at weekends. The rows stored before the update stay until
+this prune deletes them. Read the dry run (counts by class and timeframe:
+no price, no id, no symbol), then apply it, on a weekday, before the next
+entries:
+
+```bash
+./deploy/dc exec -T web python manage.py bars_shut_prune           # the counts, nothing deleted
+./deploy/dc exec -T web python manage.py bars_shut_prune --apply   # delete them, recompute the indicators
+```
+
+It deletes only eToro's rows that hold no open time inside a shut of a
+day or more, with the indicator rows stored at them, and recomputes at
+once the stored indicators of every series it changed. Crypto, stocks,
+ETFs, indices, the other feeds' rows and the bar that holds Sunday's
+reopen are never touched. A second `--apply` finds nothing. `--symbols`
+adds each symbol's count; `--since YYYY-MM-DD` limits the window.
+
 ## 10. Restoring
 
 Dumps live inside the `backups` volume, not on the host, so copy one out
