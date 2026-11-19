@@ -201,6 +201,20 @@ const minS = nowS - nowS % 60;
        no family (one argument, as before): the line back in the scale. */
     await refresh(STAND);
     R.again = prov()(own);
+
+    /* A price BESIDE the candles (the review, 2026-11-19): under their own
+       range it would land in the scale's margins (12 % above, 14 % below
+       of a 500 px pane), over the volume bars or the legend's rows; it is
+       held in the scale. Further off it is left out, as above. */
+    chart.paneSize = function () { return { width: 1200, height: 500 }; };
+    R.beside = {};
+    [['nearBelow', 4145.0], ['nearAbove', 4185.0], ['farBelow', 4124.54],
+     ['farAbove', 4200.0]].forEach(function (c) {
+        api.setNow(c[1], 'etoro');
+        R.beside[c[0]] = prov()(own);
+    });
+    delete chart.paneSize;
+
     api.setNow(4124.54);
     R.oneArgument = prov()(own);
     process.stdout.write(JSON.stringify(R));
@@ -356,3 +370,24 @@ class TheStandInScaleTests(SimpleTestCase):
                          {"minValue": 4149.56, "maxValue": 4181.21})
         self.assertEqual(self.r["oneArgument"]["priceRange"],
                          {"minValue": 4124.54, "maxValue": 4181.21})
+
+    def test_a_price_beside_the_candles_is_held_in_their_scale(self):
+        """The review, 2026-11-19: on gold's 15 min the scale was the
+        candles' own and eToro's ask, a little under them, fell into the
+        pane's foot, the volume's band: the line ran across the volume bars
+        and its chip sat at the pane's foot. A price that would land in the
+        scale's margins (the volume's band below, the legend's rows above)
+        is held in the scale, at the candles' edge, as before the change;
+        further off it is left out (the measured test pins it)."""
+        b = self.r["beside"]
+        # 500 px, margins 60.1 px above and 70.1 px below, 369.8 px inside:
+        # 4.56 under the candles (31.65 tall) is 53 px down, in the margin
+        self.assertEqual(b["nearBelow"]["priceRange"],
+                         {"minValue": 4145.0, "maxValue": 4181.21})
+        self.assertEqual(b["nearAbove"]["priceRange"],
+                         {"minValue": 4149.56, "maxValue": 4185.0})
+        # 25.02 under them is 292 px down, off the pane: the candles' own
+        self.assertEqual(b["farBelow"]["priceRange"],
+                         {"minValue": 4149.56, "maxValue": 4181.21})
+        self.assertEqual(b["farAbove"]["priceRange"],
+                         {"minValue": 4149.56, "maxValue": 4181.21})

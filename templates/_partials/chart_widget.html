@@ -3450,10 +3450,45 @@ or none.{% endcomment %}
         return !(SOURCE && SOURCE.stand_in && NOW_FAM && SOURCE.family &&
                  NOW_FAM !== SOURCE.family);
     }
+    /* A PRICE BESIDE THE CANDLES IS HELD IN THEIR SCALE (2026-11-19, the
+       review: on gold's 15 min eToro's ask sat a little under the candles,
+       fell into the pane's foot by their own scale and ran across the
+       volume bars, its chip at the foot). Under `res`, the candles' own
+       range, the pane keeps the scale's margins: the legend's rows above,
+       the volume's band below (baseOptions' scaleMargins, and the pixel
+       margins the series asks for). A price that would land in them,
+       inside the pane, is held in the scale at the candles' edge, as every
+       price was before; further off it is off the pane, and pinned. */
+    function nowInMargins(res) {
+        if (NOW_V === null || !isFinite(NOW_V) || !res || !res.priceRange) return false;
+        var lo = res.priceRange.minValue, hi = res.priceRange.maxValue;
+        if (!isFinite(lo) || !isFinite(hi) || (NOW_V >= lo && NOW_V <= hi)) return false;
+        if (!(hi > lo)) return true;
+        var h = 0, sm = null, logScale = false;
+        try { h = (chart && typeof chart.paneSize === 'function') ? chart.paneSize().height : 0; } catch (e) { h = 0; }
+        if (!(h > 0)) return false;
+        try {
+            var o = chart.priceScale('right').options();
+            sm = o.scaleMargins;
+            logScale = o.mode === LightweightCharts.PriceScaleMode.Logarithmic;
+        } catch (e) { sm = null; }
+        var mt = (sm && isFinite(sm.top)) ? sm.top : 0.12, mb = (sm && isFinite(sm.bottom)) ? sm.bottom : 0.14;
+        var m = res.margins || {};
+        var top = mt * h + (m.above || 0), foot = mb * h + (m.below || 0), inside = h - top - foot;
+        if (!(inside > 0)) return false;
+        var f = function (v) { return v; };
+        if (logScale) {
+            if (!(lo > 0 && NOW_V > 0)) return false;
+            f = Math.log;
+        }
+        var under = NOW_V < lo;
+        var px = (under ? f(lo) - f(NOW_V) : f(NOW_V) - f(hi)) / (f(hi) - f(lo)) * inside;
+        return px <= (under ? foot : top);
+    }
     function nowAware(inner) {
         return function (original) {
             var res = inner ? inner(original) : original();
-            if (!nowInScale()) return res;
+            if (!nowInScale() && !nowInMargins(res)) return res;
             if (!res || !res.priceRange) {
                 return { priceRange: { minValue: NOW_V, maxValue: NOW_V },
                          margins: res ? res.margins : undefined };
@@ -3904,8 +3939,9 @@ or none.{% endcomment %}
        A pinned chip keeps clear of what the level chips keep clear of (the
        bureau v2 note's pictures, 2026-11-15: "Your target" sat on the
        legend's "(+0.09%)", "LONG @ 0.64500" touched "Your stop"): the
-       page's own boxes (the legend at the top left) and the marks (his
-       entry's arrow and its words, the signal dots), MCHIP_AIR px off each.
+       page's own boxes (the legend at the top left), the marks (his
+       entry's arrow and its words, the signal dots) and the newest candles
+       (2026-11-19), MCHIP_AIR px off each.
        Like an edge count it slides left from beside the lane, then one row
        inward; at the top also under the page's boxes there. */
     var MCHIP_H = 20, MCHIP_GAP = 2, MCHIP_EDGE = 4, MCHIP_OFF = 6, MCHIP_AIR = 2, MCHIP_STEP = 8;
@@ -3944,11 +3980,21 @@ or none.{% endcomment %}
         }
         return parts[0];
     }
-    function moneyChipPlan(toY, w, h, keep) {
+    function moneyChipPlan(toY, w, h, keep, candles) {
         var api = lvApi(), dp = priceDecimals(0);
-        keep = (keep || []).filter(function (b) {
-            return b && [b.x0, b.x1, b.y0, b.y1].every(function (v) { return typeof v === 'number' && isFinite(v); });
-        });
+        function boxes(list) {
+            return (list || []).filter(function (b) {
+                return b && [b.x0, b.x1, b.y0, b.y1].every(function (v) { return typeof v === 'number' && isFinite(v); });
+            });
+        }
+        keep = boxes(keep);
+        /* THE NEWEST CANDLES (2026-11-19, the review): on a stand-in's own
+           scale the candles fill the pane, their lows reach the foot's
+           rows, and "eToro ask ... ↓" and "Your target ↓" sat on the
+           newest ones, the last one too. A pinned chip keeps off them as
+           the level chips do (candleBoxes: svLevels.LV.NOW_BARS of them),
+           sliding left from beside the lane as from the legend. */
+        candles = boxes(candles);
         var now = (NOW_V !== null && isFinite(NOW_V)) ? NOW_V
                 : (lastBars.length ? lastBars[lastBars.length - 1].close : null);
         var right = w - laneWidth() - MCHIP_OFF, out = [], edges = { top: [], bottom: [] };
@@ -3991,9 +4037,10 @@ or none.{% endcomment %}
                 off('Signal entry', 'sv-mchip--sig sv-mchip--ent', pd.sig.entry);
             }
         }
+        var avoid = keep.concat(candles);
         function clear(r) {
-            for (var i = 0; i < keep.length; i++) {
-                var b = keep[i];
+            for (var i = 0; i < avoid.length; i++) {
+                var b = avoid[i];
                 if (r.x0 < b.x1 + MCHIP_AIR && r.x1 > b.x0 - MCHIP_AIR &&
                     r.y0 < b.y1 + MCHIP_AIR && r.y1 > b.y0 - MCHIP_AIR) return false;
             }
@@ -4597,7 +4644,8 @@ or none.{% endcomment %}
            the page's own boxes (the legend): the money chips keep off them,
            then the level chips keep off all three */
         var marks = api.markerBoxes(markerPoints(toY), spacing, 10), pageBoxes = overlayBoxes(w);
-        try { paintMoneyChips(moneyChipPlan(toY, w, h, pageBoxes.concat(marks))); } catch (e) { mchipBoxes = []; }
+        var newest = candleBoxes(toY, w, spacing);
+        try { paintMoneyChips(moneyChipPlan(toY, w, h, pageBoxes.concat(marks), newest)); } catch (e) { mchipBoxes = []; }
         var g = api.layout(d.items, {
             toY: toY, toX: originX, width: w, height: h,
             theme: c.isDark ? 'dark' : 'light', phone: lvlPhone,
@@ -4609,7 +4657,7 @@ or none.{% endcomment %}
             mark: last, money: moneyRows(toY), labels: titledLines(), laneW: laneWidth(), titles: titleRows(toY),
             hlines: hlineRows(toY), lastY: lastShown === null ? null : toY(lastShown),
             boxes: marks,
-            overlays: pageBoxes.concat(mchipBoxes), candles: candleBoxes(toY, w, spacing),
+            overlays: pageBoxes.concat(mchipBoxes), candles: newest,
             asia: asia, po3: stageEnv(d.po3, d.asia),
             sessions: sessionEnv(d.sessions, aWin, spacing), measure: measureChip
         });

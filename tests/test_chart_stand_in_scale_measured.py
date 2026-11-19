@@ -15,6 +15,11 @@ pane's edge as a chip with its arrow, like his stop off the view ("eToro
 ask 4124.54"). eToro's own candles, and a same-instrument feed's under an
 eToro price (EURUSD=X), keep the line in the scale.
 
+The review of that change (2026-11-19) found two seams, measured here too:
+the chips pinned at the foot sat on the newest candles once these filled
+the pane (e), and a price just beside the candles fell into the volume's
+band, the line across the volume bars (f).
+
 The scene: the desk v2 deploy note's invented book (tests/desk_scenes.py),
 the clock held at its instant, the page served with every script, the
 chart library from its pinned copy, 1440 x 900 at deviceScaleFactor 1.
@@ -82,14 +87,25 @@ READ = r"""(function (cid) {
   var chips = Array.prototype.map.call(el.querySelectorAll('.sv-mchip'), function (c) {
     var r = c.getBoundingClientRect();
     return { text: c.textContent.replace(/\s+/g, ' ').trim(), cls: c.className,
-             edge: c.getAttribute('data-edge'), top: r.top - box.top, bottom: r.bottom - box.top };
+             edge: c.getAttribute('data-edge'), top: r.top - box.top, bottom: r.bottom - box.top,
+             left: r.left - box.left, right: r.right - box.left };
   });
   var cap = document.querySelector('#' + cid + '-src [data-role="now"]');
+  /* the newest 30 candles as drawn: a bar's slot wide, high to low */
+  var ts = chart.timeScale(), half = Math.max(1, ((ts.options() || {}).barSpacing || 6) / 2);
+  var newest = [];
+  for (var j = Math.max(0, bars.length - 30); j < bars.length; j++) {
+    var x = ts.timeToCoordinate(bars[j].time);
+    if (x === null) continue;
+    newest.push({ i: j, x0: x - half, x1: x + half,
+                  y0: series.priceToCoordinate(bars[j].high), y1: series.priceToCoordinate(bars[j].low) });
+  }
   return JSON.stringify({ family: src.family, standIn: src.stand_in, n: bars.length,
                           low: lo, high: hi, paneH: pane.height,
                           yLow: series.priceToCoordinate(lo), yHigh: series.priceToCoordinate(hi),
                           now: v, yNow: v === null ? null : series.priceToCoordinate(v),
                           foot: Math.round(pane.height * 0.86) - 6, chips: chips,
+                          volTop: pane.height * 0.86, newest: newest,
                           caption: cap ? cap.textContent : '' });
 })(%s)"""
 
@@ -113,22 +129,48 @@ def _minutes(n, mid, swing, half_range, period, low=None, high=None):
     return rows
 
 
+def _falling(n, top, bottom, half_range):
+    """`n` one-minute candles up to the scene's instant, falling from
+    `top` to `bottom` in a straight line: the newest at the lowest low."""
+    end = S.T.replace(second=0, microsecond=0)
+    span = (top - bottom) - 2 * half_range
+    rows = []
+    for k in range(n):
+        m = top - half_range - span * k / (n - 1)
+        o, c = (m + half_range / 3, m - half_range / 3) if k % 2 else \
+            (m - half_range / 3, m + half_range / 3)
+        rows.append([end - timedelta(minutes=n - 1 - k), o, m + half_range,
+                     m - half_range, c])
+    return rows
+
+
 class _Feed:
-    """The keyless feed, answering the scene's minute candles per symbol."""
+    """The keyless feed, answering the scene's minute candles per symbol,
+    in the shape the page asks for (`shape`, "" by default)."""
 
     def __init__(self):
         self.asked = []
+        self.shape = ""
         self.rows = {
             "XAUUSD": _minutes(240, 4165.385, 13.0, 2.3, 19.0,
                                low=4149.56, high=4181.21),
             "EURUSD": _minutes(240, 1.08225, 0.0003, 0.00008, 17.0),
+            # the newest candles at the foot, eToro's ask and his target
+            # under the pane: the pinned chips at the foot, beside them
+            "XAUUSD:foot": _falling(240, 4181.21, 4149.56, 2.3),
+            # the candles just above eToro's ask: by their own scale it
+            # would sit in the volume's band
+            "XAUUSD:beside": _minutes(240, 4143.5, 13.0, 2.3, 19.0,
+                                      low=4127.0, high=4160.0),
         }
 
     def klines(self, symbol, interval="1m", limit=240):
         self.asked.append((symbol, interval, limit))
+        rows = self.rows.get("%s:%s" % (symbol, self.shape)) or \
+            self.rows.get(symbol, [])
         return [[int(t.timestamp()) * 1000, str(round(o, 5)), str(round(h, 5)),
                  str(round(lo, 5)), str(round(c, 5)), "120"]
-                for t, o, h, lo, c in self.rows.get(symbol, [])[-limit:]]
+                for t, o, h, lo, c in rows[-limit:]]
 
 
 def _gold_on_the_scene(book):
@@ -188,10 +230,13 @@ class TheStandInScaleMeasuredTests(TestCase):
 
     maxDiff = None
     PAGES = (("gold_1min", "XAUUSD", "1min"), ("gold_1h", "XAUUSD", "1h"),
-             ("eur_1min", "EURUSD", "1min"))
+             ("eur_1min", "EURUSD", "1min"),
+             ("gold_1min_foot", "XAUUSD", "1min"),
+             ("gold_1min_beside", "XAUUSD", "1min"))
 
     @classmethod
     def setUpTestData(cls):
+        from django.core.cache import cache
         S.hold_the_clock(cls)
         book = S.scene_book()
         _gold_on_the_scene(book)
@@ -206,6 +251,14 @@ class TheStandInScaleMeasuredTests(TestCase):
             desk = _Browser(client)
             try:
                 for name, sym, tf in cls.PAGES:
+                    # the page's own candles: the live frame is kept a
+                    # minute (chart_source._live_frame), so each page asks
+                    # the feed afresh
+                    cls.feed.shape = name.rpartition("_")[2] \
+                        if name.endswith(("_foot", "_beside")) else ""
+                    cache.delete_many(["chart:v2:%s:%s" % (sym, f) for f in
+                                       ("1m", "1min", "5m", "10m", "15m",
+                                        "30m")])
                     pref = {"sv-chart:%s:%s" % (CID, sym): json.dumps({"tf": tf})}
                     tid, sid = desk.open("/instruments/%s/" % sym, 1440, 900,
                                          prefs=pref)
@@ -221,6 +274,9 @@ class TheStandInScaleMeasuredTests(TestCase):
                 self.assertTrue(self.drew[name], "the chart drew")
                 self.assertNotIn("error", self.got[name])
                 self.assertEqual(self.got[name]["n"], 240, self.got[name])
+        self.assertEqual((self.got["gold_1min_foot"]["low"],
+                          self.got["gold_1min_foot"]["high"]),
+                         (4149.56, 4181.21))
         gold = self.got["gold_1min"]
         self.assertEqual((gold["family"], gold["standIn"]), ("yahoo", "future"))
         self.assertEqual(gold["now"], ETORO_ASK)
@@ -263,3 +319,43 @@ class TheStandInScaleMeasuredTests(TestCase):
         g = self.got["eur_1min"]
         self.assertLess(g["now"], g["low"], "eToro's bid is under every candle")
         self.assertTrue(0 <= g["yNow"] <= g["paneH"], g)
+
+    def test_e_the_pinned_chips_keep_off_the_newest_candles(self):
+        """(e) The review, 2026-11-19: on the candles' own scale their lows
+        reach the row the pinned chips stand on at the pane's foot, and
+        "eToro ask 4124.54 ↓" and "Your target ↓" sat on the newest
+        candles, the last one too. The newest 30 candles (the ones no chip
+        hides, svLevels.LV.NOW_BARS) are a pinned chip's keep-out."""
+        g = self.got["gold_1min_foot"]
+        self.assertEqual((g["family"], g["standIn"], g["n"]),
+                         ("yahoo", "future", 240))
+        self.assertEqual(len(g["newest"]), 30, g["newest"])
+        foot = [c for c in g["chips"] if c["edge"] == "bottom"]
+        self.assertTrue(any("eToro ask 4124.54" in c["text"] for c in foot), foot)
+        self.assertTrue(any("Your target" in c["text"] for c in foot), foot)
+        # the scene reached: the newest candles stand on the chips' row
+        self.assertGreater(max(b["y1"] for b in g["newest"]), g["foot"] - 20, g)
+        for c in [c for c in g["chips"] if c["edge"]]:
+            for b in g["newest"]:
+                with self.subTest(chip=c["text"], bar=b["i"]):
+                    on = c["left"] < b["x1"] - 0.5 and c["right"] > b["x0"] + 0.5 \
+                        and c["top"] < b["y1"] - 0.5 and c["bottom"] > b["y0"] + 0.5
+                    self.assertFalse(on, (c, b))
+            with self.subTest(chip=c["text"]):
+                self.assertGreaterEqual(c["left"], 0)
+                self.assertLessEqual(c["bottom"], g["foot"] + 0.5)
+
+    def test_f_a_price_beside_the_candles_stays_above_the_volume_band(self):
+        """(f) The review, 2026-11-19: on gold's 15 min eToro's ask sat a
+        little under the candles; by their own scale it fell into the
+        volume's band, the line across the volume bars and its chip at the
+        pane's foot. A price that would land in the scale's margins is
+        held in the scale, at the candles' edge, above the band."""
+        g = self.got["gold_1min_beside"]
+        self.assertEqual((g["family"], g["standIn"]), ("yahoo", "future"))
+        self.assertEqual((g["low"], g["high"]), (4127.0, 4160.0))
+        self.assertEqual(g["now"], ETORO_ASK)
+        self.assertGreaterEqual(g["yNow"], 0, g)
+        self.assertLessEqual(g["yNow"], g["volTop"] + 0.5, g)
+        self.assertFalse([c for c in g["chips"]
+                          if c["edge"] and "4124.54" in c["text"]], g["chips"])
