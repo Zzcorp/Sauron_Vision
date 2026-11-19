@@ -395,9 +395,11 @@
   }, true);
 
   /* ── the doors' tips: a name, a key, one italic line ──────────────── */
-  /* After 400 ms of hover (a class, so a forced :hover never draws one),
-     or at once on keyboard focus (sv-frame.css). Each line is read at the
-     moment it shows, from the panel's own counts. */
+  /* After 400 ms of hover, or at once when the keyboard brings the focus
+     (:focus-visible): a class, so neither the census's forced :hover nor
+     its forced :focus-visible draws one (sv-frame.css). A click or Enter
+     puts it away, so the panel it opens is never under it. Each line is
+     read at the moment it shows, from the panel's own counts. */
   function hhmm(t) { var x = new Date(t); return ('0' + x.getUTCHours()).slice(-2) + ':' + ('0' + x.getUTCMinutes()).slice(-2); }
   function num(n) { var s = d.createElement('span'); s.className = 'sv-num'; s.textContent = String(n); return s; }
   function line(box, parts) {
@@ -430,17 +432,24 @@
       if (said.length) line(box, [said.join(' · ')]);
     }
   }
+  function keyed(door) {
+    try { return d.activeElement === door && door.matches(':focus-visible'); } catch (err) { return false; }
+  }
   Array.prototype.forEach.call(d.querySelectorAll('.sv-door'), function (door) {
     if (!door.querySelector('.sv-door-tip')) return;
     var timer = null;
+    function show() { hint(door); door.classList.add('is-tipping'); }
     function hide() { clearTimeout(timer); timer = null; door.classList.remove('is-tipping'); }
     door.addEventListener('mouseenter', function () {
       clearTimeout(timer);
-      timer = setTimeout(function () { hint(door); door.classList.add('is-tipping'); }, 400);
+      timer = setTimeout(show, 400);
     });
-    door.addEventListener('mouseleave', hide);
+    door.addEventListener('mouseleave', function () { if (!keyed(door)) hide(); });
+    /* Used, it gives the panel the room: a click or Enter puts it away. */
     door.addEventListener('mousedown', hide);
-    door.addEventListener('focus', function () { hint(door); });
+    door.addEventListener('click', hide);
+    door.addEventListener('focus', function () { if (keyed(door)) show(); });
+    door.addEventListener('blur', hide);
   });
 
   /* ── the menu's door: the fold row at its foot ────────────────────── */

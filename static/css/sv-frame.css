@@ -766,8 +766,10 @@ html body .sv-dock {
     display: flex; flex-direction: column; align-items: center; gap: 2px; margin: -12px 0 0;
     font-family: var(--sv-font-mono); font-size: 11px; font-weight: 500; line-height: 13px; color: var(--sv-ink-1);
 }
-.sv-dock-dirs .up { color: var(--sv-up); }
-.sv-dock-dirs .down { color: var(--sv-down); }
+/* each side's glyph in its colour, its count in ink: never the colour alone */
+.sv-dock-dirs .up, .sv-dock-dirs .down { color: var(--sv-ink-1); }
+.sv-dock-dirs .up .sv-dir-g { color: var(--sv-up); }
+.sv-dock-dirs .down .sv-dir-g { color: var(--sv-down); }
 
 /* ── The right column: the rail, and the panels that open in its place ── */
 html body .signals-rail {
@@ -811,6 +813,9 @@ html body .sv-council-band:not(.open) { visibility: hidden; }
 html body .sv-horde {
     left: var(--sidebar-width) !important; right: var(--sv-frame-right) !important; bottom: var(--sv-frame-foot) !important;
     --hd-l: var(--sidebar-width); --hd-r: var(--sv-frame-right); --hd-sr: var(--sv-frame-right);
+    /* No minimize tab or restore pill under it in the frame: its rows run
+       down to the bar, with no empty band at its foot. */
+    --hd-foot: 0px;
 }
 html body .sv-horde:not(.open) { pointer-events: none; }
 
@@ -1018,7 +1023,16 @@ html body .se-chat-header .se-chat-title { display: inline-flex; align-items: ce
 .sv-door-tip-hint .sv-num { font-family: var(--sv-font-mono); font-style: normal; font-size: 11px; color: var(--sv-ink-2); }
 body.light-mode .sv-door-tip-hint { color: var(--sv-ink-2); }
 body.light-mode .sv-door-tip-hint .sv-num { color: var(--sv-ink-1); }
-.sv-door.is-tipping .sv-door-tip, .sv-door:focus-visible .sv-door-tip { opacity: 1; visibility: visible; }
+/* Shown only by its class (sv-frame.js: 400 ms of hover, or the keyboard's
+   focus), never by a pseudo-class alone, so the census's forced :hover and
+   :focus-visible never draw one. While one shows, the dock or the bar that
+   holds it stands over the open column, so the tip is read whole: the
+   rail, the Council, the Activity and Ask's panel stand beside them, never
+   under them, and Gollum's face keeps its place over the bar. */
+.sv-door.is-tipping .sv-door-tip { opacity: 1; visibility: visible; }
+html body .sv-dock:has(.sv-door.is-tipping) { z-index: calc(var(--z-panel) + 1); }
+html body:has(.info-panel-wrap .sv-door.is-tipping) .info-panel-wrap { z-index: calc(var(--z-panel) + 1) !important; }
+html body:has(.info-panel-wrap .sv-door.is-tipping) .gollum-fab { z-index: calc(var(--z-panel) + 2); }
 .sv-dock .sv-door-tip { right: calc(100% + 12px); top: 50%; translate: 0 -50%; }
 .info-panel-bar .sv-door-tip { bottom: calc(100% + 10px); left: -1px; }
 
