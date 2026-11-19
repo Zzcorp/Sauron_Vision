@@ -6818,7 +6818,11 @@ def chart_data_api(request):
       * Intraday RESOLUTIONS ("1min", "5min", "10min", "15min", "30min",
         "1h", "2h", "4h") — `time` is epoch seconds; minute bars are
         fetched live from the keyless public feed and cached for a minute,
-        2h folded from the stored 1h rows.
+        2h folded from the stored 1h rows. For an instrument routed to a
+        venue, the minute frames are the venue's own stored rows while
+        they are fresh (2026-11-19, chart_source._venue_minutes: eToro's
+        15m and 5m from the Orcs' tape, 10 min and 30 min folded from
+        them on the UTC grid); no request, no write.
     Any other timeframe is refused with a 400 (2026-11-01): it drew 90 days
     of daily candles for any word.
     """

@@ -41,6 +41,15 @@ reply (`series`), the quote's preview and the hero (`quote_facts`):
     suspect bar inherits its marking; the partial last one is the forming
     bar. This week's candle takes the live tick only while it holds
     today's forming day, as the daily view's last candle does.
+  * THE VENUE'S MINUTE CANDLES (2026-11-19, the operator: "il y a un
+    probleme d'affichage des prix sur certaines charts comme la 30min").
+    The minute frames of a venue-routed instrument were the keyless feed's
+    alone, another instrument for a stand-in (Yahoo's front-month future)
+    under the venue's price line. They follow the rule above now: the
+    venue's own stored minute rows (the Orcs' eToro tape: 15m and 5m)
+    while they are fresh, 10 min and 30 min folded from them on the UTC
+    grid; else the keyless feed, live, as before, and the legend says
+    where the venue's candles stop (_venue_minutes).
 
 Display only: the engine reads bars through its own loaders, never this.
 """
@@ -108,6 +117,17 @@ STORED_FROM = {"1h": "1h", "2h": "1h", "4h": "4h"}
 #: Live frames a keyless feed has no interval for, and the finer one they
 #: are folded from (_native).
 LIVE_FOLD = {"10m": "5m"}
+#: THE VENUE'S OWN MINUTE CANDLES (2026-11-19): the stored frames a venue's
+#: minute frame reads, in order of preference (_venue_minutes). The Orcs'
+#: eToro tape writes 15m and 5m (bot_program/orcs/constants.TAPE_INTERVALS);
+#: nothing writes 1m or 30m today, and a frame a venue does not store is
+#: folded from a finer one of the same rows, as 2h is from 1h.
+VENUE_MINUTE_FROM = {"1m": ("1m",), "5m": ("5m",), "10m": ("5m",),
+                     "15m": ("15m",), "30m": ("30m", "15m")}
+#: A venue's minute rows are fresh while their newest ended within this
+#: many frames of now (and never under VENUE_MINUTE_FLOOR_S per frame).
+VENUE_MINUTE_FRAMES = 2
+VENUE_MINUTE_FLOOR_S = 600
 #: Binance's kline intervals (GET /api/v3/klines). Yahoo's are
 #: market_data.public_feed.YF_NATIVE, and its client resamples the
 #: RESAMPLE_FROM frames from 1h itself.
@@ -118,7 +138,7 @@ BINANCE_INTERVALS = frozenset({"1s", "1m", "3m", "5m", "15m", "30m", "1h",
 #: and SMA200 have weeks to say something on.
 WEEKLY_DAYS = 1820
 #: A frame in the legend's words.
-FRAME_WORDS = {"5m": "5 min", "10m": "10 min"}
+FRAME_WORDS = {"5m": "5 min", "10m": "10 min", "30m": "30 min"}
 
 
 def family(tag) -> str:
@@ -537,16 +557,25 @@ def session_day(stamp) -> str:
 def intraday_series(instrument, interval, *, route="",
                     limit=INTRADAY_LIMIT, now=None):
     """(bars, source) for an intraday frame. 1h and 4h are the stored
-    rows of one feed; finer frames are fetched live from the keyless feed
-    (never stored: a minute table for a chart click is not worth its
-    rows) and kept a minute. `time` is epoch seconds.
+    rows of one feed; finer frames are the routed venue's own stored
+    minute rows when it has fresh ones (_venue_minutes), else fetched live
+    from the keyless feed (never stored: a minute table for a chart click
+    is not worth its rows) and kept a minute. `time` is epoch seconds.
 
     2h and 10 min (2026-11-01). Nothing stores 2h: it is folded from the
     1h rows of the feed choose() picks for 1h, with the same hole cut,
     notes and suspect marks, on the fixed UTC grid; the newest `limit`
     buckets are read as twice as many hours. Neither keyless feed serves
     10 min: it is folded from the feed's 5 min bars, kept a minute under
-    its own key. 30 min is both feeds' own interval."""
+    its own key. 30 min is both feeds' own interval.
+
+    THE VENUE'S OWN MINUTE CANDLES (2026-11-19). The operator: "il y a un
+    probleme d'affichage des prix sur certaines charts comme la 30min".
+    For an instrument routed to eToro whose keyless feed is another
+    instrument (Yahoo's front-month future, a cash index), every frame
+    finer than 1h was that other instrument's, under eToro's price line,
+    hero and position lines. The venue's stored minute rows (the Orcs'
+    tape writes eToro's 15m and 5m) now draw them when they are fresh."""
     from market_data.models import PriceData
 
     now = now or datetime.now(dt_tz.utc)
@@ -596,6 +625,12 @@ def intraday_series(instrument, interval, *, route="",
         # No stored rows (an instrument outside the fleet and the
         # watchlist): the live fetch below.
 
+    if route in VENUES and interval in VENUE_MINUTE_FROM:
+        venue = _venue_minutes(instrument, interval, route, now, limit,
+                               notes)
+        if venue is not None:
+            return venue
+
     fam = public_family(instrument.asset_class)
     src = _source(instrument, fam, route, notes)
     fetch, ratio = interval, 1
@@ -618,6 +653,99 @@ def intraday_series(instrument, interval, *, route="",
                             f"folded from {label(fam, instrument)}'s {part} "
                             f"bars, on the UTC grid")
     return _finish([dict(b) for b in bars], src, fold_with), src
+
+
+def _venue_own(instrument, timeframe, route):
+    """(tags, newest) of the routed venue's OWN stored rows at `timeframe`
+    (2026-11-19): the route family's tags but a public feed's, which
+    shares a family with a venue for crypto (Binance's keyless klines are
+    "binance_public", not the venue's own candles). ([], None) without."""
+    from market_data.bot_bars import _is_public_source
+    fam = _families(instrument, timeframe).get(route)
+    if not fam:
+        return [], None
+    tags = [t for t in fam["tags"] if not _is_public_source(t)]
+    if not tags:
+        return [], None
+    if tags == fam["tags"]:
+        return tags, fam["newest"]
+    from django.db.models import Max
+
+    from market_data.models import PriceData
+    newest = (PriceData.objects.filter(instrument=instrument,
+                                       timeframe=timeframe, source__in=tags)
+              .aggregate(n=Max("timestamp"))["n"])
+    return tags, newest
+
+
+def _venue_minutes_fresh(instrument, interval, base, newest, route, now):
+    """Whether the venue's `base` rows, the newest opened at `newest`, may
+    draw the `interval` frame at `now` (2026-11-19): the newest ended
+    within VENUE_MINUTE_FRAMES frames of now (VENUE_MINUTE_FLOOR_S at
+    least), or no earlier than the venue's newest 1h bar opened (a shut
+    market, or a bar pass itself behind: then the minute frames are as
+    late as the 1H series is), and never once they are stale by the 1h
+    series' own bound (choose: 72 h, three hours for crypto), when the 1H
+    series gives way to newer public bars."""
+    end = newest + timedelta(seconds=FRAME_SECONDS[base])
+    window = VENUE_MINUTE_FRAMES * max(FRAME_SECONDS[interval],
+                                       VENUE_MINUTE_FLOOR_S)
+    if (now - end).total_seconds() <= window:
+        return True
+    _tags, hour = _venue_own(instrument, "1h", route)
+    return (hour is not None and end >= hour
+            and not _stale(instrument, "1h", end, now))
+
+
+def _venue_minutes(instrument, interval, route, now, limit, notes):
+    """(bars, source) of the routed venue's OWN stored minute rows for
+    `interval`, or None when it has none fresh (2026-11-19).
+
+    VENUE_MINUTE_FROM names the stored frames read, in order: 5m from 5m;
+    10m from 5m on the 600 s UTC grid; 15m from 15m; 30m from 30m, else
+    from 15m on the 1800 s UTC grid (the 2h fold's own _on_grid, with its
+    suspect marks); 1m from 1m rows alone. No public feed's row is drawn
+    here, no request is sent and nothing is written; the keyless feed's
+    minute cache is not touched. The source is the venue's own candles,
+    whose close side is unmeasured: no live price is welded on them.
+
+    When the venue holds rows of the frame that are not fresh
+    (_venue_minutes_fresh), the live frame draws as before and the legend
+    says where the venue's candles stop."""
+    from market_data.models import PriceData
+
+    stopped = None
+    for base in VENUE_MINUTE_FROM[interval]:
+        tags, newest = _venue_own(instrument, base, route)
+        if newest is None:
+            continue
+        if not _venue_minutes_fresh(instrument, interval, base, newest,
+                                    route, now):
+            stopped = stopped or (base, newest)
+            continue
+        ratio = FRAME_SECONDS[interval] // FRAME_SECONDS[base]
+        rows = list(PriceData.objects
+                    .filter(instrument=instrument, timeframe=base,
+                            source__in=tags)
+                    .order_by("-timestamp")[:limit * ratio])
+        rows.reverse()
+        bars = [_bar(p, int(p.timestamp.timestamp())) for p in rows]
+        fold_with = None
+        if ratio > 1:
+            fold_with = _on_grid(FRAME_SECONDS[interval], f"{base} bar",
+                                 limit)
+            notes.insert(0, f"{FRAME_WORDS.get(interval, interval)} candles "
+                            f"folded from {label(route, instrument)}'s "
+                            f"{base} candles, on the UTC grid")
+        src = _source(instrument, route, route, notes)
+        return _finish(bars, src, fold_with), src
+    if stopped is not None:
+        base, newest = stopped
+        pub = public_family(getattr(instrument, "asset_class", ""))
+        notes.append(f"{feed_name(route)}'s {base} candles stop at "
+                     f"{newest:%Y-%m-%d %H:%M} UTC; these are "
+                     f"{label(pub, instrument)}'s")
+    return None
 
 
 def _live_frame(instrument, interval, limit, key=None):
