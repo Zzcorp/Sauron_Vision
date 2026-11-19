@@ -15,25 +15,31 @@ The switch care_holds_while_shut, "Hold management while the market is
 shut": OFF on arrival, and OFF is the tick and the drain exactly as they
 were; its ON takes the trading PIN at /ops/. ON, a LIVE eToro row, real or
 demo, of a currency pair or of a commodity eToro trades on weekdays only,
-while its instrument is inside a shut of 24 hours or more on the bar rule's
-own clocks (market_data/shut_bars.shut_for_a_day_now: eToro's FX week,
-Friday 17:00 to Sunday 17:00 New York, for a pair; the instrument's clock
-for a commodity), is HELD: the tick reads nothing and sends nothing for it,
-and the drain neither resends its close nor counts an attempt. eToro's
-all-week instruments (gold here), crypto, stocks and paper rows are managed
-as before, and so is everything the operator does himself: the kill switch
-and the CLOSE button.
+while its instrument is inside a shut of 24 hours or more on eToro's own
+published edges (market_data/shut_bars.shut_for_a_day_now: a pair from
+Friday 16:30 to Sunday 17:05 New York; copper from 30 minutes before
+Globex's Friday close to its Sunday reopen; Christmas Day and New Year's
+Day stretch the weekend), is HELD: the tick reads nothing and sends nothing
+for it, and the drain neither resends its close nor counts an attempt.
+eToro's all-week instruments (gold here), EURUSD (whose weekend hours at
+eToro are unsettled: a hold would leave it only eToro's resting stop),
+crypto, stocks and paper rows are managed as before, and so is everything
+the operator does himself: the kill switch and the CLOSE button.
 
 Fakes only: the feed harness's fake eToro (tests/feed/harness.py) records
 every request and refuses every write unless a scenario accepts it.
 Invented prices; public catalogue symbols only.
 
 Clocks, UTC, in winter (New York on EST since 1 November):
-  FRI_2130  Fri 20 Nov 21:30  eToro's FX week still runs, to 22:00
+  FRI_2125  Fri 20 Nov 21:25  eToro still trades its pairs and copper
+  FRI_2130  Fri 20 Nov 21:30  eToro's own close of both (its market-hours
+                              page), half an hour before the FX week and
+                              Globex, which the bar rule keeps
   FRI_2200  Fri 20 Nov 22:00  the FX week and Globex shut
   SAT       Sat 21 Nov 12:00  inside both shuts
-  SUN_2210  Sun 22 Nov 22:10  the FX week reopened at 22:00; Globex still shut
+  SUN_2210  Sun 22 Nov 22:10  pairs reopened at 22:05; Globex still shut
   CME_BACK  Sun 22 Nov 23:05  Globex reopened at 23:00
+  XMAS      Fri 25 Dec 12:00  Christmas Day: the weekend began on Thursday
 
 Run with:  python manage.py test tests.test_weekend_guard
 """
@@ -56,11 +62,18 @@ KEY = "care_holds_while_shut"
 NAME = "Hold management while the market is shut"
 TEST_PIN = "583920"     # a test-only value
 
+FRI_2125 = datetime(2026, 11, 20, 21, 25, tzinfo=UTC)
 FRI_2130 = datetime(2026, 11, 20, 21, 30, tzinfo=UTC)
 FRI_2200 = datetime(2026, 11, 20, 22, 0, tzinfo=UTC)
 SAT = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
 SUN_2210 = datetime(2026, 11, 22, 22, 10, tzinfo=UTC)
 CME_BACK = datetime(2026, 11, 22, 23, 5, tzinfo=UTC)
+XMAS = datetime(2026, 12, 25, 12, 0, tzinfo=UTC)
+#: eToro's own edges of this weekend (its market-hours page, winter UTC):
+#: pairs shut Friday 21:30 to Sunday 22:05, copper Friday 21:30 to Sunday
+#: 23:00.
+PAIR_WEEKEND = (FRI_2130, datetime(2026, 11, 22, 22, 5, tzinfo=UTC))
+COPPER_WEEKEND = (FRI_2130, datetime(2026, 11, 22, 23, 0, tzinfo=UTC))
 
 #: symbol -> (class, exchange, invented entry, invented 1R)
 BOOK = {
@@ -122,47 +135,106 @@ class TheClockTests(SimpleTestCase):
         from market_data.shut_bars import HELD_CLASSES
         self.assertEqual(HELD_CLASSES, frozenset({"forex", "commodity"}))
 
-    def test_a_pair_reads_etoros_new_york_week(self):
-        """Winter: eToro's week shuts at Friday 22:00 UTC and reopens at
-        Sunday 22:00 UTC, an hour after the FOREX row's own hours."""
-        week = (FRI_2200, _at(2026, 11, 22, 22))
-        for sym in ("EURUSD", "GBPUSD"):
-            fx = _inst("forex", "FOREX", sym)
-            self.assertIsNone(self._shut(fx, FRI_2130), sym)
-            self.assertEqual(self._shut(fx, FRI_2200), week, sym)
-            self.assertEqual(self._shut(fx, SAT), week, sym)
-            self.assertEqual(self._shut(fx, _at(2026, 11, 22, 21, 59)), week)
-            self.assertIsNone(self._shut(fx, _at(2026, 11, 22, 22)), sym)
-            self.assertIsNone(self._shut(fx, _at(2026, 11, 18, 12)), sym)
+    def test_a_pair_reads_etoros_published_week(self):
+        """Winter: eToro shuts its pairs at Friday 21:30 UTC and reopens
+        them at Sunday 22:05 UTC ("Market Opens: Sunday 22:05; Market
+        Closes: Friday 21:30", its market-hours page), half an hour before
+        the FX week's 17:00 New York close and five minutes after its
+        reopen."""
+        fx = _inst("forex", "FOREX", "GBPUSD")
+        self.assertIsNone(self._shut(fx, FRI_2125))
+        self.assertEqual(self._shut(fx, FRI_2130), PAIR_WEEKEND)
+        self.assertEqual(self._shut(fx, FRI_2200), PAIR_WEEKEND)
+        self.assertEqual(self._shut(fx, SAT), PAIR_WEEKEND)
+        self.assertEqual(self._shut(fx, _at(2026, 11, 22, 22, 4)),
+                         PAIR_WEEKEND)
+        self.assertIsNone(self._shut(fx, _at(2026, 11, 22, 22, 5)))
+        self.assertIsNone(self._shut(fx, _at(2026, 11, 18, 12)))
 
     def test_a_pair_in_summer(self):
-        """New York on EDT: Friday 21:00 to Sunday 21:00 UTC."""
-        fx = _inst("forex", "FOREX", "EURUSD")
-        self.assertIsNone(self._shut(fx, _at(2026, 7, 10, 20, 59)))
+        """New York on EDT: Friday 20:30 to Sunday 21:05 UTC."""
+        fx = _inst("forex", "FOREX", "GBPUSD")
+        self.assertIsNone(self._shut(fx, _at(2026, 7, 10, 20, 29)))
         self.assertEqual(self._shut(fx, _at(2026, 7, 11, 12)),
-                         (_at(2026, 7, 10, 21), _at(2026, 7, 12, 21)))
-        self.assertIsNone(self._shut(fx, _at(2026, 7, 12, 21)))
+                         (_at(2026, 7, 10, 20, 30), _at(2026, 7, 12, 21, 5)))
+        self.assertIsNone(self._shut(fx, _at(2026, 7, 12, 21, 5)))
 
-    def test_a_weekday_commodity_reads_its_exchange_clock(self):
-        """Copper on COMEX keeps Globex at eToro: shut Friday 22:00 to
-        Sunday 23:00 UTC in winter; the daily hour's break is no shut of a
-        day and holds nothing."""
+    def test_a_weekday_commodity_reads_etoros_edges_on_globex(self):
+        """Copper keeps Globex's week at eToro, shut half an hour earlier:
+        Friday 21:30 to Sunday 23:00 UTC in winter (eToro's COPPER.FUT row:
+        "Market Opens: Sunday 23:00; Market Closes: Friday 21:30"); the
+        daily hour's break is no shut of a day and holds nothing."""
         copper = _inst("commodity", "COMEX", "HGUSD")
-        shut = (FRI_2200, _at(2026, 11, 22, 23))
-        self.assertIsNone(self._shut(copper, FRI_2130))
-        self.assertEqual(self._shut(copper, SAT), shut)
-        self.assertEqual(self._shut(copper, SUN_2210), shut)
+        self.assertIsNone(self._shut(copper, FRI_2125))
+        self.assertEqual(self._shut(copper, FRI_2130), COPPER_WEEKEND)
+        self.assertEqual(self._shut(copper, SAT), COPPER_WEEKEND)
+        self.assertEqual(self._shut(copper, SUN_2210), COPPER_WEEKEND)
         self.assertIsNone(self._shut(copper, CME_BACK))
         self.assertIsNone(self._shut(copper, _at(2026, 11, 17, 22, 30)))
+
+    def test_the_bar_rule_keeps_the_wider_week(self):
+        """Between eToro's close and the FX week's or Globex's, the guard
+        holds while the bar rule still keeps the bars: a bar it keeps there
+        is a flat candle at most, while a row held from eToro's own close is
+        never sent an order eToro cannot fill."""
+        from market_data.shut_bars import holds_no_open_time
+        for inst in (_inst("forex", "FOREX", "GBPUSD"),
+                     _inst("commodity", "COMEX", "HGUSD")):
+            for minute in (30, 45):
+                at = FRI_2125.replace(minute=minute)
+                self.assertIsNotNone(self._shut(inst, at), inst.symbol)
+                self.assertFalse(holds_no_open_time(inst, "15m", at),
+                                 inst.symbol)
 
     def test_an_unknown_exchange_reads_the_class_clock(self):
         """"" (/setup/) and "ETORO" (the legacy sync) name no table: the
         class's default clock, CME."""
         for exch in ("", "ETORO"):
             other = _inst("commodity", exch, "HGUSD")
-            self.assertEqual(self._shut(other, SAT),
-                             (FRI_2200, _at(2026, 11, 22, 23)), exch)
+            self.assertEqual(self._shut(other, SAT), COPPER_WEEKEND, exch)
             self.assertIsNone(self._shut(other, _at(2026, 11, 17, 22, 30)))
+
+    def test_a_friday_holiday_stretches_the_hold_back_to_thursday(self):
+        """Christmas Day 2026 and New Year's Day 2027 are Fridays on which
+        the FX market and Globex hold no session: a pair and copper are held
+        from Thursday at eToro's usual hour, 21:30 UTC, to the weekend's
+        reopen."""
+        fx = _inst("forex", "FOREX", "GBPUSD")
+        copper = _inst("commodity", "COMEX", "HGUSD")
+        for thursday in (_at(2026, 12, 24), _at(2026, 12, 31)):
+            closed = thursday + timedelta(hours=21, minutes=30)
+            sunday = thursday + timedelta(days=3)
+            for at in (closed, thursday + timedelta(days=1, hours=12),
+                       sunday + timedelta(hours=21)):
+                self.assertEqual(
+                    self._shut(fx, at),
+                    (closed, sunday + timedelta(hours=22, minutes=5)), at)
+                self.assertEqual(self._shut(copper, at),
+                                 (closed, sunday + timedelta(hours=23)), at)
+            before = closed - timedelta(minutes=5)
+            self.assertIsNone(self._shut(fx, before))
+            self.assertIsNone(self._shut(copper, before))
+
+    def test_eurusd_is_never_held_while_its_weekend_bars_still_go(self):
+        """eToro's weekend hours for EURUSD are unsettled (one page lists
+        it 24/7, another weekday-only). A hold would leave it only eToro's
+        resting stop for two days if eToro trades it, so the guard never
+        holds it; the bar rule still drops its weekend candles, its safe
+        side either way."""
+        from market_data.shut_bars import holds_no_open_time
+        for exch in ("FOREX", ""):
+            eur = _inst("forex", exch, "EURUSD")
+            for at in (FRI_2130, SAT, XMAS):
+                self.assertIsNone(self._shut(eur, at), (exch, at))
+            self.assertTrue(holds_no_open_time(eur, "4h", SAT))
+            self.assertTrue(holds_no_open_time(eur, "4h", XMAS))
+
+    def test_an_lme_commodity_is_never_held(self):
+        """LME's clock is not one the venue keeps (LSE's hours stand in for
+        it): a commodity filed under it is never held."""
+        for at in (SAT, _at(2026, 11, 20, 17), _at(2026, 11, 23, 7)):
+            self.assertIsNone(self._shut(_inst("commodity", "LME", "X"),
+                                         at), at)
 
     def test_etoros_all_week_instruments_are_never_shut(self):
         """Gold and silver trade at eToro on Saturday and Sunday too (its
@@ -182,9 +254,9 @@ class TheClockTests(SimpleTestCase):
             self.assertIsNone(self._shut(_inst(cls, exch, sym), SAT), cls)
 
     def test_what_cannot_be_read_is_never_held(self):
-        fx = _inst(" Forex ", "", "EURUSD")
+        fx = _inst(" Forex ", "", "GBPUSD")
         self.assertEqual(self._shut(fx, SAT.replace(tzinfo=None)),
-                         (FRI_2200, _at(2026, 11, 22, 22)), "naive is UTC")
+                         PAIR_WEEKEND, "naive is UTC")
         self.assertIsNone(self._shut(None, SAT))
         self.assertIsNone(self._shut(fx, "Saturday"))
 
@@ -247,8 +319,8 @@ class TheSwitchTests(TestCase):
             "before."), words)
         for said in ("nothing is sent to eToro", "forex",
                      "weekday-only commodity", "shut a day or more",
-                     "pending close", "resumes at the reopen",
-                     "Gold, oil, crypto, stocks: as before."):
+                     "holidays too", "pending close", "until the reopen",
+                     "EURUSD, gold, oil, crypto, stocks: as before."):
             self.assertIn(said, words)
 
     def test_a_missing_row_reads_off(self):
@@ -465,7 +537,7 @@ class TheTickTests(_Guard):
         the row OPEN, its stop, target and care as they were."""
         from bot_program.models import AssetBotTrade
         self.guard(True)
-        for symbol in ("EURUSD", "HGUSD"):
+        for symbol in ("GBPUSD", "HGUSD"):
             for name in SCENARIOS:
                 for demo in (False, True):
                     with self.subTest(symbol=symbol, scenario=name,
@@ -488,23 +560,23 @@ class TheTickTests(_Guard):
         """On the row (metadata["shut_hold"], written once for the shut)
         and in the log, every tick."""
         self.guard(True)
-        fx = self.row("EURUSD", protected=True, care=(1.5, 0.1))
+        fx = self.row("GBPUSD", protected=True, care=(1.5, 0.1))
         copper = self.row("HGUSD", protected=True, care=(1.5, 0.1))
-        etoro = self.etoro({"EURUSD": 0.0, "HGUSD": 0.0})
+        etoro = self.etoro({"GBPUSD": 0.0, "HGUSD": 0.0})
         with self.assertLogs("bot_program.shut_guard", level="INFO") as logs:
             self.tick(etoro)
         said = "\n".join(logs.output)
-        fx_words = ("held: market shut until Sun 22 Nov 22:00 UTC (the "
+        fx_words = ("held: market shut until Sun 22 Nov 22:05 UTC (the "
                     "guard): nothing is sent to eToro; the row is managed "
                     "again at the reopen")
         copper_words = ("held: market shut until Sun 22 Nov 23:00 UTC (the "
                         "guard): nothing is sent to eToro; the row is "
                         "managed again at the reopen")
-        self.assertIn(f"EURUSD #{fx.id}: {fx_words}", said)
+        self.assertIn(f"GBPUSD #{fx.id}: {fx_words}", said)
         self.assertIn(f"HGUSD #{copper.id}: {copper_words}", said)
         note = self.note(fx)
         self.assertEqual(note["words"], fx_words)
-        self.assertEqual(note["until"], "2026-11-22T22:00:00+00:00")
+        self.assertEqual(note["until"], "2026-11-22T22:05:00+00:00")
         self.assertEqual(note["since"], SAT.isoformat())
         self.assertEqual(self.note(copper)["until"],
                          "2026-11-22T23:00:00+00:00")
@@ -520,56 +592,79 @@ class TheTickTests(_Guard):
         for a paper row; the close itself waits for the reopen."""
         from alerts.models import Notification
         self.guard(True)
-        t = self.row("EURUSD", opened_days_ago=26)       # 624 h of 720
-        etoro = self.etoro({"EURUSD": 0.2})
+        t = self.row("GBPUSD", opened_days_ago=26)       # 624 h of 720
+        etoro = self.etoro({"GBPUSD": 0.2})
         self.tick(etoro)
         self.assertEqual(etoro.requests, [], "held: not even its mark read")
         self.assertTrue(Notification.objects.filter(
-            title__startswith="⧗ Time stop nearing: EURUSD").exists())
-        self.assertEqual(self.note(t)["until"], "2026-11-22T22:00:00+00:00")
+            title__startswith="⧗ Time stop nearing: GBPUSD").exists())
+        self.assertEqual(self.note(t)["until"], "2026-11-22T22:05:00+00:00")
         t.refresh_from_db()
         self.assertEqual(t.status, "OPEN")
+
+    def test_on_a_eurusd_row_is_managed_on_saturday_beside_a_held_pair(
+            self):
+        """EURUSD's weekend hours at eToro are unsettled: its row is
+        managed as before (its soft-stop close goes on a Saturday), in the
+        very walk that holds GBPUSD's."""
+        self.guard(True)
+        eur = self.row("EURUSD", protected=True, care=(1.5, 0.1))
+        gbp = self.row("GBPUSD", protected=True, care=(1.5, 0.1))
+        etoro = self.etoro({"EURUSD": 0.0, "GBPUSD": 0.0})
+        self.tick(etoro)
+        self.assertEqual([w[0] for w in self.sent(etoro, "EURUSD")],
+                         ["close_position"])
+        self.assertEqual(self.sent(etoro, "GBPUSD"), [])
+        self.assertEqual(self.note(eur), {})
+        self.assertNotEqual(self.note(gbp), {})
 
 
 # ── the reopen, on each instrument's own clock ───────────────────────────
 
 class TheReopenTests(_Guard):
 
-    def test_friday_2130_utc_a_pair_is_still_managed_and_held_from_2200(self):
-        """eToro's FX week runs to 17:00 New York, 22:00 UTC in winter: the
-        FOREX row's 21:00 UTC close is not the venue's."""
+    def test_friday_a_pair_and_copper_are_managed_to_2130_utc_then_held(
+            self):
+        """eToro closes its pairs and copper at Friday 21:30 UTC in winter
+        (its market-hours page), half an hour before the FX week and
+        Globex: at 21:25 both rows are still managed, from 21:30 held."""
+        from bot_program.models import AssetBotTrade
         self.guard(True)
-        self.clock.now = FRI_2130
-        managed = self.row("EURUSD", protected=True, care=(1.5, 0.1))
-        etoro = self.etoro({"EURUSD": 0.0})
-        self.tick(etoro)
-        self.assertEqual([w[0] for w in self.sent(etoro, "EURUSD")],
-                         ["close_position"])
-        managed.refresh_from_db()
-        self.assertEqual(managed.status, "CLOSE_PENDING")
-        self.clock.now = FRI_2200
-        held = self.row("GBPUSD", protected=True, care=(1.5, 0.1))
-        etoro = self.etoro({"GBPUSD": 0.0})
-        self.tick(etoro)
-        self.assertEqual(self.sent(etoro, "GBPUSD"), [])
-        held.refresh_from_db()
-        self.assertEqual(held.status, "OPEN")
+        for symbol in ("GBPUSD", "HGUSD"):
+            with self.subTest(symbol=symbol):
+                AssetBotTrade.objects.all().delete()
+                self.clock.now = FRI_2125
+                managed = self.row(symbol, protected=True, care=(1.5, 0.1))
+                etoro = self.etoro({symbol: 0.0})
+                self.tick(etoro)
+                self.assertEqual([w[0] for w in self.sent(etoro, symbol)],
+                                 ["close_position"])
+                managed.refresh_from_db()
+                self.assertEqual(managed.status, "CLOSE_PENDING")
+                AssetBotTrade.objects.all().delete()
+                self.clock.now = FRI_2130
+                held = self.row(symbol, protected=True, care=(1.5, 0.1))
+                etoro = self.etoro({symbol: 0.0})
+                self.tick(etoro)
+                self.assertEqual(self.sent(etoro, symbol), [])
+                held.refresh_from_db()
+                self.assertEqual(held.status, "OPEN")
 
     def test_the_first_tick_after_the_reopen_manages_the_row(self):
-        """Saturday held; Sunday 22:10 UTC the pair is managed again (its
-        week reopened at 22:00) while copper, on Globex, still waits; at
+        """Saturday held; Sunday 22:10 UTC the pair is managed again (eToro
+        reopened it at 22:05) while copper, on Globex, still waits; at
         23:05 copper is managed too. The time stop that fell due while held
         fires then, at the reopen's price."""
         self.guard(True)
-        fx = self.row("EURUSD", protected=True, care=(1.5, 0.1))
+        fx = self.row("GBPUSD", protected=True, care=(1.5, 0.1))
         copper = self.row("HGUSD", opened_days_ago=40)
-        etoro = self.etoro({"EURUSD": 0.0, "HGUSD": 0.2})
+        etoro = self.etoro({"GBPUSD": 0.0, "HGUSD": 0.2})
         self.tick(etoro)
         self.assertEqual(etoro.writes_sent, [])
         self.clock.now = SUN_2210
-        etoro = self.etoro({"EURUSD": 0.0, "HGUSD": 0.2})
+        etoro = self.etoro({"GBPUSD": 0.0, "HGUSD": 0.2})
         self.tick(etoro)
-        self.assertEqual([w[0] for w in self.sent(etoro, "EURUSD")],
+        self.assertEqual([w[0] for w in self.sent(etoro, "GBPUSD")],
                          ["close_position"])
         self.assertEqual(self.sent(etoro, "HGUSD"), [])
         self.clock.now = CME_BACK
@@ -581,6 +676,43 @@ class TheReopenTests(_Guard):
         self.assertEqual(copper.status, "CLOSE_PENDING")
         fx.refresh_from_db()
         self.assertEqual(fx.status, "CLOSE_PENDING")
+
+
+# ── a holiday: Christmas Day 2026 is a Friday ────────────────────────────
+
+class TheHolidayTests(_Guard):
+    """The FX market and Globex hold no session on Christmas Day: eToro's
+    pairs and copper are shut from Thursday 24 December at 21:30 UTC to the
+    weekend's reopen. Before the holiday table the guard read the day as
+    open and sent."""
+
+    START = XMAS
+
+    def test_off_christmas_day_is_managed_as_before(self):
+        self.guard(False)
+        self.row("GBPUSD", protected=True, care=(1.5, 0.1))
+        etoro = self.etoro({"GBPUSD": 0.0})
+        self.tick(etoro)
+        self.assertEqual([w[0] for w in self.sent(etoro, "GBPUSD")],
+                         ["close_position"])
+
+    def test_on_nothing_is_sent_on_christmas_day_for_a_pair_or_copper(self):
+        """Held as on a Saturday, to the weekend's reopen; EURUSD, whose
+        weekend hours are unsettled, is managed as before."""
+        self.guard(True)
+        fx = self.row("GBPUSD", protected=True, care=(1.5, 0.1))
+        copper = self.row("HGUSD", protected=True, care=(1.5, 0.1))
+        eur = self.row("EURUSD", protected=True, care=(1.5, 0.1))
+        etoro = self.etoro({"GBPUSD": 0.0, "HGUSD": 0.0, "EURUSD": 0.0})
+        self.tick(etoro)
+        self.assertEqual(self.sent(etoro, "GBPUSD"), [])
+        self.assertEqual(self.sent(etoro, "HGUSD"), [])
+        self.assertEqual([w[0] for w in self.sent(etoro, "EURUSD")],
+                         ["close_position"])
+        self.assertEqual(self.note(fx)["until"], "2026-12-27T22:05:00+00:00")
+        self.assertEqual(self.note(copper)["until"],
+                         "2026-12-27T23:00:00+00:00")
+        self.assertEqual(self.note(eur), {})
 
 
 # ── what the guard never touches ─────────────────────────────────────────
@@ -609,8 +741,8 @@ class TheUntouchedTests(_Guard):
         self.guard(True)
         btc = self.row("BTCUSD")
         aapl = self.row("AAPL")
-        paper = self.row("GBPUSD", paper=True)
-        fx = self.row("EURUSD")
+        paper = self.row("EURUSD", paper=True)
+        fx = self.row("GBPUSD")
         etoro = self.etoro({"BTCUSD": -1.5, "AAPL": -1.5, "GBPUSD": -1.5,
                             "EURUSD": -1.5})
         self.tick(etoro)
@@ -618,7 +750,7 @@ class TheUntouchedTests(_Guard):
                          ["close_position"])
         self.assertEqual([w[0] for w in self.sent(etoro, "AAPL")],
                          ["close_position"])
-        self.assertEqual(self.sent(etoro, "EURUSD"), [])
+        self.assertEqual(self.sent(etoro, "GBPUSD"), [])
         paper.refresh_from_db()
         self.assertEqual(paper.status, "CLOSED")
         for t in (btc, aapl, paper):
@@ -631,13 +763,13 @@ class TheUntouchedTests(_Guard):
         from bot_program.engine.kill_switch import execute_kill_switch
         from bot_program.manual_close import execute_close
         self.guard(True)
-        fx = self.row("EURUSD", protected=True, care=(1.5, 0.1))
-        etoro = self.etoro({"EURUSD": 0.0})
+        fx = self.row("GBPUSD", protected=True, care=(1.5, 0.1))
+        etoro = self.etoro({"GBPUSD": 0.0})
         self.tick(etoro)
         self.assertEqual(etoro.writes_sent, [])
         with H.route_to(etoro):
             execute_close(self.owner, fx, pin_ok=True)
-        self.assertEqual([w[0] for w in self.sent(etoro, "EURUSD")],
+        self.assertEqual([w[0] for w in self.sent(etoro, "GBPUSD")],
                          ["close_position"])
         copper = self.row("HGUSD", protected=True, care=(1.5, 0.1))
         etoro = self.etoro({"HGUSD": 0.0})
@@ -653,7 +785,7 @@ class TheUntouchedTests(_Guard):
 
 class TheDrainTests(_Guard):
 
-    def _pending(self, symbol="EURUSD"):
+    def _pending(self, symbol="GBPUSD"):
         return self.row(symbol, status="CLOSE_PENDING")
 
     def test_off_a_saturday_pass_resends_and_spends_an_attempt(self):
@@ -661,7 +793,7 @@ class TheDrainTests(_Guard):
         is counted, and twelve such passes put the row in ERROR."""
         self.guard(False)
         t = self._pending()
-        etoro = self.etoro({"EURUSD": 0.0}, writes="fail")
+        etoro = self.etoro({"GBPUSD": 0.0}, writes="fail")
         self.drain(etoro)
         self.assertEqual([w[0] for w in self.sent(etoro)], ["close_position"])
         t.refresh_from_db()
@@ -678,7 +810,7 @@ class TheDrainTests(_Guard):
         from alerts.models import Notification
         self.guard(True)
         t = self._pending()
-        etoro = self.etoro({"EURUSD": 0.0}, writes="fail")
+        etoro = self.etoro({"GBPUSD": 0.0}, writes="fail")
         with self.assertLogs("bot_program.shut_guard", level="INFO") as logs:
             out = self.drain(etoro)
         self.assertEqual(out, {"pending": 1, "closed": 0, "still_pending": 1,
@@ -692,17 +824,29 @@ class TheDrainTests(_Guard):
         self.assertNotIn("close_retry_attempts", t.metadata)
         self.assertFalse(Notification.objects.filter(
             title__icontains="stranded").exists())
-        words = ("held: market shut until Sun 22 Nov 22:00 UTC (the guard): "
+        words = ("held: market shut until Sun 22 Nov 22:05 UTC (the guard): "
                  "the close is not resent and no attempt is spent; the "
                  "drain resumes at the reopen")
         self.assertEqual(self.note(t)["words"], words)
-        self.assertIn(f"EURUSD #{t.id}: {words}", "\n".join(logs.output))
+        self.assertIn(f"GBPUSD #{t.id}: {words}", "\n".join(logs.output))
         self.assertNotIn("manual_close_claim", t.metadata)
+
+    def test_on_a_eurusd_pending_close_is_drained_as_before(self):
+        """EURUSD is never held: its pending close is resent on a Saturday
+        and the attempt counted, as with the switch OFF."""
+        self.guard(True)
+        t = self._pending("EURUSD")
+        etoro = self.etoro({"EURUSD": 0.0}, writes="fail")
+        out = self.drain(etoro)
+        self.assertNotIn("held", out)
+        self.assertEqual([w[0] for w in self.sent(etoro)], ["close_position"])
+        t.refresh_from_db()
+        self.assertEqual(t.metadata.get("close_retry_attempts"), 1)
 
     def test_on_the_drain_resumes_at_the_reopen(self):
         self.guard(True)
         t = self._pending()
-        etoro = self.etoro({"EURUSD": 0.0}, writes="fail")
+        etoro = self.etoro({"GBPUSD": 0.0}, writes="fail")
         self.drain(etoro)
         self.assertEqual(etoro.writes_sent, [])
         self.clock.now = SUN_2210
@@ -735,7 +879,7 @@ class TheDrainTests(_Guard):
         from bot_program.manual_close import execute_close
         self.guard(True)
         t = self._pending()
-        etoro = self.etoro({"EURUSD": 0.0}, writes="accept")
+        etoro = self.etoro({"GBPUSD": 0.0}, writes="accept")
         self.drain(etoro)
         self.assertEqual(etoro.writes_sent, [])
         with H.route_to(etoro):
@@ -750,28 +894,30 @@ class TheGuardsOwnReadTests(_Guard):
     def test_held_names_the_reopen_only_for_rows_in_scope(self):
         from bot_program.shut_guard import held
         self.guard(True)
-        fx = self.row("EURUSD")
+        fx = self.row("GBPUSD")
         gold = self.row("XAUUSD")
-        paper = self.row("GBPUSD", paper=True)
+        eur = self.row("EURUSD")
+        paper = self.row("HGUSD", paper=True)
         btc = self.row("BTCUSD")
         etoro = self.etoro({})
         out = held(fx, etoro)
-        self.assertEqual((out["closed"], out["reopens"]),
-                         (FRI_2200, _at(2026, 11, 22, 22)))
-        for t in (gold, paper, btc):
+        self.assertEqual((out["closed"], out["reopens"]), PAIR_WEEKEND)
+        self.assertEqual(out["until"], "Sun 22 Nov 22:05 UTC")
+        for t in (gold, eur, paper, btc):
             self.assertIsNone(held(t, etoro), t.symbol)
-        self.assertIsNone(held(fx, etoro, now=FRI_2130))
+        self.assertIsNone(held(fx, etoro, now=FRI_2125))
+        self.assertIsNotNone(held(fx, etoro, now=FRI_2130))
         self.guard(False)
         self.assertIsNone(held(fx, etoro))
 
     def test_a_row_another_venue_carries_is_never_held(self):
         from bot_program.shut_guard import held
         self.guard(True)
-        fx = self.row("EURUSD")
+        fx = self.row("GBPUSD")
         fx.metadata = {**fx.metadata, "broker": "oanda"}
         fx.save(update_fields=["metadata"])
         self.assertIsNone(held(fx, self.etoro({})))
-        bare = self.row("GBPUSD")
+        bare = self.row("HGUSD")
         bare.metadata = {k: v for k, v in bare.metadata.items()
                          if k != "broker"}
         bare.save(update_fields=["metadata"])

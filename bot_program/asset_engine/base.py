@@ -1516,8 +1516,9 @@ class AssetBot(ABC):
                 # THE GUARD (2026-11-19, bot_program/shut_guard.py; the
                 # switch care_holds_while_shut, OFF on arrival, its ON
                 # behind the trading PIN): a LIVE eToro row of a currency
-                # pair or of a commodity eToro trades on weekdays only,
-                # while its market is shut for a day or more, is HELD for
+                # pair (EURUSD excepted: eToro may trade it at weekends) or
+                # of a commodity eToro trades on weekdays only, while its
+                # market is shut for a day or more, is HELD for
                 # this tick here, before anything below can send: no mark
                 # is read, no time stop, no care close, no mirror or knob
                 # stop move, no bot-side SL/TP, and nothing those follow

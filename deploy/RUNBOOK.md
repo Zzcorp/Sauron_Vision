@@ -595,8 +595,14 @@ It deletes only eToro's rows that hold no open time inside a shut of a
 day or more, with the indicator rows stored at them, and recomputes at
 once the stored indicators of every series it changed. Crypto, stocks,
 ETFs, indices, the other feeds' rows and the bar that holds Sunday's
-reopen are never touched. A second `--apply` finds nothing. `--symbols`
-adds each symbol's count; `--since YYYY-MM-DD` limits the window.
+reopen are never touched. A second `--apply` finds nothing; if a run was
+cut short, a second `--apply` finishes it. `--symbols` adds each
+symbol's count; `--since YYYY-MM-DD` limits the window. `--apply` warns
+when a market it judges is shut (weekend or holiday). After `--apply`,
+wait ten minutes before the next entries: the capital desk keeps its
+correlations for ten minutes. Christmas Day and New Year's Day count as
+part of the weekend for the bar writer; run the dry run again after
+them.
 
 ## 10. Restoring
 
@@ -2682,14 +2688,23 @@ in ERROR. With the switch ON, nothing is sent to eToro for a live row (real
 or demo) of a currency pair or of a commodity eToro trades on weekdays only
 (copper, platinum, palladium) while its market is shut for a day or more.
 
-- *The clocks.* A currency pair follows eToro's own week, shut from Friday
-  17:00 to Sunday 17:00 New York (22:00 to 22:00 UTC in winter), EURUSD
-  included until a measurement says eToro trades it at weekends. A
-  commodity follows its exchange's clock (Globex for metals and energy:
-  Friday 22:00 to Sunday 23:00 UTC in winter); an unknown exchange reads
-  Globex. eToro trades gold, oil, silver and natural gas all week, so those
-  rows are managed at weekends as before, and so are crypto, stocks,
-  indices and paper rows.
+- *The clocks.* eToro's own published hours. A currency pair is held from
+  Friday 16:30 to Sunday 17:05 New York (21:30 to 22:05 UTC in winter). A
+  weekday-only metal (copper, platinum, palladium) is held from 30 minutes
+  before Globex's Friday close to its Sunday reopen (21:30 to 23:00 UTC in
+  winter); an unknown exchange reads Globex. Christmas Day and New Year's
+  Day stretch the weekend: on Friday 25 December 2026 and Friday 1 January
+  2027 the hold starts on Thursday at the same hour. Early closes (the eve
+  of a holiday, the day after Thanksgiving) are not seen: those few hours
+  are managed as before. eToro trades gold, oil, silver and natural gas
+  all week, so those rows are managed at weekends as before, and so are
+  crypto, stocks, indices and paper rows.
+- *EURUSD is not held.* One eToro page lists EURUSD as trading 24/7 and
+  another as weekday-only. If eToro trades it at weekends, holding it would
+  leave only eToro's own stop on the position for two days, so it is
+  managed as before until a measurement settles it. (The bar writer still
+  drops its weekend candles: for the bars that is the safe side either
+  way.)
 - *While held.* The row's price is not read, its stops are not moved, it is
   not closed by any rule, and the care keeps its locks where they were. The
   time stop's warning still comes. The row says "held: market shut until

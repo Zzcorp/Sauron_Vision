@@ -22,12 +22,20 @@ ON, a row is HELD (held()) while all of this is true:
     client the router hands it is eToro's;
   * its instrument, read as the router reads it (the Instrument row's
     class and exchange; the trade's class when there is no row), is inside
-    a shut of a day or more (market_data.shut_bars.shut_for_a_day_now): a
-    currency pair on eToro's FX week, Friday 17:00 to Sunday 17:00 New
-    York; a commodity on its own market clock, an unknown exchange on the
-    class's default. eToro's all-week instruments (GOLD, OIL, SILVER,
+    a shut of a day or more (market_data.shut_bars.shut_for_a_day_now), on
+    eToro's own published edges: a currency pair from Friday 16:30 to
+    Sunday 17:05 New York (21:30 to 22:05 UTC in winter); a commodity on
+    Globex's clock (metals and energy, an unknown exchange) from 30 minutes
+    before Globex's Friday close to its Sunday reopen (21:30 to 23:00 UTC
+    in winter), any other commodity on its own market clock; Christmas Day
+    and New Year's Day stretch the weekend (Fri 2026-12-25: held from
+    Thursday's close). eToro's all-week instruments (GOLD, OIL, SILVER,
     NATGAS, SPX500, NSDQ100: shut_bars.ALL_WEEK_ETORO_IDS) are never held,
-    nor is any class outside shut_bars.HELD_CLASSES.
+    nor EURUSD, whose weekend hours at eToro are unsettled (shut_bars
+    .UNSETTLED_WEEKEND_ETORO_IDS: if eToro trades it at weekends, a hold
+    would leave only eToro's resting stop), nor a commodity filed under an
+    exchange the venue does not keep (LME), nor any class outside
+    shut_bars.HELD_CLASSES. Early closes are not modelled.
 
 Held in the manage tick (hold_tick, asked before the row's mark is read):
 the row's tick ends there. No mark is read, nothing is sent (no time stop,
@@ -53,7 +61,7 @@ unchanged.
 THE LINE. A held row says so in one plain line, in this module's log at
 every held tick or pass, and on the row (metadata["shut_hold"]: the words,
 the reopen, since when), written once a shut and read by nothing that
-sends: "held: market shut until Sun 22 Nov 22:00 UTC (the guard): ...".
+sends: "held: market shut until Sun 22 Nov 22:05 UTC (the guard): ...".
 """
 from __future__ import annotations
 
@@ -121,7 +129,7 @@ def carried_by_etoro(trade, client=None) -> bool:
 
 
 def until_words(moment) -> str:
-    """"Sun 22 Nov 22:00 UTC" for an aware datetime."""
+    """"Sun 22 Nov 22:05 UTC" for an aware datetime."""
     m = moment.astimezone(dt_tz.utc)
     return (f"{_DAYS[m.weekday()]} {m.day:02d} {_MONTHS[m.month - 1]} "
             f"{m:%H:%M} UTC")

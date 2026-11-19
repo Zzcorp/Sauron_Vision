@@ -626,20 +626,24 @@ DEFAULT_COMPONENTS = [
     # bot_program/shut_guard holds a LIVE eToro row, real or demo, of a
     # currency pair or of a commodity eToro trades on weekdays only, while
     # its market is shut for a day or more (market_data/shut_bars
-    # .shut_for_a_day_now: eToro's FX week for a pair, the instrument's
-    # clock for a commodity; eToro's all-week GOLD, OIL, SILVER and NATGAS
-    # never): the manage tick sends nothing for it (no time stop, no care
-    # close, no mirror or knob stop move, no bot-side SL/TP) and the
-    # pending-close drain neither resends its close nor counts an attempt;
-    # both take it up again at the reopen. The kill switch, the CLOSE
-    # button, TAKE TRADE, reconcile and Morgul are untouched. LIVE MONEY:
-    # it decides what reaches eToro for real rows, so it is in
-    # LIVE_MONEY_SWITCHES (the trading PIN at /ops/, never "all on", never
-    # the shell). OFF on arrival (no is_enabled key); a missing row reads
-    # OFF and nothing changes. Description measured at 295 chars (< 300).
+    # .shut_for_a_day_now: eToro's published FX week for a pair, Friday
+    # 16:30 to Sunday 17:05 New York; Globex's week for a weekday metal,
+    # from 30 minutes before its Friday close; Christmas Day and New Year's
+    # Day stretch either; eToro's all-week GOLD, OIL, SILVER and NATGAS
+    # never, nor EURUSD, which eToro may trade at weekends: holding it would
+    # leave only eToro's resting stop): the manage tick sends nothing for it
+    # (no time stop, no care close, no mirror or knob stop move, no
+    # bot-side SL/TP) and the pending-close drain neither resends its close
+    # nor counts an attempt; both take it up again at the reopen. The kill
+    # switch, the CLOSE button, TAKE TRADE, reconcile and Morgul are
+    # untouched. LIVE MONEY: it decides what reaches eToro for real rows, so
+    # it is in LIVE_MONEY_SWITCHES (the trading PIN at /ops/, never "all
+    # on", never the shell). OFF on arrival (no is_enabled key); a missing
+    # row reads OFF and nothing changes. Description measured at 298 chars
+    # (< 300).
     {"key": "care_holds_while_shut",
      "name": "Hold management while the market is shut",
-     "description": "Off (default): live rows are managed through weekends as before. On: nothing is sent to eToro for a forex or weekday-only commodity row while its market is shut a day or more: no close, no stop move, no resend of a pending close; each resumes at the reopen. Gold, oil, crypto, stocks: as before.",
+     "description": "Off (default): live rows are managed through weekends as before. On: nothing is sent to eToro for a forex or weekday-only commodity row while its market is shut a day or more, holidays too (no close, stop move or pending close resend) until the reopen. EURUSD, gold, oil, crypto, stocks: as before.",
      "category": "system"},
 
     # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ──

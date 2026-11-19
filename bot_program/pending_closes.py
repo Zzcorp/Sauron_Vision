@@ -1979,8 +1979,9 @@ def retry_all_pending_closes() -> dict:
 
     THE GUARD (2026-11-19, bot_program/shut_guard.py; the switch
     care_holds_while_shut, OFF on arrival): a live eToro row of a currency
-    pair or of a commodity eToro trades on weekdays only, while its market
-    is shut for a day or more, is neither resent nor counted as a failed
+    pair (EURUSD excepted: eToro may trade it at weekends) or of a commodity
+    eToro trades on weekdays only, while its market is shut for a day or
+    more, is neither resent nor counted as a failed
     attempt on this pass, so a weekend can never walk it to ERROR or raise
     a "stranded" alert; the drain takes it up again at the reopen. It
     counts as still pending, and the answer gains "held" only when the

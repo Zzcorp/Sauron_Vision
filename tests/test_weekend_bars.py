@@ -88,6 +88,25 @@ SYMBOLS = {
 #: and the S&P 500 open 24/7), never read from shut_bars.
 ALL_WEEK = frozenset({"XAUUSD", "XAGUSD", "SPX500"})
 
+#: The holiday shuts, written here like WEEKEND from the venues' published
+#: calendars and NOT read from the code: Christmas Day 2026 and New Year's
+#: Day 2027 are Fridays, on which the FX market and Globex hold no session,
+#: so each of those weekends begins at Thursday's close: (closed, reopens).
+HOLIDAY_SHUTS = {
+    "fx": ((datetime(2026, 12, 24, 17, tzinfo=NEW_YORK),
+            datetime(2026, 12, 27, 17, tzinfo=NEW_YORK)),
+           (datetime(2026, 12, 31, 17, tzinfo=NEW_YORK),
+            datetime(2027, 1, 3, 17, tzinfo=NEW_YORK))),
+    "cme": ((datetime(2026, 12, 24, 16, tzinfo=CHICAGO),
+             datetime(2026, 12, 27, 17, tzinfo=CHICAGO)),
+            (datetime(2026, 12, 31, 16, tzinfo=CHICAGO),
+             datetime(2027, 1, 3, 17, tzinfo=CHICAGO))),
+}
+HOLIDAYS_FROM = datetime(2026, 11, 30, tzinfo=UTC)     # a Monday
+HOLIDAYS_TO = datetime(2027, 1, 5, tzinfo=UTC)
+CHRISTMAS_REOPEN = datetime(2026, 12, 27, 23, 15, tzinfo=UTC)
+NEW_YEAR_REOPEN = datetime(2027, 1, 3, 23, 15, tzinfo=UTC)
+
 #: A moving weekend candle's range, as a multiple of the week's.
 MOVING = {"wide": 3.0, "narrow": 0.25}
 
@@ -105,12 +124,21 @@ SUN_16 = datetime(2026, 11, 15, 16, 0, tzinfo=UTC)
 SUN_20 = datetime(2026, 11, 15, 20, 0, tzinfo=UTC)     # holds both reopens:
 SUN_2315 = datetime(2026, 11, 15, 23, 15, tzinfo=UTC)  # FX 22:00, CME 23:00
 TUE_22 = datetime(2026, 11, 10, 22, 0, tzinfo=UTC)     # the CME daily break
+#: Copper's last traded candles before the weekend of 13-15 November: the
+#: Globex hour that ends at its Friday 16:00 Chicago close (22:00 UTC), and
+#: the 4h bar that holds it.
+LAST_TRADED = {"1h": FRI_21, "4h": FRI_21 - H}
 
 Candle = namedtuple("Candle", "open o h l c v")
 
 
 def _r(x):
     return round(x, 6)
+
+
+def _ms(t):
+    """A candle's open as the answer notes keep it: epoch milliseconds."""
+    return int(t.timestamp() * 1000)
 
 
 def _weekend_shut(kind, start, end):
@@ -129,6 +157,13 @@ def _weekend_shut(kind, start, end):
     return shut <= start and end <= reopen
 
 
+def _holiday_shut(kind, start, end):
+    """_weekend_shut, and [start, end) inside one of HOLIDAY_SHUTS."""
+    return (_weekend_shut(kind, start, end)
+            or any(closed <= start and end <= reopens
+                   for closed, reopens in HOLIDAY_SHUTS.get(kind, ())))
+
+
 def _shut_bar(symbol, start, end):
     """The writer must drop `symbol`'s candle spanning [start, end): a
     currency pair or a commodity that keeps weekday hours at eToro, the
@@ -139,11 +174,13 @@ def _shut_bar(symbol, start, end):
             and _weekend_shut(kind, start, end))
 
 
-def _candles(symbol, interval, weekend=None):
-    """eToro's candles of (symbol, interval), HISTORY_FROM to HISTORY_TO. The
-    slots the market traded carry one deterministic wave, the same whatever
-    `weekend` says, each opening at the previous TRADED close. The slots it
-    was shut for (_weekend_shut) carry what `weekend` says eToro answers:
+def _candles(symbol, interval, weekend=None, *, start=HISTORY_FROM,
+             end=HISTORY_TO, shut=_weekend_shut):
+    """eToro's candles of (symbol, interval), `start` to `end` (HISTORY_FROM
+    to HISTORY_TO). The slots the market traded carry one deterministic
+    wave, the same whatever `weekend` says, each opening at the previous
+    TRADED close. The slots it was shut for (`shut`: _weekend_shut, or
+    _holiday_shut) carry what `weekend` says eToro answers:
       None      nothing: a venue that answers traded slots only;
       "flat"    Friday's close repeated (open = high = low = close, no volume);
       "wide"    a print that moves, its range MOVING["wide"] times the week's;
@@ -153,9 +190,9 @@ def _candles(symbol, interval, weekend=None):
     if interval == "1h":
         rng = rng / 2
     span = SPAN[interval]
-    out, last, wk, i, t = [], None, None, 0, HISTORY_FROM
-    while t < HISTORY_TO:
-        if not _weekend_shut(kind, t, t + span):
+    out, last, wk, i, t = [], None, None, 0, start
+    while t < end:
+        if not shut(kind, t, t + span):
             c = _r(base + 2 * rng * math.sin(i / 5.0))
             o = c if last is None else last
             out.append(Candle(t, o, _r(max(o, c) + rng / 2),
@@ -185,9 +222,9 @@ class EtoroTrader:
 
     wire_reads = 0
 
-    def __init__(self, weekend=None, symbols=("XAUUSD", "EURUSD")):
+    def __init__(self, weekend=None, symbols=("XAUUSD", "EURUSD"), **span):
         self.t = None
-        self.series = {(s, iv): _candles(s, iv, weekend)
+        self.series = {(s, iv): _candles(s, iv, weekend, **span)
                        for s in symbols for iv in SPAN}
         self.answered = {}
 
@@ -485,6 +522,61 @@ class TheShutPredicateTests(SimpleTestCase):
             self._is(other, "4h", _at(2026, 11, 14, 12), True)
             self._is(other, "1h", _at(2026, 11, 10, 22), False)
 
+    def test_a_friday_holiday_is_part_of_the_weekend(self):
+        """Christmas Day 2026 and New Year's Day 2027 are Fridays on which
+        the FX market and Globex hold no session: each of those weekends
+        begins at Thursday's close (17:00 New York, 22:00 UTC, for a pair;
+        Globex's 16:00 Chicago, 22:00 UTC, for copper), and every bar of
+        the holiday lies inside it. The bar before Thursday's close and the
+        bars that hold Sunday's reopens still traded."""
+        for thursday in (_at(2026, 12, 24), _at(2026, 12, 31)):
+            friday = thursday + timedelta(days=1)
+            sunday = thursday + timedelta(days=3)
+            for cls, exch, sym, reopen_h in (
+                    ("forex", "FOREX", "GBPUSD", 22),
+                    ("forex", "FOREX", "EURUSD", 22),
+                    ("commodity", "COMEX", "HGUSD", 23)):
+                inst = _inst(cls, exch, sym)
+                self._is(inst, "1h", thursday + 21 * H, False)
+                self._is(inst, "4h", thursday + 20 * H, False)
+                self._is(inst, "1h", thursday + 22 * H, True)
+                for h in range(24):
+                    self._is(inst, "1h", friday + h * H, True)
+                for h in range(0, 24, 4):
+                    self._is(inst, "4h", friday + h * H, True)
+                self._is(inst, "1h", sunday + (reopen_h - 1) * H, True)
+                self._is(inst, "1h", sunday + reopen_h * H, False)
+                self._is(inst, "4h", sunday + 20 * H, False)
+
+    def test_a_monday_holiday_stretches_the_weekend_to_monday(self):
+        """Every year, not one table: Christmas Day 2028 is a Monday, so the
+        FX weekend runs to Monday 17:00 New York (22:00 UTC) and the Sunday
+        20:00 UTC 4h bar, which holds the reopen on any other weekend, lies
+        inside it."""
+        fx = _inst("forex", "FOREX", "GBPUSD")
+        for tf, at, want in (("4h", _at(2028, 12, 22, 20), False),
+                             ("4h", _at(2028, 12, 24, 20), True),
+                             ("4h", _at(2028, 12, 25, 12), True),
+                             ("1h", _at(2028, 12, 25, 21), True),
+                             ("1h", _at(2028, 12, 25, 22), False),
+                             ("4h", _at(2028, 12, 25, 20), False)):
+            self._is(fx, tf, at, want)
+
+    def test_an_lme_commodity_is_not_judged(self):
+        """LME's clock is not one the venue keeps: core.exchange_status
+        reads it on LSE's 08:00-16:30 London weekday clock
+        (SESSION_ALIASES), while LMEselect trades 01:00-19:00 London. No bar
+        of a commodity filed under LME is a shut bar, the weekend's
+        included: written as before the rule."""
+        from market_data.shut_bars import holds_no_open_time
+        t = _at(2026, 11, 13, 12)
+        while t < _at(2026, 11, 16, 12):
+            for exch in ("LME", " lme "):
+                for tf in ("15m", "1h", "4h"):
+                    self.assertFalse(holds_no_open_time(
+                        _inst("commodity", exch, "X"), tf, t), (exch, tf, t))
+            t += H
+
     def test_etoros_all_week_instruments_are_never_shut(self):
         """eToro trades GOLD (18), OIL (17), SILVER (19) and NATGAS (22) on
         Saturday and Sunday too (its market-hours page: 24/7, short breaks
@@ -631,13 +723,26 @@ class TheWriterDropsShutCandlesTests(_Writer):
                 else:
                     self.assertEqual(shut, [], f"{sym} {iv}")
 
+    def _fresh(self):
+        """Each pass of a loop starts from an empty table and cache: a pass
+        that found the previous one's rows would ask eToro for its newest
+        candles only, and judge none of the slots under test."""
+        from market_data.models import PriceData
+        PriceData.objects.all().delete()
+        cache.clear()
+
     def test_the_friday_fx_hour_after_the_forex_row_closes_is_kept(self):
-        """Winter: the FOREX row says shut from 21:00 UTC, eToro's week runs
-        to 22:00 UTC. The 21:00-22:00 bar traded."""
+        """Winter: the FOREX row says shut from 21:00 UTC, eToro's FX week
+        runs to 22:00 UTC (its own page: its pairs close at 21:30). The
+        21:00-22:00 bar traded; the 22:00 one, flat or moving, did not."""
         for weekend in ("flat", "wide"):
             with self.subTest(weekend=weekend):
+                self._fresh()
                 venue = self._weekend_pass(weekend)
                 for sym in ("EURUSD", "GBPUSD"):
+                    answered = {c.open for c in venue.answered[(sym, "1h")]}
+                    self.assertLessEqual({FRI_21, FRI_22}, answered,
+                                         "the pass judged neither candle")
                     kept = _rows(sym, "1h")
                     stamps = {r.timestamp for r in kept}
                     self.assertIn(FRI_21, stamps)
@@ -649,11 +754,16 @@ class TheWriterDropsShutCandlesTests(_Writer):
 
     def test_the_sunday_bar_that_holds_the_reopen_is_kept(self):
         """The Sunday 20:00 UTC 4h bar holds the FX reopen (22:00) and the
-        Globex reopen (23:00): it traded, for copper and for the pairs."""
+        Globex reopen (23:00): it traded, for copper and for the pairs; the
+        16:00 one did not."""
         for weekend in ("flat", "wide"):
             with self.subTest(weekend=weekend):
-                self._weekend_pass(weekend)
+                self._fresh()
+                venue = self._weekend_pass(weekend)
                 for sym in WEEKDAY_MARKETS:
+                    answered = {c.open for c in venue.answered[(sym, "4h")]}
+                    self.assertLessEqual({SUN_16, SUN_20}, answered,
+                                         "the pass judged neither candle")
                     stamps = {r.timestamp for r in _rows(sym, "4h")}
                     self.assertIn(SUN_20, stamps, sym)
                     self.assertNotIn(SUN_16, stamps, sym)
@@ -661,11 +771,16 @@ class TheWriterDropsShutCandlesTests(_Writer):
     def test_the_cme_daily_break_bar_is_kept(self):
         """A weekday's 22:00-23:00 UTC (16:00-17:00 Chicago) is Globex's
         daily break: a shut of one hour, shorter than a day. Its candle,
-        flat or not, is written as before."""
+        flat or not, is written as before, in the very pass that drops the
+        previous weekend's flat candles."""
         venue = EtoroTrader(weekend="flat", symbols=("HGUSD",))
         venue.flatten("HGUSD", "1h", TUE_22)
         self.pass_at(venue, datetime(2026, 11, 11, 0, 15, tzinfo=UTC),
                      ("HGUSD",), intervals=("1h",))
+        self.assertTrue(any(_shut_bar("HGUSD", c.open, c.open + H)
+                            for c in venue.answered[("HGUSD", "1h")]),
+                        "the pass was answered no weekend candle")
+        self.assertNoShutRow("HGUSD")
         bar = next((r for r in _rows("HGUSD", "1h")
                     if r.timestamp == TUE_22), None)
         self.assertIsNotNone(bar)
@@ -746,6 +861,10 @@ class TheWriterDropsShutCandlesTests(_Writer):
             self.assertEqual(
                 bot_bars.last_venue_answer("etoro", "HGUSD", iv)["newest_ms"],
                 notes[iv]["newest_ms"], iv)
+            # the any-source note (bars:answered:, read by preflight_live
+            # and the staleness checks) names the last traded candle too
+            self.assertEqual(bot_bars.last_answer("HGUSD", iv)["newest_ms"],
+                             _ms(LAST_TRADED[iv]), iv)
 
     def _saturday(self, symbol, weekend):
         """A held real row, a pass on Friday 21:01 and one on Saturday
@@ -754,6 +873,7 @@ class TheWriterDropsShutCandlesTests(_Writer):
         from market_data.models import PriceData
         PriceData.objects.all().delete()
         AssetBotTrade.objects.all().delete()
+        cache.clear()
         venue = EtoroTrader(weekend=weekend, symbols=(symbol,))
         row = self.held_row(symbol)
         self.pass_at(venue, FRI_21 + M, (symbol,), stamp_marks=True)
@@ -788,6 +908,11 @@ class TheWriterDropsShutCandlesTests(_Writer):
                 if weekend == "wide":
                     self.assertNotEqual(Decimal(str(vm["price"])),
                                         Decimal(str(sat12.c)))
+                from market_data import bot_bars
+                for iv in SPAN:
+                    self.assertEqual(
+                        bot_bars.last_answer("HGUSD", iv)["newest_ms"],
+                        _ms(LAST_TRADED[iv]), iv)
 
     def test_a_moving_weekend_gold_candle_is_kept_and_read_as_before(self):
         """Gold's weekend candles are eToro's 24/7 market for the very
@@ -852,13 +977,13 @@ class TheReopenATRTests(_Writer):
                                     stop=stop, direction="BUY")
         return Measure(atr, stop, size["qty"], meta.get("levels_source"))
 
-    def _reopen(self, symbol, weekend):
+    def _reopen(self, symbol, weekend, *, at=SUN_2315, **span):
         from indicators.models import TechnicalIndicator
         from market_data.models import PriceData
         PriceData.objects.filter(instrument__symbol=symbol).delete()
         TechnicalIndicator.objects.filter(instrument__symbol=symbol).delete()
-        venue = EtoroTrader(weekend=weekend, symbols=(symbol,))
-        self.pass_at(venue, SUN_2315, (symbol,), intervals=("4h",))
+        venue = EtoroTrader(weekend=weekend, symbols=(symbol,), **span)
+        self.pass_at(venue, at, (symbol,), intervals=("4h",))
         return self._measure(symbol), venue
 
     def test_the_weekend_candles_would_move_the_atr(self):
@@ -914,6 +1039,38 @@ class TheReopenATRTests(_Writer):
                     self.assertLess(got.atr, traded.atr)
                     self.assertGreater(got.stop, traded.stop)
                     self.assertGreater(got.qty, traded.qty)
+
+    def test_a_friday_holiday_leaves_the_reopen_atr_the_traded_weeks(self):
+        """Christmas Day 2026 and New Year's Day 2027 are Fridays: eToro
+        answers a flat candle for every slot from Thursday's close to
+        Sunday's reopen. Kept, Friday's six flat 4h candles would deflate
+        ATR(4h) at Sunday's reopen beside the weekend's (stops tighter,
+        sizes larger); dropped with them, the ATR, the stop and the size are
+        the traded weeks', for a pair and for copper."""
+        span = dict(start=HOLIDAYS_FROM, end=HOLIDAYS_TO, shut=_holiday_shut)
+        for symbol in ("GBPUSD", "HGUSD"):
+            kind = SYMBOLS[symbol][2]
+            for reopen in (CHRISTMAS_REOPEN, NEW_YEAR_REOPEN):
+                with self.subTest(symbol=symbol, reopen=f"{reopen:%d %b}"):
+                    traded, _v = self._reopen(symbol, None, at=reopen,
+                                              **span)
+                    got, venue = self._reopen(symbol, "flat", at=reopen,
+                                              **span)
+                    answered = venue.answered[(symbol, "4h")]
+                    friday = reopen.replace(hour=12, minute=0) - \
+                        timedelta(days=2)
+                    self.assertIn(friday, {c.open for c in answered})
+                    self.assertTrue(_holiday_shut(kind, friday,
+                                                  friday + SPAN["4h"]))
+                    # what the weekend-only rule kept: Friday's flat candles
+                    weekend_only = [c for c in answered if not _weekend_shut(
+                        kind, c.open, c.open + SPAN["4h"])]
+                    self.assertLess(_atr_of(weekend_only, until=reopen),
+                                    0.9 * traded.atr)
+                    self.assertAlmostEqual(got.atr, traded.atr, places=9)
+                    self.assertAlmostEqual(got.stop, traded.stop, places=9)
+                    self.assertAlmostEqual(got.qty, traded.qty, places=6)
+                    self.assertEqual(got.levels, "atr")
 
     def test_the_stored_indicator_reads_the_same_atr(self):
         """The indicator task's stored atr_14, which atr_for reads first,

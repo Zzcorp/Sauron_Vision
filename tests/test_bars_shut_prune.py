@@ -138,9 +138,9 @@ class _Prune(TestCase):
             id=next(_INST_IDS), symbol=oil, name="Oil", asset_class="commodity",
             exchange="NYMEX")
 
-    def prune(self, *args):
+    def prune(self, *args, now=NOW):
         out = StringIO()
-        with patch("django.utils.timezone.now", return_value=NOW):
+        with patch("django.utils.timezone.now", return_value=now):
             call_command("bars_shut_prune", *args, stdout=out)
         return out.getvalue()
 
@@ -198,6 +198,18 @@ class TheDryRunTests(_Prune):
         self.assertIn("nothing was deleted", last.lower())
         self.assertIn("bars_shut_prune --apply", last)
 
+    def test_the_words_give_the_server_form_and_the_weekday(self):
+        """The operator runs it inside docker, as the RUNBOOK does, and on a
+        weekday: the dry run's last line and --help both say so."""
+        from market_data.management.commands.bars_shut_prune import Command
+        self.store_week()
+        last = self.prune().strip().splitlines()[-1]
+        self.assertIn("on a weekday", last)
+        self.assertIn("./deploy/dc exec -T web python manage.py "
+                      "bars_shut_prune --apply", last)
+        self.assertIn("weekday", Command.help)
+        self.assertIn("ten minutes", Command.help)
+
     def test_symbols_adds_each_symbols_count(self):
         self.store_week()
         gone = _gone_by_the_rule(_bars())
@@ -254,36 +266,160 @@ class TheApplyTests(_Prune):
             self):
         """The indicator task stored a row on Saturday (keyed at the
         weekend bar that was the newest then) and one at the reopen, its
-        ATR(4h) deflated by Friday's close repeated all weekend. After
-        --apply no indicator row is left at a deleted bar, and the stored
-        atr_14 the entry stops and sizes read first (risk_levels.atr_for)
-        is the traded week's."""
+        ATR(4h) moved by the weekend's candles: deflated by Friday's close
+        repeated all weekend, inflated by wide moving candles, deflated by
+        narrow ones. After --apply no indicator row is left at a deleted
+        bar, and the stored atr_14 the entry stops and sizes read first
+        (risk_levels.atr_for) is the traded week's: it rises after a flat or
+        a narrow weekend (stops wider, sizes smaller) and falls after a wide
+        one (stops tighter, sizes larger)."""
+        from bot_program.asset_engine import risk_levels
+        from indicators.models import TechnicalIndicator
+        from indicators.tasks import recalculate_for_instruments
+        from market_data.models import PriceData
+        for weekend in ("flat", "wide", "narrow"):
+            with self.subTest(weekend=weekend):
+                PriceData.objects.all().delete()
+                TechnicalIndicator.objects.all().delete()
+                for sym in ("HGUSD", "EURUSD"):
+                    inst = self.inst[sym]
+                    _store(inst, sym, weekend, intervals=("4h",),
+                           until=SAT_1201)
+                    recalculate_for_instruments([inst], timeframes=("4h",))
+                    _store(inst, sym, weekend, intervals=("4h",),
+                           since=SAT_1201, until=SUN_2315)
+                    recalculate_for_instruments([inst], timeframes=("4h",))
+                before = _indicators()
+                for sym in ("HGUSD", "EURUSD"):
+                    traded = _atr_of(_candles(sym, "4h"))
+                    self.assertIn((sym, "4h", SAT_12), before)
+                    was = float(before[(sym, "4h", SUN_20)][0])
+                    if weekend == "flat":
+                        self.assertLess(was, 0.5 * traded, sym)
+                    elif weekend == "wide":
+                        self.assertGreater(was, 1.5 * traded, sym)
+                    else:
+                        self.assertLess(was, traded, sym)
+                self.prune("--apply")
+                after = _indicators()
+                for sym in ("HGUSD", "EURUSD"):
+                    traded = _atr_of(_candles(sym, "4h"))
+                    was = float(before[(sym, "4h", SUN_20)][0])
+                    self.assertNotIn((sym, "4h", SAT_12), after)
+                    self.assertFalse(any(k[0] == sym and _shut_bar(
+                        sym, k[2], k[2] + SPAN["4h"]) for k in after), sym)
+                    now = float(after[(sym, "4h", SUN_20)][0])
+                    self.assertAlmostEqual(now, traded, places=6)
+                    self.assertAlmostEqual(risk_levels.atr_for(sym, "4h"),
+                                           traded, places=6)
+                    if weekend == "wide":
+                        self.assertLess(now, was, sym)
+                    else:
+                        self.assertGreater(now, was, sym)
+
+    def test_a_series_left_too_short_loses_every_indicator_row(self):
+        """A short 4h series with indicators stored, whose weekend rows
+        leave fewer than MIN_BARS bars: nothing can be recomputed, so every
+        indicator row of the series goes, an older one too (atr_for reads
+        the newest row left, whatever its age), the words name it, and the
+        stops read the cleaned bars themselves."""
+        from bot_program.asset_engine import risk_levels
+        from indicators.models import TechnicalIndicator
+        from indicators.tasks import MIN_BARS, recalculate_for_instruments
+        from market_data.models import PriceData
+        eur = self.inst["EURUSD"]
+        since = datetime(2026, 11, 10, 20, tzinfo=UTC)
+        _store(eur, "EURUSD", "flat", intervals=("4h",), since=since)
+        stored = PriceData.objects.filter(instrument=eur).count()
+        shut = len(_gone_by_the_rule(_bars()))
+        self.assertGreaterEqual(stored, MIN_BARS)
+        self.assertLess(stored - shut, MIN_BARS)
+        recalculate_for_instruments([eur], timeframes=("4h",))
+        self.assertIn(("EURUSD", "4h", SUN_20), _indicators())
+        TechnicalIndicator.objects.create(
+            instrument=eur, timeframe="4h", timestamp=since + 4 * SPAN["1h"],
+            atr_14=Decimal("0.0099"))
+        out = self.prune("--apply")
+        self.assertRegex(out, r"(?m)^Too few bars left to recompute: 1 "
+                              r"series; all their 2 indicator rows were "
+                              r"deleted")
+        self.assertNotIn("recompute failed", out)
+        self.assertFalse(TechnicalIndicator.objects.filter(
+            instrument=eur, timeframe="4h").exists())
+        left = [c for c in _candles("EURUSD", "4h", "flat")
+                if since <= c.open <= SUN_2315
+                and not _shut_bar("EURUSD", c.open, c.open + SPAN["4h"])]
+        self.assertEqual(len(left), stored - shut)
+        self.assertAlmostEqual(risk_levels.atr_for("EURUSD", "4h"),
+                               _atr_of(left), places=9)
+
+    def test_a_failed_recompute_is_said_and_leaves_no_stale_row(self):
+        """The recompute can fail (the indicator task counts an error). The
+        words say so, never "too few bars", and every indicator row of the
+        series goes: with --since, the rows older than the window used to
+        survive, and atr_for read the newest of them, days old."""
+        from bot_program.asset_engine import risk_levels
+        from indicators.models import TechnicalIndicator
+        from indicators.tasks import recalculate_for_instruments
+        copper = self.inst["HGUSD"]
+        wednesday = datetime(2026, 11, 11, 12, tzinfo=UTC)
+        _store(copper, "HGUSD", "flat", intervals=("4h",), until=wednesday)
+        recalculate_for_instruments([copper], timeframes=("4h",))
+        _store(copper, "HGUSD", "flat", intervals=("4h",),
+               since=wednesday + timedelta(minutes=1))
+        recalculate_for_instruments([copper], timeframes=("4h",))
+        self.assertEqual(set(k[2] for k in _indicators()),
+                         {wednesday, SUN_20})
+        with patch("indicators.calculator.compute_all_indicators",
+                   side_effect=ValueError("invented")):
+            out = self.prune("--apply", "--since", "2026-11-09")
+        self.assertRegex(out, r"(?m)^The recompute failed for 1 series")
+        self.assertNotIn("Too few bars", out)
+        self.assertFalse(TechnicalIndicator.objects.filter(
+            instrument=copper, timeframe="4h").exists())
+        since = datetime(2026, 11, 9, tzinfo=UTC)
+        left = [c for c in _candles("HGUSD", "4h", "flat")
+                if c.open <= SUN_2315 and not (
+                    c.open >= since
+                    and _shut_bar("HGUSD", c.open, c.open + SPAN["4h"]))]
+        self.assertAlmostEqual(risk_levels.atr_for("HGUSD", "4h"),
+                               _atr_of(left), places=9)
+
+    def test_a_run_cut_before_its_recompute_is_finished_by_the_next(self):
+        """A series' last delete batch and its recompute are one
+        transaction: a run cut while the indicators are recomputed leaves
+        that batch stored, and the next --apply deletes it and recomputes,
+        so the stored atr_14 the stops read first is the traded week's
+        (before, the next run found nothing and left it deflated)."""
         from bot_program.asset_engine import risk_levels
         from indicators.tasks import recalculate_for_instruments
-        for sym in ("HGUSD", "EURUSD"):
-            inst = self.inst[sym]
-            _store(inst, sym, "flat", intervals=("4h",), until=SAT_1201)
-            recalculate_for_instruments([inst], timeframes=("4h",))
-            _store(inst, sym, "flat", intervals=("4h",),
-                   since=SAT_1201, until=SUN_2315)
-            recalculate_for_instruments([inst], timeframes=("4h",))
-        before = _indicators()
-        for sym in ("HGUSD", "EURUSD"):
-            traded = _atr_of(_candles(sym, "4h"))
-            self.assertIn((sym, "4h", SAT_12), before)
-            self.assertLess(float(before[(sym, "4h", SUN_20)][0]),
-                            0.5 * traded, f"{sym}: the fixture's deflation")
-        self.prune("--apply")
-        after = _indicators()
-        for sym in ("HGUSD", "EURUSD"):
-            traded = _atr_of(_candles(sym, "4h"))
-            self.assertNotIn((sym, "4h", SAT_12), after)
-            self.assertFalse(any(k[0] == sym and _shut_bar(
-                sym, k[2], k[2] + SPAN["4h"]) for k in after), sym)
-            self.assertAlmostEqual(float(after[(sym, "4h", SUN_20)][0]),
-                                   traded, places=6)
-            self.assertAlmostEqual(risk_levels.atr_for(sym, "4h"), traded,
-                                   places=6)
+
+        class Cut(Exception):
+            """The process stopped mid-run."""
+
+        copper = self.inst["HGUSD"]
+        _store(copper, "HGUSD", "flat", intervals=("4h",))
+        recalculate_for_instruments([copper], timeframes=("4h",))
+        traded = _atr_of(_candles("HGUSD", "4h"))
+        self.assertLess(risk_levels.atr_for("HGUSD", "4h"), 0.5 * traded)
+        gone = _gone_by_the_rule(_bars())
+        self.assertGreater(len(gone), 10)
+        with patch(f"{COMMAND}.BATCH", 5), \
+                patch("indicators.tasks.recalculate_for_instruments",
+                      side_effect=Cut):
+            with self.assertRaises(Cut):
+                self.prune("--apply")
+        left = _gone_by_the_rule(_bars())
+        self.assertTrue(left, "the cut batch was deleted all the same")
+        self.assertLess(len(left), len(gone))
+        self.assertLess(risk_levels.atr_for("HGUSD", "4h"), 0.5 * traded)
+        out = self.prune("--apply")
+        self.assertRegex(out, rf"(?m)^Deleted {len(left)} bars in 1 series")
+        self.assertRegex(out, r"(?m)^Indicators recomputed from the cleaned "
+                              r"bars: 1 series\.$")
+        self.assertEqual(_gone_by_the_rule(_bars()), set())
+        self.assertAlmostEqual(risk_levels.atr_for("HGUSD", "4h"), traded,
+                               places=6)
 
     def test_a_second_apply_finds_nothing_and_changes_nothing(self):
         from indicators.tasks import recalculate_for_instruments
@@ -419,3 +555,39 @@ class TheApplyTests(_Prune):
             self.assertIsNone(cache.get(keys[name]), name)
         for name in ("gold_weekend", "btc_range"):
             self.assertIsNotNone(cache.get(keys[name]), name)
+
+    def test_a_memo_clearing_that_fails_is_said_by_its_kind_only(self):
+        """The cache's own words name its host and port; the output prints
+        the error's kind only, and the bars are deleted all the same."""
+        self.store_week()
+        gone = _gone_by_the_rule(_bars())
+        err = ConnectionError("Error 111 connecting to invented-cache-host:"
+                              "6379. Connection refused.")
+        with patch(f"{COMMAND}._clear_gap_memos", side_effect=err):
+            out = self.prune("--apply")
+        self.assertIn("The Orcs' gap memos were not all cleared "
+                      "(ConnectionError); they are measured again at 00:00 "
+                      "UTC.", out)
+        for leaked in ("invented-cache-host", "6379", "Error 111",
+                       "refused"):
+            self.assertNotIn(leaked, out)
+        self.assertEqual(_gone_by_the_rule(_bars()), set())
+        self.assertRegex(out, rf"(?m)^Deleted {len(gone)} bars in ")
+
+    def test_apply_warns_while_a_market_it_judges_is_shut(self):
+        """Run during a weekend, the prune moves a frame's newest final bar
+        back to Friday's and an Orc may wake once on it: --apply says so,
+        and goes on. On a weekday it says nothing of it."""
+        saturday = datetime(2026, 11, 21, 12, tzinfo=UTC)
+        for now, warned in ((saturday, True), (NOW, False)):
+            with self.subTest(now=f"{now:%a}"):
+                from market_data.models import PriceData
+                PriceData.objects.all().delete()
+                self.store_week()
+                out = self.prune("--apply", now=now)
+                self.assertEqual("Warning: some of the markets it judges "
+                                 "are shut now" in out, warned, out)
+                self.assertRegex(out, r"(?m)^Deleted [1-9]")
+                self.assertEqual(_gone_by_the_rule(_bars()), set())
+        dry = self.prune(now=saturday)
+        self.assertNotIn("Warning", dry)
