@@ -1771,10 +1771,11 @@ EURUSD at 14:05 UTC; the price is 0.6 x ATR(1h) beyond it (same symbol,
 hop 0)." Prices and ATR only: never another position's R or money, and
 never a calendar title (a print is named by its currency and its calendar
 row, "the USD print C412"). A level break listing several symbols reaches
-the Orcs of each of them. In O1 a drum wakes nobody: the switch
-`orcs_drums` (System, OFF on arrival) changes nothing until O2, where it
-lets a drum wake the Orcs it reaches; the drums are journaled either way
-while `orcs` is ON.
+the Orcs of each of them. The drums are journaled whatever the switches
+say while `orcs` is ON. A drum wakes the Orcs it reaches only while
+`orcs_drums` (System, OFF on arrival; ON alone it wakes nobody) AND
+`orcs_drum_wakes` (System, OFF on arrival, turned on only with your trading
+PIN) AND the Orcs' minds are ON: see "The Orcs' drum wakes (O2c)" below.
 
 #### eToro's candle headroom, before the 15m and 5m candles
 
@@ -2224,6 +2225,38 @@ and points to /ops/, and the Django admin will not turn it on either. To
 stop it: turning `orcs_temperaments` OFF takes no PIN; the next newborn
 draws none, and every Orc keeps the temperament it drew, or none: an Orc
 born while it was OFF is never graded as a temperament.
+
+### The Orcs' drum wakes (O2c)
+
+A war drum (a stop hit, a lock, a level break...) is journaled on the Orcs
+it reaches within your book, as in O1. With the drum wakes on, it also
+wakes them: each Orc it reaches gets one drum reason (W12) per wave, and a
+model reads it in shadow, like any wake, within the Orc's day caps and the
+Orcs line. Nothing it decides sends an order or moves a stop: a stop it
+proposes moves the Orc's shadow arm only, never a real stop.
+
+The wake waits 15 minutes after its wave's first drum, so the drums that
+join the wave meanwhile wake the Orc once. Urgent means a stop hit on the
+Orc's own symbol, or its own stop within a quarter of an ATR(1h) of the
+mark, read again when the wake is written. A breaker holds them: at most 6
+drum wakes of one wave and 12 drum wakes of your book within an hour reach
+a model, after which the wave is journaled only; at most 2 urgent drum
+wakes an Orc a UTC day, after which a drum waits for the Orc's next wake
+instead of waking it; drum wakes stop at 25% of the Orcs line, and once the
+line is 60% spent only an urgent drum on the Orc's own stakes still wakes
+it (inside that wake's own share of the line). Each wave keeps a record of
+its drums, the Orcs it reached, its drum wakes and their AI cost.
+
+Two switches, both System and OFF on arrival: `orcs_drums` ("Orc War Drums
+(wakes from O2)") and `orcs_drum_wakes` ("Orc Drum Wakes (models in
+shadow)"). `orcs_drums` may already be ON: alone it wakes nobody and spends
+nothing. To turn the drum wakes on: on /ops/ (Switches, System), turn on
+"Orc Drum Wakes (models in shadow)" with your trading PIN; "all on" leaves
+it OFF, the shell's `component on` refuses it and points to /ops/, and the
+Django admin will not turn it on either. To stop it: turning
+`orcs_drum_wakes` (or `orcs_drums`) OFF takes no PIN and works at once: the
+next drums are journaled only, and a drum wake not yet sent to a model is
+answered by code (`drum_wakes_off`), spending nothing.
 
 ## Operating notes
 

@@ -18,9 +18,10 @@ is claimed: the worker (tasks.orc_think) and the watchdog
            that fails answers it by code (`skipped` with its code, a
            `budget` entry while the minds switch itself is on), in this
            order: the four gates; the Orc dead, the row closed; the
-           dossier over its size cap; the breaker; the Orc's day caps
-           (A.12); the triage and the core's floor (A.13, A.18); the
-           spacing (A.15). Else `pending`: dedupe_key "orc<pk>:pending"
+           dossier over its size cap; the breaker; for a drum wake, the
+           drums' breaker (below); the Orc's day caps (A.12); the triage
+           and the core's floor (A.13, A.18); the spacing (A.15). Else
+           `pending`: dedupe_key "orc<pk>:pending"
            (the database then holds one pending wake per Orc), the tick's
            key kept in components["record_key"], queued_at set once, the
            priority its rank (A.14), the answering rung and A.21's bound
@@ -78,6 +79,31 @@ is claimed: the worker (tasks.orc_think) and the watchdog
            transaction: the wake's est_usd r5's bound, the twin's ticket
            (caller twin, its `pair` the wake) its own. In O2 the pair is
            above the core's $3.00 floor, so no r5 wake is ever admitted
+
+THE DRUMS' BREAKER (C.16; O2c, 2026-11-15). A DRUM WAKE is a wake whose
+every reason is a W12 (drum_bus.is_drum_wake, defined there once); its
+wave is its newest W12's (drum_bus.drum_wave). At admission and at the
+claim (_check, drum_code), after the minds' own breaker, a drum wake is
+answered by code by the first of: drum_wakes_off (`orcs_drums` or
+`orcs_drum_wakes` read OFF again: frictionless off, N2, as the router's,
+the probes' and the frontier's switches are read again at the claim; no
+breaker opens); drum_breaker (its wave's breaker open, or
+DRUM_WAVE_WAKES drum wakes of its wave, or DRUM_USER_HOUR_WAKES of its user
+in a rolling hour, already reached a model, urgent ones included: the
+wave's breaker opens {open, why} and its next deliveries are journaled
+only); drum_carry (urgent, its Orc's DRUM_URGENT_PER_ORC_DAY urgent drum
+wakes of the UTC day used: the claim's guard for a W12 that passed its
+delivery before they were, its W12 reasons carried to the Orc's next
+recorded wake); drum_line (the line's booked spend and money in flight at
+or past DRUM_LINE_SHARE of it, but an urgent drum wake, on its Orc's own
+stakes, which still meets its triage ceiling: P14's twin); drum_share (the
+W12 spend booked today, Σ OrcWave.cost_usd, the W12 calls in flight and
+this bound past DRUM_SHARE of the line, urgent ones included). The claim
+counts a drum wake on its wave (OrcWave.w12_answered) and an urgent one on
+its Orc's day (seen["w12_urgent"]), under the Orc's lock; the settle adds
+its booked cost to its wave. Database reads and writes only, under the
+locks that were there. A W12 riding a wake with another reason meets none
+of these and counts for none.
 
 THE MONEY (N3): every check of the line reads its cap, what it booked
 today and the OTHER calls' money in flight and held, through mind.py
@@ -158,7 +184,9 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         CLASS_REAL_URGENT, CODE_BACKLOG,
                                         CODE_BREAKER, CODE_DAY_CAP,
                                         CODE_DEAD, CODE_DEEP_SHARE,
-                                        CODE_DOLLAR_CAP,
+                                        CODE_DOLLAR_CAP, CODE_DRUM_BREAKER,
+                                        CODE_DRUM_CARRY, CODE_DRUM_LINE,
+                                        CODE_DRUM_OFF, CODE_DRUM_SHARE,
                                         CODE_EXPIRED, CODE_INFLIGHT,
                                         CODE_ITEM_BUSY, CODE_ITEM_CLOSED,
                                         CODE_OVER_BUDGET,
@@ -168,6 +196,9 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         CODE_SPACING, CODE_TRIAGE,
                                         CODE_WALL_TIME, CODE_WORKER_SILENT,
                                         COLD_MODEL_MIN, DEEP_TIERS,
+                                        DRUM_LINE_SHARE, DRUM_SHARE,
+                                        DRUM_URGENT_PER_ORC_DAY,
+                                        DRUM_USER_HOUR_WAKES, DRUM_WAVE_WAKES,
                                         FRONTIER_RUNG, HIGH,
                                         HOLD_LEDGER_GAP, HOLD_ORPHAN,
                                         HOLD_TICKET, HOLD_UNBILLED,
@@ -209,7 +240,9 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         WAKE_STATUS_RUNNING,
                                         WAKE_STATUS_SKIPPED,
                                         WAKE_STATUS_STALE, WAKES_PER_DAY_KEY,
-                                        WALL_S, WATCH_PAUSED_MIN)
+                                        W12_CARRY_KEY, W12_URGENT_KEY,
+                                        WALL_S, WATCH_PAUSED_MIN,
+                                        WAVE_BREAKER_OPEN)
 
 logger = logging.getLogger(__name__)
 
@@ -223,9 +256,15 @@ ROUTINE_CODES = ("W2", "W11")
 CLAIM_SCAN = 50
 #: A rendered wake admission may act on: the O1 render's statuses.
 ADMISSIBLE = (WAKE_STATUS_SKIPPED, WAKE_STATUS_RECORDED)
-#: The codes that answer a wake by code for budget (§2.6 item 8).
+#: The codes that answer a wake by code for budget (§2.6 item 8); from O2c
+#: (2026-11-15, C.16) the drum wakes' 60% rule and 25% share too.
 BUDGET_CODES = (CODE_TRIAGE, CODE_INFLIGHT, CODE_DAY_CAP, CODE_ROUTINE_CAP,
-                CODE_DOLLAR_CAP, "line", "total", "deep_share")
+                CODE_DOLLAR_CAP, "line", "total", "deep_share",
+                CODE_DRUM_LINE, CODE_DRUM_SHARE)
+#: The drum wakes' codes (C.16; their switches read again, N2): their
+#: journal body names the wave.
+DRUM_CODES = (CODE_DRUM_OFF, CODE_DRUM_BREAKER, CODE_DRUM_CARRY,
+              CODE_DRUM_LINE, CODE_DRUM_SHARE)
 #: The return's words (A.53).
 RETURN_WORDS = "The Orc reads its position again: it cited the takeover."
 #: A.55 (2026-11-06, completing O2b): the ticket callers the `orcs` worker
@@ -1081,6 +1120,203 @@ def absorb(wake, *, now=None) -> int:
     return len(older)
 
 
+# ── the drums' breaker (C.16; O2c, 2026-11-15) ───────────────────────────
+
+def _drum_of(w):
+    """(wave_id, hop) of a DRUM WAKE (drum_bus.is_drum_wake: every reason a
+    W12; its wave the newest W12's, drum_bus.drum_wave), read on its
+    reasons as they stand; None for any other wake (no query)."""
+    from bot_program.orcs import drum_bus
+    if not drum_bus.is_drum_wake(w.reasons):
+        return None
+    return drum_bus.drum_wave(w.reasons)
+
+
+def _day_start(now) -> datetime:
+    """00:00 UTC of `now`'s day: the line's day (A.12)."""
+    day = _utc(now).date()
+    return datetime(day.year, day.month, day.day, tzinfo=dt_tz.utc)
+
+
+def _hour_drum_wakes(user_id, now) -> int:
+    """The user's drum wakes that reached a model (claimed: started_at) in
+    the rolling hour before `now`."""
+    from bot_program.orcs.models import OrcWake
+    return sum(1 for c in OrcWake.objects.filter(
+        orc__user_id=user_id, started_at__gt=now - timedelta(hours=1),
+        started_at__lte=now).values_list("components", flat=True)
+        if isinstance(c, dict) and c.get("drum"))
+
+
+def drum_booked(now) -> float:
+    """The W12 spend booked today: Σ OrcWave.cost_usd of the waves whose
+    last drum falls on `now`'s UTC day, the line's (a wave's spend is its
+    day's by its last drum)."""
+    from django.db.models import Sum
+
+    from bot_program.orcs.models import OrcWave
+    got = OrcWave.objects.filter(last_at__gte=_day_start(now)).aggregate(
+        s=Sum("cost_usd"))["s"]
+    return float(got or 0)
+
+
+def drum_inflight(now) -> float:
+    """The W12 calls' money in flight and held: each running drum wake's
+    bound (est_usd) and each hold of a drum wake that has not expired
+    (OrcSetting "minds_inflight"), but a ledger gap's: its cost is known and
+    the settle booked it on its wave already (_drum_cost, drum_booked)."""
+    from bot_program.orcs.models import OrcWake
+    out = 0.0
+    for comps, est in OrcWake.objects.filter(
+            status=WAKE_STATUS_RUNNING).values_list("components", "est_usd"):
+        if isinstance(comps, dict) and comps.get("drum"):
+            out += float(est or 0)
+    by_wake = {}
+    for entry in _pruned(_setting(MINDS_INFLIGHT_KEY) or {}, now).values():
+        if entry.get("kind") not in (HOLD_TICKET, HOLD_LEDGER_GAP) and \
+                isinstance(entry.get("wake"), int):
+            by_wake.setdefault(entry["wake"], []).append(entry)
+    if by_wake:
+        for pk, comps in OrcWake.objects.filter(
+                pk__in=list(by_wake)).values_list("pk", "components"):
+            if isinstance(comps, dict) and comps.get("drum"):
+                for entry in by_wake[pk]:
+                    try:
+                        out += float(entry.get("usd") or 0)
+                    except (TypeError, ValueError):
+                        continue
+    return out
+
+
+def drum_code(w, orc, f, *, now, bound, purse) -> str:
+    """C.16, the drums' breaker, for a DRUM WAKE at admission and at the
+    claim (_check, after the minds' own breaker): "" for any other wake,
+    with no query; else the first that fails, as its code:
+
+      drum_wakes_off  `orcs_drums` or `orcs_drum_wakes` OFF, read again
+                    (frictionless off, N2): a W12 queued while they were
+                    ON spends nothing once one is OFF; no breaker opens
+      drum_breaker  its wave's breaker open; DRUM_WAVE_WAKES drum wakes of
+                    its wave, or DRUM_USER_HOUR_WAKES of its user in the
+                    rolling hour, already reached a model (urgent ones
+                    included): the wave's breaker opens (_drum_after)
+      drum_carry    urgent, its Orc's DRUM_URGENT_PER_ORC_DAY urgent drum
+                    wakes of the UTC day already used (the claim's guard
+                    for a W12 that passed its delivery before they were):
+                    its W12 reasons wait for the Orc's next wake
+      drum_line     not urgent, the line's booked spend and money in
+                    flight at or past DRUM_LINE_SHARE of its cap; an urgent
+                    drum wake (its W12 on the Orc's own stakes) passes, and
+                    still meets its triage ceiling after this (P14's twin)
+      drum_share    the W12 spend booked today, the W12 calls in flight and
+                    this bound past DRUM_SHARE of the cap, urgent included
+
+    Database reads only. `w._drum` keeps {wave, hop, why} for the code's
+    journal body and the writes under the lock."""
+    from bot_program.orcs import drum_bus, switches
+    from bot_program.orcs.models import OrcWave
+    got = _drum_of(w)
+    if got is None:
+        return ""
+    info = {"wave": got[0], "hop": got[1], "why": ""}
+    w._drum = info
+    if not (drum_bus.drums_on() and switches.drum_wakes_on()):
+        return CODE_DRUM_OFF
+    wave = OrcWave.objects.filter(user_id=orc.user_id,
+                                  wave_id=got[0]).first()
+    breaker = (wave.breaker or {}) if wave is not None else {}
+    if breaker.get("state") == WAVE_BREAKER_OPEN:
+        info["why"] = str(breaker.get("why") or "")
+        return CODE_DRUM_BREAKER
+    if wave is not None and int(wave.w12_answered or 0) >= DRUM_WAVE_WAKES:
+        info["why"] = (f"{DRUM_WAVE_WAKES} drum wakes of its wave reached a "
+                       f"model")
+        return CODE_DRUM_BREAKER
+    if _hour_drum_wakes(orc.user_id, now) >= DRUM_USER_HOUR_WAKES:
+        info["why"] = (f"{DRUM_USER_HOUR_WAKES} drum wakes of its book "
+                       f"reached a model within an hour")
+        return CODE_DRUM_BREAKER
+    if f["urgent"] and drum_bus.urgent_today(orc, now) >= \
+            DRUM_URGENT_PER_ORC_DAY:
+        info["why"] = (f"{DRUM_URGENT_PER_ORC_DAY} urgent drum wakes of "
+                       f"this Orc today")
+        return CODE_DRUM_CARRY
+    cap = float(purse.get("cap") or 0)
+    if not f["urgent"] and float(purse.get("spent") or 0) + float(
+            purse.get("inflight") or 0) >= DRUM_LINE_SHARE * cap - 1e-9:
+        return CODE_DRUM_LINE
+    if drum_booked(now) + drum_inflight(now) + float(bound) > \
+            DRUM_SHARE * cap + 1e-9:
+        return CODE_DRUM_SHARE
+    return ""
+
+
+def _drum_body(w, code) -> dict:
+    """A drum code's journal body: its wake's wave, and its breaker's why
+    (dollars in the body only, as every money code's, A.5)."""
+    info = getattr(w, "_drum", None)
+    if code not in DRUM_CODES or not isinstance(info, dict):
+        return {}
+    return {"wave": info.get("wave"), "why": info.get("why") or ""}
+
+
+def _drum_after(locked, w, code, *, now) -> None:
+    """Under the Orc's lock (admission's or the claim's transaction), after
+    a drum code: drum_breaker opens its wave's breaker {state: open, why,
+    at}, its first why kept; drum_carry carries the wake's W12 reasons into
+    the Orc's memory (drum_bus.add_carry), so they join its next recorded
+    wake, routine. Database writes only."""
+    from bot_program.orcs import drum_bus, journal
+    from bot_program.orcs.models import OrcWave
+    info = getattr(w, "_drum", None)
+    if not isinstance(info, dict) or not info.get("wave"):
+        return
+    if code == CODE_DRUM_BREAKER:
+        for pk, breaker in OrcWave.objects.filter(
+                user_id=locked.user_id, wave_id=info["wave"]).values_list(
+                "pk", "breaker"):
+            if (breaker or {}).get("state") == WAVE_BREAKER_OPEN:
+                continue
+            OrcWave.objects.filter(pk=pk).update(breaker={
+                "state": WAVE_BREAKER_OPEN, "why": str(info.get("why") or ""),
+                "at": now.isoformat()})
+    elif code == CODE_DRUM_CARRY:
+        journal.remember(locked, **{W12_CARRY_KEY: drum_bus.add_carry(
+            [r for r in w.reasons or []
+             if isinstance(r, dict) and r.get("code") == "W12"])})
+
+
+def _drum_claimed(locked, drum, *, urgent, now) -> dict:
+    """At the claim, under the line lock and the Orc's (_take): the drum
+    wake counts on its wave (OrcWave.w12_answered), and an urgent one on
+    its Orc's UTC day, the memory keys returned ({w12_urgent: {day, n}})."""
+    from django.db.models import F
+
+    from bot_program.orcs import drum_bus
+    from bot_program.orcs.models import OrcWave
+    OrcWave.objects.filter(user_id=locked.user_id, wave_id=drum[0]).update(
+        w12_answered=F("w12_answered") + 1)
+    if not urgent:
+        return {}
+    return {W12_URGENT_KEY: {"day": utc_day(now),
+                             "n": drum_bus.urgent_today(locked, now) + 1}}
+
+
+def _drum_cost(locked, w, cost) -> None:
+    """At the settle, under its locks: a drum wake's booked cost joins its
+    wave's (OrcWave.cost_usd), the 25% share's booked spend."""
+    from django.db.models import F
+
+    from bot_program.orcs.models import OrcWave
+    drum = (w.components or {}).get("drum") if isinstance(
+        w.components, dict) else None
+    if not isinstance(drum, dict) or not drum.get("wave") or not cost:
+        return
+    OrcWave.objects.filter(user_id=locked.user_id,
+                           wave_id=drum["wave"]).update(
+        cost_usd=F("cost_usd") + cost)
+
+
 # ── admission (A.11) ─────────────────────────────────────────────────────
 
 def _facts(w, orc) -> dict:
@@ -1121,6 +1357,9 @@ def _check(w, orc, f, *, now, rung, bound, purse, inflight_high,
         return CODE_OVER_BUDGET
     if breaker_state(now):
         return CODE_BREAKER
+    code = drum_code(w, orc, f, now=now, bound=bound, purse=purse)
+    if code:
+        return code
     code = cap_code(orc, real=f["real"], urgent=f["urgent"],
                     routine=f["routine"], rung=rung, day_class=w.day_class,
                     now=now, inflight_high=inflight_high)
@@ -1249,8 +1488,10 @@ def admit(wake, rendered=None, *, now=None) -> dict:
         if code:
             fresh.save(update_fields=["components"])
             _by_code(locked, fresh, code, now=now,
-                     body=_code_body(code, bound=price["weigh"], purse=purse,
-                                     rung=rung))
+                     body={**_code_body(code, bound=price["weigh"],
+                                        purse=purse, rung=rung),
+                           **_drum_body(w, code)})
+            _drum_after(locked, w, code, now=now)
         else:
             _to_pending(fresh, f, rung=rung, price=price, now=now)
     wake.status, wake.skipped_reason = fresh.status, fresh.skipped_reason
@@ -1320,6 +1561,10 @@ def _take(locked, w, f, price, *, rung, now, frontier="") -> None:
                  "pair": round(float(price["weigh"]), 6)}
     elif frontier:
         extra = {"frontier": str(frontier)}
+    # C.16 (O2c): a drum wake reaching a model names its wave
+    drum = _drum_of(w)
+    if drum is not None:
+        extra["drum"] = {"wave": drum[0], "hop": drum[1]}
     w.status = WAKE_STATUS_RUNNING
     w.started_at = now
     w.est_usd = Decimal(str(round(float(price["bound"]), 6)))
@@ -1341,6 +1586,8 @@ def _take(locked, w, f, price, *, rung, now, frontier="") -> None:
         fields.update(spend_today_usd=Decimal(0),
                       routine_spend_today_usd=Decimal(0))
         keys["unbilled_usd"] = 0.0
+    if drum is not None:
+        keys.update(_drum_claimed(locked, drum, urgent=f["urgent"], now=now))
     journal.remember(locked, fields=fields, **keys)
 
 
@@ -1422,8 +1669,10 @@ def _claim_one(wid, orc_id, *, now, paused=False) -> tuple:
                 real_urgent=f["real"] and f["urgent"])
         if code:
             _by_code(locked, w, code, now=now,
-                     body=_code_body(code, bound=price["weigh"],
-                                     purse=purse, rung=rung))
+                     body={**_code_body(code, bound=price["weigh"],
+                                        purse=purse, rung=rung),
+                           **_drum_body(w, code)})
+            _drum_after(locked, w, code, now=now)
             return "code", code
         if not f["urgent"] and _cold_running(price["model"]):
             return "wait", "the first call on a cold model is running"
@@ -1635,6 +1884,8 @@ def settle(wake, outcome, *, now=None) -> dict:
         line_lock()
         locked = journal.orc_lock(wake.orc_id)
         w = OrcWake.objects.select_for_update().get(pk=wake.pk)
+        # C.16 (O2c): a drum wake's booked cost joins its wave's
+        _drum_cost(locked, w, cost)
         if w.status != WAKE_STATUS_RUNNING:
             # a late settle (A.55): the real cost booked once, nothing else
             # written; its orphan hold kept or released by what came back

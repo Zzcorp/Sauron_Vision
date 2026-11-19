@@ -222,6 +222,26 @@ def _room(work, tick, stop, level, vctx) -> str:
     return ""
 
 
+def _wave_stamp(it):
+    """C.17 (O2c, 2026-11-15): an intent's wave stamp, {wave, hop}, for the
+    O arm's would-stop: its wave_id (mind._write_intent, from its wake's
+    newest W12) and that W12's hop on its wake (0 when unread); None for an
+    intent from a wake with no W12."""
+    wave = str(getattr(it, "wave_id", "") or "")
+    if not wave:
+        return None
+    hop = 0
+    reasons = it.wake.reasons if it.wake is not None else []
+    for r in reasons if isinstance(reasons, list) else []:
+        if isinstance(r, dict) and r.get("code") == "W12" and \
+                str(r.get("wave") or "") == wave:
+            try:
+                hop = int(r.get("hop") or 0)
+            except (TypeError, ValueError):
+                hop = 0
+    return {"wave": wave, "hop": hop}
+
+
 def _event_at(vctx, event_id):
     """A lock waiver's event moment, from the wake's own events (A.8)."""
     ev = (vctx.get("events") or {}).get(str(event_id or "")) \
@@ -285,7 +305,7 @@ def _apply(orc, work, env, tick, it) -> dict:
         work, env, tick, kind=it.kind, intent=it.pk, would_stop=stop,
         level_id=str(level.get("level_id") or it.level_id or ""),
         share=_f(it.share), event_id=it.event_id,
-        event_at=_event_at(vctx, it.event_id))
+        event_at=_event_at(vctx, it.event_id), wave=_wave_stamp(it))
     if not applied:
         return {"applied": False, "exit": None,
                 "outcome": _expired(orc, it, EXPIRY_MOVED,

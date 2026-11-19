@@ -89,14 +89,28 @@ answered by code never makes the next metronome quiet. W3 watches the
 plan's levels without urgency; W11 counts from every recorded wake at the
 army type's period, and fires the wake a validated answer asked for.
 
+THE DRUM WAKES (O2c, 2026-11-15, the O2 spec C.14-C.16, P15). While the
+drum wakes' gate is ON (drum_bus.route: `orcs_drums`, `orcs_drum_wakes` and
+the four gates), a drum the census routes adds a W12 reason to the pending
+wake of each Orc it reaches (_queue), one per wave, its words code's
+(the drum's kind, symbols, relation and hop). The tick records a W12 no
+earlier than DRUM_SETTLE_MIN after its wave's first drum (_settled): until
+then it stays in seen["wake_pending"], neither recorded nor consumed, so the
+drums that join its wave within DRUM_JOIN_MIN wake the Orc once, and a wake
+recorded meanwhile for another reason leaves it waiting. A W12 the breaker
+carried (seen["w12_carry"]: its Orc's urgent drum wakes of the day were
+used) joins the next wake recorded for any reason, routine, and `record`
+consumes it; the carry alone never records a wake. The render reads each
+W12's urgency again as of the wake's moment, on its own mark and ATR(1h),
+with no lock held (_w12_again, P15), on the survivor of the merge, before
+admission. With the gate OFF no W12 exists and nothing here changes.
+
 `detect` never raises; a recorded wake is written in a savepoint, so a
 failure leaves the tick and the Orc as they were, and a quiet tick costs
 no query at all. A render pass that fails on a wake (its merge, its
 render or its admission) marks it `failed` in its components and answers
 it by code (`skipped`, render_failed): never pending, never retried,
 never counted as the worker's silence (P11), and never stopping the next.
-
-# O2c: drum deliveries add W12
 """
 import copy
 import hashlib
@@ -108,7 +122,7 @@ from datetime import timedelta
 
 from bot_program.orcs.constants import (BAND_HOLD_AFTER_URGENT_MIN,
                                         CODE_MINDS_OFF, CODE_RENDER_FAILED,
-                                        FACTS_HASH_VERSION,
+                                        DRUM_SETTLE_MIN, FACTS_HASH_VERSION,
                                         MIN_WAKE_SPACING_MIN,
                                         PRINT_BANDS_MIN, ROUTE_WOULD_T,
                                         RUNG_NONE, STATE_DEAD, VENUE_DEMO,
@@ -122,6 +136,7 @@ from bot_program.orcs.constants import (BAND_HOLD_AFTER_URGENT_MIN,
                                         W11_CLOSE_BEFORE_MIN,
                                         W11_METRONOME_H, W11_OPEN_AFTER_MIN,
                                         W11_WEEKEND_BEFORE_H,
+                                        W12_CARRY_KEY, W12_STOP_ATR1H,
                                         WAKE_KEYS_KEPT,
                                         WAKE_RENDERED_WORDS,
                                         WAKE_STATUS_PENDING,
@@ -233,6 +248,18 @@ def _reason(code, key, t, urgent, **extra) -> dict:
 def _one_shot(reason) -> bool:
     return (reason.get("code") in ONCE_CODES
             or reason.get("key") in ONCE_KEYS)
+
+
+def _settled(reason, now) -> bool:
+    """C.15 (O2c, 2026-11-15): a W12 is recorded no earlier than
+    DRUM_SETTLE_MIN after its wave's first drum (its `first_at`), so the
+    drums that join its wave within DRUM_JOIN_MIN wake the Orc once. Every
+    other reason, and a W12 whose first drum cannot be read, is due."""
+    if not isinstance(reason, dict) or reason.get("code") != "W12":
+        return True
+    first = _parse(reason.get("first_at"))
+    return first is None or now - first >= timedelta(
+        minutes=DRUM_SETTLE_MIN)
 
 
 def _done_keys(seen) -> set:
@@ -496,8 +523,11 @@ def _detect(bot, trade, price, cared, orc):
     before = dict(before) if isinstance(before, dict) else dict(seen)
     keys = _done_keys(seen)
     pending = dict(seen.get("wake_pending") or {})
+    # C.15 (O2c): a W12 whose wave has not settled stays pending, neither
+    # recorded nor consumed (record consumes the keys it carries only)
     reasons = [r for r in pending.get("reasons") or []
-               if isinstance(r, dict) and r.get("key") not in keys]
+               if isinstance(r, dict) and r.get("key") not in keys
+               and _settled(r, now)]
     have = {r["key"] for r in reasons}
     fresh = []
 
@@ -786,11 +816,18 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
     the predicates' states), queued for its render; the memory that
     decided it, merged under the Orc's lock; the next metronome. A handful
     of queries, never the dossier (render_queued, on the slow queue).
-    Returns the OrcWake."""
+    Returns the OrcWake. The W12 reasons the drums' breaker carried
+    (seen["w12_carry"]; O2c, 2026-11-15, C.16) join it, routine, and are
+    consumed in the same merge, only when there are some (_carried)."""
     from bot_program.orcs import journal
     from bot_program.orcs.models import OrcWake
     urgent = any(r.get("urgent") for r in reasons)
     seen = orc.seen or {}
+    # C.16 (O2c): the W12 reasons the breaker carried join this wake,
+    # routine, and are consumed below; only when there are some
+    carried, carry_keys = _carried(seen, reasons)
+    if carried:
+        reasons = list(reasons) + carried
     meta = trade.metadata if isinstance(trade.metadata, dict) else {}
     care = meta.get("care") if isinstance(meta.get("care"), dict) else {}
     preds = {str(k): (v or {}).get("state")
@@ -834,6 +871,8 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
     if urgent:
         remember["band_hold_until"] = (now + timedelta(
             minutes=BAND_HOLD_AFTER_URGENT_MIN)).isoformat()
+    if carry_keys:
+        remember[W12_CARRY_KEY] = _take_carry(carry_keys)
     if w2_bar:
         remember["w2_bar"] = w2_bar
     w3 = {str(r["level"]): now.isoformat() for r in reasons
@@ -845,6 +884,61 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
                      card_extra={"next_wake_due": due.isoformat()},
                      **remember)
     return wake
+
+
+def _carried(seen, reasons) -> tuple:
+    """C.16 (O2c, 2026-11-15): the W12 reasons waiting in
+    seen["w12_carry"] that join a wake recorded with `reasons` (those whose
+    key it does not carry already), routine and marked carried, and every
+    key of the carry, which the record consumes. ([], []) with no carry:
+    the record is then O1's."""
+    carry = [r for r in (seen or {}).get(W12_CARRY_KEY) or []
+             if isinstance(r, dict) and r.get("key")]
+    if not carry:
+        return [], []
+    have = {r.get("key") for r in reasons or () if isinstance(r, dict)}
+    joined = []
+    for r in carry:
+        if r["key"] not in have:
+            have.add(r["key"])
+            joined.append({**r, "urgent": False, "carried": True})
+    return joined, [r["key"] for r in carry]
+
+
+def _take_carry(keys):
+    """A `remember` value for seen["w12_carry"]: the locked carry less the
+    keys a recorded wake took; None once empty. A W12 carried since this
+    tick read the Orc stays for the next wake."""
+    gone = set(keys or ())
+
+    def merge(cur):
+        left = [r for r in (cur if isinstance(cur, list) else [])
+                if isinstance(r, dict) and r.get("key") not in gone]
+        return left or None
+    return merge
+
+
+def _w12_again(reasons, ctx) -> list:
+    """P15 (O2c, 2026-11-15, C.14): each W12 reason's urgency read again AS
+    OF the wake's moment, from the render's own mark, its effective stop and
+    its ATR(1h) (dossier.context_for), with no lock held, on the survivor's
+    reasons before admission: urgent for a stop_hit on the Orc's own symbol
+    (`own`), or for its stop within W12_STOP_ATR1H x ATR(1h) of the mark. A
+    carried W12 stays routine. The same list when it holds no W12."""
+    if not any(isinstance(r, dict) and r.get("code") == "W12"
+               for r in reasons or ()):
+        return reasons
+    m, eff = _f((ctx or {}).get("m")), _f((ctx or {}).get("effective"))
+    atr = _f((ctx or {}).get("atr1h"))
+    near = bool(m is not None and eff is not None and atr
+                and abs(m - eff) <= W12_STOP_ATR1H * atr)
+    out = []
+    for r in reasons:
+        if isinstance(r, dict) and r.get("code") == "W12" and \
+                not r.get("carried"):
+            r = {**r, "urgent": bool(r.get("own")) or near}
+        out.append(r)
+    return out
 
 
 #: The tick's own inputs a render keeps while the minds are on (O2a), so a
@@ -983,6 +1077,14 @@ def render_wake(wake, *, real_money=None, fable_money=None):
     orc._orc_results = None
     ctx = dossier.context_for(orc, trade, price=price, now=now, cache={},
                               reasons=reasons, bot=None)
+    # P15 (O2c): a W12's urgency read again as of this wake's moment, before
+    # the validation context and admission read the survivor's reasons
+    again = _w12_again(reasons, ctx)
+    reread = again != reasons
+    if reread:
+        reasons = again
+        ctx["reasons"] = list(again)
+        wake.reasons = again
     ctx["real"] = real
     ctx["world"] = world
     if isinstance(tick.get("predicates"), dict):
@@ -1000,6 +1102,8 @@ def render_wake(wake, *, real_money=None, fable_money=None):
     from bot_program.orcs.switches import router_on
     routed = router_on()
     with transaction.atomic():
+        if reread:
+            wake.save(update_fields=["reasons"])
         return _render(wake, orc, trade, tick, ctx, reasons, now=now,
                        real=real, vctx=vctx, gate=gate,
                        route_world=_route_world(world, real_money),

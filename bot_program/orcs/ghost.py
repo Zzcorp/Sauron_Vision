@@ -1190,13 +1190,20 @@ def arm_effective(state):
 
 
 def apply_intent(state, env, tick, *, kind, intent, would_stop=None,
-                 level_id="", share=None, event_id="", event_at=None):
+                 level_id="", share=None, event_id="", event_at=None,
+                 wave=None):
     """A.43, one applied proposal on the O arm's working state, after
     _to_would: (applied, exit).
 
       tighten     orc_stop = the tighter of its own and the would-stop (the
                   level's own stop beyond the crowd, or the BE row's
-                  price: V7); orc_why its words
+                  price: V7); orc_why its words. The wave stamp (C.17;
+                  O2c, 2026-11-15): when it moves orc_stop, a tighten from
+                  a drum wake (`wave`, {wave, hop}: intents._wave_stamp)
+                  stores {wave, hop} beside it, in `orc_stop_wave`, and any
+                  other drops it: the would-stop's own origin. A would-stop
+                  hit publishes no drum (drums come from real exits only,
+                  drum_bus.on_close) and no real stop carries a wave
       trim        _bank: the share at the tick's market exit price
       exit        _exit("orc", pricing.market_exit_px of the tick), which
                   closes the arm
@@ -1206,8 +1213,15 @@ def apply_intent(state, env, tick, *, kind, intent, would_stop=None,
               replay=env.meta.get("paper_replay"))
     if kind == "tighten":
         sign = pricing.d(state.get("side"))
+        before = _f(state.get("orc_stop"))
         state["orc_stop"] = _tighter(sign, state.get("orc_stop"), would_stop)
         state["orc_why"] = f"the Orc's proposal {level_id}".strip()
+        if _f(state.get("orc_stop")) != before:
+            if isinstance(wave, dict) and wave.get("wave"):
+                state["orc_stop_wave"] = {"wave": str(wave["wave"]),
+                                          "hop": int(wave.get("hop") or 0)}
+            else:
+                state.pop("orc_stop_wave", None)
         return True, None
     if kind == "trim":
         banked = _bank(state, shadow_of(state), tick, env.now,

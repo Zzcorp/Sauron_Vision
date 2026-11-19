@@ -38,23 +38,51 @@ else, whatever `orcs_drums` says (§4.7 "Rollout", §11: drums are published
 and routed as journal facts only, so the reach is measured before any
 wake is spent on it).
 
-# O2: drum wakes (a delivery adds W12 to the receiver's pending wake,
-# urgent per _urgent_for, gated by `orcs_drums`), waves (OrcWave), the
-# breaker and the wave stamp on intents and stops; a stop placed from a
-# drum wake carries the wave and its hit inherits hop + 1.
+THE DRUM WAKES (O2c, 2026-11-15, the O2 spec C.14-C.17, §4 Q21). route reads
+its gate once a pass (wakes_gate): `orcs_drums` first, then the drum wakes'
+own switch `orcs_drum_wakes` (OFF on arrival, turned on only with the
+trading PIN), then the four gates of A.2. While any reads OFF, a delivery is
+O1's, byte for byte, and no wave row is written. While all are ON:
+  - each drum's wave is upserted, one OrcWave row per (user, wave_id): its
+    drums, symbols, first and last drum, highest hop, reach and W12 queued;
+  - each delivery adds a W12 reason to the Orc it reaches (wake._queue), one
+    per wave: urgent for a stop_hit on the Orc's own symbol or its own stop
+    within W12_STOP_ATR1H x ATR(1h) of the mark (_urgent_for, its stop clause
+    narrowed for W12), read again at the render (P15). wake.py records it no
+    earlier than DRUM_SETTLE_MIN after its wave's first drum (C.15);
+  - its wave's breaker open, the delivery is journaled only, as in O1;
+  - an urgent W12 past the Orc's DRUM_URGENT_PER_ORC_DAY urgent drum wakes of
+    the UTC day (the claim counts them) waits in the Orc's memory
+    (seen["w12_carry"]) and joins its next recorded wake, routine, never a
+    wake of its own; its delivery is journaled.
+  The DR entry's body then says which (`w12`: queued, carried, breaker). The
+  switches read again (frictionless off), the breaker's counts, the 60% rule
+  and the 25% share are the scheduler's, at admission and at the claim, on a
+  DRUM WAKE: a wake whose every reason is a W12 (is_drum_wake). A drum
+  wake's wave, its intents' wave stamp and its cost read one rule: its
+  newest W12 (drum_wave). Nothing here imports the scheduler, the mind or
+  the gateway at its top: the tick imports this module (on_tick). The stop
+  a drum wake would place is the O arm's alone (C.17): a real stop never
+  carries a wave (on_close's seam is O3's).
 """
 import logging
 import re
 import statistics
 from datetime import timedelta
+from datetime import timezone as dt_tz
 
 from bot_program.orcs import drums
 from bot_program.orcs.constants import (DRUM_FACTOR_MAP_V1, DRUM_JOIN_MIN,
-                                        DRUM_LOCK_WHYS, DRUMS_SWITCH,
+                                        DRUM_LOCK_WHYS,
+                                        DRUM_URGENT_PER_ORC_DAY, DRUMS_SWITCH,
                                         GAP_MIN_SAMPLES,
                                         NEWS_SHOCK_CORROBORATION_ATR1H,
                                         NEWS_SHOCK_CORROBORATION_MIN,
-                                        RING_SAMPLES, RING_TTL_S, STATE_DEAD)
+                                        RING_SAMPLES, RING_TTL_S, STATE_DEAD,
+                                        W12_BREAKER, W12_CARRIED,
+                                        W12_CARRY_KEEP, W12_CARRY_KEY,
+                                        W12_QUEUED, W12_STOP_ATR1H, W12_T,
+                                        W12_URGENT_KEY, WAVE_BREAKER_OPEN)
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +110,11 @@ def _now():
 
 
 def drums_on() -> bool:
-    """The `orcs_drums` switch. Read by nothing in O1: drum wakes are O2's
-    (route's seam)."""
+    """The `orcs_drums` switch. Inert through O1. From O2c (2026-11-15, C.14)
+    its one reader is route's gate (wakes_gate), read first, once a pass:
+    OFF, nothing else of the gate is read and a delivery is O1's. ON alone
+    it wakes nobody: the drums are journaled with `orcs` ON whatever it
+    says."""
     try:
         from core.platform_control import is_component_enabled
         return bool(is_component_enabled(DRUMS_SWITCH))
@@ -216,8 +247,9 @@ def on_close(orc, trade):
     payload = drums.payload_stop_hit(stop=_px(trade, level), at=at,
                                      beyond_atr=beyond)
     payload["leg"] = trade.pk
-    # O2: a stop placed from a drum wake carries its wave; its hit
-    # inherits the wave and hop + 1 (§4.7). In O1 every stop is hop 0.
+    # O3: a stop placed from a drum wake carries its wave; its hit
+    # inherits the wave and hop + 1 (§4.7). Through O2 every real stop
+    # is hop 0: no Orc places one (the wave stamp is the O arm's, C.17).
     return publish("stop_hit", user=orc.user, symbol=trade.symbol,
                    asset_class=trade.asset_class, payload=payload,
                    origin=f"orc:{orc.pk}", orc=orc, at=at)
@@ -579,10 +611,13 @@ def _factor_map():
     return DRUM_FACTOR_MAP_V1
 
 
-def _urgent_for(orc, drum, now) -> bool:
+def _urgent_for(orc, drum, now, *, atr_share=1.0) -> bool:
     """§4.7: urgent only when the receiver's own stakes are: a stop_hit on
-    its own symbol, or its own stop within 1 x ATR(1h) of the mark. O2's
-    (a drum wake); called by nothing in O1."""
+    its own symbol, or its own stop within `atr_share` x ATR(1h) of the mark
+    (1 by §4.7's rule). Called by nothing in O1; from O2c (2026-11-15, C.14)
+    by a delivery's W12, its stop clause narrowed to W12_STOP_ATR1H: in a
+    correlated shock ATR widens and nearly every stop would sit within one
+    ATR, so nearly every drum wake would be urgent."""
     if drum.kind == "stop_hit" and drum.symbol == orc.symbol:
         return True
     try:
@@ -592,7 +627,8 @@ def _urgent_for(orc, drum, now) -> bool:
         stop = _f(care.get("soft_stop")) or _f(row.stop_loss)
         mark, atr = _last(orc.symbol), _atr1h(orc.symbol, orc.asset_class,
                                               now)
-        return bool(stop and mark and atr and abs(mark - stop) <= atr)
+        return bool(stop and mark and atr
+                    and abs(mark - stop) <= float(atr_share) * atr)
     except Exception:  # noqa: BLE001
         return False
 
@@ -622,7 +658,12 @@ def _reach(d, ideas, matrix, factor_map) -> list:
 def route(now) -> int:
     """Route every unrouted drum within its user's book; journal one DR
     fact per (wave, Orc). Returns the deliveries. In O1 a delivery wakes
-    nobody (the module's docstring)."""
+    nobody (the module's docstring). From O2c (2026-11-15, C.14-C.16), while
+    the drum wakes' gate is ON (wakes_gate, read once a pass), each drum's
+    wave is upserted (OrcWave) and each delivery adds its W12, carries it,
+    or (its wave's breaker open) journals the drum only, its DR entry's body
+    saying which (`w12`). OFF, a delivery is O1's, byte for byte, and no
+    wave row is written."""
     from bot_program.orcs import journal, sources
     from bot_program.orcs.models import Orc, OrcDrum
     pending = list(OrcDrum.objects.filter(routed_at__isnull=True,
@@ -630,6 +671,7 @@ def route(now) -> int:
                    .order_by("at", "id"))
     if not pending:
         return 0
+    wakes = wakes_gate()
     factor_map = _factor_map()
     by_user = {}
     for d in pending:
@@ -653,6 +695,14 @@ def route(now) -> int:
                                or bool((d.payload or {}).get("corroborated")))
             targets = _reach(d, ideas, matrix, factor_map) \
                 if corroborated_ok else []
+            wave = None
+            if wakes:
+                try:
+                    wave = _wave_upsert(d)
+                except Exception as e:  # noqa: BLE001 — O1's delivery then
+                    logger.warning("[orcs] drum %s: its wave not written: "
+                                   "%s", d.pk, e)
+            queued = 0
             for oid, relation in targets:
                 orc = by_id.get(oid)
                 if orc is None:
@@ -663,25 +713,233 @@ def route(now) -> int:
                 # merged under the Orc's lock: a list another writer grew
                 # since this pass loaded the Orc is kept
                 remember = {"drum_waves": journal.add_keys(50, [d.wave_id])}
-                # O2: a delivery adds W12 to the receiver's pending wake
-                # (urgent per _urgent_for), gated by `orcs_drums` (§4.7).
                 payload_d = {"kind": d.kind, "symbol": d.symbol,
                              "hop": d.hop, "payload": d.payload}
+                body = {"fk": "drum", "drum": d.pk, "drum_kind": d.kind,
+                        "symbol": d.symbol, "relation": relation,
+                        "hop": d.hop, "wave": d.wave_id}
+                reason, w12 = None, ""
+                if wave is not None:
+                    try:
+                        reason, w12 = _w12_delivery(orc, d, relation, wave,
+                                                    now)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[orcs] drum %s to Orc %s: no W12: "
+                                       "%s", d.pk, oid, e)
+                if w12:
+                    body["w12"] = w12
+                if w12 == W12_CARRIED:
+                    remember[W12_CARRY_KEY] = add_carry([reason])
                 try:
                     journal.append(
                         orc, "drum",
                         lambda fid, pd=payload_d, rel=relation:
                         drums.line(pd, rel, fid),
-                        body={"fk": "drum", "drum": d.pk, "drum_kind": d.kind,
-                              "symbol": d.symbol, "relation": relation,
-                              "hop": d.hop, "wave": d.wave_id},
+                        body=body,
                         fact=True, id_prefix="DR", remember=remember, at=now)
                     reached.append({"orc": oid, "relation": relation})
                     delivered += 1
                 except Exception as e:  # noqa: BLE001
                     logger.warning("[orcs] drum %s to Orc %s not "
                                    "journaled: %s", d.pk, oid, e)
+                    continue
+                if w12 == W12_CARRIED:
+                    queued += 1
+                elif w12 == W12_QUEUED:
+                    try:
+                        from bot_program.orcs import wake
+                        wake._queue(orc, [reason], now)
+                        queued += 1
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[orcs] drum %s to Orc %s: its W12 "
+                                       "not queued: %s", d.pk, oid, e)
+            if wave is not None:
+                try:
+                    _wave_reach(wave, reached, queued)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[orcs] drum %s: its wave's reach not "
+                                   "written: %s", d.pk, e)
             d.reach = list(d.reach or []) + reached
             d.routed_at = now
             d.save(update_fields=["reach", "routed_at"])
     return delivered
+
+
+# ── the drum wakes (O2c, 2026-11-15, the O2 spec C.14-C.16) ──────────────
+
+def wakes_gate() -> bool:
+    """C.14: may this pass's deliveries add a W12? `orcs_drums` first (its
+    one reader, drums_on), then the drum wakes' own switch, then the four
+    gates of A.2 (switches.gate_code: the Orcs line is read through the
+    gateway inside that function, so this module still imports no
+    scheduler, mind or gateway at its top). Read once a pass; unreadable
+    reads OFF."""
+    try:
+        if not drums_on():
+            return False
+        from bot_program.orcs import switches
+        return bool(switches.drum_wakes_on()) and switches.gate_code() == ""
+    except Exception as e:  # noqa: BLE001 — an unreadable gate is OFF
+        logger.info("[orcs] the drum wakes' gate could not be read: %s", e)
+        return False
+
+
+def _symbols_of(d) -> list:
+    syms = ([str(x) for x in (d.payload or {}).get("symbols") or []]
+            if d.kind == "level_break" else [])
+    return syms or [str(d.symbol)]
+
+
+def w12_reason(d, relation, *, urgent, own, first_at) -> dict:
+    """C.14: one delivery's W12 reason, keyed per wave (one per wave and
+    Orc): {code W12, key "W12:<wave_id>", t (W12_T's code words), urgent,
+    wave, hop, first_at (its wave's first drum: the settle counts from it),
+    drum (its kind), own (a stop_hit on the receiver's own symbol: urgent
+    whatever its stop, the render reading it again)}."""
+    from bot_program.orcs.notes import DRUM_WORDS
+    hop = int(d.hop or 0)
+    t = W12_T.format(kind_t=DRUM_WORDS.get(str(d.kind), "a drum"),
+                     symbols=", ".join(_symbols_of(d)), relation=relation,
+                     hop=hop)
+    return {"code": "W12", "key": f"W12:{d.wave_id}"[:120], "t": t,
+            "urgent": bool(urgent), "wave": str(d.wave_id), "hop": hop,
+            "first_at": (first_at.isoformat() if hasattr(first_at,
+                                                         "isoformat")
+                         else str(first_at or "")),
+            "drum": str(d.kind), "own": bool(own)}
+
+
+def is_drum_wake(reasons) -> bool:
+    """A DRUM WAKE (C.16; defined here, once): a wake whose every reason is
+    a W12. Only a drum wake meets the breaker, the 60% rule and the 25%
+    share, and only a drum wake counts for its wave, for the user's hour and
+    for its Orc's urgent drum wakes of the day: a W12 that rides a wake with
+    another reason is read with it, on that reason's own account."""
+    rs = [r for r in reasons or () if isinstance(r, dict)]
+    return bool(rs) and all(r.get("code") == "W12" for r in rs)
+
+
+def drum_wave(reasons):
+    """The wave a wake answers to (C.16, C.17; one rule, documented): its
+    NEWEST W12 reason, the latest first_at (its wave's first drum; ties, the
+    greater key). (wave_id, hop), or None when no reason is a W12. A drum
+    wake's counts and cost, and the wave stamp on an intent, read it."""
+    from django.utils.dateparse import parse_datetime
+    best = None
+    for r in reasons or ():
+        if not isinstance(r, dict) or r.get("code") != "W12" or \
+                not r.get("wave"):
+            continue
+        try:
+            at = parse_datetime(str(r.get("first_at") or ""))
+        except (TypeError, ValueError):
+            at = None
+        rank = (at.timestamp() if at is not None else float("-inf"),
+                str(r.get("key") or ""))
+        if best is None or rank > best[0]:
+            best = (rank, (str(r["wave"]), int(r.get("hop") or 0)))
+    return best[1] if best is not None else None
+
+
+def urgent_today(orc, now) -> int:
+    """The Orc's urgent drum wakes of `now`'s UTC day, as the claim counts
+    them (seen[W12_URGENT_KEY] = {day, n}); 0 for another day."""
+    seen = orc.seen if isinstance(orc.seen, dict) else {}
+    got = seen.get(W12_URGENT_KEY)
+    if not isinstance(got, dict) or \
+            got.get("day") != now.astimezone(dt_tz.utc).date().isoformat():
+        return 0
+    try:
+        return max(0, int(got.get("n") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def add_carry(reasons):
+    """A `remember` value for seen[W12_CARRY_KEY]: the locked carry with
+    `reasons` added once per key, each routine (urgent False) and marked
+    `carried`, the newest W12_CARRY_KEEP kept. A carried W12 joins the Orc's
+    next recorded wake (wake.record), never one of its own, and the render
+    never reads it urgent again."""
+    add = [{**r, "urgent": False, "carried": True} for r in reasons or ()
+           if isinstance(r, dict) and r.get("key")]
+
+    def merge(cur):
+        out = [r for r in (cur if isinstance(cur, list) else [])
+               if isinstance(r, dict) and r.get("key")]
+        have = {r["key"] for r in out}
+        for r in add:
+            if r["key"] not in have:
+                out.append(r)
+                have.add(r["key"])
+        return out[-W12_CARRY_KEEP:]
+    return merge
+
+
+def _wave_upsert(d):
+    """C.16: the drum's wave, one OrcWave row per (user, wave_id), upserted
+    from it: its drums counted, its symbols joined, its first and last drum
+    and its highest hop. A new row's first drum is its wave's first OrcDrum
+    (a drum routed before the gate was ON counts). Route alone writes these
+    columns; the claim writes w12_answered and the breaker, the settle the
+    cost, each by its own UPDATE of its own columns."""
+    from django.db.models import F, Min
+
+    from bot_program.orcs.models import OrcDrum, OrcWave
+    syms = _symbols_of(d)
+    wave = OrcWave.objects.filter(user_id=d.user_id,
+                                  wave_id=d.wave_id).first()
+    if wave is None:
+        first = OrcDrum.objects.filter(
+            user_id=d.user_id, wave_id=d.wave_id).aggregate(
+            m=Min("at"))["m"] or d.at
+        wave, created = OrcWave.objects.get_or_create(
+            user_id=d.user_id, wave_id=d.wave_id, defaults={
+                "kind": str(d.kind)[:16], "symbols": sorted(set(syms)),
+                "origin": str(d.origin or "")[:40],
+                "first_at": min(first, d.at), "last_at": d.at,
+                "max_hop": int(d.hop or 0), "drums": 1})
+        if created:
+            return wave
+    OrcWave.objects.filter(pk=wave.pk).update(
+        drums=F("drums") + 1,
+        symbols=sorted(set(wave.symbols or []) | set(syms)),
+        first_at=min(wave.first_at, d.at), last_at=max(wave.last_at, d.at),
+        max_hop=max(int(wave.max_hop or 0), int(d.hop or 0)))
+    wave.refresh_from_db()
+    return wave
+
+
+def _wave_reach(wave, reached, queued) -> None:
+    """After one drum's deliveries: the wave's reach (one entry per Orc it
+    reached) and its W12 queued (each W12 queued or carried)."""
+    from django.db.models import F
+
+    from bot_program.orcs.models import OrcWave
+    if not reached and not queued:
+        return
+    have = {r.get("orc") for r in wave.reach or [] if isinstance(r, dict)}
+    reach = list(wave.reach or []) + [r for r in reached
+                                      if r.get("orc") not in have]
+    OrcWave.objects.filter(pk=wave.pk).update(
+        reach=reach, w12_queued=F("w12_queued") + int(queued))
+    wave.reach = reach
+
+
+def _w12_delivery(orc, d, relation, wave, now) -> tuple:
+    """C.14, C.16: one delivery's W12, as (the reason or None, what became
+    of it): none while its wave's breaker is open (W12_BREAKER: the drum
+    journaled only, as in O1); urgent for a stop_hit on the Orc's own
+    symbol, or for its own stop within W12_STOP_ATR1H x ATR(1h) of the mark
+    (_urgent_for, its stop clause narrowed); an urgent one past the Orc's
+    DRUM_URGENT_PER_ORC_DAY urgent drum wakes of the day carried
+    (W12_CARRIED), any other queued (W12_QUEUED)."""
+    if (wave.breaker or {}).get("state") == WAVE_BREAKER_OPEN:
+        return None, W12_BREAKER
+    own = d.kind == "stop_hit" and d.symbol == orc.symbol
+    urgent = own or _urgent_for(orc, d, now, atr_share=W12_STOP_ATR1H)
+    reason = w12_reason(d, relation, urgent=urgent, own=own,
+                        first_at=wave.first_at)
+    if urgent and urgent_today(orc, now) >= DRUM_URGENT_PER_ORC_DAY:
+        return reason, W12_CARRIED
+    return reason, W12_QUEUED

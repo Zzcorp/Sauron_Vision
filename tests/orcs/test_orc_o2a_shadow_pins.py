@@ -68,7 +68,8 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: route in shadow (2026-11-06) adds the pure router (router.py); O2b's
 #: probes (2026-11-06) the probes and their forward grade (probes.py). O2c's
 #: honor and temperaments (2026-11-15) add the code of honor's audits in
-#: shadow (honor.py) and the temperaments' table and draw (temperament.py).
+#: shadow (honor.py) and the temperaments' table and draw (temperament.py);
+#: O2c's drum wakes (2026-11-15) add no module, only definitions (O2_CODE).
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
               "mind", "scheduler", "intents", "router", "probes", "honor",
               "temperament")
@@ -98,7 +99,9 @@ O2_CODE = {
                  # twin's own and r5's beside the wake's (B.15c)
                  "frontier_on",
                  # O2c's temperaments (2026-11-15): the draw's switch
-                 "temperaments_on"),
+                 "temperaments_on",
+                 # O2c's drum wakes (2026-11-15): their switch (C.14)
+                 "drum_wakes_on"),
     "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
@@ -113,6 +116,13 @@ O2_CODE = {
                 # (C.4, C.6): the grade's tag, its key, the table's rows
                 "shadow_findings", "_breach_tags", "temperament_tag",
                 "temperament_key", "temperament_grades"),
+    # O2c's drum wakes (2026-11-15, C.14-C.16): route's gate, a drum's
+    # symbols, the W12 reason, a drum wake and its wave (the newest W12),
+    # the Orc's urgent drum wakes today, the carry, the wave's row and its
+    # reach, one delivery's W12
+    "drum_bus": ("wakes_gate", "_symbols_of", "w12_reason", "is_drum_wake",
+                 "drum_wave", "urgent_today", "add_carry", "_wave_upsert",
+                 "_wave_reach", "_w12_delivery"),
     "wake": ("_minds_on", "_evidence", "_render",
              # O2a's queue (2026-11-05): the facts hash v2, the plan's
              # watches, the army's metronome, F6's reference, the render
@@ -127,7 +137,11 @@ O2_CODE = {
              "_route_world", "_route",
              # O2b's frontier (2026-11-06): Fable's gate, its clauses read
              # before the render (B.9)
-             "_fable_gate"),
+             "_fable_gate",
+             # O2c's drum wakes (2026-11-15, C.15, C.16, P15): the settle,
+             # W12's urgency read again at the render, the carry joined and
+             # consumed by record
+             "_settled", "_w12_again", "_carried", "_take_carry"),
     # O2a's light (2026-11-05): the words (A.4, A.62): a wake's status in
     # words, the card's intents and intellect, the plan on the line
     "notes": ("wake_status_t", "_intents", "intellect_after", "_has_plan",
@@ -482,7 +496,11 @@ CAPTAIN_TABLES = ("Captain", "CaptainOrder")
 #: (lifecycle's _closed_quietly, _close_leg and kill_all take the Orc's
 #: lock through journal.orc_lock, under the money paths' lock budget). A
 #: change to one is a deliberate pin change in the same commit, with its
-#: reason in the commit message.
+#: reason in the commit message. Changed on purpose (2026-11-15, O2c's drum
+#: wakes, the O2 spec §1.0 item 6, C.17): drum_bus.on_close's comment only,
+#: its seam re-marked "# O3:" (a stop placed from a drum wake carries its
+#: wave from O3); its code is O2a's, its AST pinned beside its source
+#: (tests/orcs/test_orc_o2c_drums.py, FROZEN_ON_CLOSE).
 FROZEN_SOURCES = {
     ("birth", "_create"):
         "201d02f6758d08a6d004029a39098585899db0c30806fbd295952f3321d691f8",
@@ -497,7 +515,7 @@ FROZEN_SOURCES = {
     ("lifecycle", "kill_all"):
         "83e3b5262cc00d86b7a8b8431bec493ecf45324109476202e48f037ef0ae9bb9",
     ("drum_bus", "on_close"):
-        "85f4ed15e6711e3c263e976e84f35c24ffd5a7890460727981f565df12a6f4ee",
+        "eb33f81a26f499d0c8554e124e04ab28629c6526b0eba12a832083d5f217efd5",
 }
 
 # ── A.45b, A.3 and §1.0 item 5 ────────────────────────────────────────────

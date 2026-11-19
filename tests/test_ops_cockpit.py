@@ -548,9 +548,11 @@ class BulkEnableExemptTests(_Fixture):
     #: and the frontier's, whose ON opens Fable's gate (r5 beside its r4
     #: blind twin), a gate that cannot open in O2. Grown on purpose
     #: (2026-11-15, O2c): the temperaments' switch, whose ON has each
-    #: newborn Orc draw a temperament a model then reads in PS9.
+    #: newborn Orc draw a temperament a model then reads in PS9; and the
+    #: drum wakes' switch, whose ON lets a drum the census routes wake the
+    #: Orcs it reaches (W12), a model reading them in shadow.
     MINDS = ("orcs_minds", "orcs_router", "orcs_probes", "orcs_frontier",
-             "orcs_temperaments")
+             "orcs_temperaments", "orcs_drum_wakes")
     #: The operator's-choice switches (2026-11-12, the F1 review): a
     #: seeded Pipeline row each, OFF, moving no money, spending none and
     #: taking no PIN, whose ON undoes something he asked to keep. The

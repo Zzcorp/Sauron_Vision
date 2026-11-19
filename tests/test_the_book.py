@@ -1704,9 +1704,10 @@ class TheBookFollowsTheCode(SimpleTestCase):
             # the Orcs' minds, ships off and is no live-money switch; grown
             # on purpose (2026-11-06, O2b): the router's, the probes' and
             # the frontier's switches too; and (2026-11-15, O2c) the
-            # temperaments' switch, whose ON changes what a model reads
+            # temperaments' switch, whose ON changes what a model reads, and
+            # the drum wakes' switch, whose ON lets a drum wake an Orc
             "orcs_minds", "orcs_router", "orcs_probes", "orcs_frontier",
-            "orcs_temperaments"}
+            "orcs_temperaments", "orcs_drum_wakes"}
         for key in named:
             self.assertIn(key, rows, "%s is no longer a component: rewrite the safeguards" % key)
             row = rows[key]
@@ -1714,11 +1715,11 @@ class TheBookFollowsTheCode(SimpleTestCase):
                              "%s ships on: rewrite every 'off on arrival'" % key)
         for key in ("council_bots", "council_ticket", "orcs", "orcs_minds",
                     "orcs_router", "orcs_probes", "orcs_frontier",
-                    "orcs_temperaments"):
+                    "orcs_temperaments", "orcs_drum_wakes"):
             self.assertNotIn(key, LIVE_MONEY_SWITCHES,
                              "%s moves money now: rewrite 'The council', 'The Orcs' and the lexicon's 'Shadow'" % key)
         for key in ("orcs_minds", "orcs_router", "orcs_probes",
-                    "orcs_frontier", "orcs_temperaments"):
+                    "orcs_frontier", "orcs_temperaments", "orcs_drum_wakes"):
             self.assertIn(key, BULK_ENABLE_EXEMPT,
                           "the Orcs' minds arrive by 'all on': rewrite 'The Orcs'")
 
@@ -2311,11 +2312,17 @@ class TheBookFollowsTheCode(SimpleTestCase):
     def test_the_bench_is_not_on_main(self):
         """The third edition's bench (2026-10-31): the Orcs' second release,
         which the code on main names and does not yet run. The day it
-        lands, its line moves to the road with its hash."""
+        lands, its line moves to the road with its hash.
+
+        Changed on purpose (2026-11-15, the Orcs' O2 spec C.19): O2c gives
+        `orcs_drums` its new description (a drum wakes the Orcs it reaches
+        only with the new `orcs_drum_wakes` ON), so the tripwire reads the
+        switch's NAME, "Orc War Drums (wakes from O2)", which keeps "from
+        O2" until the bench line moves with the release's last commit."""
         from core.platform_control import DEFAULT_COMPONENTS
         self.assertEqual([row["title"] for row in book.IN_PROGRESS], ["The Orcs' shadow minds"])
         drums = [c for c in DEFAULT_COMPONENTS if c["key"] == "orcs_drums"][0]
-        self.assertIn("from O2", drums["description"],
+        self.assertIn("from O2", drums["name"],
                       "the Orcs' second release landed: move 'The Orcs' shadow minds' to the road")
         # Review (2026-10-31): work with no code on main to point at (the
         # volume profile, the order-flow footprint) has no line, so the

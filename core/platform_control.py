@@ -126,6 +126,7 @@ ORC_MIND_SWITCHES = (
     "orcs_probes",                  # a neighbouring rung reads a paper wake
     "orcs_frontier",                # Fable's gate (r5 beside its r4 twin)
     "orcs_temperaments",            # a newborn draws a lead voice (PS9)
+    "orcs_drum_wakes",              # a routed drum wakes the Orcs it reaches
 )
 
 #: Every switch whose ON takes the trading PIN, at every door
@@ -434,10 +435,30 @@ DEFAULT_COMPONENTS = [
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.
-    # In O1 this switch is INERT: drum wakes (W12) are O2's, which reads it
-    # (bot_program/orcs/drum_bus.route's seam). Description below 300.
+    # Inert through O1. From O2c (2026-11-15, the Orcs' O2 spec C.14, C.19,
+    # D-C2) drum_bus.route reads it first: a drum wakes the Orcs it reaches
+    # only while this, `orcs_drum_wakes` below and the minds' four gates are
+    # all ON. It keeps its name (the Book's bench tripwire reads "from O2"
+    # in it until the release lands, D.19) and its O1 meaning, outside
+    # ORC_MIND_SWITCHES and BULK_ENABLE_EXEMPT: ON alone it wakes nobody and
+    # spends nothing. Description below 300 (C.19's words).
     {"key": "orcs_drums", "name": "Orc War Drums (wakes from O2)",
-     "description": "Off (default). With orcs on, the war drums (a stop hit, a lock, a level break...) are always journaled on the Orcs they reach within one user's book. In O1 this switch changes nothing; from O2, on, a drum also wakes the Orcs it reaches.",
+     "description": "Off (default). With orcs on, the war drums (a stop hit, a lock, a level break...) are always journaled on the Orcs they reach within one user's book. On, with Orc Drum Wakes on, a drum also wakes the Orcs it reaches, in shadow.",
+     "category": "system"},
+    # THE ORCS' DRUM WAKES (2026-11-15, the Orcs' O2 spec C.14-C.16, N2,
+    # §4 Q21): with `orcs_drums` above and the minds on, each drum the
+    # census routes adds a W12 reason to every Orc it reaches, recorded once
+    # its wave settled (15 minutes after its first drum) and read by a model
+    # in shadow, under a breaker: 6 drum wakes a wave, 12 a user an hour, 2
+    # urgent an Orc a UTC day (the rest wait for its next wake), 25% of the
+    # Orcs line, none past 60% of it but an urgent drum on the Orc's own
+    # stakes. OFF on arrival (no is_enabled key), exempt from "all on" and
+    # turned on only with the trading PIN at /ops/ (ORC_MIND_SWITCHES: it
+    # lets a model spend AI money); OFF takes no PIN and works at once: the
+    # next routed drum is journaled only, and a drum wake not yet sent is
+    # answered by code (drum_wakes_off). Description measured below 300.
+    {"key": "orcs_drum_wakes", "name": "Orc Drum Wakes (models in shadow)",
+     "description": "Off (default). On, with Orc War Drums and the minds on: a drum also wakes the Orcs it reaches, in shadow, once its wave settles, within a breaker (2 urgent drum wakes an Orc a day, 25% of the Orcs line). It sends no order. Turning it on takes the PIN.",
      "category": "system"},
     # THE ORCS' TAPE (2026-10-22, O1c, spec §5.2a item 3): eToro's 15m and
     # 5m candles of the held and board symbols. It sends nothing until

@@ -33,7 +33,16 @@ THE TEMPERAMENTS' SWITCH (O2c, 2026-11-15, the O2 spec C.4, N2):
 draws a temperament (bot_program/orcs/temperament.py), just after its
 birth commits. It is no model caller's switch and no gate: it sends no
 call, and changes only what a model reads of the Orcs born while it is ON
-(PS9). The tick never reads it."""
+(PS9). The tick never reads it.
+
+THE DRUM WAKES' SWITCH (O2c, 2026-11-15, the O2 spec C.14, N2):
+`orcs_drum_wakes`, read by `drum_wakes_on`, lets a drum the census routes
+wake the Orcs it reaches (W12), beside `orcs_drums` (the drums journaled, as
+in O1; it may already be ON at the site, so the power that spends sits
+behind this switch, OFF on arrival) and the four gates. It is no fifth gate:
+drum_bus.route reads it once a pass, after `orcs_drums`, and the scheduler
+again for a drum wake at its admission and its claim (frictionless off).
+The tick never reads it."""
 import logging
 
 logger = logging.getLogger(__name__)
@@ -154,6 +163,19 @@ def temperaments_on() -> bool:
     '', whatever it says later."""
     from bot_program.orcs.constants import TEMPERAMENTS_SWITCH
     return _component_on(TEMPERAMENTS_SWITCH)
+
+
+def drum_wakes_on() -> bool:
+    """The drum wakes' switch (`orcs_drum_wakes`; O2c, 2026-11-15, the O2
+    spec C.14, N2), OFF when unreadable. Read by drum_bus.route once a pass,
+    only while `orcs_drums` is ON and before the four gates: OFF, a routed
+    drum is journaled as in O1 and queues no W12; ON (with the gates), each
+    delivery adds a W12 reason to the Orc it reaches. Read again at the
+    admission and at each claim of a drum wake (scheduler.drum_code;
+    frictionless off): once it is OFF, a W12 queued before is answered by
+    code (drum_wakes_off) and sends nothing."""
+    from bot_program.orcs.constants import DRUM_WAKES_SWITCH
+    return _component_on(DRUM_WAKES_SWITCH)
 
 
 def caller_code(caller, rung=None) -> str:

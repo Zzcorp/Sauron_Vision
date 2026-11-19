@@ -979,3 +979,70 @@ WAVE_BREAKER_STATES = (WAVE_BREAKER_CLOSED, WAVE_BREAKER_OPEN)
 
 #: C.4: the draw's switch (core/platform_control.py ORC_MIND_SWITCHES).
 TEMPERAMENTS_SWITCH = "orcs_temperaments"
+
+# ── O2c: the drum wakes (2026-11-15, the O2 spec C.14-C.17, §4 Q21) ───────
+# Behind `orcs_drum_wakes`, OFF on arrival, exempt from "all on" and turned
+# on only with the trading PIN (N2). With it, `orcs_drums` (the drums
+# journaled, as in O1) and the four gates of A.2 ON, a drum the census routes
+# adds a W12 reason to each Orc it reaches (drum_bus.route), recorded once its
+# wave settled (wake.py), held by the breaker (scheduler.py). Nothing here
+# sends anything.
+
+#: C.14: the drum wakes' switch (core/platform_control.py ORC_MIND_SWITCHES).
+DRUM_WAKES_SWITCH = "orcs_drum_wakes"
+#: C.14: a W12 is urgent for a stop_hit on the Orc's own symbol, or for its
+#: own stop within this many ATR(1h) of the mark (O1's _urgent_for reads 1).
+W12_STOP_ATR1H = 0.25
+#: C.16, §4 Q21, the breaker: at most DRUM_WAVE_WAKES drum wakes of a wave,
+#: and DRUM_USER_HOUR_WAKES of a user in a rolling hour, reach a model,
+#: urgent ones included; at most DRUM_URGENT_PER_ORC_DAY urgent drum wakes of
+#: an Orc a UTC day, beyond which a W12 waits in the Orc's memory
+#: (W12_CARRY_KEY) for its next recorded wake; drum wakes as a whole within
+#: DRUM_SHARE of the Orcs line (the W12 spend booked today, the W12 calls in
+#: flight and this bound), urgent ones included; and none once the line's
+#: booked spend and money in flight reach DRUM_LINE_SHARE of it, but an urgent
+#: W12 on the Orc's own stakes, which still meets its triage ceiling (P14's
+#: twin).
+DRUM_WAVE_WAKES = 6
+DRUM_USER_HOUR_WAKES = 12
+DRUM_URGENT_PER_ORC_DAY = 2
+DRUM_SHARE = 0.25
+DRUM_LINE_SHARE = 0.60
+#: The Orc's memory: the W12 reasons carried to its next recorded wake (the
+#: newest W12_CARRY_KEEP kept), and its urgent drum wakes of the UTC day,
+#: {day, n}, which the claim counts.
+W12_CARRY_KEY = "w12_carry"
+W12_CARRY_KEEP = 20
+W12_URGENT_KEY = "w12_urgent"
+#: A W12 reason's words: code words only (the drum's kind, its symbols, the
+#: relation that routed it, its hop), never another position's R or money.
+W12_T = "a drum: {kind_t} on {symbols} ({relation}, hop {hop})"
+#: What became of a delivery's W12, in its DR entry's body while the drum
+#: wakes' gate is ON: queued in the Orc's pending wake; carried (its Orc's
+#: urgent drum wakes of the day are used); or none, its wave's breaker open.
+W12_QUEUED, W12_CARRIED, W12_BREAKER = "queued", "carried", "breaker"
+#: The drum wakes' codes (A.4): the switches read again (frictionless off,
+#: N2: a drum wake not yet sent once `orcs_drums` or `orcs_drum_wakes` is
+#: OFF), the breaker (a wave's drum wakes, or the user's hour), the claim's
+#: guard on the Orc's urgent drum wakes of the day (a W12 that passed its
+#: delivery before they were used: it is carried), the 60% rule and the 25%
+#: share. The last two are money codes (scheduler.BUDGET_CODES).
+CODE_DRUM_OFF = "drum_wakes_off"
+CODE_DRUM_BREAKER = "drum_breaker"
+CODE_DRUM_CARRY = "drum_carry"
+CODE_DRUM_LINE = "drum_line"
+CODE_DRUM_SHARE = "drum_share"
+WAKE_CODES = WAKE_CODES + (CODE_DRUM_OFF, CODE_DRUM_BREAKER, CODE_DRUM_CARRY,
+                           CODE_DRUM_LINE, CODE_DRUM_SHARE)
+WAKE_CODE_WORDS = {
+    **WAKE_CODE_WORDS,
+    CODE_DRUM_OFF: "the drum wakes are off (orcs_drums or orcs_drum_wakes): "
+                   "the drum stays journaled",
+    CODE_DRUM_BREAKER: "the drums' breaker is open for its wave",
+    CODE_DRUM_CARRY: "this Orc's urgent drum wakes of the day are used: the "
+                     "drum joins its next wake",
+    CODE_DRUM_LINE: "the Orcs line is 60% spent: only an urgent drum on the "
+                    "Orc's own stakes wakes it",
+    CODE_DRUM_SHARE: "the drum wakes have used their quarter of the Orcs "
+                     "line",
+}

@@ -1005,12 +1005,18 @@ def _write_done(locked, w, outcome, verdict, *, now, fields, keys):
 def _write_intent(locked, w, outcome, intent, decision, *, now) -> None:
     """One OrcIntent and its `intent` entry (A.41), the card's newest
     three rewritten in the same append; a queued one's id joins
-    seen["intents_queued"]; an officer's refusal writes its refusal."""
-    from bot_program.orcs import journal, validator
+    seen["intents_queued"]; an officer's refusal writes its refusal.
+
+    The wave stamp (C.17; O2c, 2026-11-15): an intent from a wake that
+    carries a W12 reason gets its wave_id, by one rule, the wake's newest
+    W12 (drum_bus.drum_wave: the latest first drum); any other intent keeps
+    wave_id blank. The O arm reads it (intents.take), never a real stop."""
+    from bot_program.orcs import drum_bus, journal, validator
     from bot_program.orcs.models import OrcIntent
     level = intent.get("level") if isinstance(intent.get("level"),
                                               dict) else {}
     stop = intent.get("would_stop")
+    wave = drum_bus.drum_wave(w.reasons)
     row_ = OrcIntent.objects.create(
         orc_id=locked.pk, wake=w, decision=decision, kind=intent["kind"],
         candidate=str(intent.get("candidate") or "")[:16],
@@ -1024,6 +1030,7 @@ def _write_intent(locked, w, outcome, intent, decision, *, now) -> None:
         officer=dict(intent.get("officer") or {}), status=intent["status"],
         why=str(intent.get("why") or "")[:200],
         expires_at=intent.get("expires_at"),
+        wave_id=str(wave[0] if wave else "")[:40],
         rung=str(outcome.get("rung") or "")[:4], s_version=S_VERSION,
         schema_version=SCHEMA_VERSION)
     words = intent_words(locked, intent)

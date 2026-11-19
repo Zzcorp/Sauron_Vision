@@ -73,7 +73,9 @@ class ThePinsTests(SimpleTestCase):
         scheduler.py only, never in wake.py or the tick (observe.py); the
         dispatch seam O2a filled is narrowed to what O2c adds (the O2 spec
         §1.0 item 6; changed on purpose 2026-11-06: O2b's router filled
-        its part, bot_program/orcs/router.py)."""
+        its part, bot_program/orcs/router.py). Changed on purpose
+        (2026-11-15): O2c's drum wakes filled the last part (W12, the
+        settle and the carry), and the marker is removed."""
         from tests.orcs.test_orc_o2a_shadow_pins import (PKG,
                                                          pending_writes,
                                                          tree_of)
@@ -93,17 +95,25 @@ class ThePinsTests(SimpleTestCase):
         self.assertNotIn("# O2:", src, "O2a filled the dispatch seam")
         self.assertNotIn("# O2b, O2c: the router", src,
                          "O2b's router filled its part")
-        self.assertIn("# O2c: drum deliveries add W12", src,
-                      "the seam that remains is marked")
+        self.assertNotIn("# O2c:", src, "O2c's drum wakes filled the seam")
+        self.assertIn("W12", src)
 
     def test_the_o2_seams_are_marked(self):
         for name, needle in (("dossier_market", "# O2:"),
-                             ("dossier_position", "# O2:"),
-                             ("drum_bus", "# O2:")):
+                             ("dossier_position", "# O2:")):
             src = inspect.getsource(importlib.import_module(
                 f"bot_program.orcs.{name}"))
             with self.subTest(module=name):
                 self.assertIn(needle, src)
+        # drum_bus's seams (changed on purpose 2026-11-15, the O2 spec §1.0
+        # item 6, C.14, C.17): O2c's drum wakes filled the plan's seam and
+        # route's; the hop of a stop placed from a drum wake, inside the
+        # frozen close (on_close), is re-marked for O3, which places stops
+        src = inspect.getsource(importlib.import_module(
+            "bot_program.orcs.drum_bus"))
+        with self.subTest(module="drum_bus"):
+            self.assertIn("# O3:", src)
+            self.assertNotIn("# O2:", src)
         # integrity's and fence's seams were filled by O2a's mind
         # (2026-11-05): the officer replaced allowed_actions_l0 in the
         # dossier, and the validator enforces V10. Each says who filled it.
