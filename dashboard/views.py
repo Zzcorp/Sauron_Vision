@@ -5050,12 +5050,63 @@ def _chart_decimals(instrument):
 LEVELS_TTL = 60
 
 
-def _chart_levels(instrument):
+def _live_quote_mark(instrument):
+    """The LiveQuote row's last as a float, or None."""
+    try:
+        lq = getattr(instrument, "live_quote", None)
+        return float(lq.last) if lq and lq.last else None
+    except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
+        return None
+
+
+def _chart_mark(instrument, route, now_payload):
+    """(mark, feed): the price the chart's levels and positioning caption
+    are measured from, and whose it is ("" for the LiveQuote row's own,
+    as before). The chart's copy only (2026-11-19).
+
+    The operator, 2026-11-19: the prices on some charts are wrong. The
+    chart's levels took the LiveQuote row as their mark; for an instrument
+    routed to eToro whose quote is a stand-in (gold's LiveQuote is Yahoo's
+    GC=F: eToro's quote read skips stand-ins) that is another instrument,
+    while the price line, the hero and the position lines beside the
+    levels are eToro's. The reproduction drew the 4150 round number
+    "below" the mark, 0.1 ATR away, with eToro's price 25 points under it.
+
+    So when the route is a venue and the LiveQuote is a stand-in, the mark
+    is the reply's one price (`now_payload`, market_data.one_quote: the
+    price every number beside the chart prints), and `feed` names it so
+    the chart's caches keep that copy apart. Otherwise the LiveQuote's
+    last, as before. Display only: living_levels and positioning_map are
+    pure reads that the care, the ticket and the Orcs call with their own
+    marks; the bars the levels read are not touched."""
+    import math
+
+    from dashboard import chart_source
+
+    lq = getattr(instrument, "live_quote", None)
+    tag = chart_source.family(getattr(lq, "source", "")) if lq else ""
+    if (route in chart_source.VENUES and tag
+            and chart_source.stand_in(tag, instrument.symbol)):
+        payload = now_payload or {}
+        try:
+            v = float(payload.get("v"))
+        except (TypeError, ValueError):
+            v = None
+        if v is not None and math.isfinite(v) and v > 0:
+            return v, str(payload.get("fam") or route)
+    return _live_quote_mark(instrument), ""
+
+
+def _chart_levels(instrument, *, mark=None, feed=""):
     """The living levels (bot_program.smart_money.living_levels) as the
     chart draws them: price, kind, side (below/above the mark), pool,
     atr_away and the price as text at the page's one decimal count
     (_chart_decimals), sorted by price. At the live mark when there is
     one, else at the newest 4h close.
+
+    `mark` and `feed` (2026-11-19, _chart_mark): with a feed, the levels
+    are measured from `mark`, that feed's price, and cached under a key
+    of their own; without one, from the LiveQuote's last, as before.
 
     An EMPTY list without bars — which the widget reads as "no level to
     draw" and clears the lines on — never a missing key, which it reads
@@ -5067,16 +5118,12 @@ def _chart_levels(instrument):
 
     from bot_program.smart_money import living_levels
 
-    key = "chart:levels:" + instrument.symbol
+    key = "chart:levels:" + instrument.symbol + (":" + feed if feed else "")
     hit = cache.get(key)
     if hit is not None:
         return hit
-    mark = None
-    try:
-        lq = getattr(instrument, "live_quote", None)
-        mark = float(lq.last) if lq and lq.last else None
-    except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
-        mark = None
+    if not feed:
+        mark = _live_quote_mark(instrument)
     read = living_levels(instrument.symbol, mark)
     rows = []
     if read:
@@ -5087,28 +5134,26 @@ def _chart_levels(instrument):
     return rows
 
 
-def _chart_positioning(instrument, levels=None):
+def _chart_positioning(instrument, levels=None, *, mark=None, feed=""):
     """The positioning map (bot_program/positioning.py), compact, cached a
     minute per symbol like the levels: the crowd's label and score, the
     nearest pool each side, the hunt and the draw, the proving ground's
     verdict on pool sweeps. `levels` is the reply's own living-levels read
-    (_chart_levels), so the lines and the caption come from ONE read.
+    (_chart_levels), so the lines and the caption come from ONE read, and
+    `mark` and `feed` are the levels' own (2026-11-19, _chart_mark).
     {ok: False, why} without bars — a dict, never a missing key, so the
     widget clears its caption."""
     from django.core.cache import cache
 
     from bot_program.positioning import compact, positioning_map
 
-    key = "chart:positioning:" + instrument.symbol
+    key = ("chart:positioning:" + instrument.symbol
+           + (":" + feed if feed else ""))
     hit = cache.get(key)
     if hit is not None:
         return hit
-    mark = None
-    try:
-        lq = getattr(instrument, "live_quote", None)
-        mark = float(lq.last) if lq and lq.last else None
-    except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
-        mark = None
+    if not feed:
+        mark = _live_quote_mark(instrument)
     pm = positioning_map(instrument.symbol,
                          asset_class=instrument.asset_class or "",
                          mark=mark, levels=levels)
@@ -6872,6 +6917,17 @@ def chart_data_api(request):
                              "error": f"Unknown timeframe '{timeframe}'"},
                             status=400)
 
+    # ONE FEED PER SERIES, NAMED (2026-10-31, dashboard.chart_source). The
+    # venue the operator's orders on this instrument go to — a read of his
+    # own settings, no request — decides whose stored candles draw the
+    # series; `source` carries the words the legend prints, the class's
+    # jump bar the live tick is held to, and the notes (older history cut,
+    # today's forming candle, suspect bars). When the overlay is asked for,
+    # it also says when the position lines (the venue's prices) sit over
+    # another feed's candles, and (2026-11-19) the route decides whose
+    # price the chart's levels are measured from (_chart_mark).
+    route = chart_source.route_of(request.user, instrument)
+
     # ONE PRICE EVERYWHERE (2026-11-12): the price the numbers beside the
     # chart print (market_data.one_quote), for its "now" line. It rides
     # beside the overlays too (2026-11-19): they were built into a new
@@ -6895,8 +6951,13 @@ def chart_data_api(request):
             # their own failure word: a level read that fails must not
             # cost the operator the stop line of a position they are
             # managing, and must not pass for "no level" either.
+            # Measured from the price beside them (2026-11-19): a
+            # venue-routed stand-in's levels from the one price, never
+            # from the other instrument's quote (_chart_mark).
+            mark, feed = _chart_mark(instrument, route, extra["now"])
             try:
-                extra["levels"] = _chart_levels(instrument)
+                extra["levels"] = _chart_levels(instrument, mark=mark,
+                                                feed=feed)
             except Exception as e:  # noqa: BLE001 — informational layer
                 logger.warning("[chart_data_api] levels failed for %s: %s",
                                symbol, e)
@@ -6905,7 +6966,8 @@ def chart_data_api(request):
             # its stops sit, the hunt and the draw — under the chart.
             try:
                 extra["positioning"] = _chart_positioning(
-                    instrument, levels=extra.get("levels"))
+                    instrument, levels=extra.get("levels"), mark=mark,
+                    feed=feed)
             except Exception as e:  # noqa: BLE001 — informational layer
                 logger.warning("[chart_data_api] positioning failed for %s: "
                                "%s", symbol, e)
@@ -6923,16 +6985,6 @@ def chart_data_api(request):
             # saying the overlay had stopped updating. The one price is no
             # overlay: it stays.
             extra = {"now": extra["now"], "overlays_error": str(e)[:200]}
-
-    # ONE FEED PER SERIES, NAMED (2026-10-31, dashboard.chart_source). The
-    # venue the operator's orders on this instrument go to — a read of his
-    # own settings, no request — decides whose stored candles draw the
-    # series; `source` carries the words the legend prints, the class's
-    # jump bar the live tick is held to, and the notes (older history cut,
-    # today's forming candle, suspect bars). When the overlay is asked for,
-    # it also says when the position lines (the venue's prices) sit over
-    # another feed's candles.
-    route = chart_source.route_of(request.user, instrument)
 
     def _said(source):
         if overlays and isinstance(extra.get("positions"), list):
