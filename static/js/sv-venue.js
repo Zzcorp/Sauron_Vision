@@ -577,6 +577,7 @@
   }
 
   function setText(el, t) {
+    if (el.hasAttribute && el.hasAttribute('data-q-seps')) return setParts(el, t);
     var c = el.firstChild;
     if (c && c === el.lastChild && c.nodeType === 3) {
       if (c.nodeValue !== t) { c.nodeValue = t; return true; }
@@ -584,6 +585,44 @@
     }
     if (el.textContent !== t) { el.textContent = t; return true; }
     return false;
+  }
+
+  /* A cell whose words break only at their separators (data-q-seps: the
+     instrument header's whose price and how old, which wrapped at any
+     space, "eToro bid · 10" over "s", in the bureau v2 note's pictures,
+     2026-11-15). Each part between two " · " is a span that never wraps
+     (.sv-q-seg), the separator ending the part before it; the plain space
+     between two parts is the line's only break. The cell's text is the
+     words, as a plain cell's (the server's render, core/templatetags/
+     quote_tags.q_seps, writes the same parts): when only a part's words
+     changed (the age, every second), only that part is rewritten. True
+     when the text changed. */
+  var SEP = ' · ';
+  function setParts(el, t) {
+    var parts = String(t).split(SEP), n = parts.length, kids = el.childNodes, i;
+    var same = kids.length === 2 * n - 1;
+    for (i = 0; same && i < kids.length; i++) {
+      same = (i % 2) ? (kids[i].nodeType === 3 && kids[i].nodeValue === ' ')
+        : (kids[i].nodeType === 1 && kids[i].className === 'sv-q-seg');
+    }
+    var changed = false;
+    if (same) {
+      for (i = 0; i < n; i++) {
+        var want = parts[i] + (i < n - 1 ? ' ·' : '');
+        if (kids[2 * i].textContent !== want) { kids[2 * i].textContent = want; changed = true; }
+      }
+      return changed;
+    }
+    changed = el.textContent !== t;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    for (i = 0; i < n; i++) {
+      if (i) el.appendChild(doc.createTextNode(' '));
+      var seg = doc.createElement('span');
+      seg.className = 'sv-q-seg';
+      seg.textContent = parts[i] + (i < n - 1 ? ' ·' : '');
+      el.appendChild(seg);
+    }
+    return changed;
   }
 
   function setAttr(el, name, v) {
