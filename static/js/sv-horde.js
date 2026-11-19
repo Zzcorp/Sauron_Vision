@@ -285,8 +285,15 @@
      riding the sheet's top cut through the page's own lines (the account
      card's "LIVE 25,840.55 USD" with the activity drawer open, "PORTFOLIO
      VALUE" at 1100). */
+  /* The sheet's door: THE HORDE in the frame's bar where it is drawn
+     (2026-11-15), else the tab; the focus comes back to it. */
+  function door() {
+    var cell = document.getElementById('svHordeCell');
+    return (cell && cell.getClientRects().length) ? cell : tab;
+  }
   function tuckTab() {
-    var tuck = state.open && !state.phone;
+    /* Not where the bar's door stands for the tab: it never moves. */
+    var tuck = state.open && !state.phone && door() === tab;
     if (tuck !== root.classList.contains('hd-tab-tucked')) root.classList.toggle('hd-tab-tucked', tuck);
     /* A hidden tab never keeps the focus: it goes to the head's title. */
     if (tuck && document.activeElement === tab) {
@@ -447,7 +454,7 @@
        After the class change, so a phone's pill is shown before it is
        focused. */
     if (!open && panel.contains(document.activeElement)) {
-      try { tab.focus({ preventScroll: true }); } catch (e) { /* an old engine */ }
+      try { door().focus({ preventScroll: true }); } catch (e) { /* an old engine */ }
     }
     if (open) panel.removeAttribute('inert'); else panel.setAttribute('inert', '');
     if (how !== 'restore' && !state.phone) store(OPEN_KEY, open ? '1' : '0');
@@ -2098,7 +2105,7 @@
   });
   if (closeBtn) closeBtn.addEventListener('click', function () {
     setOpen(false, 'key');
-    try { tab.focus(); } catch (e) { /* an old engine */ }
+    try { door().focus(); } catch (e) { /* an old engine */ }
   });
   document.addEventListener('keydown', function (e) {
     if (e.defaultPrevented) return;
@@ -2110,10 +2117,14 @@
       closeDossier(true);
       return;
     }
+    /* Where the frame's doors own Esc (sv-frame.js: the last panel opened,
+       one per press), the frame shuts the sheet; the seat's dossier above
+       keeps its own. */
+    if (window.SVDoors && window.SVDoors.owns()) return;
     if (state.open && root.contains(document.activeElement)) {
       e.preventDefault();
       setOpen(false, 'key');
-      try { tab.focus(); } catch (x) { /* an old engine */ }
+      try { door().focus(); } catch (x) { /* an old engine */ }
     }
   });
   window.SVHorde = {

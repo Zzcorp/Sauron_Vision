@@ -467,8 +467,7 @@
                 <span class="brand-text">SAURON</span>
             </h1>
             <div class="subtitle">TRADING INTELLIGENCE</div>
-            {# The menu folds to its icons from its own head (the desk v2 board, 2026-11-13: the page's edge toggles go); folded, the Eye unfolds it. toggleSidebar() keeps the choice, as before. #}
-            <button type="button" class="sv-side-fold" onclick="toggleSidebar()" aria-label="Fold or unfold the menu" title="Fold the menu to its icons; folded, the Eye opens it again"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-panel-left"/></svg></button>
+            {# The menu folds from the row at its foot (2026-11-15), no longer from an unseen button in this head. #}
 <!-- UPGRADE-9: sidebar toggle moved to unified edge button -->
         </div>
         <nav class="sidebar-nav" data-nav-page-id="{{ page_id }}">
@@ -634,6 +633,8 @@
         </script>
         {# The tower (the desk v2 board, Twist2 "La tour en filigrane"): Barad-dûr's silhouette in the menu's empty foot only, ink at 7.5 %, its Eye a faint ember. It takes its own room at the foot, so no row is ever written over it. #}
         <div class="sv-tower" aria-hidden="true"><svg viewBox="0 0 60 140" width="30" height="70" focusable="false"><path class="sv-tower-body" d="M4 140L12 133L14 113L18 109L20 85L23 81L24 57L26 53L26.5 35L22.5 31L18.5 5L25 23.5L28.5 29.5L31.5 29.5L35 23.5L41.5 5L37.5 31L33.5 35L34 53L36 57L37 81L40 85L42 109L46 113L48 133L56 140Z" fill="currentColor" fill-opacity="0.075"/><ellipse class="sv-tower-eye" cx="30" cy="20.5" rx="3.2" ry="1.5"/></svg></div>
+        {# THE MENU'S DOOR (open and close made easy, 2026-11-15): one row at the menu's foot, always shown, in the same place folded or not (its icon at 20 px either way); folded, its name is the folded menu's tip. The menu's last Tab stop; sv-frame.js folds and keeps the choice (sauron_sidebar). #}
+        <button type="button" class="sv-door sv-fold-row" id="svFoldRow" aria-controls="mainSidebar" aria-expanded="true" aria-label="Fold the menu" title="Fold the menu"><svg class="sv-ico sv-fold-ico sv-fold-ico--fold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-panel-left"/></svg><svg class="sv-ico sv-fold-ico sv-fold-ico--unfold" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-panel-right"/></svg><span class="sv-door-word" aria-hidden="true">Fold the menu</span></button>
         <div class="sidebar-footer">
             {# Same mark the Admin Panel nav-link carries, so both routes into admin read as one destination. #}
             <a href="{% url 'admin:index' %}"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-admin"/></svg> Admin</a>
@@ -859,9 +860,15 @@
         <!-- Ticker Bar (fixed, always visible) -->
         {# THE ONE BAND (UI redo B1, the desk v2 board, 2026-11-13): the prices, then the news, side by side in one 32 px row under the top bar; each lane keeps its own frame, speed and pop (static/js/sv-marquee.js), its collapse button and its restore tab. The marker comment above opens the slice of the bands the page-runner tests read. #}
         <div class="sv-band" id="svBand" role="region" aria-label="Markets and news">
+        {# THE LANES' DOORS (open and close made easy, 2026-11-15; the operator: "restore the old system ... of opening and closing icons, their old sizes too"): the old collapse buttons, moved out of their lanes to the band's right end, side by side, each with its word and the old 18 px arrow; one click puts a lane away, the same click on the same door brings it back (aria-pressed: shown). First in the band's markup so the keyboard meets them before the quotes; drawn last (sv-frame.css). The phone keeps its own button in the price lane, below. #}
+        <div class="sv-band-doors" role="group" aria-label="The band's lanes">
+            <button type="button" class="hb-collapse-btn sv-door sv-lane-door" data-collapse="data" aria-controls="dataHeadband" aria-pressed="true" aria-label="Prices" title="Hide prices"><span class="sv-door-word">Prices</span><svg class="sv-ico sv-door-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-arrow-right"/></svg></button>
+            <button type="button" class="hb-collapse-btn sv-door sv-lane-door" data-collapse="ticker" aria-controls="tickerBar" aria-pressed="true" aria-label="News" title="Hide news"><span class="sv-door-word">News</span><svg class="sv-ico sv-door-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-arrow-right"/></svg></button>
+        </div>
         <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
 <div class="data-headband" id="dataHeadband" data-sv-marquee-speed="40" data-sv-marquee-pop=".dh-pop">
-  <button type="button" class="hb-collapse-btn" data-collapse="data" aria-label="Hide data headband" title="Hide data headband">
+  {# The phone's own door to the price lane (sv-responsive.css), as it was; from 769 px up the band's doors above stand for it. #}
+  <button type="button" class="hb-collapse-btn sv-phone-lane-door" data-collapse="data" aria-label="Hide data headband" title="Hide data headband">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
     </svg>
@@ -881,11 +888,6 @@
         40), and holds it still while a card it opened
         (data-sv-marquee-pop) is on the page.{% endcomment %}
         <div class="ticker-bar" id="tickerBar" data-sv-marquee-speed="30" data-sv-marquee-pop=".ticker-popup">
-            <button type="button" class="hb-collapse-btn" data-collapse="ticker" aria-label="Hide ticker bar" title="Hide ticker bar">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
-                </svg>
-            </button>
             <div class="ticker-track" id="tickerTrack">
                 {% include "_partials/ticker_items.html" %}
             </div>
@@ -893,6 +895,7 @@
         </div>
 
 <!-- Restore tabs (visible only when the corresponding headband is collapsed) -->
+{# The phone's only (2026-11-15): from 769 px up a lane comes back from its own door at the band's end. #}
 <button type="button" class="hb-restore-tab ticker" data-restore="ticker" aria-label="Show ticker bar" title="Show ticker bar">
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>
@@ -927,6 +930,8 @@
         tooltip on the region element itself would freeze at its first value.
         {% endcomment %}
         <div class="info-panel-wrap" id="infoPanelWrap">
+            {# The Eye's cell at the bar's right end: lit while Ask Sauron is open, as its tab in the dock is (2026-11-15). #}
+            <span class="sv-eye-slot" aria-hidden="true"></span>
             <div class="ip-minimize-tab" id="ipMinTab" title="Minimize panel">
                 <svg viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
@@ -1200,10 +1205,13 @@
                     </div>
                 </a>
                 {# THE HORDE (the desk v2 board, his default "yes", 2026-11-13): in POSITIONS' place, one standard per seat, REAL (solid REAL red) then DEMO (gold outline) then PAPER (grey outline), at most eight then "+n"; the count in words. It opens the Horde's sheet (h). The standards are this render's book; sv-horde.js repaints them from its own answer. #}
-                <button type="button" data-sv-cell="horde" class="ip-cat sv-sb-horde" id="svHordeCell" aria-controls="svHordePanel" aria-expanded="false" aria-keyshortcuts="h" aria-label="The Horde: {{ panel_positions|default:0 }} seat{{ panel_positions|default:0|pluralize }}, {{ panel_live_positions|default:0 }} real, {{ panel_demo_positions|default:0 }} demo, {{ panel_paper_positions|default:0 }} paper. Key h">
-                    <span class="ip-label">HORDE</span>
+                {# THE DOOR (open and close made easy, 2026-11-15; the operator: "their old sizes too for the horde tab too"): THE HORDE's old words at the old tab's 28 px, inside the bar, its standards and seats, a chevron that turns when its sheet is up; its tip carries the old tab's figures (sv-frame.js). #}
+                <button type="button" data-sv-cell="horde" class="ip-cat sv-sb-horde sv-door sv-door--panel sv-door--horde" id="svHordeCell" aria-controls="svHordePanel" aria-expanded="false" aria-keyshortcuts="h" aria-label="The Horde: {{ panel_positions|default:0 }} seat{{ panel_positions|default:0|pluralize }}, {{ panel_live_positions|default:0 }} real, {{ panel_demo_positions|default:0 }} demo, {{ panel_paper_positions|default:0 }} paper. Key h">
+                    <span class="ip-label">THE HORDE</span>
                     <span class="sv-seats-wrap" data-sv-live="hb-horde" data-sv-live-key="hb-horde">{% include "_partials/horde_seats.html" with live=panel_live_positions demo=panel_demo_positions paper=panel_paper_positions none=panel_unvenued_positions total=panel_positions %}<span class="sv-seats-n"><span class="sv-n">{{ panel_positions|default:0 }}</span><span class="sv-seats-word"> seat{{ panel_positions|default:0|pluralize }}</span></span></span>
                     <span class="sv-seat-alarm" id="svBarAlarms" hidden></span>
+                    <svg class="sv-ico sv-door-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-up"/></svg>
+                    <span class="sv-door-tip" aria-hidden="true"><span class="sv-door-tip-name">The Horde <kbd class="sv-kbd">h</kbd></span><span class="sv-door-tip-hint" data-sv-tip="horde">{{ panel_positions|default:0 }} seat{{ panel_positions|default:0|pluralize }}</span></span>
                 </button>
                 <div class="sv-more">
                 <button type="button" data-sv-cell="more" class="ip-cat sv-sb-more" id="svMoreBtn" aria-expanded="false" aria-controls="svMorePop" aria-label="6 more cells: Positions, Strategies, Funding, Liquidations 24 h, Watchlist, Volatility"><span class="sv-more-n">6 more</span><svg class="sv-ico sv-ico-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-up"/></svg></button>
@@ -1603,12 +1611,13 @@
 </button>
 
 {# THE DOCK (UI redo B1, the desk v2 board, 2026-11-13): a 40 px column on the right edge, between the band and the status bar. Signals opens the rail as a column that pushes the page (its count and the long/short split ride the sweep); the Council and Activity open their own panels through their own doors (staff only, as the panels are); Ask Sauron opens the answer panel, as the Eye in the status bar does. static/js/sv-frame.js. #}
+{# THE DOORS (open and close made easy, 2026-11-15; the operator: "restore the old system only, of opening and closing icons, their old sizes too for the horde tab too and the council and the activity", then "make it better and easier to use please"): each panel's door is the old 28 px tab with its word again, read from bottom to top, its icon on top and a chevron at its foot that turns when it is open; the Council and the Activity at their old 28 x 112, Signals grown from its 28 x 56 to carry its word, Ask Sauron 28 x 136. Quiet when shut, lit in the panel's own colour when open (sv-frame.css); its tip says its name, its key and one line (sv-frame.js). #}
 <div class="sv-dock" id="svDock" role="toolbar" aria-label="Side panels" aria-orientation="vertical">
-    <button type="button" class="sv-dock-btn" data-sv-dock="signals" aria-controls="signalsRail" aria-expanded="false" title="Signals: open or close the rail (g then s for the page)" aria-label="Signals on the rail: open or close the rail"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg><span class="sv-dock-n" data-sv-live="dock-sig-n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span></button>
+    <button type="button" class="sv-dock-btn sv-door sv-door--panel sv-door--signals" data-sv-dock="signals" aria-controls="signalsRail" aria-expanded="false" title="Signals: open or close the rail (g then s for the page)" aria-label="Signals on the rail: open or close the rail"><svg class="sv-ico sv-door-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg><span class="sv-door-word" aria-hidden="true">Signals</span><svg class="sv-ico sv-door-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-right"/></svg><span class="sv-dock-n sv-door-n" data-sv-live="dock-sig-n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span><span class="sv-door-tip" aria-hidden="true"><span class="sv-door-tip-name">Signals</span><span class="sv-door-tip-hint" data-sv-tip="signals">the rail of signals and the watchlist</span></span></button>
     <div class="sv-dock-dirs" aria-hidden="true" data-sv-live="dock-sig-dirs">{% if not rail.error %}<span class="up">&#9650;{{ rail.long_n|default:"0" }}</span><span class="down">&#9660;{{ rail.short_n|default:"0" }}</span>{% endif %}</div>
-    {% if user.is_staff %}<button type="button" class="sv-dock-btn" data-sv-dock="council" aria-controls="svCouncilBandPanel" aria-expanded="false" aria-keyshortcuts="c" title="The Council (c)" aria-label="The Council (c)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg><span class="sv-dock-n" hidden></span></button>
-    <button type="button" class="sv-dock-btn" data-sv-dock="activity" aria-controls="svActivityPanel" aria-expanded="false" title="Sauron's activity log" aria-label="Sauron's activity log"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-activity"/></svg><span class="sv-dock-n" hidden></span></button>{% endif %}
-    <button type="button" class="sv-dock-btn" data-sv-dock="ask" aria-controls="seChatPanel" aria-expanded="false" aria-keyshortcuts="Control+K" title="Ask Sauron (Ctrl+K)" aria-label="Ask Sauron: the answer panel opens here (Ctrl+K)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg></button>
+    {% if user.is_staff %}<button type="button" class="sv-dock-btn sv-door sv-door--panel sv-door--council" data-sv-dock="council" aria-controls="svCouncilBandPanel" aria-expanded="false" aria-keyshortcuts="c" title="The Council (c)" aria-label="The Council (c)"><svg class="sv-ico sv-door-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg><span class="sv-door-word" aria-hidden="true">Council</span><svg class="sv-ico sv-door-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-right"/></svg><span class="sv-dock-n sv-door-n" hidden></span><span class="sv-door-tip" aria-hidden="true"><span class="sv-door-tip-name">Council <kbd class="sv-kbd">c</kbd></span><span class="sv-door-tip-hint" data-sv-tip="council">nothing new</span></span></button>
+    <button type="button" class="sv-dock-btn sv-door sv-door--panel sv-door--activity" data-sv-dock="activity" aria-controls="svActivityPanel" aria-expanded="false" title="Sauron's activity log" aria-label="Sauron's activity log"><svg class="sv-ico sv-door-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-activity"/></svg><span class="sv-door-word" aria-hidden="true">Activity</span><svg class="sv-ico sv-door-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-right"/></svg><span class="sv-dock-n sv-door-n" hidden></span><span class="sv-door-tip" aria-hidden="true"><span class="sv-door-tip-name">Activity</span><span class="sv-door-tip-hint" data-sv-tip="activity">nothing new</span></span></button>{% endif %}
+    <button type="button" class="sv-dock-btn sv-door sv-door--panel sv-door--ask" data-sv-dock="ask" aria-controls="seChatPanel" aria-expanded="false" aria-keyshortcuts="Control+K" title="Ask Sauron (Ctrl+K)" aria-label="Ask Sauron: the answer panel opens here (Ctrl+K)"><svg class="sv-ico sv-door-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg><span class="sv-door-word" aria-hidden="true">Ask Sauron</span><svg class="sv-ico sv-door-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-right"/></svg><span class="sv-door-tip" aria-hidden="true"><span class="sv-door-tip-name">Ask Sauron <kbd class="sv-kbd">Ctrl K</kbd></span><span class="sv-door-tip-hint" data-sv-tip="ask">a question, a chart, a position</span></span></button>
 </div>
 
 {# THE PHONE'S BOTTOM NAV (2026-09-28). The four pages the keeper opens every day and the whole menu, one tap each. #}
@@ -1636,13 +1645,13 @@
     renders no card: the body is not a region.
     {% endcomment %}
     <div class="rail-section sig-section" id="railSignals" data-sv-fhost="signals" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.sig kind="signals" %}>
-        <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railSignals').classList.toggle('collapsed');localStorage.setItem('sauron_rail_sig',document.getElementById('railSignals').classList.contains('collapsed')?'1':'0');})()">
-            <span class="rh-icon">&#x25C8;</span>
-            <span class="rh-label">SIGNALS</span>
+        {# The section's head folds it from a real button (open and close made easy, 2026-11-15): Tab and Enter reach it, it says whether the section is open, and the whole head is its door (sv-frame.css stretches it under the head's filter and refresh buttons; sv-frame.js folds and keeps the choice, sauron_rail_sig). #}
+        <div class="rail-head sv-head--eye">
+            <button type="button" class="rh-fold" id="railSigFold" aria-expanded="true" aria-controls="railSignalsBody" data-rail-fold="railSignals" data-rail-key="sauron_rail_sig"><span class="rh-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-signals"/></svg></span><span class="rh-label">SIGNALS</span></button>
             <button type="button" class="rh-held" id="railHeld" hidden title="A refresh is waiting while you read a card. Click to show it now."></button>
             <button type="button" class="rh-gear" data-f-panel="railSigPanel" aria-controls="railSigPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
             <span class="rh-count" id="railSigCount" title="{{ rail.title }}">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span>
-            <span class="rh-chev">▼</span>
+            <svg class="sv-ico rh-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg>
         </div>
         {% comment %}
         THE FILTERS (2026-11-06): asset class (press more than one to
@@ -1674,12 +1683,11 @@
     <div class="rail-resizer" id="railResizer" title="Drag to resize"></div>
 
     <div class="rail-section watch-section" id="railWatch">
-        <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railWatch').classList.toggle('collapsed');localStorage.setItem('sauron_rail_watch',document.getElementById('railWatch').classList.contains('collapsed')?'1':'0');})()">
-            <span class="rh-icon">◉</span>
-            <span class="rh-label">WATCHLIST</span>
+        <div class="rail-head">
+            <button type="button" class="rh-fold" id="railWatchFold" aria-expanded="true" aria-controls="railWatchBody" data-rail-fold="railWatch" data-rail-key="sauron_rail_watch"><span class="rh-icon"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-positions"/></svg></span><span class="rh-label">WATCHLIST</span></button>
             <button type="button" class="rh-gear" data-f-panel="railWatchPanel" aria-controls="railWatchPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
             <span class="rh-count" id="railWatchlistCount">{{ ui_watchlist|length }}</span>
-            <span class="rh-chev">▼</span>
+            <svg class="sv-ico rh-chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-chevron-down"/></svg>
         </div>
         {% comment %}
         THE WATCHLIST'S FILTERS (2026-11-06): asset class, held or not, and
@@ -4937,10 +4945,22 @@ window.svWheelMarquee = function (frame, track) {
     var KEY_TICKER = 'sauron_hb_ticker';
     var KEY_DATA   = 'sauron_hb_data';
 
+    /* The band's doors (2026-11-15): one per lane at the band's end, the
+       same door both ways. Pressed is shown; its title says what a click
+       does. */
+    function sayDoors(kind, collapsed) {
+        var word = (kind === 'ticker') ? 'news' : 'prices';
+        document.querySelectorAll('.sv-band-doors [data-collapse="' + kind + '"]').forEach(function(door){
+            door.setAttribute('aria-pressed', collapsed ? 'false' : 'true');
+            door.setAttribute('title', (collapsed ? 'Show ' : 'Hide ') + word);
+        });
+    }
+
     function setCollapsed(kind, collapsed, persist) {
         var el = (kind === 'ticker') ? ticker : data;
         var bodyClass = (kind === 'ticker') ? 'hb-ticker-hidden' : 'hb-data-hidden';
         if (!el) return;
+        sayDoors(kind, collapsed);
         if (collapsed) {
             el.classList.add('collapsed');
             body.classList.add(bodyClass);
@@ -4972,12 +4992,16 @@ window.svWheelMarquee = function (frame, track) {
         }
     }
 
-    // Wire collapse buttons inside each headband
+    // Wire the collapse buttons: the band's doors put a lane away and bring
+    // it back; the phone's own button in the price lane puts it away.
     document.querySelectorAll('.hb-collapse-btn[data-collapse]').forEach(function(btn){
         btn.addEventListener('click', function(e){
             e.preventDefault();
             e.stopPropagation();
-            setCollapsed(btn.getAttribute('data-collapse'), true, true);
+            var kind = btn.getAttribute('data-collapse');
+            var lane = (kind === 'ticker') ? ticker : data;
+            var away = !!(lane && lane.classList.contains('collapsed'));
+            setCollapsed(kind, btn.classList.contains('sv-lane-door') ? !away : true, true);
         });
     });
 
@@ -6748,6 +6772,7 @@ window.svWheelMarquee = function (frame, track) {
             <div class="kbd-row"><span class="kbd-label">Go to a symbol or a page</span><span class="kbd-keys"><kbd>/</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Show shortcuts</span><span class="kbd-keys"><kbd>?</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Close modal</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Close the last panel opened</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Toggle theme</span><span class="kbd-keys"><kbd>t</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Mark notifs read</span><span class="kbd-keys"><kbd>n</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Toggle the Horde</span><span class="kbd-keys"><kbd>h</kbd></span></div>
@@ -7119,7 +7144,7 @@ never nags. He never acts.{% endcomment %}
     <div class="gl-head">
         <span class="gl-title">GOLLUM</span>
         <span class="gl-sub">knows the way</span>
-        <button type="button" class="gl-close" data-gollum-close aria-label="Close">✕</button>
+        <button type="button" class="gl-close" data-gollum-close aria-label="Close"><svg class="sv-ico sv-ico-x12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-close"/></svg></button>
     </div>
     <input type="search" class="gl-input" data-gollum-input autocomplete="off" spellcheck="false"
            placeholder="Where to, precious? briefing · positions · pnl · brain…">
@@ -7239,12 +7264,13 @@ never nags. He never acts.{% endcomment %}
     <div class="se-resize-t"  id="seResizeT"  title="Drag to resize"></div>
     <div class="se-resize-tl" id="seResizeTL" title="Drag to resize"></div>
 
-    <div class="se-chat-header">
-        <span class="se-chat-title">ASK SAURON</span>
+    {# Its head wears its door's colour: the Eye's line on top and the Ask icon (2026-11-15). #}
+    <div class="se-chat-header sv-head--eye">
+        <span class="se-chat-title"><svg class="sv-ico sv-head-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-ask"/></svg>ASK SAURON</span>
         <span class="se-chat-header-actions">
             <a class="se-chat-header-btn" href="{% url 'research_view' %}" title="Open full /research/ tab">FULL ↗</a>
             <button class="se-chat-header-btn" id="seChatNew" title="Start a new conversation">NEW</button>
-            <button class="se-chat-header-btn" id="seChatClose" title="Close (Esc)">CLOSE ✕</button>
+            <button class="se-chat-header-btn" id="seChatClose" title="Close (Esc)">CLOSE <svg class="sv-ico sv-ico-x12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-close"/></svg></button>
         </span>
     </div>
     <div class="se-chat-messages" id="seChatMessages">
@@ -7330,8 +7356,25 @@ never nags. He never acts.{% endcomment %}
         return (el && el.value) || getCookie('csrftoken') || '';
     }
 
+    /* From 769 px up the Eye stays in the bar while the panel is open and
+       closes it (2026-11-15): it never takes .open there (sv-frame.css draws
+       it still), it says so instead; the phone keeps its own. Shut, the
+       panel is out of the Tab order. */
+    var deskMq = window.matchMedia ? window.matchMedia('(min-width: 769px)') : null;
+    function onDesk() { return !deskMq || deskMq.matches; }
+    function backToDoor() {
+        if (!panel.contains(document.activeElement)) return;
+        var dk = document.querySelector('.sv-dock [data-sv-dock="ask"]');
+        var to = (dk && dk.getClientRects().length) ? dk : fab;
+        try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); }
+    }
+    fab.setAttribute('aria-expanded', 'false');
+    panel.setAttribute('inert', '');
     function openPanel() {
-        panel.classList.add('open'); fab.classList.add('open');
+        panel.removeAttribute('inert');
+        panel.classList.add('open');
+        if (!onDesk()) fab.classList.add('open');
+        fab.setAttribute('aria-expanded', 'true');
         /* Every way in comes through here — the orb, Ctrl+K (the "?" key
            is the keys sheet's since the desk v2 board), askSauronAbout,
            [data-ask-sauron], the banner's Open — so this is
@@ -7345,7 +7388,10 @@ never nags. He never acts.{% endcomment %}
         setTimeout(function() { input && input.focus(); }, 60);
     }
     function closePanel() {
+        backToDoor();
         panel.classList.remove('open'); fab.classList.remove('open');
+        fab.setAttribute('aria-expanded', 'false');
+        panel.setAttribute('inert', '');
     }
     /* FAB toggles the panel; SEND button submits (handler bound below). */
     fab.addEventListener('click', function() {
@@ -7489,8 +7535,12 @@ never nags. He never acts.{% endcomment %}
 
     // Keyboard: Esc closes. Ctrl+K opens (the shortcuts block); "?" is
     // the keys sheet's (the desk v2 board, 2026-11-13: "? Keys").
+    /* Where the frame's doors own Esc (sv-frame.js: the last panel opened,
+       one per press; Esc in the panel's own box closes it), the frame
+       closes it. */
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape' && panel.classList.contains('open')) {
+            if (e.defaultPrevented || (window.SVDoors && window.SVDoors.owns())) return;
             e.preventDefault(); closePanel();
         }
     });

@@ -26,11 +26,13 @@ in static/css/sv-responsive.css.
         <span class="sv-activity-badge" id="svActivityBadge" hidden>0</span>
     </button>
     <div class="sv-activity-panel" id="svActivityPanel" role="region" aria-labelledby="svActivityTitle" inert>
-        <div class="sv-activity-head">
+        {# Its head wears its door's colour (2026-11-15): the Activity's blue line on top and its icon; the close drawn from the sprite. #}
+        <div class="sv-activity-head sv-head--activity">
+            <svg class="sv-ico sv-head-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-activity"/></svg>
             <span class="sv-activity-dot" id="svActivityDot" aria-hidden="true"></span>
             <span class="sv-activity-title" id="svActivityTitle">SAURON ACTIVITY</span>
             <span class="sv-activity-stamp" id="svActivityStamp"></span>
-            <button type="button" class="sv-activity-close" id="svActivityClose" aria-label="Close the activity log" title="Close (Esc)">&times;</button>
+            <button type="button" class="sv-activity-close sv-x" id="svActivityClose" aria-label="Close the activity log" title="Close (Esc)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-close"/></svg></button>
         </div>
         <div class="sv-activity-chips" role="toolbar" aria-label="Show only">
             <button type="button" class="sv-activity-chip" data-filter="all" aria-pressed="true">All</button>

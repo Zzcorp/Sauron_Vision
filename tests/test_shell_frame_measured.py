@@ -70,13 +70,23 @@ TOP_H, BAND_H, FOOT_H, DOCK_W, MINI_W = 44, 32, 32, 40, 56
 
 #: The bottom bar, left to right, by the board.
 CELLS = ("portfolio", "pnl", "stops", "margin", "drawdown", "bots", "horde", "more", "keys")
+#: THE HORDE's cell is its door again (open and close made easy,
+#: 2026-11-15; the operator: "restore the old system only, of opening and
+#: closing icons, their old sizes too for the horde tab too"): it wears the
+#: old tab's name, updated deliberately from "HORDE".
 LABELS = {"portfolio": "PORTFOLIO", "pnl": "OPEN P&L", "stops": "AT STOPS", "margin": "MARGIN",
-          "drawdown": "DRAWDOWN", "bots": "BOTS", "horde": "HORDE"}
+          "drawdown": "DRAWDOWN", "bots": "BOTS", "horde": "THE HORDE"}
 #: The top bar, left to right.
 TOPBAR = (".topbar-title", "form.sv-cmd", "#clock", ".exchange-indicator", "#liveStatusPill",
           ".sv-armed-pill", "#notifBell", "#lockNowBtn", "#userMenu")
 #: The dock, top to bottom (Council and Activity are staff's, as their panels are).
 DOCK = ("signals", "council", "activity", "ask")
+#: Each dock door's box, w x h: the old tabs' 28 px, tall enough for the
+#: word they carry upright (open and close made easy, 2026-11-15; the
+#: operator: "restore the old system only, of opening and closing icons,
+#: their old sizes too for the horde tab too and the council and the
+#: activity"), updated deliberately from the 30 x 30 icon buttons.
+DOOR = {"signals": (28, 112), "council": (28, 112), "activity": (28, 112), "ask": (28, 136)}
 #: The fixture's eToro cells: eToro's own equity and used margin.
 EQUITY, USED = "10453.61", "4402.10"
 
@@ -358,11 +368,17 @@ MENU_PROBE = r"""
     if (r.right > tb.left && r.left < tb.right && r.bottom > tb.top && r.top < tb.bottom) hits.push(e.textContent.trim());
   });
   var tp = tower ? tower.querySelector('path') : null;
+  var ts = tower ? tower.querySelector('svg') : null, sb = ts ? ts.getBoundingClientRect() : null;
+  var fold = document.getElementById('svFoldRow'), fb = fold ? fold.getBoundingClientRect() : null;
+  var menu = document.querySelector('.sidebar');
   return JSON.stringify({ rows: rows, secs: secs, towerHits: hits,
     towerOpacity: tp ? parseFloat(getComputedStyle(tp).fillOpacity) : null,
-    side: document.querySelector('.sidebar').getBoundingClientRect().width,
-    sideBottom: document.querySelector('.sidebar').getBoundingClientRect().bottom,
-    towerBox: tb ? [tb.left, tb.top, tb.right, tb.bottom] : null });
+    side: menu.getBoundingClientRect().width,
+    sideBottom: menu.getBoundingClientRect().bottom,
+    towerBox: tb ? [tb.left, tb.top, tb.right, tb.bottom] : null,
+    svgBox: sb ? [sb.left, sb.top, sb.right, sb.bottom] : null,
+    foldBox: fb ? [fb.left, fb.top, fb.right, fb.bottom] : null,
+    menuScroll: [menu.scrollHeight, menu.clientHeight] });
 })()
 """
 
@@ -559,7 +575,7 @@ class FrameGeometryTests(TestCase):
                 names = [n for n, _b, _l in g["dockBtns"]]
                 self.assertEqual(names, list(DOCK))
                 for n, bx, label in g["dockBtns"]:
-                    self.assertEqual((bx["w"], bx["h"]), (30, 30), n)
+                    self.assertEqual((bx["w"], bx["h"]), DOOR[n], n)
                     self.assertTrue(label, n)
                 if key[2] == "rail":
                     r = g["rail"]
@@ -642,11 +658,25 @@ class FrameGeometryTests(TestCase):
                 self.assertAlmostEqual(left + w / 2, MINI_W / 2, delta=1)
 
     def test_the_tower_watches_the_empty_foot_only(self):
+        """Updated deliberately (open and close made easy, 2026-11-15; the
+        operator: "restore the old system only, of opening and closing
+        icons", then "make it better and easier to use please"): the menu's
+        fold row is back at its foot, so the tower stands on that row, not
+        on the menu's edge: within 16 px above it, nothing of the tower or
+        its drawing under it, and the menu does not scroll for them (at
+        1440 x 900 the row first covered the tower's last 10 px and made
+        the menu scroll)."""
         m = self.menu[1440]
         self.assertIsNotNone(m["towerBox"])
         self.assertEqual(m["towerHits"], [])
         self.assertAlmostEqual(m["towerOpacity"], 0.075, places=3)
-        self.assertLessEqual(m["sideBottom"] - m["towerBox"][3], 16)
+        fold = m["foldBox"]
+        self.assertIsNotNone(fold)
+        self.assertEqual(fold[3], m["sideBottom"])
+        self.assertLessEqual(m["towerBox"][3], fold[1])
+        self.assertLessEqual(fold[1] - m["towerBox"][3], 16)
+        self.assertLessEqual(m["svgBox"][3], fold[1])
+        self.assertEqual(m["menuScroll"][0], m["menuScroll"][1])
 
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
@@ -1141,7 +1171,12 @@ class FrameFocusAndKeysTests(TestCase):
         reached through "N more", seen and on top;
       * "/" and "?" do nothing while a dialog holds the page."""
 
-    RING = ".nav-fold, .sv-side-fold, .sv-dock-btn, #seEyeFab, #notifBell, #lockNowBtn, .nav-link, #svMoreBtn"
+    #: Updated deliberately (open and close made easy, 2026-11-15; the
+    #: operator: "restore the old system only, of opening and closing
+    #: icons"): the menu's fold is its fold row now, and the band's two
+    #: doors and THE HORDE's door join the ring.
+    RING = (".nav-fold, .sv-fold-row, .sv-dock-btn, .sv-lane-door, .sv-sb-horde, #seEyeFab, #notifBell,"
+            " #lockNowBtn, .nav-link, #svMoreBtn")
 
     @classmethod
     def setUpTestData(cls):
@@ -1317,16 +1352,24 @@ class FrameLookDetailTests(TestCase):
                 dots: dots,
                 bubble: (function () { var g = q('.gollum-bubble'); return g ? getComputedStyle(g).maxWidth : null; })()
               }); })()"""))
-            # The lanes hovered, their collapse buttons shown: the mask keeps
-            # each button's own box whole.
+            # The lanes hovered: their doors stand outside both, at the
+            # band's end, where no lane's fade reaches them.
             lanes = ".sv-band .ticker-bar, .sv-band .data-headband"
             b.force(sid, lanes, ("hover",))
-            cls.got["hovered"] = json.loads(b.js(sid, r"""JSON.stringify(Array.prototype.map.call(
-              document.querySelectorAll('.sv-band .ticker-bar, .sv-band .data-headband'), function (e) {
-                var cs = getComputedStyle(e), r = e.getBoundingClientRect(), t = e.querySelector('.hb-collapse-btn').getBoundingClientRect();
-                return { mask: cs.maskImage || cs.webkitMaskImage, size: cs.maskSize || cs.webkitMaskSize,
-                         position: cs.maskPosition || cs.webkitMaskPosition, repeat: cs.maskRepeat || cs.webkitMaskRepeat,
-                         button: [Math.round(r.right - t.right), Math.round(t.top - r.top), Math.round(t.width), Math.round(t.height)] }; }))"""))
+            cls.got["hovered"] = json.loads(b.js(sid, r"""(function () {
+              var lanes = Array.prototype.map.call(document.querySelectorAll('.sv-band .ticker-bar, .sv-band .data-headband'), function (e) {
+                return e.getBoundingClientRect(); });
+              return JSON.stringify({
+                lanes: Array.prototype.map.call(document.querySelectorAll('.sv-band .ticker-bar, .sv-band .data-headband'), function (e) {
+                  var cs = getComputedStyle(e);
+                  return { mask: cs.maskImage || cs.webkitMaskImage, size: cs.maskSize || cs.webkitMaskSize }; }),
+                doors: Array.prototype.map.call(document.querySelectorAll('.sv-band-doors .sv-lane-door'), function (d) {
+                  var r = d.getBoundingClientRect(), cs = getComputedStyle(d), op = 1;
+                  for (var p = d; p; p = p.parentElement) op *= parseFloat(getComputedStyle(p).opacity);
+                  var hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                  return { kind: d.getAttribute('data-collapse'), w: Math.round(r.width), h: Math.round(r.height), opacity: op,
+                           mask: cs.maskImage || cs.webkitMaskImage, onTop: !!hit && (hit === d || d.contains(hit)),
+                           clear: lanes.every(function (l) { return r.right <= l.left + 0.5 || r.left >= l.right - 0.5; }) }; }) }); })()"""))
             b.force(sid, lanes, ())
             # Folded to its icons: one short rule between groups, none under the brand.
             b.js(sid, "document.getElementById('mainSidebar').classList.add('mini'); 0")
@@ -1339,14 +1382,19 @@ class FrameLookDetailTests(TestCase):
                 firstTop: secs.length ? secs[0].getBoundingClientRect().top - brand : null,
                 bubble: (function () { var g = document.querySelector('.gollum-bubble'); return g ? getComputedStyle(g).display : null; })() }); })()"""))
             b.js(sid, "document.getElementById('mainSidebar').classList.remove('mini'); 0")
-            # A lane shut: its chip names it, in its own slot.
-            b.js(sid, "document.getElementById('tickerBar').classList.add('collapsed'); document.body.classList.add('hb-ticker-hidden'); 0")
+            # A lane shut, as the band's script shuts it (this page runs the
+            # frame's script only): its door names it, in its own slot.
+            door = "document.querySelector('.sv-band-doors [data-collapse=\"ticker\"]')"
+            b.js(sid, "document.getElementById('tickerBar').classList.add('collapsed'); document.body.classList.add('hb-ticker-hidden');"
+                      " %s.setAttribute('aria-pressed', 'false'); %s.setAttribute('title', 'Show news'); 0" % (door, door))
             cls.got["chip"] = json.loads(b.js(sid, r"""(function () {
-              var chip = document.querySelector('.hb-restore-tab.ticker'), lane = document.getElementById('dataHeadband');
-              var c = chip.getBoundingClientRect(), l = lane.getBoundingClientRect();
-              return JSON.stringify({ shown: getComputedStyle(chip).display !== 'none', text: chip.textContent.trim(),
+              var chip = document.querySelector('.sv-band-doors [data-collapse="ticker"]'), lane = document.getElementById('dataHeadband');
+              var c = chip.getBoundingClientRect(), l = lane.getBoundingClientRect(), a = chip.querySelector('.sv-door-arrow').getBoundingClientRect();
+              return JSON.stringify({ shown: getComputedStyle(chip).display !== 'none' && c.width > 0, text: chip.textContent.trim(),
+                pressed: chip.getAttribute('aria-pressed'), arrow: [Math.round(a.width), Math.round(a.height)],
                 clear: c.left >= l.right - 0.5 }); })()"""))
-            b.js(sid, "document.getElementById('tickerBar').classList.remove('collapsed'); document.body.classList.remove('hb-ticker-hidden'); 0")
+            b.js(sid, "document.getElementById('tickerBar').classList.remove('collapsed'); document.body.classList.remove('hb-ticker-hidden');"
+                      " %s.setAttribute('aria-pressed', 'true'); %s.setAttribute('title', 'Hide news'); 0" % (door, door))
             # The Eye's states.
             cls.got["eye"] = {}
             for st in ("live", "closed", "locked", "unknown"):
@@ -1390,18 +1438,30 @@ class FrameLookDetailTests(TestCase):
                 self.assertEqual(lane["paint"], ["none", "none"])
 
     def test_a_shown_collapse_button_never_fades(self):
-        """F8 kept: while a lane's collapse button shows, the mask's second
-        layer is a solid box over the button's own (24 px, 4 px in from the
-        lane's right and top), so the button never fades with the items."""
-        self.assertEqual(len(self.got["hovered"]), 2)
-        for lane in self.got["hovered"]:
+        """F8 kept: a lane's collapse button never fades with the items.
+
+        Updated deliberately (open and close made easy, 2026-11-15; the
+        operator: "restore the old system only, of opening and closing
+        icons, their old sizes too", then "make it better and easier to use
+        please"): the collapse buttons left the lanes for the band's two
+        doors, at its right end, so the mask's second layer, which kept a
+        24 px button whole inside a lane, has nothing left to keep: each
+        lane, hovered, wears its one 12 px fade, and each door (88 x 31)
+        stands clear of both lanes, unmasked, whole and on top."""
+        got = self.got["hovered"]
+        self.assertEqual(len(got["lanes"]), 2)
+        for lane in got["lanes"]:
             with self.subTest(lane=lane):
-                # The button: 4 px in from the lane's right and top, 24 px.
-                self.assertEqual(lane["button"], [4, 4, 24, 24])
-                self.assertTrue(lane["mask"].endswith(", linear-gradient(rgb(0, 0, 0), rgb(0, 0, 0))"), lane["mask"])
-                self.assertEqual(lane["size"], "100% 100%, 24px 24px")
-                self.assertEqual(lane["position"], "0px 0px, calc(100% - 4px) 4px")
-                self.assertEqual(lane["repeat"], "no-repeat, no-repeat")
+                self.assertRegex(lane["mask"], r"^linear-gradient\(90deg, rgba\(0, 0, 0, 0\), rgb\(0, 0, 0\) 12px, "
+                                               r"rgb\(0, 0, 0\) calc\(100% - 12px\), rgba\(0, 0, 0, 0\)\)$")
+        self.assertEqual([d["kind"] for d in got["doors"]], ["data", "ticker"])
+        for door in got["doors"]:
+            with self.subTest(door=door["kind"]):
+                self.assertEqual((door["w"], door["h"]), (88, 31))
+                self.assertTrue(door["clear"], door)
+                self.assertEqual(door["mask"], "none")
+                self.assertEqual(door["opacity"], 1)
+                self.assertTrue(door["onTop"], door)
 
     def test_a_headline_says_its_time_not_news(self):
         self.assertEqual(self.got["detail"]["newsBadges"], 0)
@@ -1435,9 +1495,18 @@ class FrameLookDetailTests(TestCase):
         self.assertEqual(self.got["detail"]["bubble"], "%dpx" % (SIDE_W[1440] - 16))
 
     def test_a_shut_lane_s_chip_names_it_in_its_own_slot(self):
+        """Updated deliberately (open and close made easy, 2026-11-15; the
+        operator: "restore the old system only, of opening and closing
+        icons", then "make it better and easier to use please"): a shut
+        lane is brought back by the door that shut it, which names it, says
+        it is away (aria-pressed false) and turns its arrow back at the old
+        12 px, in its own slot after the lane left open; the chip that
+        stood for it is the phone's only."""
         c = self.got["chip"]
         self.assertTrue(c["shown"])
         self.assertIn("News", c["text"])
+        self.assertEqual(c["pressed"], "false")
+        self.assertEqual(c["arrow"], [12, 12])
         self.assertTrue(c["clear"])
 
     def test_the_eye_s_states(self):

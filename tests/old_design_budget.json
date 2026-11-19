@@ -2683,7 +2683,7 @@
    "off_token_hex": 9
   },
   "static/css/sauron.css": {
-   "accent_role": 146,
+   "accent_role": 143,
    "eye_literal": 128,
    "glass": 12,
    "glow": 104,
@@ -2696,9 +2696,9 @@
    "sub11": 197
   },
   "static/css/sv-activity.css": {
-   "accent_role": 3,
+   "accent_role": 2,
    "infinite": 1,
-   "old_token": 3,
+   "old_token": 2,
    "scrollbar": 1,
    "sub11": 7
   },
@@ -2777,9 +2777,6 @@
    "inline_visual": 5,
    "sub11": 2
   },
-  "templates/_partials/council_band.html": {
-   "glyph_icon": 1
-  },
   "templates/_partials/dh_item.html": {
    "accent_role": 2,
    "glyph_icon": 2,
@@ -2820,7 +2817,7 @@
   "templates/base.html": {
    "accent_role": 18,
    "eye_literal": 33,
-   "glyph_icon": 17,
+   "glyph_icon": 15,
    "inline_visual": 34,
    "js_style": 10,
    "off_token_hex": 15,

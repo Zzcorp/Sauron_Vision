@@ -1364,7 +1364,9 @@ def build_scenes(details, live_id, paper_id):
     S("sidebar_mini", sidebar="mini", act=_hover(".sidebar .nav-link:not(.active)"), shows="#navMiniTip")
     # The bar is always shown from 769 px up (B1, the desk v2 board): no
     # minimise tab, no restore pill, so no minimised state.
-    S("bands_hidden", bands=True, shows=".hb-restore-tab")
+    # Both lanes put away: from 769 px up their own doors at the band's end
+    # say so (the doors, 2026-11-15; the phone's chips are the phone's).
+    S("bands_hidden", bands=True, shows='.hb-restore-tab, .sv-band-doors [aria-pressed="false"]')
     S("take_trade_paper", "/instruments/BTCUSD/", act=_click(".tk-side.tk-long"), shows=".sz-dialog",
       real_post=(r"^/instruments/BTCUSD/take-trade/preview/$",))
     # Made from the paper preview at run time ("@live", "@short").
