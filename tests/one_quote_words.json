@@ -1,5 +1,5 @@
 {
- "about": "One grammar for the words beside a price, proven twice: tests/test_one_quote_words.py asserts market_data.one_quote.words and SVVenue.words (static/js/sv-venue.js) on every case. Synthetic payloads. Hand-written expectations: the build spec's table (one price everywhere, 1.6). The fields section (2026-11-12, the review's fixes) pins the other cells a price carries: its age and clock face (a shut market and a previous close said so), the move since entry, the distance to a level, reward to risk now, and the hover; market_data.one_quote.field_words and SVVenue.fieldText.",
+ "about": "One grammar for the words beside a price, proven twice: tests/test_one_quote_words.py asserts market_data.one_quote.words and SVVenue.words (static/js/sv-venue.js) on every case. Synthetic payloads. Hand-written expectations: the build spec's table (one price everywhere, 1.6). The fields section (2026-11-12, the review's fixes) pins the other cells a price carries: its age and clock face (a shut market and a previous close said so), the move since entry, the distance to a level, reward to risk now, and the hover; market_data.one_quote.field_words and SVVenue.fieldText. eToro's all-week instruments (2026-11-19, market_data/all_week_display.py): an open price while Sauron's own clock is shut leads with \"open · eToro 24/7\" until that clock reopens (wk.open, wk.until), one of eToro's breaks reads \"pause\" with its reopening (shut.word), and the next break an open price carries turns it to a pause by itself (wk.np).",
  "cases": [
   {
    "name": "etoro bid, 25 s",
@@ -1173,6 +1173,416 @@
    },
    "now": 1794780010000,
    "words": "eToro bid · 2 days"
+  },
+  {
+   "name": "all week, open at eToro while Sauron's clock is shut",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795272960000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795273200000,
+   "words": "open · eToro 24/7 · eToro bid · 4 min"
+  },
+  {
+   "name": "all week, the open words end when Sauron's clock reopens",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795272960000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795389000000,
+   "words": "eToro bid · 32 h"
+  },
+  {
+   "name": "all week, eToro's next break begins by itself",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795272960000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795385400000,
+   "words": "pause · eToro bid Sat 21 Nov 14:56 · eToro reopens 23:00 UTC"
+  },
+  {
+   "name": "all week, a pause read after its start is dated by it",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795212300000,
+    "state": "shut",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": {
+     "since": 1795212000000,
+     "label": "pause · eToro reopens 22:30 UTC",
+     "opens": "eToro reopens 22:30 UTC",
+     "reopens": 1795213800000,
+     "word": "pause"
+    },
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": null,
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795212600000,
+   "words": "pause · eToro bid 22:00 · eToro reopens 22:30 UTC"
+  },
+  {
+   "name": "all week, past Friday's pause it reads open at eToro",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795212300000,
+    "state": "shut",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": {
+     "since": 1795212000000,
+     "label": "pause · eToro reopens 22:30 UTC",
+     "opens": "eToro reopens 22:30 UTC",
+     "reopens": 1795213800000,
+     "word": "pause"
+    },
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": null,
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795214700000,
+   "words": "open · eToro 24/7 · eToro bid · 40 min"
+  },
+  {
+   "name": "all week, a weekday pause",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795557570000,
+    "state": "shut",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": {
+     "since": 1795557600000,
+     "label": "pause · eToro reopens 23:00 UTC",
+     "opens": "eToro reopens 23:00 UTC",
+     "reopens": 1795561200000,
+     "word": "pause"
+    },
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "",
+     "until": null,
+     "np": null,
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795559400000,
+   "words": "pause · eToro bid 21:59 · eToro reopens 23:00 UTC"
+  },
+  {
+   "name": "all week, a weekday pause ends with Sauron's own open",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795557570000,
+    "state": "shut",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": {
+     "since": 1795557600000,
+     "label": "pause · eToro reopens 23:00 UTC",
+     "opens": "eToro reopens 23:00 UTC",
+     "reopens": 1795561200000,
+     "word": "pause"
+    },
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "",
+     "until": null,
+     "np": null,
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795561500000,
+   "words": "eToro bid · 66 min"
+  },
+  {
+   "name": "all week, natural gas's Saturday break",
+   "payload": {
+    "s": "NGUSD",
+    "p": "3.2150",
+    "v": 3.215,
+    "b": "3.2150",
+    "a": "3.2190",
+    "l": "3.2170",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795298580000,
+    "state": "delayed",
+    "dp": 4,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795298400000,
+      "label": "pause · eToro reopens 22:15 UTC",
+      "opens": "eToro reopens 22:15 UTC",
+      "reopens": 1795299300000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30, Sat 22:00-22:15"
+    }
+   },
+   "now": 1795298700000,
+   "words": "pause · eToro bid 22:00 · eToro reopens 22:15 UTC"
+  },
+  {
+   "name": "all week, past the Saturday break it reads open at eToro",
+   "payload": {
+    "s": "NGUSD",
+    "p": "3.2150",
+    "v": 3.215,
+    "b": "3.2150",
+    "a": "3.2190",
+    "l": "3.2170",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795298580000,
+    "state": "delayed",
+    "dp": 4,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795298400000,
+      "label": "pause · eToro reopens 22:15 UTC",
+      "opens": "eToro reopens 22:15 UTC",
+      "reopens": 1795299300000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30, Sat 22:00-22:15"
+    }
+   },
+   "now": 1795299600000,
+   "words": "open · eToro 24/7 · eToro bid · 17 min"
+  },
+  {
+   "name": "all week, a stand-in keeps its own market's time",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2641.30",
+    "v": 2641.3,
+    "b": null,
+    "a": null,
+    "l": "2641.30",
+    "side": "",
+    "src": "yfinance",
+    "fam": "yfinance",
+    "who": "Yahoo GC=F, the front-month future",
+    "auth": "reference",
+    "basis": "quote",
+    "at": 1795212000000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "now": 1795273200000,
+   "words": "open · eToro 24/7 · Yahoo GC=F, the front-month future · 17 h"
   }
  ],
  "slots": [
@@ -2082,6 +2492,216 @@
    "attrs": {
     "data-q-title": "valued for profit and loss at 1.08400 (the position's own venue mark)"
    }
+  },
+  {
+   "name": "age, one of eToro's breaks says pause and its reopening",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795212300000,
+    "state": "shut",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": {
+     "since": 1795212000000,
+     "label": "pause · eToro reopens 22:30 UTC",
+     "opens": "eToro reopens 22:30 UTC",
+     "reopens": 1795213800000,
+     "word": "pause"
+    },
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": null,
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "field": "age",
+   "now": 1795212600000,
+   "text": "pause · eToro reopens 22:30 UTC"
+  },
+  {
+   "name": "age, eToro's next break once it has begun",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795272960000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "field": "age",
+   "now": 1795385400000,
+   "text": "pause · eToro reopens 23:00 UTC"
+  },
+  {
+   "name": "age, open at eToro on the weekend is its age",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795272960000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "field": "age",
+   "now": 1795273200000,
+   "text": "4 min"
+  },
+  {
+   "name": "asof, a pause read after its start is its start",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795212300000,
+    "state": "shut",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": {
+     "since": 1795212000000,
+     "label": "pause · eToro reopens 22:30 UTC",
+     "opens": "eToro reopens 22:30 UTC",
+     "reopens": 1795213800000,
+     "word": "pause"
+    },
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": null,
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "field": "asof",
+   "now": 1795212600000,
+   "text": "22:00:00 UTC ·"
+  },
+  {
+   "name": "title, an all-week price names eToro's breaks",
+   "payload": {
+    "s": "XAUUSD",
+    "p": "2640.10",
+    "v": 2640.1,
+    "b": "2640.10",
+    "a": "2640.60",
+    "l": "2640.35",
+    "side": "bid",
+    "src": "etoro",
+    "fam": "etoro",
+    "who": "eToro",
+    "auth": "etoro",
+    "basis": "stamp:tick",
+    "at": 1795272960000,
+    "state": "delayed",
+    "dp": 2,
+    "cls": "commodity",
+    "chg": null,
+    "ls": null,
+    "shut": null,
+    "sf": null,
+    "slot": null,
+    "via": "tick",
+    "wk": {
+     "open": "open · eToro 24/7",
+     "until": 1795388400000,
+     "np": {
+      "since": 1795384800000,
+      "label": "pause · eToro reopens 23:00 UTC",
+      "opens": "eToro reopens 23:00 UTC",
+      "reopens": 1795388400000,
+      "word": "pause"
+     },
+     "hint": "eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
+    }
+   },
+   "field": "title",
+   "now": 1795273200000,
+   "text": "open · eToro 24/7 · eToro bid · 4 min; read by the manage tick; eToro 24/7: breaks 22:00-23:00 UTC daily, Fri 22:00-22:30"
   }
  ]
 }
