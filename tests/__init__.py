@@ -95,10 +95,10 @@ _etoro_smoke.SMOKE_GAP_S = 0.0
 _proof.GATE = False
 # THE BAR WRITER'S SHUT CANDLES (2026-11-19, bot_bars.DROP_SHUT_CANDLES):
 # a forex or commodity venue candle whose whole span lies inside a weekend
-# shut is not written. The suite's fake venues date their candles by the
-# wall clock, so a fixture's newest candles would be dropped on a weekend
-# and kept on a weekday (on a simulated Saturday six tests of four modules
-# failed for the hour, not for the code). Off, the writer stores every
-# candle as before; tests/test_weekend_bars.py turns it back on at fixed
-# clocks.
+# shut is not written (eToro's all-week instruments excepted). The suite's
+# fake venues date their candles by the wall clock, so a fixture's newest
+# candles would be dropped on a weekend and kept on a weekday (on a
+# simulated Saturday six tests of four modules failed for the hour, not for
+# the code). Off, the writer stores every candle as before;
+# tests/test_weekend_bars.py turns it back on at fixed clocks.
 _bot_bars.DROP_SHUT_CANDLES = False

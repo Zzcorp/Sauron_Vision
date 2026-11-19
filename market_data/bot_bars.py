@@ -683,9 +683,11 @@ def _without_shut_candles(inst, interval, rows) -> tuple:
     """(rows, dropped): a venue's answer without the candles whose WHOLE
     span holds no open time inside a shut of 24 hours or more (market_data
     .shut_bars.holds_no_open_time: a currency pair on eToro's 17:00 New
-    York week, a commodity on its own market clock; no other class), in
-    order, and how many went (2026-11-19). A candle whose open cannot be
-    read is kept: the writer refuses it on its own. Never raises."""
+    York week, a commodity on its own market clock; never one of eToro's
+    all-week instruments, gold, oil, silver or natural gas; no other
+    class), in order, and how many went (2026-11-19). A candle whose open
+    cannot be read is kept: the writer refuses it on its own. Never
+    raises."""
     rows = list(rows or [])
     if not DROP_SHUT_CANDLES or not rows:
         return rows, 0
@@ -917,7 +919,9 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     # A CANDLE THE MARKET WAS SHUT FOR IS NOT A BAR
                     # (2026-11-19). eToro answers a candle for every slot
                     # it is asked for: on a weekend a 1h and a 4h candle
-                    # per slot of a commodity, flat or moving, each stored
+                    # per slot of a pair or a weekday-only commodity
+                    # (eToro's all-week gold, oil, silver and natural gas
+                    # trade then, and are kept), flat or moving, each stored
                     # as the venue's bar, read by every ATR stop and size
                     # and every Orc's W2, and stamped as the venue mark
                     # "now". A candle whose whole span holds no open time

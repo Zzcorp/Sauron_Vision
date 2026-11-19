@@ -1,5 +1,5 @@
 """WEEKEND BARS (2026-11-19): a venue candle for a slot the market was shut
-for is not a bar.
+for is not a bar; eToro's all-week instruments are never shut.
 
 The bar pass asks eToro for candles every ten minutes and reads no market
 clock (market_data/bot_bars.py, refresh_bars_for_config). eToro answered a
@@ -16,14 +16,24 @@ or more, is dropped before the write (market_data.shut_bars
 Sunday 17:00 New York), a commodity on its instrument's market clock. What
 still trades is written as before: the Friday hour eToro trades after the
 FOREX row's 21:00 UTC close in winter, the bar that holds the reopen, the
-CME daily break (a shut shorter than a day), crypto and stocks. An answer
-made of nothing else is "not now": it writes, stamps and mutes nothing.
+CME daily break (a shut shorter than a day), crypto, stocks and indices. An
+answer made of nothing else is "not now": it writes, stamps and mutes
+nothing.
 
-Money, per case. Where the weekend candles were flat, the ATR at the reopen
-rises back to the traded bars' value: stops wider, sizes smaller than with
-them. Where they moved, it returns to the traded bars' value too, which is
-lower than with wide weekend candles (stops tighter, sizes larger) and
-higher than with narrow ones.
+eToro's ALL-WEEK instruments are never shut (shut_bars.ALL_WEEK_ETORO_IDS:
+GOLD, OIL, SILVER, NATGAS, SPX500 and NSDQ100, which eToro's market-hours
+page lists as trading 24/7). Their weekend candles are prices eToro traded,
+moving or not, and they are written, noted and stamped exactly as before
+the rule. Gold's and silver's are the cases here; copper (HGUSD) keeps
+weekday hours at eToro and stands for the commodities whose weekend
+candles go.
+
+Money, per case. Where a weekday market's weekend candles were flat, the
+ATR at the reopen rises back to the traded bars' value: stops wider, sizes
+smaller than with them. Where they moved, it returns to the traded bars'
+value too, which is lower than with wide weekend candles (stops tighter,
+sizes larger) and higher than with narrow ones. An all-week instrument's
+ATR reads its weekend market as it always did.
 
 Fakes only (an eToro candle endpoint, a keyless feed), sqlite, no network.
 Every price here is invented.
@@ -55,17 +65,28 @@ CHICAGO = ZoneInfo("America/Chicago")
 #: published hours and NOT read from the platform's clock (core.
 #: exchange_status), so the fakes below never share a mistake with the code
 #: under test: (zone, Friday close, Sunday reopen). "fx" is eToro's FX week,
-#: "cme" Globex, which eToro's regular metals and energy keep.
+#: "cme" Globex, which eToro's weekday-only metals keep. An all-week
+#: instrument's fixture uses it for the slots eToro's 24/7 market answers
+#: while Globex is shut.
 WEEKEND = {"fx": (NEW_YORK, time(17, 0), time(17, 0)),
            "cme": (CHICAGO, time(16, 0), time(17, 0))}
 
 #: symbol -> (class, exchange, weekend kind, invented base, invented 4h range)
 SYMBOLS = {
     "XAUUSD": ("commodity", "COMEX", "cme", 2000.0, 6.0),
+    "XAGUSD": ("commodity", "COMEX", "cme", 25.0, 0.15),
+    "HGUSD": ("commodity", "COMEX", "cme", 4.0, 0.02),
     "EURUSD": ("forex", "FOREX", "fx", 1.1000, 0.0012),
+    "GBPUSD": ("forex", "FOREX", "fx", 1.3000, 0.0014),
     "BTCUSD": ("crypto", "CRYPTO", None, 50000.0, 300.0),
     "AAPL": ("stock", "NASDAQ", None, 150.0, 1.0),
+    "SPX500": ("index", "CME", "cme", 5000.0, 12.0),
 }
+
+#: The symbols here whose eToro instrument trades all week, written from
+#: eToro's own list (its market-hours page, about 2026-11-02: GOLD, SILVER
+#: and the S&P 500 open 24/7), never read from shut_bars.
+ALL_WEEK = frozenset({"XAUUSD", "XAGUSD", "SPX500"})
 
 #: A moving weekend candle's range, as a multiple of the week's.
 MOVING = {"wide": 3.0, "narrow": 0.25}
@@ -106,6 +127,16 @@ def _weekend_shut(kind, start, end):
         shut = datetime.combine(friday, close_at, tzinfo=zone)
     reopen = datetime.combine(friday + timedelta(days=2), open_at, tzinfo=zone)
     return shut <= start and end <= reopen
+
+
+def _shut_bar(symbol, start, end):
+    """The writer must drop `symbol`'s candle spanning [start, end): a
+    currency pair or a commodity that keeps weekday hours at eToro, the
+    span wholly inside its weekend shut. Never an all-week instrument's,
+    never another class's."""
+    cls, _exch, kind, *_rest = SYMBOLS[symbol]
+    return (cls in ("forex", "commodity") and symbol not in ALL_WEEK
+            and _weekend_shut(kind, start, end))
 
 
 def _candles(symbol, interval, weekend=None):
@@ -238,6 +269,26 @@ def _when(s):
     return datetime.fromisoformat(str(s))
 
 
+def _pinned(iid):
+    """(label, platform symbol) of eToro's instrument `iid`: the symbol
+    read from its pin (etoro_client.VENUE_ID_PINS: OIL is 17, NATGAS 22,
+    COPPER.FUT 21, PALLADIUM.FUT 91), the label what a failure names."""
+    from bot_program.engine.etoro_client import PINNED_SYMBOL
+    return f"eToro id {iid}", PINNED_SYMBOL[iid]
+
+
+def _named(*symbols):
+    """(label, symbol) pairs for symbols written out here."""
+    return tuple((s, s) for s in symbols)
+
+
+def _prices(symbol):
+    """An invented entry, stop and target around `symbol`'s base."""
+    base = SYMBOLS[symbol][3]
+    return {"entry": f"{base:.4f}", "stop": f"{base * 0.99:.4f}",
+            "target": f"{base * 1.025:.4f}"}
+
+
 class _Writer(TestCase):
     """The REAL bar writer (bot_bars.refresh_bars_for_config) on the fake
     eToro, its own clock pinned at each pass (it reads datetime.now for the
@@ -288,19 +339,18 @@ class _Writer(TestCase):
                 pass_state=bot_bars._CandlePass(), cut=False,
                 stamp_marks=stamp_marks)
 
-    def held_row(self, symbol="XAUUSD"):
+    def held_row(self, symbol):
         """An open REAL row eToro carries: the candle stamp's target."""
         from tests.orcs.helpers import _manual_row
         return _manual_row(self.manual, symbol=symbol, cls=SYMBOLS[symbol][0],
-                           entry="2000", stop="1980", target="2050",
-                           paper=False, meta={"broker": "etoro"})
+                           paper=False, meta={"broker": "etoro"},
+                           **_prices(symbol))
 
     def assertNoShutRow(self, symbol):
-        kind = SYMBOLS[symbol][2]
         for r in _rows(symbol, source="etoro"):
             span = SPAN[r.timeframe]
             self.assertFalse(
-                _weekend_shut(kind, r.timestamp, r.timestamp + span),
+                _shut_bar(symbol, r.timestamp, r.timestamp + span),
                 f"{symbol} {r.timeframe} {r.timestamp:%a %d %H:%M} is a "
                 f"stored eToro bar whose whole span the market was shut for")
 
@@ -329,19 +379,20 @@ class TheShutPredicateTests(SimpleTestCase):
     def test_forex_winter_week_is_etoros_new_york_week(self):
         """New York on EST: eToro's week shuts at Friday 22:00 UTC and
         reopens at Sunday 22:00 UTC; the FOREX row's 21:00 UTC is not it."""
-        fx = _inst("forex", "FOREX", "EURUSD")
-        for tf, at, want in (
-                ("1h", _at(2026, 11, 13, 20), False),
-                ("1h", _at(2026, 11, 13, 21), False),   # eToro still trades
-                ("1h", _at(2026, 11, 13, 22), True),
-                ("4h", _at(2026, 11, 13, 20), False),   # holds 20:00-22:00
-                ("4h", _at(2026, 11, 14, 0), True),
-                ("4h", _at(2026, 11, 14, 12), True),
-                ("4h", _at(2026, 11, 15, 16), True),
-                ("1h", _at(2026, 11, 15, 21), True),
-                ("1h", _at(2026, 11, 15, 22), False),   # the reopen
-                ("4h", _at(2026, 11, 15, 20), False)):  # holds the reopen
-            self._is(fx, tf, at, want)
+        for sym in ("EURUSD", "GBPUSD"):
+            fx = _inst("forex", "FOREX", sym)
+            for tf, at, want in (
+                    ("1h", _at(2026, 11, 13, 20), False),
+                    ("1h", _at(2026, 11, 13, 21), False),   # eToro trades
+                    ("1h", _at(2026, 11, 13, 22), True),
+                    ("4h", _at(2026, 11, 13, 20), False),   # 20:00-22:00
+                    ("4h", _at(2026, 11, 14, 0), True),
+                    ("4h", _at(2026, 11, 14, 12), True),
+                    ("4h", _at(2026, 11, 15, 16), True),
+                    ("1h", _at(2026, 11, 15, 21), True),
+                    ("1h", _at(2026, 11, 15, 22), False),   # the reopen
+                    ("4h", _at(2026, 11, 15, 20), False)):  # holds it
+                self._is(fx, tf, at, want)
 
     def test_forex_summer_week(self):
         """New York on EDT: Friday 21:00 to Sunday 21:00 UTC."""
@@ -401,11 +452,11 @@ class TheShutPredicateTests(SimpleTestCase):
                 self.assertIs(holds_no_open_time(fx, "15m", t), shut, t)
                 t += timedelta(minutes=15)
 
-    def test_a_commodity_reads_its_exchange_clock(self):
-        """Gold on COMEX keeps Globex (CME): shut from Friday 16:00 to Sunday
-        17:00 Chicago, 22:00 to 23:00 UTC in winter; the daily 16:00-17:00
-        break is a shut of one hour, never dropped."""
-        gold = _inst("commodity", "COMEX", "XAUUSD")
+    def test_a_weekday_commodity_reads_its_exchange_clock(self):
+        """Copper on COMEX keeps Globex (CME) at eToro too: shut from Friday
+        16:00 to Sunday 17:00 Chicago, 22:00 to 23:00 UTC in winter; the
+        daily 16:00-17:00 break is a shut of one hour, never dropped."""
+        copper = _inst("commodity", "COMEX", "HGUSD")
         for tf, at, want in (
                 ("1h", _at(2026, 11, 13, 21), False),
                 ("1h", _at(2026, 11, 13, 22), True),
@@ -415,15 +466,15 @@ class TheShutPredicateTests(SimpleTestCase):
                 ("1h", _at(2026, 11, 15, 23), False),
                 ("4h", _at(2026, 11, 15, 20), False),
                 ("1h", _at(2026, 11, 10, 22), False)):  # the daily break
-            self._is(gold, tf, at, want)
+            self._is(copper, tf, at, want)
 
     def test_an_unknown_exchange_falls_back_to_the_class_clock(self):
         """"" (/setup/) and "ETORO" (the legacy sync) name no table: the
         class's default clock, CME, answers exactly as COMEX does."""
         from market_data.shut_bars import holds_no_open_time
-        comex = _inst("commodity", "COMEX", "XAUUSD")
+        comex = _inst("commodity", "COMEX", "HGUSD")
         for exch in ("", "ETORO"):
-            other = _inst("commodity", exch, "XAUUSD")
+            other = _inst("commodity", exch, "HGUSD")
             t = _at(2026, 11, 9)
             while t < _at(2026, 11, 16, 6):
                 for tf in ("1h", "4h"):
@@ -434,16 +485,59 @@ class TheShutPredicateTests(SimpleTestCase):
             self._is(other, "4h", _at(2026, 11, 14, 12), True)
             self._is(other, "1h", _at(2026, 11, 10, 22), False)
 
+    def test_etoros_all_week_instruments_are_never_shut(self):
+        """eToro trades GOLD (18), OIL (17), SILVER (19) and NATGAS (22) on
+        Saturday and Sunday too (its market-hours page: 24/7, short breaks
+        only). No bar of theirs is a shut bar, whatever exchange their row
+        names and whatever that exchange's clock says; copper, on the same
+        clock, is shut over the same slots."""
+        from market_data.shut_bars import holds_no_open_time
+        copper = _inst("commodity", "COMEX", "HGUSD")
+        all_week = _named("XAUUSD", "XAGUSD") + (_pinned(17), _pinned(22))
+        for monday in (_at(2026, 11, 9), _at(2026, 7, 6)):
+            shut = 0
+            t = monday + timedelta(days=4, hours=12)     # Friday noon
+            while t < monday + timedelta(days=7, hours=6):
+                for tf in ("1h", "4h"):
+                    shut += holds_no_open_time(copper, tf, t)
+                    for label, sym in all_week:
+                        for exch in ("COMEX", "NYMEX", "", "ETORO"):
+                            self.assertFalse(holds_no_open_time(
+                                _inst("commodity", exch, sym), tf, t),
+                                (label, exch, tf, t))
+                t += H
+            self.assertGreater(shut, 40, "the slots hold no weekend")
+
+    def test_the_all_week_list_is_keyed_by_etoros_instrument_id(self):
+        """eToro's list, by eToro's id: a platform symbol reaches it through
+        its pin (etoro_client.VENUE_ID_PINS: XAUUSD is 18, GOLD) or, with no
+        pin, as eToro spells it (SPX500 is 27); never through a name: the
+        catalogue's own GOLD is the Barrick Gold stock, not eToro's 18."""
+        from market_data.shut_bars import ALL_WEEK_ETORO_IDS, trades_all_week
+        self.assertEqual(set(ALL_WEEK_ETORO_IDS), {17, 18, 19, 22, 27, 28})
+        for label, sym in (_named("XAUUSD", "XAGUSD", "SPX500")
+                           + (_pinned(17), _pinned(22))):
+            self.assertTrue(trades_all_week(_inst("commodity", "", sym)),
+                            label)
+            self.assertTrue(trades_all_week(f" {sym.lower()} "), label)
+        for label, sym in (_named("HGUSD", "EURUSD", "GBPUSD", "BTCUSD",
+                                  "AAPL", "GOLD", "", None)
+                           + (_pinned(21), _pinned(91))):
+            self.assertFalse(trades_all_week(_inst("commodity", "", sym)),
+                             label)
+
     def test_every_class_it_does_not_cover_returns_false(self):
         """Crypto never shuts; eToro trades US shares and index CFDs outside
         their cash sessions; an unmodelled class has no hours to judge."""
         sat = _at(2026, 11, 14, 12)
-        for cls, exch in (("crypto", "CRYPTO"), ("stock", "NYSE"),
-                          ("stock", ""), ("etf", "NYSE"), ("index", ""),
-                          ("cfd", ""), ("", ""), ("options", ""),
-                          ("bond", "")):
-            self._is(_inst(cls, exch), "4h", sat, False)
-            self._is(_inst(cls, exch), "1h", sat, False)
+        for cls, exch, sym in (
+                ("crypto", "CRYPTO", "X"), ("stock", "NYSE", "X"),
+                ("stock", "", "X"), ("etf", "NYSE", "X"),
+                ("index", "", "X"), ("index", "CME", "SPX500"),
+                ("cfd", "", "X"), ("", "", "X"), ("options", "", "X"),
+                ("bond", "", "X")):
+            self._is(_inst(cls, exch, sym), "4h", sat, False)
+            self._is(_inst(cls, exch, sym), "1h", sat, False)
 
     def test_what_cannot_be_judged_is_kept(self):
         from market_data.shut_bars import holds_no_open_time
@@ -459,34 +553,83 @@ class TheShutPredicateTests(SimpleTestCase):
 
 # ── the writer ───────────────────────────────────────────────────────────
 
+WEEKDAY_MARKETS = ("HGUSD", "EURUSD", "GBPUSD")
+
+
 class TheWriterDropsShutCandlesTests(_Writer):
 
-    def _weekend_pass(self, weekend):
+    def _weekend_pass(self, weekend, symbols=WEEKDAY_MARKETS):
         """One pass at Sunday 23:15 UTC, after both reopens, its windows
         reaching back over the whole weekend (and the ones before it)."""
-        venue = EtoroTrader(weekend=weekend)
-        self.pass_at(venue, SUN_2315, ("XAUUSD", "EURUSD"))
+        venue = EtoroTrader(weekend=weekend, symbols=symbols)
+        self.pass_at(venue, SUN_2315, symbols)
         return venue
 
-    def test_no_stored_etoro_bar_lies_wholly_inside_a_weekend(self):
+    def test_no_stored_etoro_bar_of_a_weekday_market_lies_inside_a_weekend(
+            self):
         for weekend in ("flat", "wide", "narrow"):
             with self.subTest(weekend=weekend):
                 from market_data.models import PriceData
                 PriceData.objects.all().delete()
                 venue = self._weekend_pass(weekend)
-                for sym in ("XAUUSD", "EURUSD"):
-                    kind = SYMBOLS[sym][2]
+                for sym in WEEKDAY_MARKETS:
                     self.assertNoShutRow(sym)
                     for iv in SPAN:
                         answered = venue.answered[(sym, iv)]
                         traded = {c.open for c in answered if not
-                                  _weekend_shut(kind, c.open,
-                                                c.open + SPAN[iv])}
+                                  _shut_bar(sym, c.open, c.open + SPAN[iv])}
                         self.assertTrue(len(traded) < len(answered),
                                         "the fixture answered no weekend")
                         self.assertEqual(
                             {r.timestamp for r in _rows(sym, iv)}, traded,
                             f"{sym} {iv}: every traded candle, nothing else")
+
+    def test_etoros_all_week_instruments_keep_every_weekend_candle(self):
+        """Gold moving, silver flat or moving: every candle eToro answered,
+        the weekend's included, is stored with eToro's own values, as the
+        writer stored it before the rule."""
+        from market_data.models import PriceData
+        for sym, weekend in (("XAUUSD", "wide"), ("XAUUSD", "narrow"),
+                             ("XAGUSD", "flat"), ("XAGUSD", "wide")):
+            with self.subTest(symbol=sym, weekend=weekend):
+                PriceData.objects.all().delete()
+                venue = self._weekend_pass(weekend, symbols=(sym,))
+                for iv in SPAN:
+                    answered = venue.answered[(sym, iv)]
+                    weekend_candles = [
+                        c for c in answered
+                        if _weekend_shut("cme", c.open, c.open + SPAN[iv])]
+                    self.assertGreater(len(weekend_candles), 8, iv)
+                    if weekend != "flat":
+                        self.assertTrue(all(c.h > c.l
+                                            for c in weekend_candles))
+                    stored = {r.timestamp: r for r in _rows(sym, iv)}
+                    self.assertEqual(set(stored), {c.open for c in answered})
+                    for c in weekend_candles:
+                        r = stored[c.open]
+                        self.assertEqual(
+                            (r.open, r.high, r.low, r.close, r.source),
+                            (Decimal(str(c.o)), Decimal(str(c.h)),
+                             Decimal(str(c.l)), Decimal(str(c.c)), "etoro"))
+
+    def test_no_bar_of_an_all_week_instrument_is_offered_to_the_prune(self):
+        """The prune of the rows stored before the rule deletes what the
+        predicate calls a shut bar: no candle eToro answers for gold or
+        silver, Saturday's and Sunday's included, ever is one; copper's
+        weekend candles are."""
+        from instruments.models import Instrument
+        from market_data.shut_bars import holds_no_open_time
+        venue = self._weekend_pass("wide", symbols=("XAUUSD", "XAGUSD",
+                                                    "HGUSD"))
+        for sym in ("XAUUSD", "XAGUSD", "HGUSD"):
+            inst = Instrument.objects.get(symbol=sym)
+            for iv in SPAN:
+                shut = [c.open for c in venue.answered[(sym, iv)]
+                        if holds_no_open_time(inst, iv, c.open)]
+                if sym == "HGUSD":
+                    self.assertGreater(len(shut), 8, iv)
+                else:
+                    self.assertEqual(shut, [], f"{sym} {iv}")
 
     def test_the_friday_fx_hour_after_the_forex_row_closes_is_kept(self):
         """Winter: the FOREX row says shut from 21:00 UTC, eToro's week runs
@@ -494,22 +637,23 @@ class TheWriterDropsShutCandlesTests(_Writer):
         for weekend in ("flat", "wide"):
             with self.subTest(weekend=weekend):
                 venue = self._weekend_pass(weekend)
-                kept = _rows("EURUSD", "1h")
-                stamps = {r.timestamp for r in kept}
-                self.assertIn(FRI_21, stamps)
-                self.assertNotIn(FRI_22, stamps)
-                bar = next(r for r in kept if r.timestamp == FRI_21)
-                self.assertEqual(
-                    bar.close,
-                    Decimal(str(venue.candle("EURUSD", "1h", FRI_21).c)))
+                for sym in ("EURUSD", "GBPUSD"):
+                    kept = _rows(sym, "1h")
+                    stamps = {r.timestamp for r in kept}
+                    self.assertIn(FRI_21, stamps)
+                    self.assertNotIn(FRI_22, stamps)
+                    bar = next(r for r in kept if r.timestamp == FRI_21)
+                    self.assertEqual(
+                        bar.close,
+                        Decimal(str(venue.candle(sym, "1h", FRI_21).c)))
 
     def test_the_sunday_bar_that_holds_the_reopen_is_kept(self):
         """The Sunday 20:00 UTC 4h bar holds the FX reopen (22:00) and the
-        Globex reopen (23:00): it traded, for gold and for EURUSD."""
+        Globex reopen (23:00): it traded, for copper and for the pairs."""
         for weekend in ("flat", "wide"):
             with self.subTest(weekend=weekend):
                 self._weekend_pass(weekend)
-                for sym in ("XAUUSD", "EURUSD"):
+                for sym in WEEKDAY_MARKETS:
                     stamps = {r.timestamp for r in _rows(sym, "4h")}
                     self.assertIn(SUN_20, stamps, sym)
                     self.assertNotIn(SUN_16, stamps, sym)
@@ -518,22 +662,23 @@ class TheWriterDropsShutCandlesTests(_Writer):
         """A weekday's 22:00-23:00 UTC (16:00-17:00 Chicago) is Globex's
         daily break: a shut of one hour, shorter than a day. Its candle,
         flat or not, is written as before."""
-        venue = EtoroTrader(weekend="flat")
-        venue.flatten("XAUUSD", "1h", TUE_22)
+        venue = EtoroTrader(weekend="flat", symbols=("HGUSD",))
+        venue.flatten("HGUSD", "1h", TUE_22)
         self.pass_at(venue, datetime(2026, 11, 11, 0, 15, tzinfo=UTC),
-                     ("XAUUSD",), intervals=("1h",))
-        bar = next((r for r in _rows("XAUUSD", "1h")
+                     ("HGUSD",), intervals=("1h",))
+        bar = next((r for r in _rows("HGUSD", "1h")
                     if r.timestamp == TUE_22), None)
         self.assertIsNotNone(bar)
         self.assertEqual(bar.high, bar.low)
         self.assertEqual(bar.source, "etoro")
 
-    def test_crypto_and_stocks_are_unchanged(self):
-        """Every candle eToro answers for BTCUSD and AAPL, the weekend's
-        included, is stored exactly as it was before."""
-        venue = EtoroTrader(weekend="wide", symbols=("BTCUSD", "AAPL"))
-        self.pass_at(venue, SUN_2315, ("BTCUSD", "AAPL"))
-        for sym in ("BTCUSD", "AAPL"):
+    def test_crypto_stocks_and_indices_are_unchanged(self):
+        """Every candle eToro answers for BTCUSD, AAPL and SPX500, the
+        weekend's included, is stored exactly as it was before."""
+        symbols = ("BTCUSD", "AAPL", "SPX500")
+        venue = EtoroTrader(weekend="wide", symbols=symbols)
+        self.pass_at(venue, SUN_2315, symbols)
+        for sym in symbols:
             for iv in SPAN:
                 answered = venue.answered[(sym, iv)]
                 self.assertTrue(any(c.open.weekday() == 5 for c in answered))
@@ -557,21 +702,21 @@ class TheWriterDropsShutCandlesTests(_Writer):
         from bot_program import venue_mark
         from market_data import bot_bars
         from market_data.models import PriceData
-        venue = EtoroTrader(weekend="wide", symbols=("XAUUSD",))
-        row = self.held_row()
+        venue = EtoroTrader(weekend="wide", symbols=("HGUSD",))
+        row = self.held_row("HGUSD")
         fri = FRI_21 + M
-        self.pass_at(venue, fri, ("XAUUSD",), stamp_marks=True)
+        self.pass_at(venue, fri, ("HGUSD",), stamp_marks=True)
         row.refresh_from_db()
         mark = dict(row.metadata["venue_mark"])
         self.assertEqual(_when(mark["at"]), fri)
-        notes = {iv: bot_bars.last_venue_answer("etoro", "XAUUSD", iv)
+        notes = {iv: bot_bars.last_venue_answer("etoro", "HGUSD", iv)
                  for iv in SPAN}
         self.assertTrue(all(notes.values()))
         # what the old writer stored from the weekend, up to Saturday 12:00
         from instruments.models import Instrument
-        inst = Instrument.objects.get(symbol="XAUUSD")
+        inst = Instrument.objects.get(symbol="HGUSD")
         for iv in SPAN:
-            for c in venue.series[("XAUUSD", iv)]:
+            for c in venue.series[("HGUSD", iv)]:
                 if FRI_22 <= c.open <= SAT_12 and _weekend_shut(
                         "cme", c.open, c.open + SPAN[iv]):
                     PriceData.objects.create(
@@ -579,54 +724,63 @@ class TheWriterDropsShutCandlesTests(_Writer):
                         open=Decimal(str(c.o)), high=Decimal(str(c.h)),
                         low=Decimal(str(c.l)), close=Decimal(str(c.c)),
                         volume=c.v, source="etoro")
-        before =[(r.timeframe, r.timestamp, r.close, r.source)
-                  for r in _rows("XAUUSD")]
+        before = [(r.timeframe, r.timestamp, r.close, r.source)
+                  for r in _rows("HGUSD")]
 
         sat = SAT_16 + M
-        self.pass_at(venue, sat, ("XAUUSD",), stamp_marks=True)
+        self.pass_at(venue, sat, ("HGUSD",), stamp_marks=True)
         for iv in SPAN:
-            answered = venue.answered[("XAUUSD", iv)]
+            answered = venue.answered[("HGUSD", iv)]
             self.assertTrue(answered)
             self.assertTrue(all(_weekend_shut("cme", c.open, c.open + SPAN[iv])
                                 for c in answered),
                             f"{iv}: the fixture's answer is weekend only")
         self.assertEqual([(r.timeframe, r.timestamp, r.close, r.source)
-                          for r in _rows("XAUUSD")], before)
+                          for r in _rows("HGUSD")], before)
         row.refresh_from_db()
         self.assertEqual(row.metadata["venue_mark"], mark)
         self.assertEqual(venue_mark.last(row, now=sat)["at"], fri)
         for iv in SPAN:
-            self.assertFalse(bot_bars._venue_is_mute("etoro", "XAUUSD", iv),
+            self.assertFalse(bot_bars._venue_is_mute("etoro", "HGUSD", iv),
                              iv)
             self.assertEqual(
-                bot_bars.last_venue_answer("etoro", "XAUUSD", iv)["newest_ms"],
+                bot_bars.last_venue_answer("etoro", "HGUSD", iv)["newest_ms"],
                 notes[iv]["newest_ms"], iv)
 
-    def test_a_moving_weekend_candle_is_dropped_like_a_flat_one(self):
-        """eToro's weekend candles for gold MOVE (high above low, the close
-        drifting away from Friday's). Moving or flat, none is stored, and
-        none stamps the venue mark: the Saturday pass leaves it on the last
+    def _saturday(self, symbol, weekend):
+        """A held real row, a pass on Friday 21:01 and one on Saturday
+        12:01 UTC, both stamping the venue mark: (venue, row)."""
+        from bot_program.models import AssetBotTrade
+        from market_data.models import PriceData
+        PriceData.objects.all().delete()
+        AssetBotTrade.objects.all().delete()
+        venue = EtoroTrader(weekend=weekend, symbols=(symbol,))
+        row = self.held_row(symbol)
+        self.pass_at(venue, FRI_21 + M, (symbol,), stamp_marks=True)
+        self.pass_at(venue, SAT_12 + M, (symbol,), stamp_marks=True)
+        row.refresh_from_db()
+        return venue, row
+
+    def test_a_moving_weekend_candle_of_a_weekday_market_goes_like_a_flat_one(
+            self):
+        """Copper's weekend candles, moving (high above low, the close
+        drifting away from Friday's) or flat: none is stored, and none
+        stamps the venue mark: the Saturday pass leaves it on the last
         traded candle's close, dated no later than that candle's end."""
         from market_data.models import PriceData
-        from bot_program.models import AssetBotTrade
         for weekend in ("wide", "flat"):
             with self.subTest(weekend=weekend):
-                PriceData.objects.all().delete()
-                AssetBotTrade.objects.all().delete()
-                venue = EtoroTrader(weekend=weekend, symbols=("XAUUSD",))
-                sat12 = venue.candle("XAUUSD", "4h", SAT_12)
-                fri20 = venue.candle("XAUUSD", "4h", SAT_00 - 4 * H)
+                probe = EtoroTrader(weekend=weekend, symbols=("HGUSD",))
+                sat12 = probe.candle("HGUSD", "4h", SAT_12)
+                fri20 = probe.candle("HGUSD", "4h", SAT_00 - 4 * H)
                 if weekend == "wide":
                     self.assertGreater(sat12.h, sat12.l)
                     self.assertNotEqual(sat12.c, fri20.c)
-                row = self.held_row()
-                self.pass_at(venue, FRI_21 + M, ("XAUUSD",), stamp_marks=True)
-                self.pass_at(venue, SAT_12 + M, ("XAUUSD",), stamp_marks=True)
-                self.assertNoShutRow("XAUUSD")
+                _venue, row = self._saturday("HGUSD", weekend)
+                self.assertNoShutRow("HGUSD")
                 self.assertFalse(PriceData.objects.filter(
-                    instrument__symbol="XAUUSD",
+                    instrument__symbol="HGUSD",
                     timestamp__gte=FRI_22, timestamp__lt=SUN_20).exists())
-                row.refresh_from_db()
                 vm = row.metadata["venue_mark"]
                 self.assertLessEqual(_when(vm["at"]), SAT_00)
                 self.assertEqual(Decimal(str(vm["price"])),
@@ -635,18 +789,55 @@ class TheWriterDropsShutCandlesTests(_Writer):
                     self.assertNotEqual(Decimal(str(vm["price"])),
                                         Decimal(str(sat12.c)))
 
+    def test_a_moving_weekend_gold_candle_is_kept_and_read_as_before(self):
+        """Gold's weekend candles are eToro's 24/7 market for the very
+        instrument a gold row holds (GOLD, 18): the Saturday pass stores
+        them and stamps the venue mark from the newest, dated on Saturday,
+        exactly as the writer did before the rule."""
+        from market_data.models import PriceData
+        venue, row = self._saturday("XAUUSD", "wide")
+        for iv in SPAN:
+            weekend = [c for c in venue.answered[("XAUUSD", iv)]
+                       if c.open >= FRI_22]
+            self.assertTrue(weekend, iv)
+            stored = {r.timestamp: r.close for r in _rows("XAUUSD", iv)}
+            for c in weekend:
+                self.assertEqual(stored.get(c.open), Decimal(str(c.c)),
+                                 f"{iv} {c.open:%a %H:%M}")
+        self.assertTrue(PriceData.objects.filter(
+            instrument__symbol="XAUUSD", timeframe="4h",
+            timestamp=SAT_12).exists())
+        vm = row.metadata["venue_mark"]
+        self.assertGreater(_when(vm["at"]), SAT_00)
+        self.assertIn(Decimal(str(vm["price"])),
+                      {Decimal(str(venue.candle("XAUUSD", iv, SAT_12).c))
+                       for iv in SPAN})
+
 
 # ── money: the ATR at the reopen ─────────────────────────────────────────
 
 Measure = namedtuple("Measure", "atr stop qty levels")
 
 
+def _atr_of(candles, until=SUN_2315):
+    """ATR(14) of the newest 56 `candles` opening at or before `until`, as
+    the indicator calculator computes it: the fixture's own measure."""
+    import pandas as pd
+
+    from indicators.calculator import calculate_atr
+    have = [c for c in candles if c.open <= until][-56:]
+    df = pd.DataFrame([{"high": c.h, "low": c.l, "close": c.c}
+                       for c in have])
+    return float(calculate_atr(df["high"], df["low"], df["close"]).iloc[-1])
+
+
 class TheReopenATRTests(_Writer):
     """V2: the first entry after the reopen sets its stop and its size from
     ATR(4h) (risk_levels.stop_and_target, sizing.size_position), the bots'
     and the TAKE TRADE ticket's when a signal carries no levels. At Sunday
-    23:15 UTC that ATR must be the traded week's, whatever eToro answered
-    for the weekend."""
+    23:15 UTC that ATR must be the traded week's for a market that shut,
+    whatever eToro answered for the weekend; an all-week instrument's reads
+    its weekend market, as it always did."""
 
     def _measure(self, symbol):
         from bot_program.asset_engine import risk_levels, sizing
@@ -676,26 +867,17 @@ class TheReopenATRTests(_Writer):
         inflate it; narrow moving ones deflate it. So, the weekend candles
         out, a flat weekend's stops come back wider and its sizes smaller,
         a wide one's tighter and larger, a narrow one's wider and smaller."""
-        from indicators.calculator import calculate_atr
-        import pandas as pd
-
-        def atr_of(candles):
-            have = [c for c in candles if c.open <= SUN_2315][-56:]
-            df = pd.DataFrame([{"high": c.h, "low": c.l, "close": c.c}
-                               for c in have])
-            return float(calculate_atr(df["high"], df["low"],
-                                       df["close"]).iloc[-1])
-        for symbol in ("XAUUSD", "EURUSD"):
-            traded = atr_of(_candles(symbol, "4h"))
-            flat = atr_of(_candles(symbol, "4h", "flat"))
-            wide = atr_of(_candles(symbol, "4h", "wide"))
-            narrow = atr_of(_candles(symbol, "4h", "narrow"))
+        for symbol in ("HGUSD", "EURUSD", "XAUUSD"):
+            traded = _atr_of(_candles(symbol, "4h"))
+            flat = _atr_of(_candles(symbol, "4h", "flat"))
+            wide = _atr_of(_candles(symbol, "4h", "wide"))
+            narrow = _atr_of(_candles(symbol, "4h", "narrow"))
             self.assertLess(flat, 0.5 * traded, symbol)
             self.assertGreater(wide, 1.5 * traded, symbol)
             self.assertLess(narrow, traded, symbol)
 
     def test_the_reopen_atr_stop_and_size_are_the_traded_weeks(self):
-        for symbol in ("XAUUSD", "EURUSD"):
+        for symbol in ("HGUSD", "EURUSD"):
             traded, _v = self._reopen(symbol, None)
             self.assertEqual(traded.levels, "atr", symbol)
             for weekend in ("flat", "wide", "narrow"):
@@ -710,33 +892,58 @@ class TheReopenATRTests(_Writer):
                     self.assertAlmostEqual(got.qty, traded.qty, places=6)
                     self.assertEqual(got.levels, "atr")
 
+    def test_golds_reopen_atr_reads_its_weekend_market_as_before(self):
+        """Gold's weekend candles are kept, so its ATR(4h) at the reopen is
+        the ATR of every candle eToro answered, the weekend's included,
+        exactly as before the rule: above the traded week's after a wide
+        weekend (a wider stop, a smaller size), below it after a narrow
+        one (a tighter stop, a larger size)."""
+        traded, _v = self._reopen("XAUUSD", None)
+        for weekend, wider in (("wide", True), ("narrow", False)):
+            with self.subTest(weekend=weekend):
+                got, venue = self._reopen("XAUUSD", weekend)
+                self.assertAlmostEqual(
+                    got.atr, _atr_of(venue.series[("XAUUSD", "4h")]),
+                    places=9)
+                self.assertEqual(got.levels, "atr")
+                if wider:
+                    self.assertGreater(got.atr, 1.2 * traded.atr)
+                    self.assertLess(got.stop, traded.stop)
+                    self.assertLess(got.qty, traded.qty)
+                else:
+                    self.assertLess(got.atr, traded.atr)
+                    self.assertGreater(got.stop, traded.stop)
+                    self.assertGreater(got.qty, traded.qty)
+
     def test_the_stored_indicator_reads_the_same_atr(self):
         """The indicator task's stored atr_14, which atr_for reads first,
         is the traded week's too."""
         from indicators.tasks import recalculate_for_instruments
         from instruments.models import Instrument
-        traded, _v = self._reopen("XAUUSD", None)
-        got, _v = self._reopen("XAUUSD", "flat")
+        traded, _v = self._reopen("HGUSD", None)
+        got, _v = self._reopen("HGUSD", "flat")
         with patch("django.utils.timezone.now", return_value=SUN_2315):
             recalculate_for_instruments(
-                [Instrument.objects.get(symbol="XAUUSD")], timeframes=("4h",))
+                [Instrument.objects.get(symbol="HGUSD")], timeframes=("4h",))
         from bot_program.asset_engine import risk_levels
-        self.assertAlmostEqual(risk_levels.atr_for("XAUUSD", "4h"),
+        self.assertAlmostEqual(risk_levels.atr_for("HGUSD", "4h"),
                                traded.atr, places=6)
         self.assertAlmostEqual(got.atr, traded.atr, places=9)
 
 
-# ── the Orcs: his window at production cadence ───────────────────────────
+# ── the Orcs: the production cadence ─────────────────────────────────────
 
 class TheOperatorsWindowTests(_Writer):
-    """V1: two manual commodity Orcs on gold, born Friday 21:02 UTC; a bar
+    """V1: two manual commodity Orcs on copper, born Friday 21:02 UTC; a bar
     pass hourly to Saturday 11:00, then at the production cadence (a bar
     pass every 10 minutes at :01, the manage tick every 5 minutes at :03)
     to Sunday 09:30, eToro answering a MOVING candle for every weekend slot.
     Before, W2 ("a 4h bar closed") woke both at Sat 12:03, 16:03, 20:03,
-    Sun 00:03, 04:03 and 08:03. Now no weekend bar is stored, so no bar
-    closes and no W2 fires in that window; the Friday bar's own close still
-    wakes them once."""
+    Sun 00:03, 04:03 and 08:03. Now no weekend bar of a market that shut
+    is stored, so no bar closes and no W2 fires in that window; the Friday
+    bar's own close still wakes them once. (Gold's weekend bars are eToro's
+    24/7 market and are stored: whether its Orcs wake on them is the Orcs'
+    own rule, not the writer's.)"""
 
     def setUp(self):
         super().setUp()
@@ -744,7 +951,7 @@ class TheOperatorsWindowTests(_Writer):
         _switch("aragorn")
         _on()
 
-    def _tick(self, row, orc, t):
+    def _tick(self, row, orc, t, price):
         from bot_program.orcs.observe import after_care
         bot = SimpleNamespace(_tick_broker_cache={}, cfg=self.manual,
                               _last_ticks={})
@@ -753,7 +960,7 @@ class TheOperatorsWindowTests(_Writer):
             st.enter_context(patch("django.utils.timezone.now",
                                    return_value=t))
             st.enter_context(self.captureOnCommitCallbacks(execute=True))
-            after_care(bot, row, "2000.5", "")
+            after_care(bot, row, price, "")
         orc.refresh_from_db()
 
     def _w2(self, orc):
@@ -765,27 +972,29 @@ class TheOperatorsWindowTests(_Writer):
 
     def test_no_w2_in_his_window_when_etoro_answers_weekend_candles(self):
         from tests.orcs.helpers import _manual_row, born
-        venue = EtoroTrader(weekend="wide", symbols=("XAUUSD",))
-        self.pass_at(venue, FRI_21 + M, ("XAUUSD",))
+        sym = "HGUSD"
+        price = f"{SYMBOLS[sym][3] + 0.001:.4f}"
+        venue = EtoroTrader(weekend="wide", symbols=(sym,))
+        self.pass_at(venue, FRI_21 + M, (sym,))
         rows, orcs = [], []
         for _ in range(2):
-            r = _manual_row(self.manual, symbol="XAUUSD", cls="commodity",
-                            entry="2000", stop="1980", target="2050")
+            r = _manual_row(self.manual, symbol=sym, cls="commodity",
+                            **_prices(sym))
             orcs.append(born(self, r, at=FRI_21 + 2 * M))
             r.refresh_from_db()
             rows.append(r)
         t = FRI_21
         while t < SAT_11:                       # warm-up, hourly
-            self.pass_at(venue, t + M, ("XAUUSD",))
+            self.pass_at(venue, t + M, (sym,))
             for r, o in zip(rows, orcs):
-                self._tick(r, o, t + 3 * M)
+                self._tick(r, o, t + 3 * M, price)
             t += H
         t = SAT_11
         while t <= SUN_0930:                    # his window
             if t.minute % 10 == 0:
-                self.pass_at(venue, t + M, ("XAUUSD",))
+                self.pass_at(venue, t + M, (sym,))
             for r, o in zip(rows, orcs):
-                self._tick(r, o, t + 3 * M)
+                self._tick(r, o, t + 3 * M, price)
             t += 5 * M
         for o in orcs:
             w2 = self._w2(o)
@@ -794,4 +1003,4 @@ class TheOperatorsWindowTests(_Writer):
                             "close should wake the Orc")
             self.assertEqual(
                 [f"{at:%a %H:%M} {k}" for at, k in w2 if at >= SAT_11], [])
-        self.assertNoShutRow("XAUUSD")
+        self.assertNoShutRow(sym)

@@ -30,11 +30,20 @@ writer's own INTERVAL_SECONDS. Classes: COVERED_CLASSES only.
              exchange no table names ("" from /setup/, "ETORO" from the
              legacy sync) reads the class's default clock, CME.
 
+EXCEPT eToro's ALL-WEEK instruments (ALL_WEEK_ETORO_IDS, 2026-11-19):
+GOLD, OIL, SILVER and NATGAS trade at eToro on Saturday and Sunday too,
+with short breaks only, so a weekend candle of theirs is a price eToro
+traded, never a shut slot: it reads False whatever its exchange's clock
+says, and is written, noted and stamped as every candle was before this
+rule. (The rule's first cut, also 2026-11-19, read gold on Globex and
+dropped its weekend candles; eToro's own pages list the regular GOLD, the
+instrument Sauron trades, as 24/7.)
+
 Every other class reads False: crypto never shuts, eToro trades US shares
 and index CFDs outside their cash sessions, and an unmodelled class has no
 hours to judge by. So does a bar that cannot be judged (an unknown
 timeframe, an unreadable open or clock): it is written as before. Reads no
-database; never raises.
+database and no network; never raises.
 """
 from __future__ import annotations
 
@@ -55,17 +64,73 @@ SHUT_MIN_S = 24 * 3600
 FX_ZONE = ZoneInfo("America/New_York")
 FX_SHUT_AT = time(17, 0)
 
+#: eToro's ALL-WEEK instruments (2026-11-19): eToro instrument id -> eToro's
+#: own name. They trade on Saturday and Sunday too, so none is ever shut for
+#: SHUT_MIN_S and their weekend candles are kept (trades_all_week).
+#: Source: eToro's market-hours page (etoro.com/trading/market-hours-and-
+#: events/, the English page as indexed about 2026-11-02, read 2026-11-19)
+#: lists "GOLD Gold (Non Expiry)", "OIL Oil (Non Expiry)", "SILVER (Non
+#: Expiry)" and "NATGAS (Non Expiry)" as open 24/7, their only breaks daily
+#: 22:00-23:00 and Friday 22:00-22:30 UTC (OIL and NATGAS also Saturday
+#: 22:00-22:15). eToro's commodities page names "Oil, Gold, Silver, NatGas,
+#: S&P 500 and NSDQ100" as its instruments that trade 24/7, and its help
+#: centre is "gradually retiring separate .24-7 tickers" for "the 24/7-
+#: labelled asset without the .24-7 ticker": these very ids. Keyed by id,
+#: never by name: the four commodities are Sauron's own pins (etoro_client
+#: .VENUE_ID_PINS), the two indices the ids /search answers for them as
+#: spelled (27 and 28: etoro_client's VENUE_SPELLING note). NOT here:
+#: copper (21), platinum (40) and palladium (91), which eToro opens on
+#: Sunday 23:00 and shuts on Friday 21:30 UTC, and EURUSD, which one eToro
+#: page lists as 24/7 and another as weekday-only: it keeps eToro's FX week
+#: until a measurement settles it (a real weekend candle dropped leaves the
+#: traded bars; a flat one kept deflates the ATR the stops and sizes are
+#: set from).
+ALL_WEEK_ETORO_IDS = {18: "GOLD", 17: "OIL", 19: "SILVER", 22: "NATGAS",
+                      27: "SPX500", 28: "NSDQ100"}
+
+
+def trades_all_week(instrument) -> bool:
+    """True when `instrument` (anything with a `symbol`, or the platform
+    symbol itself) is one of eToro's ALL_WEEK_ETORO_IDS. Its eToro id is
+    read as etoro_client's instrument_id reads it first, with no network:
+    the symbol's pin (VENUE_ID_PINS: XAUUSD is 18); with no pin, the
+    all-week id whose eToro name is the symbol's eToro spelling
+    (VENUE_SPELLING's rewrite, else the symbol as spelled: SPX500 is 27),
+    never an id pinned to another symbol (the catalogue's own GOLD is the
+    Barrick Gold stock, never eToro's 18). Never raises."""
+    try:
+        symbol = str(getattr(instrument, "symbol", instrument) or "")
+        symbol = symbol.strip().upper()
+        if not symbol:
+            return False
+        from bot_program.engine.etoro_client import (VENUE_ID_PINS,
+                                                     VENUE_SPELLING)
+        pinned = VENUE_ID_PINS.get(symbol)
+        if pinned is not None:
+            return pinned in ALL_WEEK_ETORO_IDS
+        spelled = VENUE_SPELLING.get(symbol, symbol)
+        held = set(VENUE_ID_PINS.values())
+        return any(name == spelled and iid not in held
+                   for iid, name in ALL_WEEK_ETORO_IDS.items())
+    except Exception as e:  # noqa: BLE001 — unread is the clock's rule
+        logger.debug("[bars] all-week test unread for %r: %s",
+                     getattr(instrument, "symbol", instrument), e)
+        return False
+
 
 def holds_no_open_time(instrument, timeframe, bar_open_utc) -> bool:
     """True when the bar of `instrument` on `timeframe` that opens at
     `bar_open_utc` holds no open time over its whole span, inside one shut
-    of SHUT_MIN_S or more (the module docstring). `instrument` is anything
-    with `asset_class`, `exchange` and `symbol` (an Instrument row); a naive
+    of SHUT_MIN_S or more (the module docstring); never for one of eToro's
+    all-week instruments (trades_all_week). `instrument` is anything with
+    `asset_class`, `exchange` and `symbol` (an Instrument row); a naive
     `bar_open_utc` is read as UTC."""
     try:
         cls = str(getattr(instrument, "asset_class", "") or "").strip().lower()
         if cls not in COVERED_CLASSES or bar_open_utc is None:
             return False
+        if trades_all_week(instrument):
+            return False                  # eToro trades it all week
         from market_data.bot_bars import INTERVAL_SECONDS
         span_s = INTERVAL_SECONDS.get(str(timeframe or ""))
         if not span_s:
