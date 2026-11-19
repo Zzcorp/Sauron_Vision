@@ -223,8 +223,33 @@
     // router above preventDefaults digits before bubbling.
     var page = document.querySelector(".lk-page");
     var wakeTimer = null;
+
+    // The PIN takes the keys the moment it shows (the operator, 2026-11-15:
+    // "when sauron is locked and the pin appears the user should be able to
+    // input straight up from his keyboard the numbers"). Measured on main
+    // (tests/test_lock_pin_focus.py): the wake gave no focus, so the PIN
+    // showed with the keys on <body>. The reveal is visibility:hidden until
+    // its wake transition starts, and a hidden box refuses the focus, so
+    // the first empty box is asked again each frame until it holds them; a
+    // control he moved to himself (Tab to Disconnect) keeps them.
+    var card = document.querySelector(".lk-card");
+    var keysFrame = 0;
+    function takeKeys() {
+        if (keysFrame) cancelAnimationFrame(keysFrame);
+        var frames = 0;
+        (function attempt() {
+            keysFrame = 0;
+            if (!page || !page.classList.contains("lk-awake")) return;
+            if (card && card.contains(document.activeElement)) return;
+            focusFirstEmpty();
+            if (card && card.contains(document.activeElement)) return;
+            if (++frames < 120) keysFrame = requestAnimationFrame(attempt);
+        })();
+    }
+
     function wake() {
         if (page) page.classList.add("lk-awake");
+        takeKeys();
         if (wakeTimer) clearTimeout(wakeTimer);
         wakeTimer = setTimeout(function () {
             if (page) page.classList.remove("lk-awake");
@@ -234,6 +259,15 @@
     }
     ["mousemove", "keydown", "touchstart", "pointerdown"].forEach(function (ev) {
         document.addEventListener(ev, wake, { capture: true, passive: true });
+    });
+    // A press on the page's empty parts (a phone's waking tap lands there,
+    // and its mousedown came after the PIN had the keys) is no choice of
+    // where the keys go: it does not take them from the PIN. A control
+    // keeps its own press.
+    document.addEventListener("mousedown", function (e) {
+        var t = e.target;
+        if (t && t.closest && t.closest("input, button, a, label, select, textarea")) return;
+        e.preventDefault();
     });
 
     focusFirstEmpty();
