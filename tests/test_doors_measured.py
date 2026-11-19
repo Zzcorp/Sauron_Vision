@@ -326,7 +326,7 @@ window.__d = (function () {
     var e = q(SEL[name]);
     if (!e) return null;
     var t = e.querySelector('.sv-door-tip');
-    if (!t) return { door: box(e), tip: null, shown: false };
+    if (!t) return { door: box(e), tip: null, shown: false, focusVisible: e.matches(':focus-visible') };
     var cs = getComputedStyle(t), nm = t.querySelector('.sv-door-tip-name'), k = t.querySelector('kbd');
     var h = t.querySelector('.sv-door-tip-hint'), hcs = h ? getComputedStyle(h) : null;
     return { door: box(e), tip: box(t), shown: cs.visibility === 'visible' && parseFloat(cs.opacity) > 0.99,
@@ -776,6 +776,8 @@ class DoorsMeasuredTests(TestCase):
                     self.assertFalse(f["shown"], f)
             with self.subTest(width=width, keyboard=True):
                 f = tips["focus"]
+                self.assertIsNotNone(f)
+                self.assertIsNotNone(f["tip"], "the Council's door has no tip")
                 self.assertTrue(f["focusVisible"], f)
                 self.assertTrue(f["shown"], f)
 
