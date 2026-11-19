@@ -60,6 +60,7 @@ Run with:  python manage.py test tests.test_doors_measured
 """
 import json
 import re
+import time
 import unittest
 
 from django.conf import settings
@@ -315,11 +316,36 @@ window.__d = (function () {
     return Array.prototype.map.call(document.querySelectorAll('.signals-rail .rail-head'), function (h) {
       var b = h.querySelector('button.rh-fold, button.rail-head') || (h.tagName === 'BUTTON' ? h : null);
       var chev = h.querySelector('.rh-chev');
+      /* The count, and what the pointer meets at its middle (its tooltip
+         is its title). */
+      var n = h.querySelector('.rh-count'), nr = n ? n.getBoundingClientRect() : null;
+      var at = nr && nr.width ? document.elementFromPoint(nr.left + nr.width / 2, nr.top + nr.height / 2) : null;
       return { button: !!b, expanded: b ? b.getAttribute('aria-expanded') : null, controls: b ? b.getAttribute('aria-controls') : null,
                tab: b ? b.tabIndex : null, chev: chev ? { tag: chev.tagName.toLowerCase(), box: box(chev), use: chev.querySelector('use') ? chev.querySelector('use').getAttribute('href') : null,
                                                         transform: getComputedStyle(chev).transform } : null,
-               glyphs: glyphs(h).replace(/\d+/g, '') };
+               glyphs: glyphs(h).replace(/\d+/g, ''), h: r1(h.getBoundingClientRect().height),
+               count: n ? { title: n.getAttribute('title'), shown: shown(n), onTop: !!at && (at === n || n.contains(at)),
+                            at: at ? String(at.className || at.tagName) : null,
+                            center: nr && nr.width ? [nr.left + nr.width / 2, nr.top + nr.height / 2] : null } : null };
     });
+  }
+  /* The dock's tabs with their icon, word and chevron: where the chevron
+     sits in its tab, whether the word keeps between the icon and it. */
+  function dockLine() {
+    return ['signals', 'council', 'activity', 'ask'].map(function (n) {
+      var e = q(SEL[n]);
+      if (!e) return null;
+      var w = e.querySelector('.sv-door-word'), c = e.querySelector('.sv-door-chev'), i = e.querySelector('.sv-door-ico');
+      return { name: n, box: box(e), word: w ? box(w) : null, chev: c ? box(c) : null, ico: i ? box(i) : null };
+    });
+  }
+  /* A pointer resting at (x, y): whether the door is hovered, where it is,
+     and what the pointer meets there. */
+  function rest(name, x, y) {
+    var e = q(SEL[name]);
+    if (!e) return null;
+    var r = e.getBoundingClientRect(), t = document.elementFromPoint(x, y);
+    return { hover: e.matches(':hover'), x: r1(r.left), r: r1(r.right), w: r1(r.width), at: t ? String(t.className || t.tagName) : null };
   }
   /* A door's tip (§2.8): shown or not, where, and what it says. */
   function tip(name) {
@@ -337,7 +363,8 @@ window.__d = (function () {
              oldTab: Array.prototype.map.call(document.querySelectorAll('#svHordeTab .hd-tab-seats, #svHordeTab .hd-tab-r, #svHordeTab .hd-tab-risk'),
                function (s) { return s.hidden ? '' : s.textContent.replace(/\s+/g, ' ').trim(); }).filter(Boolean) };
   }
-  return { door: door, all: all, center: center, frame: frame, isOpen: isOpen, activeIs: activeIs, closes: closes, railHeads: railHeads, tip: tip };
+  return { door: door, all: all, center: center, frame: frame, isOpen: isOpen, activeIs: activeIs, closes: closes, railHeads: railHeads, tip: tip,
+           dockLine: dockLine, rest: rest };
 })();
 0
 """.replace("__SEL__", json.dumps(SEL)).replace(
@@ -445,7 +472,7 @@ class DoorsMeasuredTests(TestCase):
         b = _Browser(pages, "sv-doors-")
         cls.rest, cls.hover, cls.lit, cls.away, cls.clicks, cls.cols = {}, {}, {}, {}, {}, {}
         cls.horde, cls.esc, cls.tabs, cls.follow, cls.closes, cls.heads, cls.motion = {}, {}, {}, {}, {}, {}, {}
-        cls.tips, cls.plain = {}, {}
+        cls.tips, cls.plain, cls.jitter, cls.countclick = {}, {}, {}, {}
         try:
             for width, height in WIDTHS:
                 sid = b.tab(width, height)
@@ -455,7 +482,8 @@ class DoorsMeasuredTests(TestCase):
                     if theme == "light":
                         b.js(sid, "document.body.classList.add('light-mode'); 0")
                         _wait(b, sid, 250)
-                    cls.rest[key] = dict(_all(b, sid), frame=json.loads(b.js(sid, "JSON.stringify(__d.frame())")))
+                    cls.rest[key] = dict(_all(b, sid), frame=json.loads(b.js(sid, "JSON.stringify(__d.frame())")),
+                                         dock=json.loads(b.js(sid, "JSON.stringify(__d.dockLine())")))
                     # Hovered (the forced pseudo-state the guard's census uses).
                     hov = {}
                     for name in ("prices", "signals", "council", "activity", "ask", "horde", "fold"):
@@ -475,6 +503,20 @@ class DoorsMeasuredTests(TestCase):
                             cls.closes[(width, name)] = json.loads(b.js(sid, "JSON.stringify(__d.closes())"))
                         if name == "signals":
                             cls.heads[key] = json.loads(b.js(sid, "JSON.stringify(__d.railHeads())"))
+                            # The SIGNALS count stands over the head's fold
+                            # button for its tooltip; a click on it still folds
+                            # the section, and a second one opens it again.
+                            at = (cls.heads[key][0].get("count") or {}).get("center") if cls.heads[key] else None
+                            if theme == "dark" and at:
+                                folds = []
+                                for _ in range(2):
+                                    _mouse(b, sid, at[0], at[1])
+                                    _mouse(b, sid, at[0], at[1], "mousePressed", "left", 1)
+                                    _mouse(b, sid, at[0], at[1], "mouseReleased", "left", 1)
+                                    _wait(b, sid, 250)
+                                    folds.append(b.js(sid, "document.getElementById('railSigFold').getAttribute('aria-expanded')"))
+                                _mouse(b, sid, *AWAY)
+                                cls.countclick[width] = folds
                         _click(b, sid, name, 450)
                     cls.lit[key] = lit
                     # Away: a lane put away from its own door.
@@ -569,7 +611,40 @@ class DoorsMeasuredTests(TestCase):
                     _esc(b, sid)
                     esc["held"] = {"state": _state(b, sid), "focus": b.js(sid, "document.activeElement ? document.activeElement.id : ''")}
                     b.js(sid, "document.getElementById('svProbeDialog').remove(); 0")
+                    # Ask has two doors: Esc gives the focus back to the one
+                    # that opened it, the Eye or its tab in the dock.
+                    _esc(b, sid)
+                    _esc(b, sid)
+                    _click(b, sid, "eye", 450)
+                    opened = _state(b, sid)["ask"]
+                    _esc(b, sid)
+                    esc["eye"] = {"opened": opened, "state": _state(b, sid), "focus": b.js(sid, "__d.activeIs('eye')"),
+                                  "active": b.js(sid, "document.activeElement ? (document.activeElement.id || String(document.activeElement.className)) : ''")}
+                    _click(b, sid, "ask", 450)
+                    opened = _state(b, sid)["ask"]
+                    _esc(b, sid)
+                    esc["ask_tab"] = {"opened": opened, "state": _state(b, sid), "focus": b.js(sid, "__d.activeIs('ask')"),
+                                      "active": b.js(sid, "document.activeElement ? (document.activeElement.id || String(document.activeElement.className)) : ''")}
                     cls.esc[width] = esc
+                    # ── a resting pointer holds a dock tab still ──
+                    # 1.5 px inside its right edge, the move sent again ten
+                    # times: hovered every time, the tab where it was.
+                    _fresh(b, sid, POSITIONS)
+                    jit = {}
+                    for name in DOCK:
+                        at = json.loads(b.js(sid, "JSON.stringify(__d.door(%s).box)" % json.dumps(name)))
+                        x, y = at["r"] - 1.5, at["y"] + at["h"] / 2
+                        _mouse(b, sid, x, y)
+                        _wait(b, sid, 400)
+                        samples = []
+                        for _ in range(10):
+                            _mouse(b, sid, x, y)
+                            _wait(b, sid, 60)
+                            samples.append(json.loads(b.js(sid, "JSON.stringify(__d.rest(%s, %f, %f))" % (json.dumps(name), x, y))))
+                        _mouse(b, sid, *AWAY)
+                        _wait(b, sid, 400)
+                        jit[name] = {"rest": at, "samples": samples}
+                    cls.jitter[width] = jit
                     # ── Tab: native buttons, the frame's order, the money's ──
                     _fresh(b, sid, POSITIONS)
                     cls.tabs[width] = {"rest": json.loads(b.js(sid, TAB_ORDER))}
@@ -633,6 +708,12 @@ class DoorsMeasuredTests(TestCase):
             sid = b.tab(1440, 900, reduced=True)
             _fresh(b, sid, POSITIONS)
             cls.motion["reduced"] = _all(b, sid)
+            # Hovered under reduced motion: the tab does not grow, and its
+            # chevron keeps the turn that says shut.
+            b.force(sid, SEL["council"], ("hover",))
+            _wait(b, sid, 150)
+            cls.motion["reduced_hover"] = json.loads(b.js(sid, "JSON.stringify(__d.door('council'))"))
+            b.force(sid, SEL["council"], ())
         finally:
             b.close()
 
@@ -872,6 +953,92 @@ class DoorsMeasuredTests(TestCase):
                 self.assertTrue(esc["held"]["state"]["horde"] and esc["held"]["state"]["signals"], esc)
                 self.assertEqual(esc["held"]["focus"], "svProbeBtn")
 
+    def test_esc_gives_ask_back_to_the_door_that_opened_it(self):
+        """The review of the doors, 2026-11-19 (m5): Ask Sauron has two
+        doors, its tab in the dock and the Eye in the bar. Opened from the
+        Eye, Esc gives the focus back to the Eye (it went to the dock's
+        tab); opened from the tab, to the tab."""
+        for width, esc in sorted(self.esc.items()):
+            for door, key in (("eye", "eye"), ("ask", "ask_tab")):
+                with self.subTest(width=width, opened_from=door):
+                    got = esc[key]
+                    self.assertTrue(got["opened"], got)
+                    self.assertFalse(got["state"]["ask"], got)
+                    self.assertTrue(got["focus"], "the focus went to %r, not back to %s" % (got["active"], door))
+
+    def test_a_resting_pointer_holds_a_dock_tab(self):
+        """The review of the doors, 2026-11-19 (m1): a pointer resting
+        1.5 px inside a dock tab's right edge keeps it hovered through ten
+        re-sent moves, and the tab holds still: on hover it grows out from
+        its fixed right edge, as the old tab did (it slid 4 px to the left,
+        out from under the pointer, and flickered in and out)."""
+        self.assertEqual(sorted(self.jitter), [1280, 1440])
+        for width, got in sorted(self.jitter.items()):
+            for name in DOCK:
+                with self.subTest(width=width, door=name):
+                    j = got[name]
+                    s = j["samples"]
+                    self.assertEqual(len(s), 10, s)
+                    self.assertEqual([x["hover"] for x in s], [True] * 10, s)
+                    xs, rs = [x["x"] for x in s], [x["r"] for x in s]
+                    self.assertLessEqual(max(xs) - min(xs), 0.5, s)
+                    self.assertLessEqual(max(rs) - min(rs), 0.5, s)
+                    self.assertAlmostEqual(rs[0], j["rest"]["r"], delta=0.5, msg=(j["rest"], s))
+
+    def test_the_rail_count_keeps_its_tooltip(self):
+        """The review of the doors, 2026-11-19 (m2): the SIGNALS count's
+        breakdown is its title ("2 on the rail · 2 active in the engine ·
+        ..."); the count stands over the head's stretched fold button, as
+        the filter button does, so the pointer reaches it and its tooltip
+        shows. A click on it still folds the section, and opens it again."""
+        self.assertTrue(self.heads)
+        for key, heads in sorted(self.heads.items()):
+            with self.subTest(at=key):
+                c = heads[0]["count"]
+                self.assertIsNotNone(c)
+                self.assertTrue(c["shown"], c)
+                self.assertRegex(c["title"] or "", r"\d+ on the rail", c)
+                self.assertTrue(c["onTop"], "the pointer meets %r over the count" % c["at"])
+        self.assertEqual(sorted(self.countclick), [1280, 1440])
+        for width, folds in sorted(self.countclick.items()):
+            with self.subTest(width=width, click="count"):
+                self.assertEqual(folds, ["false", "true"])
+
+    def test_the_rail_heads_keep_mains_height(self):
+        """The review of the doors, 2026-11-19 (m6): the spec sets no height
+        for the rail's heads, so they keep main's 41.3 px (10 px of padding
+        each side of the old 14 px glyph's 20.3 px line, and the 1 px rule
+        under it): the rail's cards sit where they sat on main, not 2.3 px
+        higher."""
+        self.assertTrue(self.heads)
+        for key, heads in sorted(self.heads.items()):
+            for h in heads:
+                with self.subTest(at=key, head=h["controls"]):
+                    self.assertAlmostEqual(h["h"], 41.3, delta=0.5, msg=h)
+
+    def test_the_dock_chevrons_line_up(self):
+        """The review of the doors, 2026-11-19 (m3): every dock tab's
+        chevron sits at the same place in its tab, on its middle and 14 px
+        over its foot, within half a pixel; each word keeps between its icon
+        and its chevron (ACTIVITY's ran 2.6 px past its 112 px tab and
+        pushed its chevron down)."""
+        for width, theme, got in self.themes():
+            line = got["dock"]
+            self.assertEqual([d and d["name"] for d in line], list(DOCK))
+            for d in line:
+                with self.subTest(width=width, theme=theme, door=d["name"]):
+                    tab, chev, word, ico = d["box"], d["chev"], d["word"], d["ico"]
+                    self.assertIsNotNone(chev)
+                    self.assertIsNotNone(word)
+                    cx, cy = chev["x"] + chev["w"] / 2, chev["y"] + chev["h"] / 2
+                    self.assertAlmostEqual(cx, tab["x"] + tab["w"] / 2, delta=0.5, msg=d)
+                    self.assertAlmostEqual(tab["b"] - cy, 14, delta=0.5, msg=d)
+                    self.assertGreaterEqual(word["y"], ico["b"], d)
+                    self.assertLessEqual(word["b"], chev["y"], d)
+            with self.subTest(width=width, theme=theme, together=True):
+                feet = [d["box"]["b"] - (d["chev"]["y"] + d["chev"]["h"] / 2) for d in line]
+                self.assertLessEqual(max(feet) - min(feet), 0.5, feet)
+
     #: The money controls on the fixture's /positions/, in the order the
     #: keyboard meets them, as c37e841 has them.
     MONEY_ORDER = [["a", "REAL MONEY · 1 BOT ARMED", "sv-armed-pill"], ["button", "CLOSE ALL", "svCloseAll"]] + [
@@ -955,7 +1122,7 @@ class DoorsMeasuredTests(TestCase):
                     self.assertTrue(_near(i["count"], self.pal(theme, "--sv-ink-1")), i)
             eye = self.pal(theme, "--sv-eye")
             for name, d in got.items():
-                if name in ("eye", "frame") or not d:
+                if name in ("eye", "frame", "dock") or not d:
                     continue
                 with self.subTest(width=width, theme=theme, eye_paint=name):
                     self.assertFalse(_near(d["color"], eye, 6), d["color"])
@@ -1092,7 +1259,10 @@ class DoorsMeasuredTests(TestCase):
 
     def test_motion_short_and_off(self):
         """A door moves in 140 ms; under reduced motion and Ambience Off it
-        does not move at all."""
+        does not move at all. Gollum's face and the Eye are doors too (the
+        review of the doors, 2026-11-19, m4): their motion is in the asked
+        120-180 ms (Gollum's took 250 ms) and stops with the others' (both
+        kept theirs under reduced motion and Ambience Off)."""
         for name in ("prices", "signals", "council", "horde", "fold"):
             with self.subTest(door=name):
                 d = self.motion["magic"][name]
@@ -1103,3 +1273,299 @@ class DoorsMeasuredTests(TestCase):
                     self.assertEqual(set(o["transition"].split(", ")), {"0s"}, (k, o["transition"]))
                     for i in o["icons"]:
                         self.assertEqual(set(i["transition"].split(", ")), {"0s"}, (k, name, i))
+        with self.subTest(reduced="hover"):
+            h, rest = self.motion["reduced_hover"], self.motion["reduced"]["council"]
+            self.assertIsNotNone(h)
+            self.assertEqual((h["box"]["x"], h["box"]["w"]), (rest["box"]["x"], rest["box"]["w"]), h["box"])
+            turn = [[i["transform"] for i in d["icons"] if "sv-door-chev" in i["cls"]] for d in (h, rest)]
+            self.assertEqual(turn[0], turn[1], "a hovered shut tab's chevron turned to open")
+        for name in ("gollum", "eye"):
+            with self.subTest(door=name):
+                d = self.motion["magic"][name]
+                self.assertIsNotNone(d)
+                for v in d["transition"].split(", "):
+                    self.assertTrue(0.12 <= float(v.rstrip("s")) <= 0.18, (name, d["transition"]))
+                for k in ("off", "reduced"):
+                    o = self.motion[k][name]
+                    self.assertEqual(set(o["transition"].split(", ")), {"0s"}, (k, name, o["transition"]))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# One Esc, one thing: the page as a browser gets it
+# ══════════════════════════════════════════════════════════════════════════
+#
+# The review of the doors (2026-11-19, B2): the class above opens each page
+# as a file with the frame's own scripts, so the page's other Esc handlers
+# (the chart's menus and sizes, the levels dialog's) never load there. On
+# the full page one Esc closed two things: the chart's More menu AND the
+# rail; a row's levels dialog (a money dialog: stop, target, the PIN on a
+# live row) AND THE HORDE. The spec (§3): "Cards and popovers keep their own
+# Esc and go first ... one panel per press". Here the pages are served as a
+# browser gets them: every request answered by the test client (B0's
+# driver, tests/old_design/measure.py), the chart library from its pinned
+# copy (tests/test_instrument_desk_v2.py), every other host refused, the
+# page's timers on the held clock.
+
+#: What is open, and who has the keyboard (a control by its id, else its
+#: tag and the hook or the word it carries).
+OPEN_NOW = r"""JSON.stringify({
+  rail: !!document.querySelector('#signalsRail.open'), horde: !!document.querySelector('#svHorde.open'),
+  dialog: !!document.querySelector('.lvl-dlg'),
+  menu: Array.prototype.some.call(document.querySelectorAll('.sv-tb-menu'), function (m) { return !m.hidden; }),
+  day: !!document.querySelector('.day-panel.day-open'),
+  tall: !!document.querySelector('.sv-candle-container.sv-chart-tall'),
+  full: !!document.querySelector('.sv-candle-container.sv-chart-fs') || !!document.fullscreenElement,
+  active: (function (a) {
+    if (!a || a === document.body) return 'body';
+    if (a.id) return '#' + a.id;
+    return a.tagName.toLowerCase() + ':' + (a.getAttribute('data-sv-dock') || a.getAttribute('data-tb-menu') || a.getAttribute('data-ctl')
+      || (a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 16));
+  })(document.activeElement)
+})"""
+#: The levels dialog's CANCEL takes the keyboard (the review's case).
+ON_CANCEL = ("(function () { var b = Array.prototype.filter.call(document.querySelectorAll('.lvl-dlg button'),"
+             " function (x) { return /CANCEL/.test(x.textContent); })[0]; if (b) b.focus(); return !!b; })()")
+#: The browser refuses the full screen (as it may): the chart pins itself to
+#: the window instead (.sv-chart-fs), its own Esc the way out.
+REFUSED = "\nElement.prototype.requestFullscreen = function () { return Promise.reject(new Error('refused')); };"
+
+
+class _FullPage:
+    """A page on a tab of B0's driver, with the chart library's pinned
+    copy: real clicks and keys, the held clock moved after each."""
+
+    def __init__(self, client):
+        from tests.test_instrument_desk_v2 import _LiveDesk
+        self.desk = _LiveDesk(client)
+        self.driver = self.desk.driver
+
+    def close(self):
+        self.desk.close()
+
+    def open(self, url, prefs, init="", width=1440, height=900):
+        from tests.old_design.measure import ADVANCE, INIT, LOAD_MS, SETTLE
+        held = INIT % {"t": int(time.time() * 1000), "prefs": json.dumps(prefs), "ws": json.dumps("open")}
+        for attempt in range(4):
+            tid, sid = self.driver.tab(width, height, init=held + init)
+            try:
+                self.driver.go(sid, self.desk.origin + url, timeout=45)
+                break
+            except TimeoutError:
+                # A loaded machine can stall a tab's first parse: a fresh tab.
+                self.driver.close_tab(tid)
+                if attempt == 3:
+                    raise
+        self.driver.js(sid, ADVANCE % LOAD_MS)
+        self.driver.quiet(sid, still=0.5, cap=15)
+        self.driver.js(sid, SETTLE % 300)
+        return tid, sid
+
+    def advance(self, sid, ms=700):
+        from tests.old_design.measure import ADVANCE
+        self.driver.js(sid, ADVANCE % ms)
+
+    def candles(self, sid, chart_id):
+        for _ in range(150):
+            if self.driver.js(sid, "(function () { var h = window.svCharts && svCharts[%s];"
+                                   " return h && h.bars ? h.bars().length : 0; })()" % json.dumps(chart_id)):
+                return True
+            self.driver.js(sid, "window.__svClock.sleep(100)")
+        return False
+
+    def click(self, sid, selector):
+        """A real click at the middle of the first match, brought into view
+        first; the pointer then rests in the page's top gutter."""
+        at = self.driver.js(sid, "JSON.stringify((function () { var e = document.querySelector(%s); if (!e) return null;"
+                                 " e.scrollIntoView({block: 'center'}); var r = e.getBoundingClientRect();"
+                                 " return [r.left + r.width / 2, r.top + r.height / 2]; })())" % json.dumps(selector))
+        at = json.loads(at) if at else None
+        if not at:
+            return False
+        for kind in ("mouseMoved", "mousePressed", "mouseReleased"):
+            self.driver.call("Input.dispatchMouseEvent", {
+                "type": kind, "x": at[0], "y": at[1], "button": "none" if kind == "mouseMoved" else "left",
+                "buttons": 1 if kind == "mousePressed" else 0, "clickCount": 0 if kind == "mouseMoved" else 1}, session=sid)
+        self.driver.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": AWAY[0], "y": AWAY[1], "button": "none"},
+                         session=sid)
+        self.advance(sid)
+        return True
+
+    def hover(self, sid, selector):
+        """The pointer brought to the middle of the first match and left
+        there."""
+        at = self.driver.js(sid, "JSON.stringify((function () { var e = document.querySelector(%s); if (!e) return null;"
+                                 " e.scrollIntoView({block: 'center'}); var r = e.getBoundingClientRect();"
+                                 " return [r.left + r.width / 2, r.top + r.height / 2]; })())" % json.dumps(selector))
+        at = json.loads(at) if at else None
+        if not at:
+            return False
+        self.driver.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": at[0], "y": at[1], "button": "none"},
+                         session=sid)
+        self.advance(sid)
+        return True
+
+    def key(self, sid, key, code, vk, text=""):
+        for kind in ("keyDown" if text else "rawKeyDown", "keyUp"):
+            params = {"type": kind, "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk}
+            if text and kind == "keyDown":
+                params["text"] = text
+            self.driver.call("Input.dispatchKeyEvent", params, session=sid)
+        self.advance(sid, 600)
+
+    def esc(self, sid):
+        self.key(sid, "Escape", "Escape", 27)
+
+    def now(self, sid):
+        return json.loads(self.driver.js(sid, OPEN_NOW))
+
+
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class OneEscOneThingTests(TestCase):
+    """One Esc closes one thing, the last opened; a page's own menu, dialog
+    or chart size goes first, the panel under it at the next press, the
+    focus back on its door. A money dialog keeps the keyboard."""
+
+    maxDiff = None
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests import chart_desk_fixture as F
+        from tests.old_design.measure import tour_done
+        cls.got = {}
+        # /positions/: THE HORDE opened from its door, then a row's levels
+        # dialog opened from its stop, the focus on its CANCEL.
+        client = _book("doors_esc")
+        tour_done(get_user_model().objects.get(username="doors_esc"))
+        page = _FullPage(client)
+        try:
+            tid, sid = page.open(POSITIONS, {})
+            got = {"start": page.now(sid)}
+            page.click(sid, "#svHordeCell")
+            got["horde"] = page.now(sid)
+            page.click(sid, ".page-content .lvl-edit")
+            got["cancel"] = page.driver.js(sid, ON_CANCEL)
+            got["dialog"] = page.now(sid)
+            page.esc(sid)
+            got["esc1"] = page.now(sid)
+            page.esc(sid)
+            got["esc2"] = page.now(sid)
+            # The dialog again: "/" waits while it holds the page.
+            page.click(sid, ".page-content .lvl-edit")
+            page.driver.js(sid, ON_CANCEL)
+            page.key(sid, "/", "Slash", 191, "/")
+            got["slash"] = page.now(sid)
+            cls.got["dialog"] = got
+            page.driver.close_tab(tid)
+            # /command/ with the rail open: a stage of the day's ring opened
+            # under the pointer (its panel says what runs there).
+            tid, sid = page.open("/command/", {"sauron_signals_rail": "open"})
+            got = {"start": page.now(sid)}
+            got["hovered"] = page.hover(sid, "#dayScheme [data-key]:not([data-key='beat'])")
+            got["open"] = page.now(sid)
+            page.esc(sid)
+            got["esc1"] = page.now(sid)
+            page.esc(sid)
+            got["esc2"] = page.now(sid)
+            cls.got["day"] = got
+            page.driver.close_tab(tid)
+        finally:
+            page.close()
+        # /instruments/XAUUSD/ with the rail open: the chart's More menu,
+        # then its tall size, then its full screen, each from its button.
+        user = get_user_model().objects.create_user("doors_esc_chart", password="x", is_staff=True, is_superuser=True)
+        tour_done(user)
+        F.seed_desk(user)
+        chart = Client()
+        chart.force_login(user)
+        page = _FullPage(chart)
+        prefs = {"sauron_signals_rail": "open", "sv-chart:%s:XAUUSD" % F.CHART_ID: json.dumps({"tf": "1h"})}
+        try:
+            for case, door, init in (("menu", '[data-tb-menu="more"]', ""),
+                                     ("tall", '.sv-ctl-btn[data-ctl="tall"]', ""),
+                                     ("full", '.sv-ctl-btn[data-ctl="fullscreen"]', REFUSED)):
+                tid, sid = page.open(F.PAGE_URL, prefs, init)
+                got = {"candles": page.candles(sid, F.CHART_ID), "start": page.now(sid)}
+                got["clicked"] = page.click(sid, door)
+                got["open"] = page.now(sid)
+                page.esc(sid)
+                got["esc1"] = page.now(sid)
+                page.esc(sid)
+                got["esc2"] = page.now(sid)
+                cls.got[case] = got
+                page.driver.close_tab(tid)
+        finally:
+            page.close()
+
+    def test_a_levels_dialog_over_the_horde_closes_alone(self):
+        """THE HORDE open, a row's levels dialog over it, the focus on its
+        CANCEL: one Esc shuts the dialog and THE HORDE stays; the next shuts
+        THE HORDE and gives the focus back to its door."""
+        g = self.got["dialog"]
+        self.assertTrue(g["horde"]["horde"], g)
+        self.assertTrue(g["cancel"], g)
+        self.assertTrue(g["dialog"]["dialog"] and g["dialog"]["horde"], g)
+        self.assertEqual(g["dialog"]["active"], "button:CANCEL", g)
+        self.assertFalse(g["esc1"]["dialog"], g)
+        self.assertTrue(g["esc1"]["horde"], "one Esc shut the levels dialog AND THE HORDE: %r" % g["esc1"])
+        self.assertFalse(g["esc2"]["horde"], g)
+        self.assertEqual(g["esc2"]["active"], "#svHordeCell", g)
+
+    def test_a_money_dialog_keeps_the_keyboard(self):
+        """The levels dialog holds the page (held()): "/" does not take the
+        focus to the command field behind it; the focus stays on its
+        CANCEL."""
+        g = self.got["dialog"]["slash"]
+        self.assertTrue(g["dialog"], g)
+        self.assertEqual(g["active"], "button:CANCEL", g)
+
+    def test_the_charts_menu_over_the_rail_closes_alone(self):
+        """The rail open, the chart's More menu opened from its button: one
+        Esc shuts the menu, its button keeps the focus and the rail stays;
+        the next shuts the rail and gives the focus to SIGNALS."""
+        g = self.got["menu"]
+        self.assertTrue(g["candles"], g)
+        self.assertTrue(g["start"]["rail"], g)
+        self.assertTrue(g["open"]["menu"] and g["open"]["rail"], g)
+        self.assertFalse(g["esc1"]["menu"], g)
+        self.assertTrue(g["esc1"]["rail"], "one Esc shut the chart's menu AND the rail: %r" % g["esc1"])
+        self.assertEqual(g["esc1"]["active"], "button:more", g)
+        self.assertFalse(g["esc2"]["rail"], g)
+        self.assertEqual(g["esc2"]["active"], "button:signals", g)
+
+    def test_the_tall_chart_steps_back_before_the_rail(self):
+        """The rail open, the chart made tall from its button (its title
+        says "Esc to leave"): one Esc gives the chart its size back and the
+        rail stays; the next shuts the rail."""
+        g = self.got["tall"]
+        self.assertTrue(g["candles"] and g["clicked"], g)
+        self.assertTrue(g["open"]["tall"] and g["open"]["rail"], g)
+        self.assertFalse(g["esc1"]["tall"], "the chart stayed tall: %r" % g["esc1"])
+        self.assertTrue(g["esc1"]["rail"], "one Esc shut the rail under the tall chart: %r" % g["esc1"])
+        self.assertFalse(g["esc2"]["rail"], g)
+        self.assertEqual(g["esc2"]["active"], "button:signals", g)
+
+    def test_the_full_screen_chart_steps_back_before_the_rail(self):
+        """The rail open, the chart's full screen from its button (the
+        browser refuses its API: the chart pins itself to the window): one
+        Esc leaves the full screen and the rail stays; the next shuts the
+        rail."""
+        g = self.got["full"]
+        self.assertTrue(g["candles"] and g["clicked"], g)
+        self.assertTrue(g["open"]["full"] and g["open"]["rail"], g)
+        self.assertFalse(g["esc1"]["full"], "the chart stayed full screen: %r" % g["esc1"])
+        self.assertTrue(g["esc1"]["rail"], "one Esc shut the rail under the full screen: %r" % g["esc1"])
+        self.assertFalse(g["esc2"]["rail"], g)
+        self.assertEqual(g["esc2"]["active"], "button:signals", g)
+
+    def test_the_days_ring_steps_back_before_the_rail(self):
+        """The rail open, a stage of the day's ring opened under the pointer
+        (/command/, sv-day-scheme.js): one Esc brings the ring back to its
+        beat and the rail stays; the next shuts the rail."""
+        g = self.got["day"]
+        self.assertTrue(g["start"]["rail"], g)
+        self.assertTrue(g["hovered"], g)
+        self.assertTrue(g["open"]["day"] and g["open"]["rail"], g)
+        self.assertFalse(g["esc1"]["day"], g)
+        self.assertTrue(g["esc1"]["rail"], "one Esc shut the day's stage AND the rail: %r" % g["esc1"])
+        self.assertFalse(g["esc2"]["rail"], g)
+        self.assertEqual(g["esc2"]["active"], "button:signals", g)
