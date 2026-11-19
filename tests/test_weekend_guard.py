@@ -449,11 +449,11 @@ class TheTickTests(_Guard):
         """Today, for a pair and for copper alike: the soft-stop close, the
         time stop, the mirror, the knobs' stop move and the bot-side stop
         each reach eToro on a Saturday."""
+        from bot_program.models import AssetBotTrade
         self.guard(False)
         for symbol in ("EURUSD", "HGUSD"):
             for name in SCENARIOS:
                 with self.subTest(symbol=symbol, scenario=name):
-                    from bot_program.models import AssetBotTrade
                     AssetBotTrade.objects.all().delete()
                     _switch("aragorn", True)
                     t, etoro, write = self._scenario(name, symbol)
@@ -463,13 +463,13 @@ class TheTickTests(_Guard):
     def test_on_nothing_is_sent_on_a_saturday_for_a_pair_or_copper(self):
         """Held before anything that can send: no write, no read either,
         the row OPEN, its stop, target and care as they were."""
+        from bot_program.models import AssetBotTrade
         self.guard(True)
         for symbol in ("EURUSD", "HGUSD"):
             for name in SCENARIOS:
                 for demo in (False, True):
                     with self.subTest(symbol=symbol, scenario=name,
                                       demo=demo):
-                        from bot_program.models import AssetBotTrade
                         AssetBotTrade.objects.all().delete()
                         _switch("aragorn", True)
                         t, etoro, _write = self._scenario(name, symbol,

@@ -108,6 +108,7 @@ LIVE_MONEY_SWITCHES = (
     "crisis_mode",                  # the market posture binds real money
     "smart_money",                  # moves stops, sizes real-money entries
     "bots_venue_floor_live",        # a bot opens at the venue's smallest size
+    "care_holds_while_shut",        # nothing sent to eToro on a shut market
 )
 
 #: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and
@@ -618,6 +619,27 @@ DEFAULT_COMPONENTS = [
     # Description measured at 295 chars (< 300).
     {"key": "bots_venue_floor_live", "name": "Bots: Venue Floor",
      "description": "Off (default): a bot order under the venue's smallest size is refused, as before. On: it opens at that size when its loss at the stop is at most MAX BOT FLOOR RISK (/setup/, 2% of its pool by default) and every other limit passes on that size; a bot with no multiplier lets the chooser pick one.",
+     "category": "system"},
+
+    # ── The guard: management held while a market is shut (2026-11-19) ──
+    # The operator, 2026-11-19: "oui pour le garde-fou". ON,
+    # bot_program/shut_guard holds a LIVE eToro row, real or demo, of a
+    # currency pair or of a commodity eToro trades on weekdays only, while
+    # its market is shut for a day or more (market_data/shut_bars
+    # .shut_for_a_day_now: eToro's FX week for a pair, the instrument's
+    # clock for a commodity; eToro's all-week GOLD, OIL, SILVER and NATGAS
+    # never): the manage tick sends nothing for it (no time stop, no care
+    # close, no mirror or knob stop move, no bot-side SL/TP) and the
+    # pending-close drain neither resends its close nor counts an attempt;
+    # both take it up again at the reopen. The kill switch, the CLOSE
+    # button, TAKE TRADE, reconcile and Morgul are untouched. LIVE MONEY:
+    # it decides what reaches eToro for real rows, so it is in
+    # LIVE_MONEY_SWITCHES (the trading PIN at /ops/, never "all on", never
+    # the shell). OFF on arrival (no is_enabled key); a missing row reads
+    # OFF and nothing changes. Description measured at 295 chars (< 300).
+    {"key": "care_holds_while_shut",
+     "name": "Hold management while the market is shut",
+     "description": "Off (default): live rows are managed through weekends as before. On: nothing is sent to eToro for a forex or weekday-only commodity row while its market is shut a day or more: no close, no stop move, no resend of a pending close; each resumes at the reopen. Gold, oil, crypto, stocks: as before.",
      "category": "system"},
 
     # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ──

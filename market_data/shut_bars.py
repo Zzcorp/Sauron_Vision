@@ -44,6 +44,12 @@ and index CFDs outside their cash sessions, and an unmodelled class has no
 hours to judge by. So does a bar that cannot be judged (an unknown
 timeframe, an unreadable open or clock): it is written as before. Reads no
 database and no network; never raises.
+
+THE SAME CLOCKS, NOW (2026-11-19, the guard): shut_for_a_day_now(instrument,
+now) answers (closed, reopens) while `instrument` is inside one shut of
+SHUT_MIN_S or more, for the classes in HELD_CLASSES, never for an all-week
+instrument. bot_program/shut_guard.py holds a live eToro row's management
+on it (the switch care_holds_while_shut).
 """
 from __future__ import annotations
 
@@ -57,6 +63,11 @@ logger = logging.getLogger(__name__)
 #: (etoro_rates.SHUT_CADENCE_CLASSES), for the same reasons. Another class
 #: is one more word here.
 COVERED_CLASSES = frozenset({"forex", "commodity"})
+#: The classes whose live eToro rows the guard holds while their market is
+#: shut for SHUT_MIN_S or more (shut_for_a_day_now; bot_program/
+#: shut_guard.py): today the bar rule's own. Another class is one more word
+#: here, read on its instrument's market clock.
+HELD_CLASSES = frozenset({"forex", "commodity"})
 #: The shortest shut whose bars are dropped (etoro_rates.SHUT_MIN_SPAN_S).
 SHUT_MIN_S = 24 * 3600
 #: eToro's FX week shuts on Friday at FX_SHUT_AT and opens again on Sunday
@@ -138,19 +149,54 @@ def holds_no_open_time(instrument, timeframe, bar_open_utc) -> bool:
         start = bar_open_utc
         if start.tzinfo is None:
             start = start.replace(tzinfo=dt_tz.utc)
-        shut = (_fx_shut(start) if cls == "forex"
-                else _clock_shut(cls, instrument, start))
+        shut = _long_shut(cls, instrument, start)
         if shut is None:
-            return False
-        closed, reopens = shut
-        if (reopens - closed).total_seconds() < SHUT_MIN_S:
-            return False                  # a nightly or a daily break
-        return start + timedelta(seconds=span_s) <= reopens
+            return False                  # open, or a nightly/daily break
+        return start + timedelta(seconds=span_s) <= shut[1]
     except Exception as e:  # noqa: BLE001 — unjudged is written as before
         logger.debug("[bars] shut test unread for %s %s %s: %s",
                      getattr(instrument, "symbol", "?"), timeframe,
                      bar_open_utc, e)
         return False
+
+
+def shut_for_a_day_now(instrument, now=None):
+    """(closed, reopens), as aware UTC datetimes, while `instrument` is
+    inside one shut of SHUT_MIN_S or more at `now` (the wall clock when
+    None; a naive `now` is read as UTC), on the very clocks
+    holds_no_open_time reads: eToro's FX week for a pair, the instrument's
+    market clock for a commodity. None while its market runs, in a nightly
+    or a daily break, for a class outside HELD_CLASSES, for one of eToro's
+    all-week instruments (trades_all_week), and when the clock cannot be
+    read. `instrument` is anything with `asset_class`, `exchange` and
+    `symbol` (an Instrument row). Reads no database; never raises."""
+    try:
+        cls = str(getattr(instrument, "asset_class", "") or "").strip().lower()
+        if cls not in HELD_CLASSES or trades_all_week(instrument):
+            return None
+        if now is None:
+            now = datetime.now(dt_tz.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt_tz.utc)
+        return _long_shut(cls, instrument, now)
+    except Exception as e:  # noqa: BLE001 — unread is never held
+        logger.debug("[bars] shut-now test unread for %s at %s: %s",
+                     getattr(instrument, "symbol", "?"), now, e)
+        return None
+
+
+def _long_shut(cls, instrument, t):
+    """(closed, reopens) of the shut of SHUT_MIN_S or more that holds `t`
+    on the class's clock (_fx_shut for forex, the instrument's market clock
+    for any other class), or None: open, or a nightly or a daily break."""
+    shut = (_fx_shut(t) if cls == "forex"
+            else _clock_shut(cls, instrument, t))
+    if shut is None:
+        return None
+    closed, reopens = shut
+    if (reopens - closed).total_seconds() < SHUT_MIN_S:
+        return None
+    return closed, reopens
 
 
 def _fx_shut(t):

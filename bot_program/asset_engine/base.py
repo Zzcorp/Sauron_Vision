@@ -1513,6 +1513,27 @@ class AssetBot(ABC):
                         closed += 1 if _resting else 0
                         continue
 
+                # THE GUARD (2026-11-19, bot_program/shut_guard.py; the
+                # switch care_holds_while_shut, OFF on arrival, its ON
+                # behind the trading PIN): a LIVE eToro row of a currency
+                # pair or of a commodity eToro trades on weekdays only,
+                # while its market is shut for a day or more, is HELD for
+                # this tick here, before anything below can send: no mark
+                # is read, no time stop, no care close, no mirror or knob
+                # stop move, no bot-side SL/TP, and nothing those follow
+                # moves. Its line is said on the row and in the log. Only
+                # the time stop's warning runs, as for a paper row above.
+                # The first tick after the reopen manages the row as
+                # before, at the reopen's price. OFF, and for every other
+                # row: nothing here changes the tick.
+                if not trade.paper:
+                    from bot_program import shut_guard
+                    if shut_guard.hold_tick(self, trade, client):
+                        ts = self._time_stop_status(trade)
+                        if ts["approaching"]:
+                            self._warn_time_stop_near(trade, ts)
+                        continue
+
                 # THE MARK IS READ HERE, FIRST, exactly as before — only
                 # the GATE below it moved, past the two checks that never look
                 # at a price. Nothing between this line and the gate is

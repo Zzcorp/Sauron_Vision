@@ -201,8 +201,8 @@ old environment.
 > OFF — `actuator_mode_live`, `meta_allocator_mode_live`,
 > `share_allocator_mode_live`, `share_allocator_auto_derisk`,
 > `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`,
-> `bots_venue_floor_live` and every other one the page names beside the
-> button — and the Morgul brake with them.
+> `bots_venue_floor_live`, `care_holds_while_shut` and every other one the
+> page names beside the button — and the Morgul brake with them.
 > Each of those is its own decision: a live-money switch is turned on
 > from its own toggle on `/ops/` with your trading PIN (the shell refuses
 > it, and never asks for a PIN), the brake by its own toggle or
@@ -2671,6 +2671,42 @@ at the venue's smallest size instead.
   first. Each raised entry risks more than the bot's own setting, up to the
   ceiling, and MAX OPEN RISK still bounds what all open positions may lose
   together.
+
+**Hold management while the market is shut (`care_holds_while_shut`, OFF
+on arrival).** OFF, a live position is managed through a weekend as it
+always was: the time stop, the care's soft-stop close and its stop copied to
+eToro, the stop rules of the bot's settings and the bot's own stop can each
+send an order to eToro for a market eToro has shut, and a close eToro
+refuses is resent every five minutes until the twelfth refusal puts the row
+in ERROR. With the switch ON, nothing is sent to eToro for a live row (real
+or demo) of a currency pair or of a commodity eToro trades on weekdays only
+(copper, platinum, palladium) while its market is shut for a day or more.
+
+- *The clocks.* A currency pair follows eToro's own week, shut from Friday
+  17:00 to Sunday 17:00 New York (22:00 to 22:00 UTC in winter), EURUSD
+  included until a measurement says eToro trades it at weekends. A
+  commodity follows its exchange's clock (Globex for metals and energy:
+  Friday 22:00 to Sunday 23:00 UTC in winter); an unknown exchange reads
+  Globex. eToro trades gold, oil, silver and natural gas all week, so those
+  rows are managed at weekends as before, and so are crypto, stocks,
+  indices and paper rows.
+- *While held.* The row's price is not read, its stops are not moved, it is
+  not closed by any rule, and the care keeps its locks where they were. The
+  time stop's warning still comes. The row says "held: market shut until
+  ... (the guard)" in the log at every tick, and once on the row itself. A
+  close that was already pending is not resent and spends none of its
+  twelve attempts, so no "stranded" alert and no ERROR come of a weekend.
+- *At the reopen.* The first tick after the instrument's own reopen manages
+  the row as before, at the new session's price: a time stop that fell due
+  over the weekend closes then, and the drain resends a pending close.
+- *Never held.* Your own acts: the kill switch, the CLOSE button (on an open
+  row or on a pending close), TAKE TRADE. Reconcile and Morgul send nothing
+  and run as before; an Orc's reading of the tick waits with its held row,
+  and its bar wakes are unchanged. eToro's own stop and target on the
+  position stay where they rest.
+- *Turning it on.* From `/ops/` (Switches, System, "Hold management while
+  the market is shut") with your trading PIN. The shell and "all on" never
+  turn it on; turning it off is free and takes effect on the next tick.
 
 **Watch `/health/` and `/forensics/`** rather than tailing logs: the first
 answers "is the machine running", the second answers "why did it do that".

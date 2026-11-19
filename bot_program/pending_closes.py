@@ -1976,7 +1976,18 @@ def retry_all_pending_closes() -> dict:
     somebody else is already closing counts as STILL PENDING rather than as
     a separate outcome: nothing closed it on this pass, and the next beat
     picks it up if that attempt failed.
+
+    THE GUARD (2026-11-19, bot_program/shut_guard.py; the switch
+    care_holds_while_shut, OFF on arrival): a live eToro row of a currency
+    pair or of a commodity eToro trades on weekdays only, while its market
+    is shut for a day or more, is neither resent nor counted as a failed
+    attempt on this pass, so a weekend can never walk it to ERROR or raise
+    a "stranded" alert; the drain takes it up again at the reopen. It
+    counts as still pending, and the answer gains "held" only when the
+    guard held a row. The drain's own pass only: the CLOSE button's retry
+    (manual_close._retry_pending) is the operator's, and it goes through.
     """
+    from bot_program import shut_guard
     from bot_program.manual_close import _release
     from bot_program.models import AssetBotTrade
 
@@ -1987,6 +1998,7 @@ def retry_all_pending_closes() -> dict:
                .filter(status="CLOSE_PENDING", paper=False)
                .values_list("pk", flat=True))
     out = {"pending": 0, "closed": 0, "still_pending": 0}
+    pass_cache: dict = {}       # the guard's switch, read once a pass
     for pk in pks:
         out["pending"] += 1
         trade = _claim_for_retry(pk)
@@ -1994,6 +2006,10 @@ def retry_all_pending_closes() -> dict:
             out["still_pending"] += 1
             continue
         try:
+            if shut_guard.hold_close(trade, cache=pass_cache):
+                out["held"] = out.get("held", 0) + 1
+                out["still_pending"] += 1
+                continue
             if retry_trade_close(trade):
                 out["closed"] += 1
             else:

@@ -538,7 +538,11 @@ class BulkEnableExemptTests(_Fixture):
             "aragorn", "crisis_mode", "smart_money",
             # grown on purpose (2026-11-12): a bot's order under the venue's
             # smallest size opens at that size (tests/test_bot_venue_floor*)
-            "bots_venue_floor_live")
+            "bots_venue_floor_live",
+            # grown on purpose (2026-11-19): nothing is sent to eToro for a
+            # live row while its market is shut a day or more (tests/
+            # test_weekend_guard.py)
+            "care_holds_while_shut")
     #: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2 and A.1):
     #: a seeded System row each, OFF, that lets a model spend AI money and
     #: moves no account money. "All on" holds them back like the live ones.
