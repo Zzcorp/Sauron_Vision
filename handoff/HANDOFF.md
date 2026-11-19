@@ -1,12 +1,12 @@
 # Sauron Vision — handoff for the next Claude session
 
-Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-19 ~09:40 UTC, by the session working since 2026-10-31. A weekly usage limit stopped this session from 2026-11-02 05:39 to 2026-11-04 20:00 UTC; the unfinished work was saved on `claude/wip-*` branches (§3).
+Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-19 ~11:45 UTC, by the session working since 2026-10-31. A weekly usage limit stopped this session from 2026-11-02 05:39 to 2026-11-04 20:00 UTC; the unfinished work was saved on `claude/wip-*` branches (§3).
 
 Nothing private lives here. The repository is PUBLIC: it was private only from 2026-11-05 to 2026-11-06, and everything pushed to any branch, this one included, is public. The operator's account figures, positions (which instruments he holds or traded, their sizes, prices and P&L), personal or family matters, and any partner or investor document never enter git: not in code, tests, commit messages, PR bodies or this file. Describe a case generically ("a live forex ticket", "one of his eToro rows"). Before opening a PR, scan the branch's commit messages and added lines for such data. Those live in the operator's own claude.ai documents and in files he keeps.
 
 ## 1. How to resume
 
-1. **Clone `Zzcorp/Sauron_Vision`.** Then `git fetch origin` and read `git log --oneline -1 origin/main`. At this update, main is `349b1ca` (#106 merged 2026-11-13); no PR is open. The container restarted twice on 2026-11-06/07 (worktrees and the scratchpad survived; running workflows had to be resumed from their run ids).
+1. **Clone `Zzcorp/Sauron_Vision`.** Then `git fetch origin` and read `git log --oneline -1 origin/main`. At this update, main is `c89bf8b` (#120 merged 2026-11-19); PR #121 is open (open/close). The container restarted twice on 2026-11-06/07 (worktrees and the scratchpad survived; running workflows had to be resumed from their run ids).
 2. **For each branch in §3, check out its worktree:** `git worktree add .claude/worktrees/<name> origin/claude/<name>`. Check where it stands against §3 with `git log --oneline origin/main..HEAD`.
 3. **Set up the tests.**
    - Run `DB_ENGINE=sqlite python manage.py test <modules> --parallel 4`. The full suite takes 20 to 35 minutes on 4 cores.
@@ -48,7 +48,16 @@ Nothing private lives here. The repository is PUBLIC: it was private only from 2
 
 ## 3. Open lines of work
 
-**Status at 2026-11-19 ~09:40 UTC (this block wins over everything below where they differ)**
+**Status at 2026-11-19 ~11:45 UTC (this block wins over everything below where they differ)**
+- main `c89bf8b`. The machine is overloaded (load ~32 on 4 CPUs: five workflows run suites and Chromium at once). Launch nothing heavy until one finishes.
+- Weekend: `claude/weekend-bars` at `cbb0c2a` = F1 (writer drops candles with no open time; eToro's all-week ids 17/18/19/22/27/28 keep their weekend candles) + F2 (prune command, dry run first) + F4 (the guard: nothing sent to eToro for a live row while its market is shut, PIN switch OFF on arrival). Run `wf_217d0a6e-46a`: Review (two of three lenses done), then Fix. Then merge main with `merge_recount.sh`, privacy scan, PR (body via MCP), subscribe, CI, merge; then the verified French deploy + prune + switch-on sheet before Friday 2026-11-20 21:30 UTC.
+- 24/7 display: run `wf_c1d45443-15b` building on `claude/weekend-247-display` (from `cbb0c2a`); its PR opens after the weekend PR merges (`scratchpad/display247/pr_body.md`).
+- Chart prices: diagnosis done (`scratchpad/chartprices/diagnosis.md`): on frames under 1h a venue-routed stand-in (oil 17, gold 18, silver, natgas, SPX500, NSDQ100) draws Yahoo's future/cash index live under eToro's price line (basis ~0.5-1.5 %, widest this week at the December WTI expiry Fri 2026-11-20; Yahoo 12-17 min late; the scale stretched to reach eToro's line). Build P1-P5 (display only: eToro's stored 5m/15m rows drawn on 5/10/15/30m; the scale follows the candles with an edge chip for eToro's price; levels/positioning from the one price; daily forex labels by session; `now` kept with overlays) running in run `wf_38de4f6a-eb7` on `claude/chart-prices`, PR at its end. S1 (eToro 15m read for held stand-ins, own PR, switch OFF on arrival + PIN) DECIDED, after his read-only output. The French note + one read-only command (`chartprices/note_fr.md`, `cmd_server.sh`) is being verified (run `wf_92629e0f-b35`), then sent.
+- NEW task #68 (S3, possible money defect): the care's levels read `load_ohlcv(source=None)`, which may mix Yahoo future bars with eToro bars after a refused eToro pass. Read-only investigation when the load allows; he will be told it is possible, not proven.
+- Open/close #121: fix round running (run `wf_6854d5c6-1eb`: merge main, B2 one Esc closes two things, m1-m6, re-review); then CI, merge, unsubscribe. O2c: run `wf_d6ede131-879` building commit 3 (drum wakes).
+- Check-in armed for 12:57 UTC (`trig_01NaP8br9F49PsGYmuaGsPj9`).
+
+**Status at 2026-11-19 ~09:40 UTC (older)**
 - #120 MERGED (`c89bf8b`, the lock PIN takes the keyboard; review "ready", CI green). main is `c89bf8b`.
 - eToro FACTS (official pages, `scratchpad/weekendfix/v247/web_facts.md`): the REGULAR GOLD (18), OIL (17), SILVER (19), NATGAS (22), SPX500 (27) and NSDQ100 (28) trade 24/7 at eToro (short breaks: daily 22:00-23:00 UTC, Friday 22:00-22:30, oil and natgas Saturday 22:00-22:15); separate .24-7 tickers are being retired. Other forex pairs keep weekday hours (close Friday 21:30 UTC); copper, platinum, palladium too; EURUSD is unsettled (treated as weekday-only). eToro queues a close sent while shut ("Pending Close"). So gold/oil weekend candles are REAL prices.
 - Operator decisions 2026-11-19: YES to the guard (no management order to eToro while the instrument is shut); YES to showing "open 24/7 at eToro" on weekends for the all-week instruments; bots keep NO weekend entries for now.
