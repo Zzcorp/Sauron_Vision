@@ -50,6 +50,10 @@ reply (`series`), the quote's preview and the hero (`quote_facts`):
     while they are fresh, 10 min and 30 min folded from them on the UTC
     grid; else the keyless feed, live, as before, and the legend says
     where the venue's candles stop (_venue_minutes).
+  * DAILY CANDLES BY SESSION (2026-11-19): the daily view labels a row by
+    its session (session_day), as the weekly view does; Yahoo's forex days
+    in British Summer Time drew one date early, Monday's bar on a Sunday.
+    Two rows of one session draw one candle, the newer stamp's.
 
 Display only: the engine reads bars through its own loaders, never this.
 """
@@ -528,12 +532,6 @@ def week_of(day_label) -> str:
     return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
 
 
-def utc_day(stamp) -> str:
-    """A daily row's label on the daily view: the UTC date of its stamp
-    (C1's label, unchanged)."""
-    return stamp.strftime("%Y-%m-%d")
-
-
 def session_day(stamp) -> str:
     """The trading day a daily row is the bar of, 'YYYY-MM-DD'
     (2026-11-01): its stamp rounded to the nearest UTC midnight.
@@ -549,7 +547,13 @@ def session_day(stamp) -> str:
     east) and every forex day; a market at UTC+13 (New Zealand's summer)
     would not, and none is charted. A feed that stamps 00:00 UTC (Binance,
     Alpha Vantage) or New York's midnight (04:00 or 05:00 UTC) keeps its
-    date."""
+    date.
+
+    THE DAILY VIEW TOO (2026-11-19). It kept the UTC date of the stamp
+    (utc_day): EURUSD=X's summer sessions drew one date early, Monday's
+    bar labelled Sunday (60 Sunday candles on the 1Y view of the
+    chart-prices reproduction), and today's stored session read as
+    yesterday's, so the legend said today's candle was not drawn."""
     return (stamp.astimezone(dt_tz.utc) + timedelta(hours=12)) \
         .strftime("%Y-%m-%d")
 
@@ -800,7 +804,9 @@ def _live_frame(instrument, interval, limit, key=None):
 
 
 def daily_series(instrument, *, since=None, limit=None, route="", now=None):
-    """(bars, source) of daily candles, `time` a 'YYYY-MM-DD' string.
+    """(bars, source) of daily candles, `time` a 'YYYY-MM-DD' string: a
+    stored row's session (session_day, 2026-11-19), whatever midnight its
+    feed stamps it at.
 
     One feed's 1d rows. With none at all, the day is built from one feed's
     4h, else 1h rows: a daily candle IS the aggregate of its day's
@@ -905,13 +911,17 @@ def weekly_series(instrument, *, since=None, route="", now=None):
 
 
 def _daily_bars(instrument, *, since, route, now, notes, words,
-                day_of=utc_day):
+                day_of=session_day):
     """(bars, feed) of ONE feed's daily candles, and the legend's notes on
     `notes` in `words` (the daily_series body, 2026-11-01: the weekly view
-    folds the same days). `day_of` labels a daily row from its stamp: the
-    daily view keeps the UTC date (utc_day); the weekly view takes the
-    session's (session_day), and so does the check of whether today's
-    candle is in. Days folded from intraday rows are their UTC dates."""
+    folds the same days). `day_of` labels a daily row from its stamp: its
+    session (session_day), for the daily view since 2026-11-19 as for the
+    weekly one, and so does the check of whether today's candle is in.
+    Days folded from intraday rows are their UTC dates.
+
+    ONE CANDLE PER SESSION (2026-11-19). Two rows of the feed on one
+    session (an EOD stamp at 23:00 UTC and a backfill's at 00:00 UTC) were
+    two candles; the newer stamp is drawn, and the legend says so."""
     from market_data.models import PriceData
 
     def _rows(tf, tags):
@@ -927,7 +937,18 @@ def _daily_bars(instrument, *, since, route, now, notes, words,
     newest = None
     if fam:
         rows = list(_rows("1d", fams[fam]["tags"]))
-        bars = [_bar(p, day_of(p.timestamp)) for p in rows]
+        twice = 0
+        for p in rows:
+            bar = _bar(p, day_of(p.timestamp))
+            if bars and bars[-1]["time"] == bar["time"]:
+                bars[-1] = bar          # the rows run oldest first
+                twice += 1
+            else:
+                bars.append(bar)
+        if twice:
+            notes.append(f"{twice} session{'s' if twice > 1 else ''} stamped "
+                         f"twice by {label(fam, instrument)}: the newer "
+                         f"stamp is drawn")
         newest = rows[-1].timestamp if rows else None
     if not bars:
         for tf in ("4h", "1h"):
@@ -955,7 +976,7 @@ def _daily_bars(instrument, *, since, route, now, notes, words,
                         label(f, instrument)))
                 break
     elif newest is not None:
-        forming = _forming(instrument, fam, newest, bars[-1]["time"], now)
+        forming = _forming(instrument, fam, bars[-1]["time"], now)
         if forming is not None:
             bars.append(forming)
             notes.append(words["forming"].format(label(fam, instrument)))
@@ -982,16 +1003,22 @@ def _fold(days, key, p):
     d["volume"] += vol
 
 
-def _forming(instrument, fam, newest, last_label, now):
+def _forming(instrument, fam, last_label, now):
     """Today's candle from `fam`'s 1h (else 4h) rows of the UTC day, after
-    the day the newest daily bar covers; None when there are none."""
+    the day the newest daily bar covers; None when there are none.
+
+    THE DAY A BAR COVERS IS ITS SESSION (2026-11-19): `last_label`, the
+    newest daily bar's label (session_day). It was the stamp plus a day,
+    which for a bar stamped at New York's midnight (05:00 UTC) cut today's
+    first five hours out of today's candle, and for a session stamped the
+    evening before (23:00 UTC) read today's stored bar as yesterday's."""
     from market_data.models import PriceData
 
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     key = today.strftime("%Y-%m-%d")
     if key <= last_label:
         return None
-    start = max(today, newest + timedelta(days=1))
+    start = today
     for tf in ("1h", "4h"):
         tags = [t for t in _families(instrument, tf).get(fam, {})
                 .get("tags", [])]

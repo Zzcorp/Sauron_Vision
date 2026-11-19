@@ -612,6 +612,94 @@ class WeeklyCandlesBySessionTests(TestCase):
                           ("2026-10-19", 105.0, 110.0)])
 
 
+class DailyCandlesBySessionTests(TestCase):
+    """The daily view labels a row by its SESSION too (2026-11-19).
+
+    The weekly view put each day in the week of its session (above); the
+    daily view kept the UTC date of the stamp. Yahoo stamps EURUSD=X's day
+    at 00:00 London, 23:00 UTC the day before in British Summer Time: the
+    1Y view of the chart-prices reproduction drew 60 candles labelled
+    Sunday, every summer session one date before itself (Monday's bar on
+    the Sunday, Friday's on the Thursday), and today's stored session read
+    as yesterday's, so the legend said today's candle was not drawn. Two
+    rows of one feed on one session (an EOD stamp at 23:00 UTC and a
+    backfill's at 00:00 UTC) were two candles."""
+
+    def setUp(self):
+        cache.clear()
+
+    def daily(self, inst, now, route=""):
+        from dashboard.chart_source import daily_series
+        with _no_live_feed():
+            return daily_series(inst, route=route, now=now)
+
+    def test_forex_days_in_british_summer_time_keep_their_date(self):
+        from market_data.models import PriceData
+        inst = _inst("EURUSD", "forex", "Euro")
+        days = _sessions(date(2026, 7, 6), 2)
+        _yahoo_days("EURUSD", "EURUSD=X", days, "Europe/London")
+        first = PriceData.objects.filter(instrument=inst).order_by(
+            "timestamp").first()
+        self.assertEqual(first.timestamp, datetime(2026, 7, 5, 23, tzinfo=UTC))
+        bars, _src = self.daily(inst, datetime(2026, 7, 18, 10, tzinfo=UTC))
+        self.assertEqual([b["time"] for b in bars],
+                         [d.isoformat() for d in days])
+        self.assertFalse([b["time"] for b in bars
+                          if date.fromisoformat(b["time"]).weekday() >= 5])
+        self.assertEqual((bars[0]["open"], bars[0]["close"]), (100.0, 101.0))
+
+    def test_two_stamps_of_one_session_draw_one_candle(self):
+        """Tuesday's session stamped twice by Yahoo: the EOD's 23:00 UTC
+        the evening before and a backfill's 00:00 UTC. One candle, the
+        newer stamp's, and the legend says so."""
+        inst = _inst("EURUSD", "forex", "Euro")
+        _yahoo_days("EURUSD", "EURUSD=X", _sessions(date(2026, 7, 6), 1),
+                    "Europe/London")
+        _bar(inst, "1d", datetime(2026, 7, 7, tzinfo=UTC), 300, 303, 298,
+             301, "yfinance_public")
+        bars, src = self.daily(inst, datetime(2026, 7, 11, 10, tzinfo=UTC))
+        self.assertEqual([b["time"] for b in bars],
+                         ["2026-07-06", "2026-07-07", "2026-07-08",
+                          "2026-07-09", "2026-07-10"])
+        self.assertEqual((bars[1]["open"], bars[1]["close"]), (300.0, 301.0))
+        self.assertIn("1 session stamped twice by Yahoo EURUSD=X: the newer "
+                      "stamp is drawn", src["notes"])
+
+    def test_today_after_a_summer_stamp(self):
+        """Thursday 22:40 UTC, after the 22:30 pass wrote Thursday's
+        session (stamped Wednesday 23:00 UTC): it is today's candle, and
+        nothing says today's candle is not drawn."""
+        inst = _inst("EURUSD", "forex", "Euro")
+        _yahoo_days("EURUSD", "EURUSD=X",
+                    [date(2026, 7, 13), date(2026, 7, 14), date(2026, 7, 15),
+                     date(2026, 7, 16)], "Europe/London")
+        thursday = datetime(2026, 7, 16, tzinfo=UTC)
+        for hour in (12, 13, 14, 15):
+            _bar(inst, "1h", thursday + timedelta(hours=hour), 1.17, 1.173,
+                 1.169, 1.172, "etoro")
+        bars, src = self.daily(inst, thursday + timedelta(hours=22, minutes=40),
+                               route="etoro")
+        self.assertEqual(bars[-1]["time"], "2026-07-16")
+        self.assertEqual(bars[-1]["close"], 104.0)
+        self.assertFalse(any("not drawn" in n for n in src["notes"]),
+                         src["notes"])
+
+    def test_new_york_and_utc_midnights_keep_their_date(self):
+        aapl = _inst("AAPL", "stock", "Apple")
+        days = _sessions(date(2026, 10, 12), 1)
+        _yahoo_days("AAPL", "AAPL", days, "America/New_York")
+        bars, _src = self.daily(aapl, datetime(2026, 10, 17, 10, tzinfo=UTC))
+        self.assertEqual([b["time"] for b in bars],
+                         [d.isoformat() for d in days])
+        btc = _inst("BTCUSD", "crypto", "Bitcoin")
+        for d in days:
+            _bar(btc, "1d", datetime(d.year, d.month, d.day, tzinfo=UTC),
+                 90000, 90300, 89800, 90100, "binance_public")
+        bars, _src = self.daily(btc, datetime(2026, 10, 17, 10, tzinfo=UTC))
+        self.assertEqual([b["time"] for b in bars],
+                         [d.isoformat() for d in days])
+
+
 # ═══ D3. 10 min and 30 min, live from the keyless feed ════════════════
 
 class TheLiveFinerFramesTests(TestCase):
