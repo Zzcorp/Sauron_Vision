@@ -3432,13 +3432,28 @@ or none.{% endcomment %}
        is off: it was the last bar's close, whatever feed the bars are, a
        second "now" beside the numbers. The one painter (sv-venue.js) draws
        ONE price line at the price every number beside the chart prints,
-       and the scale always includes it (nowAware), so it is never
-       off-screen. */
-    var NOW_V = null;
+       and the scale includes it (nowAware), so it is never off-screen.
+
+       ANOTHER INSTRUMENT'S CANDLES KEEP THEIR OWN SCALE (2026-11-19, the
+       operator: "il y a un probleme d'affichage des prix sur certaines
+       charts"). On a stand-in's candles (SOURCE.stand_in: Yahoo's
+       front-month future, a cash index) under another feed's price
+       (NOW_FAM, the price's family, eToro's), the scale stretched to hold
+       the line: gold's 1 min candles filled 41 % of the pane, the line
+       under every one of them. There the scale is the candles' own; the
+       line is drawn where it falls, and off the pane it is pinned to the
+       edge as a chip (moneyChipPlan), whose and at what price. A caller
+       that names no family keeps the line in the scale, as before. */
+    var NOW_V = null, NOW_FAM = '';
+    function nowInScale() {
+        if (NOW_V === null || !isFinite(NOW_V)) return false;
+        return !(SOURCE && SOURCE.stand_in && NOW_FAM && SOURCE.family &&
+                 NOW_FAM !== SOURCE.family);
+    }
     function nowAware(inner) {
         return function (original) {
             var res = inner ? inner(original) : original();
-            if (NOW_V === null || !isFinite(NOW_V)) return res;
+            if (!nowInScale()) return res;
             if (!res || !res.priceRange) {
                 return { priceRange: { minValue: NOW_V, maxValue: NOW_V },
                          margins: res ? res.margins : undefined };
@@ -3919,6 +3934,16 @@ or none.{% endcomment %}
     function chipWidth(text) {
         return Math.ceil(String(text).length * 6.4) + 2 * 7 + 2;
     }
+    /* The price's head for its edge chip (2026-11-19): "eToro ask" out of
+       "eToro ask · 40 s"; a shut market's "closed · eToro ask 21:59 ·
+       opens ..." gives "closed · eToro ask". */
+    function nowHead() {
+        var parts = nowWords().split(' · ');
+        if (parts[0] === 'closed' && parts.length > 1) {
+            return 'closed · ' + parts[1].replace(/\s+(?:[A-Z][a-z]{2} \d{2} [A-Z][a-z]{2} )?\d{2}:\d{2}$/, '');
+        }
+        return parts[0];
+    }
     function moneyChipPlan(toY, w, h, keep) {
         var api = lvApi(), dp = priceDecimals(0);
         keep = (keep || []).filter(function (b) {
@@ -3929,16 +3954,27 @@ or none.{% endcomment %}
         var right = w - laneWidth() - MCHIP_OFF, out = [], edges = { top: [], bottom: [] };
         /* the foot the pinned chips sit on: above the volume's band */
         var foot = volumeShown() ? Math.round(h * VOL_TOP) - 6 : h;
-        function off(label, cls, price) {
+        /* `bare`: no distance (the price now's own chip is at no distance
+           from itself); its dot, as under its line, takes 12 px more. */
+        function off(label, cls, price, bare) {
             if (typeof price !== 'number' || !isFinite(price)) return;
             var y = toY(price);
             if (typeof y !== 'number' || !isFinite(y)) return;
             if (y >= 0 && y <= h) return;
             var up = y < 0;
-            var dist = (now !== null) ? Math.abs(price - now).toFixed(dp) : '';
+            var dist = (!bare && now !== null) ? Math.abs(price - now).toFixed(dp) : '';
             var text = label + ' ' + price.toFixed(dp) + ' ' + (up ? '↑' : '↓') + (dist ? ' ' + dist : '');
             edges[up ? 'top' : 'bottom'].push({ cls: cls, label: label, price: price, text: text,
+                                                 pad: bare ? 12 : 0,
                                                  d: up ? -y : y - h, html: escapeText(label) + ' <span class="m">' + price.toFixed(dp) + '</span> ' + (up ? '↑' : '↓') + (dist ? ' <span class="m">' + dist + '</span>' : '') });
+        }
+        /* THE PRICE OFF THE PANE (2026-11-19): on a stand-in's candles the
+           scale is theirs (nowInScale), and the price can fall off the
+           pane; it is pinned to the edge like his stop, nearest first. */
+        if (NOW_V !== null && isFinite(NOW_V)) {
+            var head = nowHead();
+            off(head || 'Price now', 'sv-mchip--now' + (/closed|delayed|stale/.test(nowWords()) ? ' is-stale' : ''),
+                NOW_V, true);
         }
         if (activeInds.positions) {
             var many = POSITIONS.length > 1;
@@ -3971,7 +4007,7 @@ or none.{% endcomment %}
             var step = MCHIP_H + MCHIP_GAP;
             var next = side === 'top' ? MCHIP_EDGE : foot - MCHIP_EDGE - MCHIP_H;
             edges[side].sort(function (a, b) { return a.d - b.d; }).forEach(function (e) {
-                var cw = chipWidth(e.text), at = null;
+                var cw = chipWidth(e.text) + (e.pad || 0), at = null;
                 var ys = side === 'top' ? [next, next + step] : [next, next - step];
                 if (side === 'top' && under) ys.push(under + MCHIP_AIR, under + MCHIP_AIR + step);
                 ys = ys.filter(function (y) { return side === 'top' ? y >= next && y + MCHIP_H <= h : y <= next && y >= 0; })
@@ -4009,11 +4045,12 @@ or none.{% endcomment %}
                            html: '<span class="sv-world sv-world--' + world + '">' + word + '</span>' });
             });
         }
-        /* the price now, under its line (above it when the foot is taken) */
+        /* the price now, under its line (above it when the foot is taken);
+           off the pane it has its edge chip above */
         var words = nowWords();
         if (words && now !== null) {
             var ny = toY(now);
-            if (typeof ny === 'number' && isFinite(ny)) {
+            if (typeof ny === 'number' && isFinite(ny) && ny >= 0 && ny <= h) {
                 var cw2 = chipWidth(words) + 12;
                 var cand = [ny + 4, ny - 4 - MCHIP_H];
                 for (var i = 0; i < cand.length; i++) {
@@ -6633,9 +6670,13 @@ or none.{% endcomment %}
             var c = levelPalette();
             return { color: c.neutral, label: c.bg2, text: c.ink };
         },
-        setNow: function (v) {
+        /* `fam` (2026-11-19): the price's family ("etoro", "yahoo"); the
+           scale leaves out a price of another family than a stand-in's
+           candles (nowInScale). Not given, the price is in the scale. */
+        setNow: function (v, fam) {
             var n = (v === null || v === undefined) ? null : Number(v);
             NOW_V = (n !== null && isFinite(n)) ? n : null;
+            NOW_FAM = (fam === null || fam === undefined) ? '' : String(fam);
         },
         refresh: function () { if (chart) loadData(currentTf, {background: true}); },
         tick: function (price, q) {

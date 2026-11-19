@@ -755,7 +755,8 @@
   // ── charts ───────────────────────────────────────────────────────────────
 
   /* A chart's handle (templates/_partials/chart_widget.html, svCharts[id]):
-     {symbol, series(), bars(), source(), caption(), setNow(v), tick(v, q)}.
+     {symbol, series(), bars(), source(), caption(), setNow(v, fam),
+     tick(v, q)}.
      The engine draws ONE "now" line on its main series at the price every
      number beside it prints, says whose bars they are when another feed's,
      and hands the price to the chart's own weld. */
@@ -804,9 +805,13 @@
     if (h._svSeries !== series) { h._svSeries = series; h._svLine = null; h._svSig = null; }
     var at = nowMs();
     var v = p ? valueNum(p, '') : null;
-    if (h.setNow && (force || h._svNowV !== v)) {
+    /* the price's family with it (2026-11-19): the chart keeps a price of
+       another family than a stand-in's candles out of their scale */
+    var fam = p ? String(p.fam || '') : '';
+    if (h.setNow && (force || h._svNowV !== v || h._svNowFam !== fam)) {
       h._svNowV = v;
-      try { h.setNow(v); } catch (e) { /* the line still moves */ }
+      h._svNowFam = fam;
+      try { h.setNow(v, fam); } catch (e) { /* the line still moves */ }
     }
     if (v === null) {
       if (h._svLine) {

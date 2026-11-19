@@ -148,6 +148,66 @@ const hourS = nowS - nowS % 3600;
 """
 
 
+#: ANOTHER INSTRUMENT'S CANDLES KEEP THEIR OWN SCALE (2026-11-19). A held
+#: gold short at eToro (its ask 4124.54) over Yahoo GC=F's 1 min candles,
+#: the front-month future, 240 of them between 4149.56 and 4181.21
+#: (invented): the scale is the candles' own, the line is still drawn. The
+#: same candles named eToro's own, or a caller that gives setNow no
+#: family, keep the line in the scale.
+STAND_IN = SCENARIO_HEAD + r"""
+vm.runInContext(M.engine, sandbox, { filename: 'sv-venue.js' });
+const V = sandbox.SVVenue;
+const minS = nowS - nowS % 60;
+(async function () {
+    const R = {};
+    V.ingest(M.gold, M.t0);
+    const bars = [];
+    for (let i = 239; i >= 0; i--) {
+        const k = 239 - i;
+        const mid = 4165.385 + 13.5 * Math.sin(k / 19);
+        bars.push({ time: minS - i * 60, open: mid - 1.2, high: mid + 2.3,
+                    low: mid - 2.3, close: mid + 1.2, volume: 50 });
+    }
+    const SRC_YAHOO = { family: 'yahoo', label: 'Yahoo GC=F',
+                        words: "Yahoo GC=F, the front-month future, not eToro's price",
+                        what: 'Yahoo GC=F, the front-month future', stand_in: 'future',
+                        route: 'etoro', tick_bar: 0.05, notes: [], positions: '',
+                        close_side: 'last' };
+    const STAND = { symbol: 'XAUUSD', timeframe: '1min', bars: bars, source: SRC_YAHOO,
+                    positions: [], signals: [] };
+    PAYLOAD = STAND;
+    vm.runInContext(M.pure, sandbox, { filename: 'pure.js' });
+    vm.runInContext(M.main, sandbox, { filename: 'widget.js' });
+    for (let i = 0; i < 6; i++) await flush();
+    const api = sandbox.svCharts[ID];
+    const own = function () {
+        return { priceRange: { minValue: 4149.56, maxValue: 4181.21 },
+                 margins: { above: 0.1, below: 0.1 } };
+    };
+    const prov = function () { return log.candleOpts && log.candleOpts.autoscaleInfoProvider; };
+    R.standIn = prov() ? prov()(own) : null;
+    R.lines = candle().lines.map(function (l) { return { title: l.o.title, price: l.o.price }; });
+    R.caption = role('now');
+
+    /* The same bars named eToro's own: one instrument, the line in scale. */
+    const etoro = JSON.parse(JSON.stringify(STAND));
+    etoro.source = Object.assign({}, SRC_YAHOO, { family: 'etoro', label: 'eToro',
+                                                  words: "eToro's own candles", what: 'eToro',
+                                                  stand_in: '', close_side: null });
+    await refresh(etoro);
+    R.etoro = prov()(own);
+
+    /* Back on the stand-in: its own scale again; then a caller that names
+       no family (one argument, as before): the line back in the scale. */
+    await refresh(STAND);
+    R.again = prov()(own);
+    api.setNow(4124.54);
+    R.oneArgument = prov()(own);
+    process.stdout.write(JSON.stringify(R));
+})().catch(function (e) { process.stderr.write(String((e && e.stack) || e)); process.exit(1); });
+"""
+
+
 def _payload(**kw):
     base = {"s": "EURUSD", "p": "1.08447", "v": 1.08447, "l": "1.08452",
             "b": "1.08447", "a": "1.08457", "side": "bid", "src": "etoro",
@@ -159,19 +219,23 @@ def _payload(**kw):
     return base
 
 
-def _run(scenario, symbol):
+def _run(scenario, symbol, timeframe="1h", decimals=5):
     import time
     t0 = int(time.time() * 1000)
-    pure, main = _blocks(widget(timeframe="1h", decimals=5, symbol=symbol))
+    pure, main = _blocks(widget(timeframe=timeframe, decimals=decimals,
+                                symbol=symbol))
     eur = _payload(at=t0 - 25000)
     gbp = _payload(s="GBPUSD", p="1.29410", v=1.2941, l="1.29410", b=None,
                    a=None, side="", src="yfinance", fam="yahoo",
                    who="Yahoo GBPUSD=X", auth="reference", basis="quote",
                    at=t0 - 60000, via="")
+    gold = _payload(s="XAUUSD", p="4124.54", v=4124.54, l="4124.30",
+                    b="4124.04", a="4124.54", side="ask", dp=2,
+                    cls="commodity", at=t0 - 40000)
     return _node(WIDGET_PRELUDE + scenario, {
         "pure": pure, "main": main, "payload": {"bars": []},
         "engine": ENGINE.read_text(encoding="utf-8"), "eur": eur,
-        "gbp": gbp, "t0": t0})
+        "gbp": gbp, "gold": gold, "t0": t0})
 
 
 @unittest.skipUnless(NODE, "node is not installed")
@@ -254,3 +318,41 @@ class TheSameFeedWeldTests(SimpleTestCase):
         self.assertEqual(a["n"], 1)
         self.assertEqual(a["last"]["close"], 1.2941)
         self.assertEqual(a["last"]["time"], self.r["weld"]["lastBar"])
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TheStandInScaleTests(SimpleTestCase):
+    """Another instrument's candles keep their own scale (2026-11-19).
+
+    The operator: "il y a un probleme d'affichage des prix sur certaines
+    charts". Measured in the chart-prices reproduction: gold's 1 min
+    candles (Yahoo GC=F, the front-month future) under eToro's ask, 0.6 %
+    lower: the scale stretched to reach the line and the candles filled
+    41 % of the pane. On a stand-in's candles under another feed's price
+    the scale is the candles' own; the line is still drawn where it falls
+    (the measured test pins it to the pane's edge as a chip)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.r = _run(STAND_IN, "XAUUSD", timeframe="1min", decimals=2)
+
+    def test_the_scale_is_the_candles_own(self):
+        self.assertEqual(self.r["standIn"]["priceRange"],
+                         {"minValue": 4149.56, "maxValue": 4181.21})
+
+    def test_the_line_is_still_drawn_and_named(self):
+        self.assertIn({"title": "eToro ask", "price": 4124.54}, self.r["lines"])
+        self.assertTrue(self.r["caption"]["text"].startswith(
+            "bars: Yahoo GC=F, the front-month future (another instrument) · "
+            "price: eToro ask · "), self.r["caption"])
+
+    def test_eToros_own_candles_keep_the_line_in_the_scale(self):
+        self.assertEqual(self.r["etoro"]["priceRange"],
+                         {"minValue": 4124.54, "maxValue": 4181.21})
+
+    def test_a_caller_naming_no_family_keeps_todays_scale(self):
+        self.assertEqual(self.r["again"]["priceRange"],
+                         {"minValue": 4149.56, "maxValue": 4181.21})
+        self.assertEqual(self.r["oneArgument"]["priceRange"],
+                         {"minValue": 4124.54, "maxValue": 4181.21})
