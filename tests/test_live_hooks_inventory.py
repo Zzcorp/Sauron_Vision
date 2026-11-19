@@ -513,16 +513,25 @@ RECORDED = {
     '#instrument-main-chart-signals': {
         'templates/dashboard/instrument_detail.html': 1,
     },
+    # OPEN AND CLOSE MADE EASY (2026-11-15; the operator: "restore the old
+    # system only, of opening and closing icons", then "make it better and
+    # easier to use please"): the rail's two heads fold their sections from
+    # a real button (sv-frame.js, data-rail-fold), where an inline onclick
+    # on each head read the rail and its section by id, twice and once:
+    # '#railSignals' in base.html 8 -> 6 and '#signalsRail' 7 -> 5. Both
+    # ids stand as they were; the rail's door, the dock's SIGNALS, reads
+    # #signalsRail in sv-frame.js, recorded with it.
     '#railSignals': {
-        'templates/base.html': 8,
+        'templates/base.html': 6,
     },
     '#railSignalsBody': {
         'static/js/sv-rail-filters.js': 2,
         'templates/base.html': 10,
     },
     '#signalsRail': {
+        'static/js/sv-frame.js': 1,
         'templates/_tour.html': 1,
-        'templates/base.html': 7,
+        'templates/base.html': 5,
     },
     '#svBannerStack': {
         'static/js/sv-flash.js': 1,

@@ -561,12 +561,18 @@ class TheScriptTests(SimpleTestCase):
         self.assertIn("'(min-width: 769px)'", act)
 
     def test_the_badge_counts_only_council_sitting_and_one_global(self):
+        """Updated deliberately (open and close made easy, 2026-11-15; the
+        operator: "restore the old system only, of opening and closing
+        icons", then "make it better and easier to use please"): the one
+        global also hands the frame the band's own step back (stepBack), so
+        Esc from anywhere steps the Council back as Esc inside it does
+        (the chamber, then open, then shut), one step per press."""
         self.assertIn("kind === 'council_sitting'", self.code)
         for kind in ("gate_reject", "notification", "sauron_answer"):
             self.assertNotIn(kind, self.code, kind)
         globals_ = re.findall(r"window\.([A-Za-z_$][\w$]*)\s*=", self.code)
         self.assertEqual(globals_, ["SVCouncilBand"])
-        self.assertIn("window.SVCouncilBand = { toggle: toggle, widen: widen };",
+        self.assertIn("window.SVCouncilBand = { toggle: toggle, widen: widen, stepBack: stepBack };",
                       self.code)
 
     def test_the_chamber_needs_room_and_a_shut_horde(self):
@@ -1551,15 +1557,30 @@ class TheChromeTests(SimpleTestCase):
         at = self.base.index(row)
         self.assertTrue(measured < at < invented)
         self.assertGreater(at, self.base.index("Agent Calibration"))
-        # The crown is the Council's alone: the row and the dock's Council
-        # button wear its symbol, nothing else does, and no template draws
-        # the glyph any more (the desk v2 board, see the docstring).
+        # The crown is the Council's alone: the row, the dock's Council
+        # button and the band's own head wear its symbol, nothing else does,
+        # and no template draws the glyph any more (the desk v2 board, see
+        # the docstring).
+        #
+        # Updated deliberately (open and close made easy, 2026-11-15; the
+        # operator: "restore the old system only, of opening and closing
+        # icons, their old sizes too for the horde tab too and the council
+        # and the activity", then "make it better and easier to use please"
+        # and "visually easy to understand, with the use of different
+        # colors, bold, italic... etc... elegant icons"): the band's head
+        # wears its door's crown in the Council's violet beside its title
+        # (sv-head-ico in council_band.html), so the crown is drawn in three
+        # places, all of them the Council's, where it was in two.
         uses = [line for p in (BASE / "templates").rglob("*.html")
                 for line in p.read_text(encoding="utf-8").splitlines()
                 if 'href="#svi-council"' in line]
-        self.assertEqual(len(uses), 2, uses)
+        self.assertEqual(len(uses), 3, uses)
         for line in uses:
-            self.assertTrue("council_dashboard" in line or 'data-sv-dock="council"' in line, line)
+            self.assertTrue("council_dashboard" in line or 'data-sv-dock="council"' in line
+                            or 'class="sv-ico sv-head-ico"' in line, line)
+        head = (BASE / "templates" / "_partials" / "council_band.html").read_text(encoding="utf-8")
+        self.assertIn('<header class="cb-head sv-head--council">\n            <svg class="sv-ico sv-head-ico" viewBox="0 0 24 24"'
+                      ' aria-hidden="true" focusable="false"><use href="#svi-council"/></svg>', head)
         count = sum(p.read_text(encoding="utf-8").count("♔")
                     for p in (BASE / "templates").rglob("*.html"))
         self.assertEqual(count, 0)
@@ -2149,6 +2170,13 @@ class ThePolishSheetTests(SimpleTestCase):
                 self.assertNotRegex(body, r"(?<![-\w])padding\s*:", sel)
 
     def test_20_the_head_keeps_its_buttons_on_the_first_row(self):
+        """Updated deliberately (open and close made easy, 2026-11-15; the
+        operator: "restore the old system only, of opening and closing
+        icons", then "make it better and easier to use please" and
+        "visually easy to understand, with the use of different colors"):
+        the head wears its door's colour (sv-head--council: the Council's
+        violet line on top and its crown), so it is found by that class
+        too; its title, widen and close keep their order."""
         rules = dict(self._rules())
         self.assertIn("order: 2;", rules[".cb-head > .cb-chips, .cb-head > .cb-stamp"])
         brk = rules[".cb-head::after"]
@@ -2157,7 +2185,7 @@ class ThePolishSheetTests(SimpleTestCase):
         self.assertIn("margin-left: auto;", rules[".cb-widen"])
         self.assertIn("display: none;", rules[".sv-council-band.chamber .cb-head::after"])
         src = PARTIAL.read_text(encoding="utf-8")
-        head = src[src.index('<header class="cb-head">'):src.index("</header>")]
+        head = src[src.index('<header class="cb-head sv-head--council">'):src.index("</header>")]
         self.assertLess(head.index("svCouncilBandTitle"), head.index("svCouncilBandWiden"))
         self.assertLess(head.index("svCouncilBandWiden"), head.index("svCouncilBandClose"))
 

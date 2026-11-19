@@ -106,7 +106,7 @@ OPEN = {
 #: The light palette (sv-tokens.css, body.light-mode).
 LIGHT = {"--sv-bg-1": "#ffffff", "--sv-bg-2": "#e8ece8", "--sv-bg-3": "#f5f8f5", "--sv-line-3": "#a0c0a0",
          "--sv-ink-1": "#1a2a1a", "--sv-ink-2": "#4a6a4a", "--sv-ink-3": "#8aaa8a", "--sv-eye": "#00994d",
-         "--sv-ai": "#8840d0", "--sv-cat-1": "#1f6fb2"}
+         "--sv-ai": "#8840d0", "--sv-cat-1": "#1f6fb2", "--sv-up": "#00994d", "--sv-down": "#e83030"}
 #: The panels' scripts, as the page loads them (sv-frame.js last), and the
 #: page's own inline scripts the doors need: the lanes' setter and memory,
 #: the menu's memory, Ask Sauron's panel (each found by a line it holds).
@@ -175,6 +175,20 @@ def _book(name):
     client = Client()
     client.force_login(user)
     return client
+
+
+def _plain(name):
+    """A reader who is not staff (the Council and the Activity are staff's
+    panels, so their doors are not drawn for him): ASK SAURON stands where
+    the Council does (§2.2)."""
+    user = get_user_model().objects.create_user(name, password="x")
+    client = Client()
+    client.force_login(user)
+    return client
+
+
+#: The page of a reader who is not staff, by its key among the pages.
+NONSTAFF = "nonstaff"
 
 
 def _pages(client, urls):
@@ -268,11 +282,15 @@ window.__d = (function () {
   function all() { var o = {}; Object.keys(SEL).forEach(function (k) { o[k] = door(k); }); return o; }
   function center(name) { var e = q(SEL[name]); if (!e) return null; var r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
   function frame() {
-    var bar = q('.info-panel-wrap'), hp = q('#svHordePanel'), dock = q('.sv-dock');
+    var bar = q('.info-panel-wrap'), hp = q('#svHordePanel'), dock = q('.sv-dock'), dirs = q('.sv-dock-dirs');
     var store = {};
     try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); store[k] = localStorage.getItem(k); } } catch (e) {}
     return { vw: document.documentElement.clientWidth, vh: innerHeight, bar: bar ? box(bar) : null,
              dock: dock ? box(dock) : null, hordePanel: hp ? box(hp) : null, store: store,
+             dirs: dirs && shown(dirs) ? box(dirs) : null,
+             dirsInk: dirs ? Array.prototype.map.call(dirs.querySelectorAll('.up, .down'), function (s) {
+               var g = s.querySelector('.sv-dir-g');
+               return { side: s.className, count: getComputedStyle(s).color, glyph: g ? getComputedStyle(g).color : null }; }) : [],
              side: box(q('.sidebar')), mini: !!q('.sidebar.mini'),
              barStep: bar ? bar.getAttribute('data-sv-bar-step') : null,
              hordeText: q('#svHordeCell') ? q('#svHordeCell').innerText.replace(/\s+/g, ' ').trim() : null,
@@ -303,7 +321,23 @@ window.__d = (function () {
                glyphs: glyphs(h).replace(/\d+/g, '') };
     });
   }
-  return { door: door, all: all, center: center, frame: frame, isOpen: isOpen, activeIs: activeIs, closes: closes, railHeads: railHeads };
+  /* A door's tip (§2.8): shown or not, where, and what it says. */
+  function tip(name) {
+    var e = q(SEL[name]);
+    if (!e) return null;
+    var t = e.querySelector('.sv-door-tip');
+    if (!t) return { door: box(e), tip: null, shown: false };
+    var cs = getComputedStyle(t), nm = t.querySelector('.sv-door-tip-name'), k = t.querySelector('kbd');
+    var h = t.querySelector('.sv-door-tip-hint'), hcs = h ? getComputedStyle(h) : null;
+    return { door: box(e), tip: box(t), shown: cs.visibility === 'visible' && parseFloat(cs.opacity) > 0.99,
+             name: nm ? nm.textContent.replace(/\s+/g, ' ').trim() : '', nameWeight: nm ? getComputedStyle(nm).fontWeight : null,
+             nameTT: nm ? getComputedStyle(nm).textTransform : null, key: k ? k.textContent.trim() : null,
+             hint: h ? h.textContent.replace(/\s+/g, ' ').trim() : '', hintStyle: hcs ? hcs.fontStyle : null,
+             hintSize: hcs ? hcs.fontSize : null, focusVisible: e.matches(':focus-visible'),
+             oldTab: Array.prototype.map.call(document.querySelectorAll('#svHordeTab .hd-tab-seats, #svHordeTab .hd-tab-r, #svHordeTab .hd-tab-risk'),
+               function (s) { return s.hidden ? '' : s.textContent.replace(/\s+/g, ' ').trim(); }).filter(Boolean) };
+  }
+  return { door: door, all: all, center: center, frame: frame, isOpen: isOpen, activeIs: activeIs, closes: closes, railHeads: railHeads, tip: tip };
 })();
 0
 """.replace("__SEL__", json.dumps(SEL)).replace(
@@ -407,9 +441,11 @@ class DoorsMeasuredTests(TestCase):
     def setUpTestData(cls):
         client = _book("doors")
         pages = _pages(client, (POSITIONS, PORTFOLIO))
+        pages[NONSTAFF] = _pages(_plain("doors_plain"), (POSITIONS,))[POSITIONS]
         b = _Browser(pages, "sv-doors-")
         cls.rest, cls.hover, cls.lit, cls.away, cls.clicks, cls.cols = {}, {}, {}, {}, {}, {}
         cls.horde, cls.esc, cls.tabs, cls.follow, cls.closes, cls.heads, cls.motion = {}, {}, {}, {}, {}, {}, {}
+        cls.tips, cls.plain = {}, {}
         try:
             for width, height in WIDTHS:
                 sid = b.tab(width, height)
@@ -541,6 +577,41 @@ class DoorsMeasuredTests(TestCase):
                     cls.tabs[width]["rail"] = json.loads(b.js(sid, TAB_ORDER))
                     cls.tabs[width]["heads"] = json.loads(b.js(sid, "JSON.stringify(__d.railHeads())"))
                     _click(b, sid, "signals", 450)
+                    # ── the tips: a name, a key, one italic line ──
+                    _fresh(b, sid, POSITIONS)
+                    # The Horde's tab painted as sv-horde.js paints it from
+                    # its board (every read is held here): the spec's
+                    # invented figures.
+                    b.js(sid, "(function () { var t = document.getElementById('svHordeTab'); if (!t) return 0;"
+                              " var r = t.querySelector('.hd-tab-r'), k = t.querySelector('.hd-tab-risk');"
+                              " if (r) { r.textContent = '+1.60R'; r.hidden = false; }"
+                              " if (k) { k.textContent = 'risk 1.8% of 2.5%'; k.hidden = false; } return 0; })()")
+                    tips = {}
+                    for name in ("signals", "council", "activity", "ask", "horde"):
+                        c = json.loads(b.js(sid, "JSON.stringify(__d.center(%s))" % json.dumps(name)))
+                        if c:
+                            _mouse(b, sid, c[0], c[1])
+                            _wait(b, sid, 750)
+                        tips[name] = json.loads(b.js(sid, "JSON.stringify(__d.tip(%s))" % json.dumps(name)))
+                        _mouse(b, sid, *AWAY)
+                        _wait(b, sid, 250)
+                    # The census's forced pseudo-states never draw one.
+                    for name, states in (("council", ("hover",)), ("horde", ("focus-visible",))):
+                        b.force(sid, SEL[name], states)
+                        _wait(b, sid, 750)
+                        tips["forced_" + name] = json.loads(b.js(sid, "JSON.stringify(__d.tip(%s))" % json.dumps(name)))
+                        b.force(sid, SEL[name], ())
+                    # The keyboard: Tab onto a door shows its tip at once.
+                    b.js(sid, "document.querySelector(%s).focus(); 0" % json.dumps(SEL["signals"]))
+                    _key(b, sid, "Tab", "Tab", 9)
+                    _wait(b, sid, 300)
+                    tips["focus"] = json.loads(b.js(sid, "JSON.stringify(__d.tip('council'))"))
+                    cls.tips[width] = tips
+                    # ── a reader who is not staff: ASK SAURON where the Council stands ──
+                    _fresh(b, sid, NONSTAFF)
+                    cls.plain[width] = {"ask": json.loads(b.js(sid, "JSON.stringify(__d.door('ask'))")),
+                                        "council": json.loads(b.js(sid, "JSON.stringify(__d.door('council'))")),
+                                        "frame": json.loads(b.js(sid, "JSON.stringify(__d.frame())"))}
                     # ── choices follow to the next page ──
                     _fresh(b, sid, POSITIONS)
                     _click(b, sid, "news")
@@ -611,6 +682,14 @@ class DoorsMeasuredTests(TestCase):
                     b = d["box"]
                     for k, v in zip(("x", "y", "w", "h"), want):
                         self.assertAlmostEqual(b[k], v, delta=1, msg="%s %s: %r" % (name, k, b))
+            with self.subTest(width=width, theme=theme, door="dirs"):
+                # SIGNALS' long and short split, under its tab: ▲3 ▼2 at
+                # y 204-232, centred on the dock's tabs.
+                dirs = fr["dirs"]
+                self.assertIsNotNone(dirs)
+                self.assertAlmostEqual(dirs["y"], 204, delta=1, msg=dirs)
+                self.assertAlmostEqual(dirs["b"], 232, delta=1, msg=dirs)
+                self.assertAlmostEqual(dirs["x"] + dirs["w"] / 2, vw - 19.5, delta=1, msg=dirs)
             with self.subTest(width=width, theme=theme, door="horde"):
                 h = got["horde"]
                 self.assertIsNotNone(h)
@@ -649,6 +728,56 @@ class DoorsMeasuredTests(TestCase):
                 with self.subTest(at=key, head=h):
                     self.assertIsNotNone(h["chev"])
                     self.assertEqual((h["chev"]["box"]["w"], h["chev"]["box"]["h"]), (14, 14))
+        # A reader who is not staff has no Council or Activity door: ASK
+        # SAURON stands at y 248, where the Council's does.
+        self.assertEqual(sorted(self.plain), [1280, 1440])
+        for width, p in sorted(self.plain.items()):
+            with self.subTest(width=width, reader="not staff"):
+                self.assertIsNone(p["council"])
+                self.assertIsNotNone(p["ask"])
+                for k, v in zip(("x", "y", "w", "h"), (p["frame"]["vw"] - 33.5, 248, 28, 136)):
+                    self.assertAlmostEqual(p["ask"]["box"][k], v, delta=1, msg=(k, p["ask"]["box"]))
+
+    def test_tips_name_key_and_one_italic_line(self):
+        """§2.8: after 400 ms of hover a door's tip says its name in bold
+        capitals and its key, then one line in italics; to the left of a
+        dock's tab, centred on it, and above THE HORDE, whose line is the
+        old tab's figures word for word. The keyboard shows it at once; the
+        census's forced :hover and :focus-visible never draw one."""
+        names = {"signals": "Signals", "council": "Council", "activity": "Activity", "ask": "Ask Sauron",
+                 "horde": "The Horde"}
+        keys = {"council": "c", "ask": "Ctrl K", "horde": "h"}
+        self.assertEqual(sorted(self.tips), [1280, 1440])
+        for width, tips in sorted(self.tips.items()):
+            for name in names:
+                with self.subTest(width=width, door=name):
+                    t = tips[name]
+                    self.assertIsNotNone(t)
+                    self.assertIsNotNone(t["tip"], "%s has no tip" % name)
+                    self.assertTrue(t["shown"], t)
+                    self.assertTrue(t["name"].startswith(names[name]), t)
+                    self.assertEqual((t["nameWeight"], t["nameTT"]), ("700", "uppercase"), t)
+                    self.assertEqual(t["key"], keys.get(name), t)
+                    self.assertTrue(t["hint"], t)
+                    self.assertEqual((t["hintStyle"], t["hintSize"]), ("italic", "12px"), t)
+                    tip, door = t["tip"], t["door"]
+                    if name == "horde":
+                        self.assertLessEqual(tip["b"], door["y"] - 6, t)
+                        self.assertEqual(t["hint"], " · ".join(t["oldTab"]), t)
+                        self.assertEqual(t["hint"], "5 seats · +1.60R · risk 1.8% of 2.5%", t)
+                    else:
+                        self.assertLessEqual(tip["r"], door["x"] - 8, t)
+                        self.assertAlmostEqual(tip["y"] + tip["h"] / 2, door["y"] + door["h"] / 2, delta=1, msg=t)
+            for name in ("council", "horde"):
+                with self.subTest(width=width, forced=name):
+                    f = tips["forced_" + name]
+                    self.assertIsNotNone(f)
+                    self.assertIsNotNone(f["tip"], f)
+                    self.assertFalse(f["shown"], f)
+            with self.subTest(width=width, keyboard=True):
+                f = tips["focus"]
+                self.assertTrue(f["focusVisible"], f)
+                self.assertTrue(f["shown"], f)
 
     def test_one_click_opens_one_click_closes_in_place(self):
         """A real click opens the panel; the door stays where it was, on
@@ -814,6 +943,14 @@ class DoorsMeasuredTests(TestCase):
                     lit = self.lit[(width, theme)][name]
                     ico = [i for i in lit["icons"] if "sv-door-ico" in i["cls"]]
                     self.assertTrue(_near(ico[0]["stroke"], self.pal(theme, token)), (ico[0], token))
+            with self.subTest(width=width, theme=theme, door="dirs"):
+                # SIGNALS' split: each side's glyph in its colour, its count
+                # in ink, never the colour alone.
+                ink = got["frame"]["dirsInk"]
+                self.assertEqual([i["side"] for i in ink], ["up", "down"], ink)
+                for i in ink:
+                    self.assertTrue(_near(i["glyph"], self.pal(theme, "--sv-" + i["side"])), i)
+                    self.assertTrue(_near(i["count"], self.pal(theme, "--sv-ink-1")), i)
             eye = self.pal(theme, "--sv-eye")
             for name, d in got.items():
                 if name in ("eye", "frame") or not d:
