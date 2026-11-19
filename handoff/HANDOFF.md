@@ -1,6 +1,6 @@
 # Sauron Vision — handoff for the next Claude session
 
-Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-19 ~13:05 UTC, by the session working since 2026-10-31. A weekly usage limit stopped this session from 2026-11-02 05:39 to 2026-11-04 20:00 UTC; the unfinished work was saved on `claude/wip-*` branches (§3).
+Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-19 ~13:25 UTC (PAUSED), by the session working since 2026-10-31. A weekly usage limit stopped this session from 2026-11-02 05:39 to 2026-11-04 20:00 UTC; the unfinished work was saved on `claude/wip-*` branches (§3).
 
 Nothing private lives here. The repository is PUBLIC: it was private only from 2026-11-05 to 2026-11-06, and everything pushed to any branch, this one included, is public. The operator's account figures, positions (which instruments he holds or traded, their sizes, prices and P&L), personal or family matters, and any partner or investor document never enter git: not in code, tests, commit messages, PR bodies or this file. Describe a case generically ("a live forex ticket", "one of his eToro rows"). Before opening a PR, scan the branch's commit messages and added lines for such data. Those live in the operator's own claude.ai documents and in files he keeps.
 
@@ -14,6 +14,7 @@ Nothing private lives here. The repository is PUBLIC: it was private only from 2
    - Run `python manage.py collectstatic --noinput` once per worktree.
    - `core/wall_facts.py` `TESTS_GREEN` must equal the test count discovered from a checkout of the index. Recount it when you commit; never edit it by hand.
 4. **Talk to the operator in French.** He reads French and is not a developer. Platform text, code, comments and commit messages stay English.
+5. **Ask for the private pack.** The operator keeps `Sauron_pause_pack_PRIVE_2026-11-19.zip` (README inside). It holds the privacy scan with its PRIVATE pattern list: run it before every push and PR (`privacy_scan.sh <worktree> <range>`). It also holds the commit/merge tools that recount `TESTS_GREEN`, the CI fonts config for the measured Chromium tests, and the working notes. Copy it to your scratchpad. NEVER put it in git.
 
 ## 2. Standing orders and house rules (non-private)
 
@@ -48,7 +49,54 @@ Nothing private lives here. The repository is PUBLIC: it was private only from 2
 
 ## 3. Open lines of work
 
-**Status at 2026-11-19 ~11:45 UTC (this block wins over everything below where they differ)**
+**PAUSED — 2026-11-19 ~13:20 UTC (this block wins over everything below)**
+
+The operator paused ALL building on Sauron 1. His words: "pause globale des constructions right now", then "do it". Next comes V2, in a NEW discussion. First the thinking: the architecture, the components and the gears of "UI + AI + human automation in trading on the financial markets". Then, very quickly, fork the current code (or a part of it) into a V2 that is more efficient and better designed. V2 has personal access for each team member and for the "Master" (the operator). Later perhaps an agora: visitor access, and "semi-members" who may vote if they pay.
+
+The operator holds a PRIVATE pack: `Sauron_pause_pack_PRIVE_2026-11-19.zip`. It contains the V2 brief in his words, the privacy scan with its private pattern list, the commit and merge tools, the CI fonts config, and the working notes. Ask him to attach it. It never enters git.
+
+What was stopped, and where each line stands. Nothing is lost; nothing below is merged.
+- **Weekend bars and guard.**
+  - `claude/weekend-bars` holds `cbb0c2a`: F1, F2 and F4; F4 is the guard behind the PIN switch `care_holds_while_shut`, OFF on arrival. Three review lenses ran.
+  - The fix stage had merged main (`ef9efa5`) and committed the review fixes (`6f82b43`). It was stopped before its runs and its push. Saved on `claude/wip-weekend-bars-reviewfix` (`6f82b43`), NOT verified.
+  - No PR was opened, so nothing is deployed before Friday 2026-11-20 21:30 UTC. Sauron 1 runs this weekend as on the last ones.
+  - To resume: verify `6f82b43` (the targeted suites and the old-design guard), fast-forward `claude/weekend-bars`, open the PR, run CI, merge. Then write the deploy + prune (dry run, then `--apply`) + switch-on (PIN) sheet.
+- **Chart prices.**
+  - `claude/chart-prices` holds `fda79ee`: P1-P5, display only. The two review lenses ran.
+  - The fix-and-PR stage committed `714b58e` and `34e293a` and was stopped before its push and its PR. Saved on `claude/wip-chart-prices-reviewfix` (`34e293a`), NOT verified.
+  - The French note and the read-only command were SENT ~12:45 UTC; his output is awaited. Their content is in the private pack: they name his instrument.
+  - Promised in that note:
+    - the scale follows eToro's 1h-4h candles when the line is Yahoo's;
+    - find how to draw the D and W views from eToro;
+    - S1, an eToro 15m read for held stand-ins behind a switch OFF on arrival with a PIN, only if his output shows the rows missing or old.
+- **All-week display ("open 24/7 at eToro" on weekends).** Saved on `claude/wip-weekend-247-display`: `a3423da` is the tests first, and `0bbe074` is the untested build in progress (a helper `market_data/all_week_display.py`). It stacks on `cbb0c2a`.
+- **Open/close, PR #121.**
+  - The PR is open; its head `3b2bdec` has CI RED from a REAL regression of fix round 1. `tests.test_marquee` pinned card: Esc makes the headband strip restart at 0.
+  - Bisect: it takes both 3b2bdec's `static/js/sv-frame.js` and its `static/css/sv-frame.css`; `304efaf` and `f3f6637` pass. Full brief in `handoff/notes/ci_marquee.md`.
+  - The one CI re-run is spent. Activity on the PR is unsubscribed.
+  - The round-1 re-review and the regression fixer were stopped; the fixer had not started its fix.
+- **Orcs O2c.** `claude/orcs2c` holds `846f5a8`, commits 1-3. Commit 4 (captains) was being built; nothing of it was saved, and its worktree was clean.
+- **Not started.**
+  - Task #68 (S3, a possible money defect): the care's levels read `load_ohlcv(source=None)`, which may mix Yahoo future bars with eToro bars after a refused eToro pass. Read-only first.
+  - The rest of §3 below.
+- **Disabled scheduled tasks.** The building check-in. "Ask for feed_harms after 7 days": ask him for that output in the new discussion; it serves the V2 inventory.
+
+V2 guidance already given to him (generic; the private details are in the pack):
+- a new name (Tolkien marks are defended);
+- a real company with a shareholders' agreement, set up with a lawyer and an accountant;
+- a PRIVATE repository;
+- build on V1's foundations, designed first:
+  1. an inventory with numbers (what he uses, what made or lost money net of fees, what protects the money);
+  2. a written design he validates;
+  3. port only proven pieces with their tests;
+  4. run V2 on demo beside V1;
+  5. switch piece by piece;
+- avoid the second system that grows as big as the first;
+- keep V1 maintained while V2 is built;
+- roles and permissions from day one, with money powers only to the Master behind his PIN, every action logged;
+- the agora's paid votes are fine on the product and the community; votes on trades, or pooled money, are regulated (AMF).
+
+**Status at 2026-11-19 ~11:45 UTC (older)**
 - main `c89bf8b`. The machine is overloaded (load ~32 on 4 CPUs: five workflows run suites and Chromium at once). Launch nothing heavy until one finishes.
 - Weekend: `claude/weekend-bars` at `cbb0c2a` = F1 (writer drops candles with no open time; eToro's all-week ids 17/18/19/22/27/28 keep their weekend candles) + F2 (prune command, dry run first) + F4 (the guard: nothing sent to eToro for a live row while its market is shut, PIN switch OFF on arrival). Run `wf_217d0a6e-46a`: Review (two of three lenses done), then Fix. Then merge main with `merge_recount.sh`, privacy scan, PR (body via MCP), subscribe, CI, merge; then the verified French deploy + prune + switch-on sheet before Friday 2026-11-20 21:30 UTC.
 - 24/7 display: run `wf_c1d45443-15b` building on `claude/weekend-247-display` (from `cbb0c2a`); its PR opens after the weekend PR merges (`scratchpad/display247/pr_body.md`).
