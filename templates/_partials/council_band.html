@@ -32,13 +32,15 @@ Included by base.html for staff only.
     </button>
     <div class="sr-only" id="svCouncilBandSay" aria-live="polite"></div>
     <div class="sv-council-band-panel" id="svCouncilBandPanel" role="region" aria-labelledby="svCouncilBandTitle" inert>
-        <header class="cb-head">
+        {# Its head wears its door's colour (2026-11-15): the Council's violet line on top and its icon; widen and close drawn from the sprite, never typed. #}
+        <header class="cb-head sv-head--council">
+            <svg class="sv-ico sv-head-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-council"/></svg>
             <span class="cb-dot" id="svCouncilBandDot" aria-hidden="true"></span>
             <h2 class="cb-title" id="svCouncilBandTitle" tabindex="-1">THE COUNCIL</h2>
             <span class="cb-chips" id="svCouncilBandChips"></span>
             <span class="cb-stamp" id="svCouncilBandStamp"></span>
-            <button type="button" class="cb-icon cb-widen" id="svCouncilBandWiden" aria-pressed="false" aria-label="Widen the council (Shift+C)" title="Widen the council (Shift+C)">&#x21D4;</button>
-            <button type="button" class="cb-icon cb-close" id="svCouncilBandClose" aria-label="Close the council (Esc)" title="Close the council (Esc)">&times;</button>
+            <button type="button" class="cb-icon cb-widen sv-x" id="svCouncilBandWiden" aria-pressed="false" aria-label="Widen the council (Shift+C)" title="Widen the council (Shift+C)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-widen"/></svg></button>
+            <button type="button" class="cb-icon cb-close sv-x" id="svCouncilBandClose" aria-label="Close the council (Esc)" title="Close the council (Esc)"><svg class="sv-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#svi-close"/></svg></button>
         </header>
         <div class="cb-body" id="svCouncilBandBody">
             <div class="cb-room" id="svCouncilBandRoom">

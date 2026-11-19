@@ -44,6 +44,7 @@
     stroke-linecap: round; stroke-linejoin: round; vertical-align: middle;
 }
 .sv-ico-sm, .sv-ico-fold { width: 14px; height: 14px; }
+.sv-ico-x12 { width: 12px; height: 12px; }
 .nav-link .icon .sv-ico { width: 16px; height: 16px; }
 .sv-pn-icon .sv-ico { width: 18px; height: 18px; }
 .um-icon .sv-ico { width: 14px; height: 14px; }
@@ -72,8 +73,9 @@
 .sv-skip:focus, .sv-skip:focus-visible { transform: none; }
 .sv-skip-to { display: block; height: 0; outline: none; }
 
-/* The frame's own pieces exist from 769 px up; the phone keeps its tier. */
-.sv-dock, .sv-band-sep, .sv-cmd, .sv-side-fold, .nav-keys, .sv-tower { display: none; }
+/* The frame's own pieces exist from 769 px up; the phone keeps its tier
+   (its own door to the price lane, its own chips to bring a lane back). */
+.sv-dock, .sv-band-sep, .sv-cmd, .sv-band-doors, .sv-fold-row, .sv-eye-slot, .nav-keys, .sv-tower { display: none; }
 .nav-fold { all: unset; display: block; cursor: default; }
 .nav-fold .sv-ico-fold { display: none; }
 
@@ -231,19 +233,8 @@ html body .sidebar-brand[data-sv-eye="locked"] .sv-brand-shut { display: inline;
 html body .sidebar.mini .sidebar-brand { justify-content: center; padding: 0; }
 html body .sidebar.mini .sidebar-brand .brand-text { display: none; }
 
-html body .sv-side-fold {
-    position: absolute; right: 8px; top: 8px; width: 28px; height: 28px; padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    border: 0; border-radius: var(--sv-radius-ctl); background: transparent;
-    color: var(--sv-ink-3); cursor: pointer; opacity: 0;
-    transition: opacity var(--sv-dur-hover) var(--sv-ease), color var(--sv-dur-hover) var(--sv-ease);
-}
-html body .sidebar:hover .sv-side-fold, html body .sv-side-fold:focus-visible { opacity: 1; }
-html body .sv-side-fold:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
-html body .sv-side-fold:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
-/* Folded, the whole head is the door back: the Eye unfolds the menu. */
-html body .sidebar.mini .sv-side-fold { inset: 0; width: auto; height: auto; opacity: 0; border-radius: 0; background: transparent; }
-html body .sidebar.mini .sv-side-fold .sv-ico { display: none; }
+/* The menu folds from the row at its foot (THE DOORS, below), never from an
+   unseen button in its head (2026-11-15). */
 
 html body .sidebar-nav { flex: 0 0 auto; padding: 6px 0 0; }
 /* A group's title keeps the board's 8 px from its fold chevron (the desk
@@ -266,7 +257,7 @@ html body .sidebar .nav-fold {
     border: 0; background: transparent; color: inherit; cursor: pointer;
     font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; white-space: nowrap;
 }
-html body .sidebar .nav-fold:hover { color: var(--sv-ink-2); }
+html body .sidebar .nav-fold:hover { color: var(--sv-ink-2); background: var(--sv-bg-3); }
 html body .sidebar .nav-fold:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
 .sidebar .nav-fold-name { flex: 0 1 auto; min-width: 0; white-space: normal; line-height: 13px; text-wrap: balance; }
 html body .sidebar .nav-fold .sv-ico-fold { display: inline-block; color: var(--sv-ink-3); transition: transform var(--sv-dur-hover) var(--sv-ease); }
@@ -327,13 +318,18 @@ html body .sidebar.mini .nav-link .label-text {
 html body .sidebar.mini .nav-link .nav-keys { display: none !important; }
 html body .sidebar.mini .nav-link .icon { width: 16px; }
 
-/* The tower: the empty foot only, ink at 7.5 %, its Eye a faint ember. */
+/* The tower: the empty foot only, ink at 7.5 %, its Eye a faint ember.
+   It stands on the menu's fold row (open and close made easy, 2026-11-15)
+   and gives way to it: where the foot is short it draws closer to the last
+   row, then sinks behind its own top edge, so the menu never scrolls for
+   it and the row never covers it (at 1440 x 900 the 32 px row would have
+   overlapped its foot by 10 px). */
 html body .sv-tower {
-    flex: none; margin-top: auto; padding: 16px 0 6px;
-    display: flex; justify-content: center; pointer-events: none;
+    flex: 0 1 auto; min-height: 0; overflow: hidden; margin-top: auto; padding: 0 0 6px;
+    display: flex; justify-content: center; align-items: flex-end; pointer-events: none;
     color: var(--sv-ink-2);
 }
-.sv-tower svg { display: block; width: 30px; height: 70px; }
+.sv-tower svg { display: block; flex: none; width: 30px; height: 70px; margin-top: 16px; }
 .sv-tower .sv-tower-eye { fill: var(--sv-eye); fill-opacity: .35; }
 html body .sidebar.mini .sv-tower svg { width: 22px; height: 52px; }
 html body[data-sv-ambience="off"] .sv-tower,
@@ -482,25 +478,23 @@ html body .sv-band .ticker-bar {
     transform: none; opacity: 1; transition: none; overflow: hidden;
 }
 html body .sv-band .data-headband { flex: 1.75 1 0; }
-html body .sv-band .ticker-bar { flex: 1 1 0; }
+/* The news keeps the width it had before the band's doors (2026-11-15): the
+   doors' 177 px (two 88 px doors and their rule) come out of the prices
+   lane, whose quotes are short, not out of the headlines. A basis of
+   177 / 1.75 px puts the news at (band - its label) / 2.75 at every width,
+   as on 99704f4; split 1.75 : 1 the doors left the news 350 px at 1440,
+   too few for a 353 px headline held whole under the keyboard. */
+html body .sv-band .ticker-bar { flex: 1 1 calc(177px / 1.75); }
 /* Each lane's ends fade over 12 px, as the board's .lane mask draws them,
    so no glyph is ever cut in two at an edge: the lane's own items fade into
    the band's ground, and nothing is painted over them (a painted fade is a
-   gradient the old-design guard counts, B0). While a lane's collapse button
-   shows (hover, focus), the mask keeps the button's own 24 px box whole, so
-   the button never fades with the items it sits over. */
+   gradient the old-design guard counts, B0). No door stands inside a lane
+   any more (the lanes' doors are at the band's end, 2026-11-15), so the
+   fade is the whole mask, hovered or not. */
 html body .sv-band .data-headband,
 html body .sv-band .ticker-bar {
     -webkit-mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
     mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
-}
-html body .sv-band .data-headband:is(:hover, :focus-within),
-html body .sv-band .ticker-bar:is(:hover, :focus-within) {
-    -webkit-mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent), linear-gradient(black, black);
-    mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent), linear-gradient(black, black);
-    -webkit-mask-size: 100% 100%, 24px 24px; mask-size: 100% 100%, 24px 24px;
-    -webkit-mask-position: 0 0, right 4px top 4px; mask-position: 0 0, right 4px top 4px;
-    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
 }
 html body .sv-band .data-headband.collapsed,
 html body .sv-band .ticker-bar.collapsed { display: none; }
@@ -550,35 +544,13 @@ html body .sv-band .ticker-item .t-time { font-family: var(--sv-font-mono); font
    was a blue of no token, under the lane's own News label). */
 html body .sv-band .ticker-item[data-type="empty"] { color: var(--sv-ink-3) !important; }
 html body .sv-band .ticker-item[data-type="empty"] .t-badge { display: none; }
-/* Each lane's collapse button: quiet, at its own right end. */
-html body .sv-band .hb-collapse-btn {
-    position: absolute; top: 4px; right: 4px; bottom: auto; z-index: 2;
-    width: 24px; height: 24px; padding: 4px; box-sizing: border-box;
-    display: flex; align-items: center; justify-content: center;
-    border: 0; border-radius: var(--sv-radius-ctl); background: var(--sv-bg-1); color: var(--sv-ink-3);
-    box-shadow: none; opacity: 0; transition: opacity var(--sv-dur-hover) var(--sv-ease);
-}
-html body .sv-band .data-headband:is(:hover, :focus-within) .hb-collapse-btn,
-html body .sv-band .ticker-bar:is(:hover, :focus-within) .hb-collapse-btn { opacity: 1; }
-html body .sv-band .hb-collapse-btn:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
-html body .sv-band .hb-collapse-btn svg { width: 14px; height: 14px; }
-/* A collapsed lane comes back from a chip that names it ("News",
-   "Prices"), in its own slot at the band's right end: the lane left open
-   stops short of it, so the chip never sits over moving prices. With both
-   lanes shut the two chips stand at the band's start. */
-html body .hb-restore-tab {
-    position: fixed; top: calc(var(--sv-frame-top) + 4px) !important; right: 8px !important; left: auto !important; z-index: calc(var(--z-chrome) + 1);
-    width: 76px; height: 24px !important; padding: 0 8px; gap: 6px; box-sizing: border-box; justify-content: center;
-    align-items: center; border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
-    background: var(--sv-bg-1); color: var(--sv-ink-2); box-shadow: none;
-    font-family: var(--sv-font-sans); font-size: 11px;
-}
-html body .hb-restore-tab:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-line-3); }
-html body .hb-restore-tab svg { width: 14px; height: 14px; flex: none; }
-html body:is(.hb-ticker-hidden, .hb-data-hidden) .sv-band { padding-right: 92px; }
-html body.hb-ticker-hidden.hb-data-hidden .sv-band { padding-right: 0; }
-html body.hb-ticker-hidden.hb-data-hidden .hb-restore-tab.data { left: calc(var(--sidebar-width) + 16px) !important; right: auto !important; }
-html body.hb-ticker-hidden.hb-data-hidden .hb-restore-tab.ticker { left: calc(var(--sidebar-width) + 100px) !important; right: auto !important; }
+/* The lanes' doors (THE DOORS, below) stand together at the band's right
+   end, in the same place whatever is shown: a lane put away leaves its
+   room to the other, and with both away the 32 px row stays, so nothing
+   under it jumps. The phone's own door in the price lane and the phone's
+   chips are the phone's only. */
+html body .sv-band .sv-phone-lane-door,
+html body .hb-restore-tab.hb-restore-tab { display: none !important; }
 
 /* ── The status bar ───────────────────────────────────────────────────── */
 html body .info-panel-wrap {
@@ -715,7 +687,18 @@ html body .gollum-fab {
     border: 0; border-right: 1px solid var(--sv-line-1); border-radius: 0;
     background: var(--sv-bg-2); box-shadow: none; filter: none; transform: none; animation: none;
 }
-html body .gollum-fab:hover { background: var(--sv-bg-3); transform: none; }
+/* His door (2026-11-15): hovered or focused, the bar's own hover, never
+   the old gold edge and glow; open, his cell is lit (bg-3, the Eye's line
+   on top); the ring inset, clear of the window's edges. */
+html body .gollum-fab:hover, html body .gollum-fab:focus-visible { background: var(--sv-bg-3); border-color: var(--sv-line-1); box-shadow: none; transform: none; }
+/* His motion is the doors' 140 ms (the review of the doors, 2026-11-19, m4:
+   the old orb's 250 ms stayed), and stops with theirs (THE DOORS, motion). */
+html body .gollum-fab {
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), border-color var(--sv-dur-hover) var(--sv-ease),
+                box-shadow var(--sv-dur-hover) var(--sv-ease);
+}
+html body .gollum-fab[aria-expanded="true"], html body .gollum-fab.is-open { background: var(--sv-bg-3); border-color: var(--sv-line-1); box-shadow: inset 0 2px 0 var(--sv-eye); }
+html body .gollum-fab:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
 html body .gollum-fab .gollum-face { width: 24px; height: 24px; filter: none; }
 html body .gollum-fab .gl-ring { display: none; }
 html body .gollum-fab .gollum-count {
@@ -727,9 +710,12 @@ html body .gollum-fab .gollum-count {
 /* His whisper stays in the menu's column, over its empty foot, never over
    the page; with the menu folded to its icons there is no room for it, and
    his count dot says it alone. */
-html body .gollum-bubble { left: 8px !important; right: auto !important; bottom: calc(var(--sv-frame-foot) + 8px) !important; top: auto !important; max-width: calc(var(--sidebar-width) - 16px); box-sizing: border-box; }
+/* Both stand 32 px higher than the bar's top since the menu's fold row
+   (THE DOORS) sits at the menu's foot (2026-11-15). */
+html body .gollum-bubble { left: 8px !important; right: auto !important; bottom: calc(var(--sv-frame-foot) + 40px) !important; top: auto !important; max-width: calc(var(--sidebar-width) - 16px); box-sizing: border-box; }
 html body:has(.sidebar.mini) .gollum-bubble { display: none !important; }
-html body .gollum-dialog { left: 8px !important; right: auto !important; bottom: calc(var(--sv-frame-foot) + 8px) !important; top: auto !important; }
+html body .gollum-dialog { left: 8px !important; right: auto !important; bottom: calc(var(--sv-frame-foot) + 40px) !important; top: auto !important; }
+html body .gollum-dialog .gl-close .sv-ico { width: 12px; height: 12px; }
 
 /* The Eye, docked right: Ask Sauron, a 26 px orb, calm. */
 html body .se-eye-fab:not(.open) {
@@ -750,10 +736,22 @@ html body .se-eye-fab:not(.open) .se-fab-eye,
 html body .se-eye-fab:not(.open) .se-fab-label,
 html body .se-eye-fab:not(.open) .se-fab-unread-ring { display: none; }
 html body .se-eye-fab:not(.open):hover { box-shadow: inset 0 0 0 1px var(--sv-eye); transform: none; }
+/* The Eye moves as the doors do, 140 ms, and stops with them (m4). */
+html body .se-eye-fab:not(.open) {
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), box-shadow var(--sv-dur-hover) var(--sv-ease);
+}
 html body .se-eye-fab:not(.open):focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
 html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .se-eye-fab:not(.open) {
     box-shadow: inset 0 0 0 1px rgba(0,232,104,.55), 0 0 10px rgba(0,232,104,.28);
 }
+/* While Ask Sauron is open the Eye stays where it is and closes what it
+   opened (2026-11-15: it used to vanish): drawn still, a bg-3 disc in the
+   Eye's 1 px ring, no sphere, no core, no glow, so its light is never
+   counted twice; its cell in the bar is lit, as its tab in the dock is. */
+html body:has(.se-chat-panel.open) .se-eye-fab.se-eye-fab:not(.open) { background: var(--sv-bg-3); box-shadow: inset 0 0 0 1px var(--sv-eye); }
+html body:has(.se-chat-panel.open) .se-eye-fab.se-eye-fab:not(.open)::after { content: none; }
+html body .sv-eye-slot { display: block; position: absolute; right: 0; top: 0; width: 44px; height: 31px; pointer-events: none; }
+html body:has(.se-chat-panel.open) .sv-eye-slot { background: var(--sv-bg-3); box-shadow: inset 0 2px 0 var(--sv-eye); }
 /* Ask Sauron's answer panel opens in the right column, under the band and
    above the bar, and the page makes room for it. */
 html body .se-chat-panel {
@@ -768,30 +766,20 @@ html body .se-chat-panel {
 html body .sv-dock {
     position: fixed; top: calc(var(--sv-frame-top) + var(--sv-frame-band)); right: 0; bottom: var(--sv-frame-foot);
     width: var(--sv-frame-dock); box-sizing: border-box; z-index: var(--z-rail);
-    display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px; padding-top: 12px;
     background: var(--sv-bg-1); border-left: 1px solid var(--sv-line-1);
 }
-.sv-dock-btn {
-    position: relative; flex: none; width: 30px; height: 30px; padding: 0; box-sizing: border-box;
-    display: flex; align-items: center; justify-content: center;
-    border: 0; border-radius: var(--sv-radius-ctl); background: transparent; color: var(--sv-ink-2); cursor: pointer;
-}
-.sv-dock-btn .sv-ico { width: 18px; height: 18px; }
-.sv-dock-btn:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); }
-.sv-dock-btn:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
-.sv-dock-btn[aria-expanded="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); box-shadow: inset 0 -2px 0 var(--sv-eye); }
-.sv-dock-n {
-    position: absolute; top: -6px; right: -4px; height: 15px; padding: 0 4px; box-sizing: border-box;
-    border: 1px solid var(--sv-bg-1); border-radius: var(--sv-radius-round); background: var(--sv-bg-4);
-    font-family: var(--sv-font-mono); font-size: 11px; line-height: 13px; color: var(--sv-ink-1); pointer-events: none;
-}
+/* Its doors are the old 28 px word tabs (THE DOORS, below); a count rides
+   a tab's corner, the long and short split sits under SIGNALS. */
 .sv-dock-n[hidden], .sv-dock-n:empty { display: none; }
 .sv-dock-dirs {
-    display: flex; flex-direction: column; align-items: center; margin: -2px 0 6px;
-    font-family: var(--sv-font-mono); font-size: 11px; line-height: 14px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px; margin: -12px 0 0;
+    font-family: var(--sv-font-mono); font-size: 11px; font-weight: 500; line-height: 13px; color: var(--sv-ink-1);
 }
-.sv-dock-dirs .up { color: var(--sv-up); }
-.sv-dock-dirs .down { color: var(--sv-down); }
+/* each side's glyph in its colour, its count in ink: never the colour alone */
+.sv-dock-dirs .up, .sv-dock-dirs .down { color: var(--sv-ink-1); }
+.sv-dock-dirs .up .sv-dir-g { color: var(--sv-up); }
+.sv-dock-dirs .down .sv-dir-g { color: var(--sv-down); }
 
 /* ── The right column: the rail, and the panels that open in its place ── */
 html body .signals-rail {
@@ -826,11 +814,275 @@ html body .sv-activity {
 /* Shut, a panel stands past the dock, out of view; open, in the column. */
 html body .sv-activity:not(.open) { visibility: hidden; }
 html body .sv-council-band:not(.open) { visibility: hidden; }
-/* The Horde's sheet rises from the bar across the page, not under the
-   column. */
-html body .sv-horde-panel {
+/* The Horde's sheet rises from the bar's top edge, between the menu's edge
+   and the dock or the open column, placed by its root (2026-11-15: its
+   panel was placed as if against the window inside a root already offset,
+   and floated 60 px above the bar; shut, the root's top stood 28 px above
+   the bar and took the page's clicks there). Shut, it lies under the bar
+   and lets every click through. */
+html body .sv-horde {
     left: var(--sidebar-width) !important; right: var(--sv-frame-right) !important; bottom: var(--sv-frame-foot) !important;
+    --hd-l: var(--sidebar-width); --hd-r: var(--sv-frame-right); --hd-sr: var(--sv-frame-right);
+    /* No minimize tab or restore pill under it in the frame: its rows run
+       down to the bar, with no empty band at its foot. */
+    --hd-foot: 0px;
 }
+html body .sv-horde:not(.open) { pointer-events: none; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   THE DOORS (open and close made easy, 2026-11-15)
+
+   The operator, the morning after the frame merged: "restore the old
+   system only, of opening and closing icons, their old sizes too for the
+   horde tab too and the council and the activity", then "make it better
+   and easier to use please"; of the look: "visually attractive/ visually
+   easy to understand, with the use of different colors, bold, italic...
+   elegant icons", "upgrade even more" (openclose/spec.md, its mock).
+
+   One door, one place: a door opens and closes its panel and never moves,
+   hides or tucks. Every door shows at rest, its word and a sprite icon at
+   the old size.
+     quiet  shut: bg-2, 1 px line-3, ink-2 word at 600; its icon in its
+            panel's accent (the Council's violet, the Activity's blue) or
+            in ink
+     hover  bg-3, ink-1; a dock tab slides out 4 px (the old hover), an
+            icon lifts 1 px, an arrow nudges 2 px
+     lit    open: ink-1 word at 700, its chevron turned; the Council and
+            the Activity wash in their accent at 18 % on bg-1, inside a
+            60 % accent border, with a 2 px inset line of it on the panel's
+            side; Signals, Ask, the Horde, Gollum and the Eye's cell on
+            bg-3 with the Eye's 2 px inset line
+     focus  the kit's ring, 2 px of the Eye, 2 px out (inset in the band,
+            the bar and the menu)
+   Tokens only (sv-tokens.css): no literal colour, no gradient, no blurred
+   coloured shadow, nothing under 11 px. The Eye draws only an inset line
+   on an open door and the focus ring. Motion 140 ms (160 for a chevron),
+   none under reduced motion or Ambience Off. Display only.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── the door ─────────────────────────────────────────────────────────── */
+.sv-door {
+    position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
+    box-sizing: border-box; margin: 0; padding: 0; cursor: pointer;
+    border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-card);
+    background: var(--sv-bg-2); color: var(--sv-ink-2);
+    font-family: var(--sv-font-sans); font-size: 11px; font-weight: 600; line-height: 1;
+    letter-spacing: var(--sv-track-label); text-transform: uppercase; white-space: nowrap;
+    box-shadow: none; filter: none; opacity: 1;
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), border-color var(--sv-dur-hover) var(--sv-ease),
+                color var(--sv-dur-hover) var(--sv-ease), transform var(--sv-dur-hover) var(--sv-ease);
+}
+.sv-door .sv-ico { color: var(--sv-ink-2); filter: none; transition: transform 160ms var(--sv-ease), color var(--sv-dur-hover) var(--sv-ease); }
+.sv-door .sv-door-chev { width: 12px; height: 12px; }
+.sv-door:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); }
+.sv-door:hover .sv-ico { color: var(--sv-ink-1); }
+.sv-door:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+
+/* lit: a panel's door while its panel is open */
+.sv-door--panel[aria-expanded="true"] { background: var(--sv-bg-3); border-color: var(--sv-line-3); color: var(--sv-ink-1); font-weight: 700; }
+.sv-door--panel[aria-expanded="true"] .sv-ico { color: var(--sv-ink-1); }
+
+/* the accents: the icon at rest, and lit a wash, an edge and the count's
+   ring (never colour alone: the icon and the word stand beside it) */
+.sv-door--council { --sv-door-accent: var(--sv-ai); }
+.sv-door--activity { --sv-door-accent: var(--sv-cat-1); }
+.sv-door--council .sv-door-ico, .sv-door--activity .sv-door-ico,
+.sv-door--council:hover .sv-door-ico, .sv-door--activity:hover .sv-door-ico,
+.sv-door--council[aria-expanded="true"] .sv-door-ico,
+.sv-door--activity[aria-expanded="true"] .sv-door-ico { color: var(--sv-door-accent); }
+.sv-door--council[aria-expanded="true"],
+.sv-door--activity[aria-expanded="true"] {
+    background: color-mix(in srgb, var(--sv-door-accent) 18%, var(--sv-bg-1));
+    border-color: color-mix(in srgb, var(--sv-door-accent) 60%, transparent);
+}
+
+/* the count: the number face, ink-1 on bg-4; an accent ring on an accent door */
+.sv-door-n {
+    position: absolute; top: -7px; right: -6px; z-index: 1; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+    border: 1px solid var(--sv-bg-1); border-radius: var(--sv-radius-round); background: var(--sv-bg-4);
+    font-family: var(--sv-font-mono); font-size: 11px; font-weight: 500; line-height: 14px; letter-spacing: 0;
+    font-variant-numeric: tabular-nums; text-align: center; text-transform: none; color: var(--sv-ink-1); pointer-events: none;
+}
+.sv-door--council .sv-door-n { border-color: var(--sv-ai); }
+.sv-door--activity .sv-door-n { border-color: var(--sv-cat-1); }
+
+/* ── the dock: four tabs at the old 28 px, 16 px apart ────────────────── */
+/* 4 px between the icon, the word and the chevron, so the longest word
+   (ACTIVITY, 57.6 px) keeps inside its 112 px tab and every chevron sits
+   14 px over its tab's foot (the review of the doors, 2026-11-19, m3: at
+   6 px ACTIVITY ran 2.6 px past and pushed its chevron down). */
+.sv-dock .sv-door {
+    width: 28px; height: 112px; flex-direction: column; justify-content: flex-start; gap: 4px; padding: 8px 0 7px;
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), border-color var(--sv-dur-hover) var(--sv-ease),
+                color var(--sv-dur-hover) var(--sv-ease), width var(--sv-dur-hover) var(--sv-ease),
+                margin-left var(--sv-dur-hover) var(--sv-ease), padding-right var(--sv-dur-hover) var(--sv-ease);
+}
+.sv-dock .sv-door--ask { height: 136px; }
+.sv-dock .sv-door-ico { width: 16px; height: 16px; }
+.sv-dock .sv-door-word { writing-mode: vertical-rl; transform: rotate(180deg); }
+.sv-dock .sv-door-chev { margin-top: auto; transform: rotate(180deg); }
+.sv-dock .sv-door[aria-expanded="true"] .sv-door-chev { transform: none; }
+/* Hovered, the tab grows out 4 px from its fixed right edge, as the old
+   tab grew 28 to 32: its face and its left edge slide out, the edge under
+   a resting pointer stays (the review of the doors, m1: a slide of the
+   whole box uncovered the pointer and the tab flickered in and out). */
+.sv-dock .sv-door:hover { width: 32px; margin-left: -4px; padding-right: 4px; }
+.sv-dock .sv-door:hover .sv-door-ico { transform: translateY(-1px); }
+.sv-dock .sv-door--panel[aria-expanded="true"] { box-shadow: inset 2px 0 0 var(--sv-eye); }
+.sv-dock .sv-door--council[aria-expanded="true"] { box-shadow: inset 2px 0 0 var(--sv-ai); }
+.sv-dock .sv-door--activity[aria-expanded="true"] { box-shadow: inset 2px 0 0 var(--sv-cat-1); }
+
+/* ── the band: two switches at its right end, the old 18 px arrow ────── */
+html body .sv-band .sv-band-doors {
+    order: 2; flex: none; display: flex; align-items: stretch; margin-left: auto;
+    border-left: 1px solid var(--sv-line-2);
+}
+html body .sv-band .sv-lane-door {
+    position: relative; top: auto; right: auto; bottom: auto; z-index: auto; display: inline-flex;
+    width: 88px; height: 31px; gap: 8px; padding: 0 10px 0 12px; justify-content: space-between;
+    border: 0; border-radius: 0; background: var(--sv-bg-1); color: var(--sv-ink-2); box-shadow: none; opacity: 1;
+    font-family: var(--sv-font-sans); font-size: 11px; font-weight: 600;
+}
+html body .sv-band .sv-lane-door + .sv-lane-door { border-left: 1px solid var(--sv-line-2); }
+html body .sv-band .sv-lane-door .sv-door-arrow { width: 18px; height: 18px; color: var(--sv-ink-2); filter: none; }
+html body .sv-band .sv-lane-door:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); box-shadow: none; }
+html body .sv-band .sv-lane-door:hover .sv-door-arrow { transform: translateX(2px); color: var(--sv-ink-1); }
+html body .sv-band .sv-lane-door[aria-pressed="false"] {
+    background: var(--sv-bg-3); box-shadow: inset 0 0 0 1px var(--sv-line-3); color: var(--sv-ink-1); font-weight: 700;
+}
+html body .sv-band .sv-lane-door[aria-pressed="false"] .sv-door-arrow { width: 12px; height: 12px; margin-right: 3px; transform: rotate(180deg); color: var(--sv-ink-1); }
+html body .sv-band .sv-lane-door[aria-pressed="false"]:hover .sv-door-arrow { transform: rotate(180deg) translateX(2px); }
+html body .sv-band .sv-lane-door:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
+
+/* ── the bar: THE HORDE's door at the old tab's 28 px ─────────────────── */
+html body .info-panel-bar .sv-sb-horde.sv-door {
+    height: 28px; margin: 0 4px; padding: 0 9px 0 10px; gap: 8px;
+    border: 1px solid var(--sv-line-3); border-radius: var(--sv-radius-card); background: var(--sv-bg-2); color: var(--sv-ink-2);
+}
+html body .info-panel-bar .sv-sb-horde.sv-door:hover { background: var(--sv-bg-3); color: var(--sv-ink-1); }
+html body .info-panel-bar .sv-sb-horde.sv-door .ip-label { color: inherit; font-weight: inherit; letter-spacing: var(--sv-track-label); }
+html body .info-panel-bar .sv-sb-horde .sv-door-chev { width: 14px; height: 14px; }
+html body .info-panel-bar .sv-sb-horde:hover .sv-door-chev { transform: translateY(-1px); }
+html body .info-panel-bar .sv-sb-horde.sv-door[aria-expanded="true"] {
+    background: var(--sv-bg-3); color: var(--sv-ink-1); font-weight: 700; box-shadow: inset 0 2px 0 var(--sv-eye);
+}
+html body .info-panel-bar .sv-sb-horde[aria-expanded="true"] .sv-door-chev { transform: rotate(180deg); }
+html body .info-panel-bar .sv-sb-horde:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
+/* its seats in the bar's own words: sentence case, the count in the number face */
+html body .info-panel-bar .sv-sb-horde .sv-seats-n { text-transform: none; letter-spacing: 0; font-weight: 400; }
+html body .info-panel-bar .sv-sb-horde .sv-seats-n .sv-n { font-weight: 500; color: var(--sv-ink-1); }
+/* the sheet's head shows the same standards (sv-frame.js copies them) */
+.sv-horde .hd-standards { display: inline-flex; align-items: center; }
+
+/* ── the menu: one fold row at its foot, the icon at x 20 both ways ──── */
+html body .sidebar .sv-fold-row {
+    position: sticky; bottom: 0; z-index: 1; flex: none; width: 100%; height: 32px; margin-top: auto;
+    justify-content: flex-start; gap: 10px; padding: 0 14px 0 20px;
+    border: 0; border-top: 1px solid var(--sv-line-1); border-radius: 0; background: var(--sv-bg-1);
+}
+/* the tower stands in the empty foot above it, wherever it is drawn */
+html body:not(.light-mode):not([data-sv-ambience="off"]) .sidebar .sv-tower + .sv-fold-row { margin-top: 0; }
+html body .sidebar .sv-fold-row:hover { background: var(--sv-bg-3); }
+html body .sidebar .sv-fold-row .sv-ico { width: 16px; height: 16px; }
+html body .sidebar .sv-fold-row .sv-fold-ico--unfold { display: none; }
+html body .sidebar .sv-fold-row:focus-visible { outline-offset: -2px; }
+html body .sidebar.mini .sv-fold-row { padding: 0 0 0 20px; }
+html body .sidebar.mini .sv-fold-row .sv-door-word,
+html body .sidebar.mini .sv-fold-row .sv-fold-ico--fold { display: none; }
+html body .sidebar.mini .sv-fold-row .sv-fold-ico--unfold { display: inline-block; }
+
+/* ── the rail's heads: a button folds its section ────────────────────── */
+/* Main's height, 41.3 px: 10 px each side of the old 14 px glyph's 20.3 px
+   line, and its 1 px rule (the review of the doors, 2026-11-19, m6: the
+   spec sets none; at 39 px the cards sat 2.3 px higher than on main). */
+html body .signals-rail .rail-head { position: relative; cursor: default; box-sizing: border-box; min-height: 41.3px; }
+html body .signals-rail .rail-head .rh-fold {
+    position: static; display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
+    margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+/* the whole head is the fold's: its chevron too (the filter and the
+   waiting refresh keep their own clicks, above it); the count stands above
+   it too, so its tooltip, the rail's breakdown, is reached (the review of
+   the doors, m2), and sv-frame.js hands its click to the fold */
+html body .signals-rail .rail-head .rh-fold::after { content: ""; position: absolute; inset: 0; }
+html body .signals-rail .rail-head :is(.rh-held, .rh-gear, .rh-count) { position: relative; z-index: 1; }
+html body .signals-rail .rail-head .rh-count { cursor: pointer; }
+html body .signals-rail .rail-head .rh-fold:focus-visible { outline: none; }
+html body .signals-rail .rail-head .rh-fold:focus-visible::after { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
+html body .signals-rail .rail-head .rh-icon { display: inline-flex; flex: none; color: var(--sv-ink-1); font-size: 0; }
+html body .signals-rail .rail-head .rh-icon .sv-ico { width: 16px; height: 16px; }
+html body .signals-rail .rail-head .rh-chev { width: 14px; height: 14px; flex: none; color: var(--sv-ink-2); transition: transform 160ms var(--sv-ease); }
+html body .signals-rail .rail-section.collapsed .rh-chev { transform: rotate(-90deg); }
+
+/* ── closes: 24 px, the sprite's ✕ at the old 16 px ─────────────────── */
+html body .sv-x {
+    display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; min-width: 24px; padding: 0;
+    box-sizing: border-box; border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl); background: transparent;
+    color: var(--sv-ink-2); font-size: 0; line-height: 0; cursor: pointer; box-shadow: none; text-shadow: none;
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), color var(--sv-dur-hover) var(--sv-ease);
+}
+html body .sv-x .sv-ico { width: 16px; height: 16px; }
+html body .sv-x:hover, html body .sv-x[aria-pressed="true"] { background: var(--sv-bg-3); border-color: var(--sv-line-3); color: var(--sv-ink-1); }
+html body .sv-x:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
+/* Ask Sauron's CLOSE keeps its word, the sprite's ✕ at 12 px beside it */
+html body #seChatClose { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── a panel's head wears its door's colour ───────────────────────────── */
+.sv-head--council { box-shadow: inset 0 2px 0 var(--sv-ai); }
+.sv-head--activity { box-shadow: inset 0 2px 0 var(--sv-cat-1); }
+.sv-head--eye { box-shadow: inset 0 2px 0 var(--sv-eye); }
+.sv-head-ico { width: 16px; height: 16px; flex: none; }
+.sv-head--council .sv-head-ico { color: var(--sv-ai); }
+.sv-head--activity .sv-head-ico { color: var(--sv-cat-1); }
+.sv-head--eye .sv-head-ico { color: var(--sv-ink-1); }
+html body .se-chat-header .se-chat-title { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ── the door's tip: its name, its key, one italic line ──────────────── */
+.sv-door-tip {
+    position: absolute; z-index: var(--z-hovercard); width: max-content; max-width: 230px; padding: 7px 10px 8px; box-sizing: border-box;
+    display: block; text-align: left; white-space: normal; writing-mode: horizontal-tb; transform: none;
+    background: var(--sv-bg-2); border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-card); box-shadow: var(--sv-shadow-pop);
+    color: var(--sv-ink-1); pointer-events: none; opacity: 0; visibility: hidden;
+    transition: opacity var(--sv-dur-hover) var(--sv-ease), visibility var(--sv-dur-hover) var(--sv-ease);
+}
+.sv-door-tip-name { display: flex; align-items: center; gap: 8px; font-family: var(--sv-font-sans); font-size: 11px; font-weight: 700;
+    line-height: 16px; letter-spacing: var(--sv-track-label); text-transform: uppercase; color: var(--sv-ink-1); }
+.sv-door-tip-hint { display: block; margin-top: 3px; font-family: var(--sv-font-sans); font-size: 12px; font-style: italic; font-weight: 400;
+    line-height: 16px; letter-spacing: 0; text-transform: none; color: var(--sv-ink-3); }
+.sv-door-tip-hint .sv-num { font-family: var(--sv-font-mono); font-style: normal; font-size: 11px; color: var(--sv-ink-2); }
+body.light-mode .sv-door-tip-hint { color: var(--sv-ink-2); }
+body.light-mode .sv-door-tip-hint .sv-num { color: var(--sv-ink-1); }
+/* Shown only by its class (sv-frame.js: 400 ms of hover, or the keyboard's
+   focus), never by a pseudo-class alone, so the census's forced :hover and
+   :focus-visible never draw one. While one shows, the dock or the bar that
+   holds it stands over the open column, so the tip is read whole: the
+   rail, the Council, the Activity and Ask's panel stand beside them, never
+   under them, and Gollum's face keeps its place over the bar. */
+.sv-door.is-tipping .sv-door-tip { opacity: 1; visibility: visible; }
+html body .sv-dock:has(.sv-door.is-tipping) { z-index: calc(var(--z-panel) + 1); }
+html body:has(.info-panel-wrap .sv-door.is-tipping) .info-panel-wrap { z-index: calc(var(--z-panel) + 1) !important; }
+html body:has(.info-panel-wrap .sv-door.is-tipping) .gollum-fab { z-index: calc(var(--z-panel) + 2); }
+.sv-dock .sv-door-tip { right: calc(100% + 12px); top: 50%; translate: 0 -50%; }
+.info-panel-bar .sv-door-tip { bottom: calc(100% + 10px); left: -1px; }
+
+/* ── light: the words and marks the frozen palette leaves faint ──────── */
+body.light-mode .info-panel-bar .sv-sb-horde .sv-seats-n { color: var(--sv-ink-2); }
+body.light-mode .sv-sb-horde .sv-seat:is([data-world="paper"], [data-world="none"]) { stroke: var(--sv-ink-2); }
+
+/* ── motion: short and calm, off when asked ──────────────────────────── */
+/* Gollum's face and the Eye are doors too (the review of the doors, m4). */
+@media (prefers-reduced-motion: reduce) {
+    .sv-door, .sv-door *, .sv-x, .sv-door-tip, .signals-rail .rail-head .rh-chev,
+    html body .gollum-fab, html body .se-eye-fab:not(.open) { transition: none !important; }
+    /* nothing lifts or grows on hover; a chevron keeps the turn that says
+       open or shut (a hovered shut tab's chevron turned to "open" here) */
+    .sv-door:hover .sv-door-ico, .sv-dock .sv-door:hover .sv-door-ico, .sv-band .sv-lane-door:hover .sv-door-arrow { transform: none; }
+    .sv-dock .sv-door:hover { width: 28px; margin-left: 0; padding-right: 0; }
+}
+html body[data-sv-ambience="off"] .sv-door, html body[data-sv-ambience="off"] .sv-door *,
+html body[data-sv-ambience="off"] .sv-x, html body[data-sv-ambience="off"] .sv-door-tip,
+html body[data-sv-ambience="off"] .signals-rail .rail-head .rh-chev,
+html body[data-sv-ambience="off"] .gollum-fab, html body[data-sv-ambience="off"] .se-eye-fab:not(.open) { transition: none !important; }
 
 /* ── The tiers ────────────────────────────────────────────────────────── */
 }

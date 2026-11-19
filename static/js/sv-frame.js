@@ -110,10 +110,18 @@
   }
 
   /* A dialog, a money dialog above all, or the lock holds the page: the
-     frame's keys wait, so the focus never leaves it. */
+     frame's keys wait, so the focus never leaves it. The levels dialog
+     (sv-level-edit.js: a stop, a target, the PIN on a live row) is a money
+     dialog without the kit's class, and any modal dialog on screen (the
+     position page's CLOSE, the keys sheet, a profile's PIN) holds it too
+     (the review of the doors, 2026-11-19, B2). */
   var pinLocked = false;
   function held() {
-    return pinLocked || !!d.querySelector('.sv-dialog.is-open') || d.body.classList.contains('sv-scroll-locked');
+    if (pinLocked || d.body.classList.contains('sv-scroll-locked')) return true;
+    if (d.querySelector('.sv-dialog.is-open, .lvl-dlg')) return true;
+    return Array.prototype.some.call(d.querySelectorAll('[role="dialog"][aria-modal="true"]'), function (m) {
+      return m.getClientRects().length > 0;
+    });
   }
 
   d.addEventListener('keydown', function (e) {
@@ -179,7 +187,22 @@
     setTimeout(function () { heads.forEach(markUnseen); }, 0);
   });
 
-  /* ── the dock ────────────────────────────────────────────────────── */
+  /* ── the doors (open and close made easy, 2026-11-15) ─────────────── */
+  /* The operator: "restore the old system only, of opening and closing
+     icons, their old sizes too for the horde tab too and the council and
+     the activity", then "make it better and easier to use please".
+     Every door opens and closes its own panel in one click, in one place:
+     the dock's tabs (Signals, the Council, the Activity, Ask Sauron), THE
+     HORDE in the bar, Gollum's face and the Eye. Each says whether its
+     panel is open (aria-expanded; sv-frame.css lights it). The right
+     column holds one panel at a time: the one opened shuts the others, and
+     they are stored shut, so a reload brings back the last one opened. Esc
+     closes the last panel opened, one per press, and gives the focus back
+     to its door; it never puts a lane away nor folds the menu, and waits
+     while a card, a menu, a dialog or the lock has the page. */
+  var DESK = w.matchMedia ? w.matchMedia('(min-width: 769px)') : null;
+  function desk() { return !DESK || DESK.matches; }
+  function shown(el) { return !!el && el.getClientRects().length > 0; }
   var rail = d.getElementById('signalsRail');
   function dockBtn(name) { return d.querySelector('.sv-dock [data-sv-dock="' + name + '"]'); }
   function setOpen(btn, open) {
@@ -188,91 +211,344 @@
     btn.classList.toggle('is-open', !!open);
   }
   function railOpen() { return !!(rail && rail.classList.contains('open')); }
-  function syncRail() { setOpen(dockBtn('signals'), railOpen()); }
-  if (rail && w.MutationObserver) {
-    new MutationObserver(syncRail).observe(rail, { attributes: true, attributeFilter: ['class'] });
+  function setRail(open) {
+    if (!rail) return;
+    rail.classList.toggle('open', !!open);
+    store(RAIL_KEY, open ? 'open' : 'closed');
   }
-  syncRail();
-
-  /* A panel's own door, its own open state, its own badge: mirrored. */
-  var DOORS = {
-    council: { tab: 'svCouncilBandTab', badge: 'svCouncilBandBadge' },
-    activity: { tab: 'svActivityTab', badge: 'svActivityBadge' }
-  };
-  Object.keys(DOORS).forEach(function (name) {
-    var door = DOORS[name], tab = d.getElementById(door.tab), btn = dockBtn(name);
-    if (!tab || !btn) return;
-    var n = btn.querySelector('.sv-dock-n');
-    function sync() {
-      setOpen(btn, tab.getAttribute('aria-expanded') === 'true');
-      var badge = d.getElementById(door.badge);
-      if (n && badge) {
-        var shown = !badge.hidden && badge.textContent.trim() && badge.textContent.trim() !== '0';
-        n.textContent = shown ? badge.textContent.trim() : '';
-        n.hidden = !shown;
-      }
-    }
-    if (w.MutationObserver) {
-      var mo = new MutationObserver(sync);
-      mo.observe(tab, { attributes: true, attributeFilter: ['aria-expanded'] });
-      var badge = d.getElementById(door.badge);
-      if (badge) mo.observe(badge, { attributes: true, childList: true, characterData: true, subtree: true });
-    }
-    sync();
-  });
-
+  var tabs = { council: d.getElementById('svCouncilBandTab'), activity: d.getElementById('svActivityTab') };
+  var badges = { council: d.getElementById('svCouncilBandBadge'), activity: d.getElementById('svActivityBadge') };
   var chat = d.getElementById('seChatPanel');
-  function syncAsk() { setOpen(dockBtn('ask'), !!(chat && chat.classList.contains('open'))); }
-  if (chat && w.MutationObserver) {
-    new MutationObserver(syncAsk).observe(chat, { attributes: true, attributeFilter: ['class'] });
+  var eyeFab = d.getElementById('seEyeFab');
+  var hordeRoot = d.getElementById('svHorde');
+  var hordeCell = d.getElementById('svHordeCell');
+  var hordeTab = d.getElementById('svHordeTab');
+  var gollumFab = d.getElementById('gollumFab');
+  var gollumDlg = d.getElementById('gollumDialog');
+  function tabOpen(name) { var t = tabs[name]; return !!(t && t.getAttribute('aria-expanded') === 'true'); }
+
+  /* Each panel: whether it is open, how it closes, its door. */
+  var PANELS = {
+    council: {
+      isOpen: function () { return tabOpen('council'); },
+      close: function (esc) {
+        var api = w.SVCouncilBand;
+        if (esc && api && api.stepBack) { api.stepBack(); return; }
+        if (tabOpen('council') && tabs.council) tabs.council.click();
+      },
+      door: function () { return dockBtn('council'); }
+    },
+    activity: {
+      isOpen: function () { return tabOpen('activity'); },
+      close: function () { if (tabOpen('activity') && tabs.activity) tabs.activity.click(); },
+      door: function () { return dockBtn('activity'); }
+    },
+    ask: {
+      isOpen: function () { return !!(chat && chat.classList.contains('open')); },
+      close: function () {
+        var c = d.getElementById('seChatClose');
+        if (c && chat && chat.classList.contains('open')) c.click();
+      },
+      /* Two doors: the one that opened it (askFrom, below), else its tab. */
+      door: function () { return askFrom && shown(askFrom) ? askFrom : dockBtn('ask'); }
+    },
+    signals: {
+      isOpen: railOpen,
+      close: function () { if (railOpen()) setRail(false); },
+      door: function () { return dockBtn('signals'); }
+    },
+    horde: {
+      isOpen: function () { return !!(hordeRoot && hordeRoot.classList.contains('open')); },
+      close: function () { if (hordeRoot && hordeRoot.classList.contains('open') && w.SVHorde) w.SVHorde.toggle('door'); },
+      door: function () { return hordeCell; }
+    },
+    gollum: {
+      isOpen: function () { return !!(gollumFab && gollumFab.getAttribute('aria-expanded') === 'true'); },
+      close: function () {
+        var x = gollumDlg && gollumDlg.querySelector('[data-gollum-close]');
+        if (x && gollumFab && gollumFab.getAttribute('aria-expanded') === 'true') x.click();
+      },
+      door: function () { return gollumFab; }
+    }
+  };
+  var COLUMN = { signals: 1, council: 1, activity: 1, ask: 1 };
+  /* The panels open, oldest first: Esc closes the last. */
+  var stack = [], was = {};
+  /* Ask Sauron's two doors, its tab in the dock and the Eye in the bar:
+     the focus goes back to the one that opened it (the review of the doors,
+     2026-11-19, m5: Esc after the Eye gave it to the tab). Noted on the
+     click that opens it, before its own handler runs; Ctrl+K and the "ask
+     about" buttons leave it to the tab. Cleared when it shuts. */
+  var askFrom = null;
+  d.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || PANELS.ask.isOpen()) return;
+    if (eyeFab && eyeFab.contains(t)) askFrom = eyeFab;
+    else if (t.closest && t.closest('.sv-dock [data-sv-dock="ask"]')) askFrom = null;
+  }, true);
+  /* When each news-bearing panel was last looked at (the tips' "since"). */
+  var seenAt = { council: Date.now(), activity: Date.now() };
+
+  function paintDoors() {
+    setOpen(dockBtn('signals'), PANELS.signals.isOpen());
+    setOpen(dockBtn('council'), PANELS.council.isOpen());
+    setOpen(dockBtn('activity'), PANELS.activity.isOpen());
+    setOpen(dockBtn('ask'), PANELS.ask.isOpen());
+    if (eyeFab) eyeFab.setAttribute('aria-expanded', PANELS.ask.isOpen() ? 'true' : 'false');
+    if (hordeCell) hordeCell.setAttribute('aria-expanded', PANELS.horde.isOpen() ? 'true' : 'false');
+    ['council', 'activity'].forEach(function (name) {
+      var btn = dockBtn(name), n = btn && btn.querySelector('.sv-dock-n'), badge = badges[name];
+      if (!n || !badge) return;
+      var t = badge.textContent.trim(), on = !badge.hidden && !!t && t !== '0';
+      n.textContent = on ? t : '';
+      n.hidden = !on;
+    });
   }
-  syncAsk();
+  function sync() {
+    Object.keys(PANELS).forEach(function (name) {
+      var open = !!PANELS[name].isOpen();
+      if (open === !!was[name]) return;
+      was[name] = open;
+      var at = stack.indexOf(name);
+      if (at !== -1) stack.splice(at, 1);
+      if (open) {
+        stack.push(name);
+        if (name === 'horde') copyStandards();
+        /* One panel in the right column: the others shut, stored shut. */
+        if (COLUMN[name] && desk()) {
+          Object.keys(COLUMN).forEach(function (other) {
+            if (other !== name && PANELS[other].isOpen()) PANELS[other].close(false);
+          });
+        }
+      } else {
+        if (seenAt[name] !== undefined) seenAt[name] = Date.now();
+        if (name === 'ask') askFrom = null;
+      }
+    });
+    paintDoors();
+  }
+  if (w.MutationObserver) {
+    var watch = function (el, attrs) { if (el) new MutationObserver(sync).observe(el, { attributes: true, attributeFilter: attrs }); };
+    watch(rail, ['class']);
+    watch(tabs.council, ['aria-expanded']);
+    watch(tabs.activity, ['aria-expanded']);
+    watch(chat, ['class']);
+    watch(hordeRoot, ['class']);
+    watch(gollumFab, ['aria-expanded']);
+    ['council', 'activity'].forEach(function (name) {
+      if (badges[name]) new MutationObserver(paintDoors).observe(badges[name], { attributes: true, childList: true, characterData: true, subtree: true });
+    });
+  }
+  sync();
 
   d.addEventListener('click', function (e) {
     var btn = e.target && e.target.closest ? e.target.closest('.sv-dock [data-sv-dock]') : null;
     if (!btn) return;
     var name = btn.getAttribute('data-sv-dock');
-    if (name === 'signals') {
-      if (!rail) return;
-      var open = rail.classList.toggle('open');
-      store(RAIL_KEY, open ? 'open' : 'closed');
-      return;
-    }
-    if (DOORS[name]) {
-      var tab = d.getElementById(DOORS[name].tab);
-      if (tab) tab.click();
-      return;
-    }
+    if (name === 'signals') { setRail(!railOpen()); return; }
+    if (tabs[name]) { tabs[name].click(); return; }
     if (name === 'ask') {
-      if (chat && chat.classList.contains('open')) {
-        var close = chat.querySelector('.se-chat-close, [data-se-close], #seChatClose');
-        if (close) { close.click(); return; }
-      }
+      if (PANELS.ask.isOpen()) { PANELS.ask.close(); return; }
       if (w.openEyeWithQuery) w.openEyeWithQuery('');
-      else { var fab = d.getElementById('seEyeFab'); if (fab) fab.click(); }
+      else if (eyeFab) eyeFab.click();
     }
   });
-
-  /* ── the status bar ──────────────────────────────────────────────── */
-  var hordeCell = d.getElementById('svHordeCell');
-  var hordePanel = d.getElementById('svHordePanel');
-  var hordeTab = d.getElementById('svHordeTab');
   if (hordeCell) {
     hordeCell.addEventListener('click', function () {
       if (w.SVHorde && w.SVHorde.toggle) w.SVHorde.toggle('click');
       else if (hordeTab) hordeTab.click();
     });
-    var syncHorde = function () {
-      var open = hordeTab ? hordeTab.getAttribute('aria-expanded') === 'true'
-                          : !!(hordePanel && !hordePanel.hasAttribute('inert'));
-      hordeCell.setAttribute('aria-expanded', open ? 'true' : 'false');
-    };
-    if (w.MutationObserver) {
-      if (hordeTab) new MutationObserver(syncHorde).observe(hordeTab, { attributes: true, attributeFilter: ['aria-expanded'] });
-      if (hordePanel) new MutationObserver(syncHorde).observe(hordePanel, { attributes: true, attributeFilter: ['inert'] });
+  }
+  /* The Horde's sheet shows its standards in its head, as its door does. */
+  function copyStandards() {
+    var src = hordeCell && hordeCell.querySelector('.sv-seats');
+    var head = d.querySelector('#svHordeHead .hd-row1');
+    if (!src || !head) return;
+    var box = head.querySelector('.hd-standards');
+    if (!box) {
+      box = d.createElement('span');
+      box.className = 'hd-standards';
+      box.setAttribute('aria-hidden', 'true');
+      head.insertBefore(box, head.firstChild);
+    }
+    box.textContent = '';
+    box.appendChild(src.cloneNode(true));
+  }
+  d.addEventListener('sv:live-swapped', function () { if (PANELS.horde.isOpen()) copyStandards(); });
+
+  /* Esc: one press closes one thing, the last opened (the review of the
+     doors, 2026-11-19, B2: one press shut the chart's More menu AND the
+     rail, a row's levels dialog AND THE HORDE). A page's own card, menu,
+     popover, dialog or chart size keeps its Esc and goes first; then the
+     last panel opened, one per press, the focus back on its door. So the
+     frame reads what is open as the key arrives (the window's capture,
+     before any handler acts: a handler may shut its own popover without a
+     word) and acts last (the document's bubble, after the page's handlers),
+     only when nothing of the page's had the key and no handler used it
+     (defaultPrevented). The panels' own Esc stands back for the frame's
+     (their scripts ask SVDoors.owns). */
+  var POPS = '.dh-pop, .ticker-popup, .nf-pop, .pos-pop, .sr-popup, .ip-dropdown, .instrument-preview';
+  /* What keeps its own Esc besides the kit's overlays: the chart's toolbar
+     menus, its tall size and its full screen (chart_widget.html), the day
+     ring's open stage (sv-day-scheme.js), the board being edited
+     (dashboard.html). */
+  var OWN_ESC = '.sv-tb-menu:not([hidden]), .sv-candle-container.sv-chart-tall, .sv-candle-container.sv-chart-fs, '
+              + '.day-panel.day-open, body.sv-editing';
+  function cardOpen(t) {
+    if (d.querySelector('[data-sv-overlay].is-open, #kbdModalOverlay.open, .user-menu.open, .sr-popup.show, .sr-popup.sv-pinned')) return true;
+    if (d.querySelector(OWN_ESC) || d.fullscreenElement) return true;
+    var more = d.getElementById('svMorePop');
+    if (more && !more.hidden) return true;
+    if (Array.prototype.some.call(d.querySelectorAll('.rail-fpanel'), function (p) { return !p.hidden; })) return true;
+    if (w.svPin && w.svPin.current && w.svPin.current()) return true;
+    try { if (d.querySelector(':popover-open')) return true; } catch (err) { /* no popover API */ }
+    var kids = d.body ? d.body.children : [];
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n.matches && n.matches(POPS) && w.getComputedStyle(n).display !== 'none' && n.getClientRects().length) return true;
+    }
+    var seat = d.getElementById('svHordeSeat');
+    return !!(seat && !seat.hidden && seat.contains(t));
+  }
+  function owns() { return desk() && shown(d.querySelector('.sv-dock')); }
+  function back(name) {
+    var door = PANELS[name] && PANELS[name].door();
+    if (door && shown(door)) { try { door.focus({ preventScroll: true }); } catch (err) { door.focus(); } }
+  }
+  function isEsc(e) { return e.key === 'Escape' || e.key === 'Esc'; }
+  /* The press as it arrived: whether something else had the page then. */
+  var escAt = null;
+  w.addEventListener('keydown', function (e) {
+    if (isEsc(e)) escAt = { e: e, other: held() || cardOpen(e.target) };
+  }, true);
+  d.addEventListener('keydown', function (e) {
+    if (!isEsc(e)) return;
+    var at = escAt;
+    escAt = null;
+    if (e.defaultPrevented || !owns()) return;
+    if ((at && at.e === e) ? at.other : (held() || cardOpen(e.target))) return;
+    var t = e.target;
+    var inAsk = !!(chat && t && chat.contains(t)), inGollum = !!(gollumDlg && t && gollumDlg.contains(t));
+    if (typing(t) && !inAsk && !inGollum) return;
+    var name = inAsk ? 'ask' : inGollum ? 'gollum' : null;
+    for (var i = stack.length - 1; !name && i >= 0; i--) { if (PANELS[stack[i]].isOpen()) name = stack[i]; }
+    if (!name || !PANELS[name].isOpen()) return;
+    e.preventDefault();
+    PANELS[name].close(true);
+    if (!PANELS[name].isOpen()) back(name);
+  });
+
+  /* ── the doors' tips: a name, a key, one italic line ──────────────── */
+  /* After 400 ms of hover, or at once when the keyboard brings the focus
+     (:focus-visible): a class, so neither the census's forced :hover nor
+     its forced :focus-visible draws one (sv-frame.css). A click or Enter
+     puts it away, so the panel it opens is never under it. Each line is
+     read at the moment it shows, from the panel's own counts. */
+  function hhmm(t) { var x = new Date(t); return ('0' + x.getUTCHours()).slice(-2) + ':' + ('0' + x.getUTCMinutes()).slice(-2); }
+  function num(n) { var s = d.createElement('span'); s.className = 'sv-num'; s.textContent = String(n); return s; }
+  function line(box, parts) {
+    box.textContent = '';
+    parts.forEach(function (p) { box.appendChild(typeof p === 'string' ? d.createTextNode(p) : p); });
+  }
+  function count(el) { var m = el ? /(\d+)/.exec(el.textContent || '') : null; return m ? parseInt(m[1], 10) : null; }
+  function hint(door) {
+    var box = door.querySelector('.sv-door-tip-hint');
+    var name = box && box.getAttribute('data-sv-tip');
+    if (!box || !name) return;
+    if (name === 'signals') {
+      var n = count(door.querySelector('.sv-dock-n')), dirs = d.querySelector('.sv-dock-dirs');
+      var up = count(dirs && dirs.querySelector('.up')), down = count(dirs && dirs.querySelector('.down'));
+      if (n === null) line(box, ['the rail could not be read']);
+      else if (!n) line(box, ['no signal on the rail']);
+      else line(box, [num(n), ' live', up !== null && down !== null ? ' · ' : '', up !== null && down !== null ? num(up) : '',
+                      up !== null && down !== null ? ' long, ' : '', up !== null && down !== null ? num(down) : '',
+                      up !== null && down !== null ? ' short' : '']);
+    } else if (name === 'council' || name === 'activity') {
+      var b = badges[name], k = b && !b.hidden ? count(b) : 0;
+      if (!k) line(box, ['nothing new']);
+      else if (name === 'council') line(box, [num(k), k === 1 ? ' new sitting since ' : ' new sittings since ', num(hhmm(seenAt.council))]);
+      else line(box, [num(k), ' new since ', num(hhmm(seenAt.activity))]);
+    } else if (name === 'horde' && hordeTab) {
+      var said = ['.hd-tab-seats', '.hd-tab-r', '.hd-tab-risk'].map(function (s) {
+        var el = hordeTab.querySelector(s);
+        return el && !el.hidden ? el.textContent.replace(/\s+/g, ' ').trim() : '';
+      }).filter(Boolean);
+      if (said.length) line(box, [said.join(' · ')]);
     }
   }
+  function keyed(door) {
+    try { return d.activeElement === door && door.matches(':focus-visible'); } catch (err) { return false; }
+  }
+  Array.prototype.forEach.call(d.querySelectorAll('.sv-door'), function (door) {
+    if (!door.querySelector('.sv-door-tip')) return;
+    var timer = null;
+    function show() { hint(door); door.classList.add('is-tipping'); }
+    function hide() { clearTimeout(timer); timer = null; door.classList.remove('is-tipping'); }
+    door.addEventListener('mouseenter', function () {
+      clearTimeout(timer);
+      timer = setTimeout(show, 400);
+    });
+    door.addEventListener('mouseleave', function () { if (!keyed(door)) hide(); });
+    /* Used, it gives the panel the room: a click or Enter puts it away. */
+    door.addEventListener('mousedown', hide);
+    door.addEventListener('click', hide);
+    door.addEventListener('focus', function () { if (keyed(door)) show(); });
+    door.addEventListener('blur', hide);
+  });
 
+  /* ── the menu's door: the fold row at its foot ────────────────────── */
+  var side = d.getElementById('mainSidebar');
+  var foldRow = d.getElementById('svFoldRow');
+  var miniTip = d.getElementById('navMiniTip');
+  function syncFold() {
+    if (!side || !foldRow) return;
+    var mini = side.classList.contains('mini');
+    var words = mini ? 'Unfold the menu' : 'Fold the menu';
+    foldRow.setAttribute('aria-expanded', mini ? 'false' : 'true');
+    foldRow.setAttribute('aria-label', words);
+    if (mini) foldRow.removeAttribute('title'); else foldRow.setAttribute('title', words);
+  }
+  if (side && foldRow) {
+    foldRow.addEventListener('click', function () {
+      var mini = side.classList.toggle('mini');
+      store('sauron_sidebar', mini ? 'mini' : 'full');
+      if (miniTip) miniTip.classList.remove('show');
+      syncFold();
+    });
+    /* Folded, its name is the folded menu's tip, as a row's is. */
+    foldRow.addEventListener('mouseenter', function () {
+      if (!miniTip || !side.classList.contains('mini')) return;
+      miniTip.textContent = 'Unfold the menu';
+      var r = foldRow.getBoundingClientRect();
+      miniTip.style.left = (r.right + 14) + 'px';
+      miniTip.style.top = (r.top + r.height / 2 - (miniTip.offsetHeight || 28) / 2) + 'px';
+      miniTip.classList.add('show');
+    });
+    foldRow.addEventListener('mouseleave', function () { if (miniTip) miniTip.classList.remove('show'); });
+    if (w.MutationObserver) new MutationObserver(syncFold).observe(side, { attributes: true, attributeFilter: ['class'] });
+    syncFold();
+  }
+
+  /* ── the rail's heads: a button folds its section ─────────────────── */
+  Array.prototype.forEach.call(d.querySelectorAll('.signals-rail .rh-fold[data-rail-fold]'), function (b) {
+    var sec = d.getElementById(b.getAttribute('data-rail-fold')), key = b.getAttribute('data-rail-key');
+    if (!sec) return;
+    function say() { b.setAttribute('aria-expanded', sec.classList.contains('collapsed') ? 'false' : 'true'); }
+    b.addEventListener('click', function () {
+      var folded = sec.classList.toggle('collapsed');
+      if (key) store(key, folded ? '1' : '0');
+      say();
+    });
+    /* The count stands over the fold's stretch so its tooltip (its title,
+       the rail's breakdown) is reached (the review of the doors, m2); a
+       click on it is still the head's. */
+    var head = b.closest('.rail-head'), count = head && head.querySelector('.rh-count');
+    if (count) count.addEventListener('click', function () { b.click(); });
+    if (w.MutationObserver) new MutationObserver(say).observe(sec, { attributes: true, attributeFilter: ['class'] });
+    say();
+  });
+
+  /* ── the status bar ──────────────────────────────────────────────── */
   var moreBtn = d.getElementById('svMoreBtn');
   var morePop = d.getElementById('svMorePop');
   function setMore(open) {
@@ -528,4 +804,7 @@
   eyeState();
 
   w.SVFrame = { target: target, openKeys: openKeys, more: setMore };
+  /* The panels' scripts ask whether the frame's doors own Esc and the
+     focus's way back (from 769 px up, where the dock is drawn). */
+  w.SVDoors = { owns: owns, stack: function () { return stack.slice(); }, door: function (name) { return PANELS[name] ? PANELS[name].door() : null; } };
 })(window, document);

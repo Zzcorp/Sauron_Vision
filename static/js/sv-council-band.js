@@ -327,10 +327,16 @@
     }
     schedule();
   }
+  /* The band's door: the dock's COUNCIL tab where the frame draws it
+     (2026-11-15), else its own tab; the focus comes back to it. */
+  function door() {
+    var dk = document.querySelector('.sv-dock [data-sv-dock="council"]');
+    return (dk && dk.getClientRects().length) ? dk : tab;
+  }
   function toggle(how) {
     if (!desk()) return;
     setOpen(!state.open, how || 'click');
-    if (!state.open && how === 'key') { try { tab.focus(); } catch (e) { /* an old engine */ } }
+    if (!state.open && how === 'key') { try { door().focus(); } catch (e) { /* an old engine */ } }
   }
   function room() {
     var side = document.querySelector('.sidebar');
@@ -1041,7 +1047,7 @@
     if (state.over) { setOver(false, true); return; }
     if (state.chamber) { setChamber(false); if (widenBtn) widenBtn.focus(); return; }
     setOpen(false, 'key');
-    try { tab.focus(); } catch (e) { /* an old engine */ }
+    try { door().focus(); } catch (e) { /* an old engine */ }
   }
 
   /* ── the tab, placed by measure ──────────────────────────────────── */
@@ -1054,6 +1060,9 @@
   function placeTab() {
     framePending = false;
     if (!desk()) return;
+    /* The frame's dock is the band's door (2026-11-15): the old tab is not
+       drawn, so there is nothing to place. */
+    if (door() !== tab) { root.style.removeProperty('--cb-tab-top'); return; }
     var box = root.getBoundingClientRect();
     var tr = tab.getBoundingClientRect();
     var toggle = rectOf('railToggleBtn');
@@ -1110,7 +1119,7 @@
 
   /* ── wiring ──────────────────────────────────────────────────────── */
   tab.addEventListener('click', function () { toggle('click'); });
-  if (closeBtn) closeBtn.addEventListener('click', function () { setOpen(false, 'click'); try { tab.focus(); } catch (e) { /* an old engine */ } });
+  if (closeBtn) closeBtn.addEventListener('click', function () { setOpen(false, 'click'); try { door().focus(); } catch (e) { /* an old engine */ } });
   if (widenBtn) widenBtn.addEventListener('click', function () { if (widenBtn.getAttribute('aria-disabled') === 'true' && !state.chamber) { say(widenBtn.title); return; } widen('click'); });
   if (sideBack) sideBack.addEventListener('click', function () { state.sitting = null; setOver(false, true); });
   Array.prototype.forEach.call(root.querySelectorAll('.cb-links [data-side]'), function (b) {
@@ -1140,6 +1149,9 @@
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape' && e.key !== 'Esc') return;
     if (e.defaultPrevented || !state.open) return;
+    /* Where the frame's doors own Esc (sv-frame.js: the last panel opened,
+       one per press), it steps the band back through stepBack itself. */
+    if (window.SVDoors && window.SVDoors.owns()) return;
     if (!root.contains(document.activeElement)) return;
     e.preventDefault();
     stepBack();
@@ -1196,7 +1208,7 @@
   }
   if (mq && mq.addEventListener) mq.addEventListener('change', schedule);
 
-  window.SVCouncilBand = { toggle: toggle, widen: widen };
+  window.SVCouncilBand = { toggle: toggle, widen: widen, stepBack: stepBack };
 
   /* A band left open comes back open, in place, on a wide screen, and
      never beside an open activity drawer. */

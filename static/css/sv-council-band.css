@@ -203,14 +203,17 @@ body.page-dashboard .sv-council-band { --cb-foot: 0px; }
 .cb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
 .cb-dot.live { background: var(--accent); animation: svActPulse 2.4s ease-in-out infinite; }
 .cb-dot.err { background: var(--accent-red); }
+/* Widen and close: the sprite's double arrow and cross at 16 px in a
+   24 px box, on the kit's tokens (2026-11-15: no gold hover, no typed
+   glyph); sv-frame.css draws them as the frame's other closes (.sv-x). */
 .cb-icon {
-    width: 24px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px;
-    background: transparent; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; padding: 0; border: 1px solid var(--sv-line-2); border-radius: var(--sv-radius-ctl);
+    background: transparent; color: var(--sv-ink-2); font-size: 0; line-height: 0; cursor: pointer;
 }
-.cb-icon:hover { color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-icon:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-line-3); }
 .cb-icon[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
-.cb-icon[aria-pressed="true"] { color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
-.cb-close { font-size: 16px; }
+.cb-icon[aria-pressed="true"] { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-line-3); }
 
 .cb-body { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .sv-council-band.chamber .cb-body { grid-template-columns: 400px minmax(0, 1fr); }

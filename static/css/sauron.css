@@ -1888,49 +1888,10 @@
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
 
-        /* UPGRADE-6: rail toggle button */
-        .rail-toggle-btn {
-            position: fixed; top: 50%; right: 44px; transform: translateY(-50%);
-            width: 28px; height: 56px; background: var(--bg-card);
-            border: 1px solid var(--border); border-right: 0;
-            border-radius: 8px 0 0 8px; cursor: pointer; z-index: 70;
-            display: flex; align-items: center; justify-content: center;
-            color: var(--accent); transition: all .25s; box-shadow: -2px 0 12px rgba(0,0,0,.4);
-        }
-        .rail-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
-        .rail-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
-        body:has(.signals-rail.open) .rail-toggle-btn { right: 280px; }
-        body:has(.signals-rail.open) .rail-toggle-btn svg { transform: rotate(180deg); }
-        @media (max-width: 768px) { .rail-toggle-btn { display: none; } }
-
-                /* UPGRADE-9: sidebar edge toggle (mirrors rail-toggle-btn) */
-        .sidebar-toggle-btn {
-            position: fixed; top: 50%; left: var(--sidebar-width); transform: translateY(-50%);
-            width: 28px; height: 56px; background: var(--bg-card);
-            border: 1px solid var(--border); border-left: 0;
-            border-radius: 0 8px 8px 0; cursor: pointer; z-index: 70;
-            display: flex; align-items: center; justify-content: center;
-            color: var(--accent); transition: all .25s; box-shadow: 2px 0 12px rgba(0,0,0,.4);
-        }
-        .sidebar-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
-        .sidebar-toggle-btn svg { width: 14px; height: 14px; transition: transform .4s cubic-bezier(0.4, 0, 0.2, 1); transform: rotate(180deg); }
-        body:has(.sidebar.mini) .sidebar-toggle-btn { left: 68px; }
-        body:has(.sidebar.mini) .sidebar-toggle-btn svg { transform: rotate(0deg); }
-        @media (max-width: 768px) { .sidebar-toggle-btn { display: none; } }
-        /* Ensure rail toggle has the same design (pass 6 / fallback) */
-        .rail-toggle-btn {
-            position: fixed; top: 50%; right: 44px; transform: translateY(-50%);
-            width: 28px; height: 56px; background: var(--bg-card);
-            border: 1px solid var(--border); border-right: 0;
-            border-radius: 8px 0 0 8px; cursor: pointer; z-index: 70;
-            display: flex; align-items: center; justify-content: center;
-            color: var(--accent); transition: all .25s; box-shadow: -2px 0 12px rgba(0,0,0,.4);
-        }
-        .rail-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
-        .rail-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
-        body:has(.signals-rail.open) .rail-toggle-btn { right: 280px; }
-        body:has(.signals-rail.open) .rail-toggle-btn svg { transform: rotate(180deg); }
-        @media (max-width: 768px) { .rail-toggle-btn { display: none; } }
+        /* The rail's and the menu's old edge toggles (UPGRADE-6, UPGRADE-9) are
+           gone from every width (2026-11-15): their doors are the frame's (the
+           dock's SIGNALS tab, the menu's fold row; sv-frame.css), the phone
+           has its own (sv-responsive.css). */
         .ticker-bar { position: fixed; }
 
         /* ── Headband collapse buttons (right-edge tab — always visible) ── */

@@ -143,19 +143,25 @@
     0%, 100% { opacity: 1; }
     50% { opacity: .35; }
 }
+/* The close: the sprite's cross at 16 px in a 24 px box, on the kit's
+   tokens (2026-11-15: no green hover, no typed glyph); sv-frame.css draws
+   it as the frame's other closes (.sv-x). */
 .sv-activity-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 24px;
     height: 24px;
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-ctl);
     background: transparent;
-    color: var(--text-muted);
-    font-size: 16px;
-    line-height: 1;
+    color: var(--sv-ink-2);
+    font-size: 0;
+    line-height: 0;
     cursor: pointer;
 }
-.sv-activity-close:hover { color: var(--accent); border-color: var(--accent-dim); }
+.sv-activity-close:hover { color: var(--sv-ink-1); background: var(--sv-bg-3); border-color: var(--sv-line-3); }
 
 /* ── the chips: client-side filters ──────────────────────────────────── */
 .sv-activity-chips {

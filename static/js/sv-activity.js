@@ -364,10 +364,16 @@
       stopPolling();
     }
   }
+  /* The drawer's door: the dock's ACTIVITY tab where the frame draws it
+     (2026-11-15), else its own tab; the focus comes back to it. */
+  function door() {
+    var dk = document.querySelector('.sv-dock [data-sv-dock="activity"]');
+    return (dk && dk.getClientRects().length) ? dk : tab;
+  }
   function shut(returnFocus) {
     if (!isOpen()) return;
     setOpen(false, true);
-    if (returnFocus) { try { tab.focus(); } catch (e) { /* an old engine keeps its focus */ } }
+    if (returnFocus) { try { door().focus(); } catch (e) { /* an old engine keeps its focus */ } }
   }
 
   tab.addEventListener('click', function () {
@@ -381,6 +387,9 @@
   document.addEventListener('keydown', function (e) {
     if (e.defaultPrevented || !isOpen()) return;
     if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    /* Where the frame's doors own Esc (sv-frame.js: the last panel opened,
+       one per press), the frame shuts it. */
+    if (window.SVDoors && window.SVDoors.owns()) return;
     var at = document.activeElement;
     if (at && at !== document.body && !root.contains(at)) return;
     e.preventDefault();

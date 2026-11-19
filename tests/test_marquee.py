@@ -904,11 +904,19 @@ def _focus(tab, name):
 
 
 def _tab_key(tab):
-    """The keyboard: Tab from the headband's collapse button reaches its
-    first item, which the strip shows, and the strip holds."""
+    """The keyboard: Tab from the button before the headband reaches its
+    first item, which the strip shows, and the strip holds.
+
+    Updated deliberately (open and close made easy, 2026-11-15; the
+    operator: "restore the old system only, of opening and closing icons,
+    their old sizes too", then "make it better and easier to use please"):
+    the lanes' collapse buttons left their lanes for the band's doors, at
+    the band's right end and first in its markup, so the button the
+    keyboard leaves for the price lane's first item is the NEWS door, the
+    last of the two."""
     tab.sample(["dh"])
     tab.hold(0.4)
-    tab.js("document.querySelector('#dataHeadband .hb-collapse-btn').focus(); 0")
+    tab.js("document.querySelector('.sv-band-doors [data-collapse=\"ticker\"]').focus(); 0")
     tab.on("dh", "focusin", lambda: tab.key("Tab", "Tab", 9))        # 1: on the first item
     tab.wait(0.15)
     active = tab.js("__mq.activeIn('dh')")
@@ -1036,14 +1044,21 @@ def _hidden(tab):
 
 
 def _collapse(tab):
+    """The price lane put away, then brought back.
+
+    Updated deliberately (open and close made easy, 2026-11-15; the
+    operator: "restore the old system only, of opening and closing icons",
+    then "make it better and easier to use please"): one door at the band's
+    end puts the lane away and the same door brings it back, where the lane
+    had its own button and a restore tab took its place."""
     tab.sample(["dh", "ticker"])
     tab.hold(0.5)
-    tab.js("__mq.mark(); document.querySelector('#dataHeadband .hb-collapse-btn').click(); 0")
+    tab.js("__mq.mark(); document.querySelector('.sv-band-doors [data-collapse=\"data\"]').click(); 0")
     tab.wait(0.15)
     w0 = tab.js("__mq.writes.dh")
     tab.hold(1.2)
     w1 = tab.js("__mq.writes.dh")
-    tab.js("__mq.mark(); document.querySelector('.hb-restore-tab.data').click(); 0")
+    tab.js("__mq.mark(); document.querySelector('.sv-band-doors [data-collapse=\"data\"]').click(); 0")
     tab.hold(1.2)
     return {"writes": w1 - w0, "samples": tab.stop()}
 
@@ -1327,12 +1342,18 @@ def _short(tab, short):
 
 def _shaky(tab):
     """A click on each strip's collapse button whose hand moves 6 px between
-    press and release, as a hand does; then the strip put back."""
+    press and release, as a hand does; then the strip put back.
+
+    Updated deliberately (open and close made easy, 2026-11-15; the
+    operator: "restore the old system only, of opening and closing icons,
+    their old sizes too", then "make it better and easier to use please"):
+    each strip's collapse button is its door at the band's end, which
+    brings the strip back on a second click, where a restore tab did."""
     out = {}
     for name, kind in (("dh", "data"), ("ticker", "ticker")):
-        r = tab.js("(function(){ var b = document.querySelector('#%s .hb-collapse-btn').getBoundingClientRect();"
+        r = tab.js("(function(){ var b = document.querySelector('.sv-band-doors [data-collapse=\"%s\"]').getBoundingClientRect();"
                    " return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()"
-                   % FRAME[name])
+                   % kind)
         tab.move((r[0] - 3, r[1]))
         tab.wait(0.1)
         tab.press((r[0] - 3, r[1]))
@@ -1341,7 +1362,7 @@ def _shaky(tab):
         tab.wait(0.3)
         out[name] = tab.js("document.getElementById('%s').classList.contains('collapsed')" % FRAME[name])
         tab.move(tab.js("__mq.away()"))
-        tab.js("(function(){ var t = document.querySelector('.hb-restore-tab.%s');"
+        tab.js("(function(){ var t = document.querySelector('.sv-band-doors [data-collapse=\"%s\"]');"
                " if (document.getElementById('%s').classList.contains('collapsed') && t) t.click(); })(); 0"
                % (kind, FRAME[name]))
         tab.wait(0.7)
