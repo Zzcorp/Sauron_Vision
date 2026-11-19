@@ -670,6 +670,43 @@ def _possible_rows(rows) -> list:
     return [r for r in (rows or []) if parse(r) is not None]
 
 
+#: THE WRITER DROPS A CANDLE THE MARKET WAS SHUT FOR (2026-11-19,
+#: _without_shut_candles). Read at call time: tests/__init__.py turns it
+#: off, because the suite's fake venues date their candles by the wall
+#: clock (a fixture's newest candles would be dropped on a weekend and kept
+#: on a weekday), and tests/test_weekend_bars.py turns it back on at fixed
+#: clocks.
+DROP_SHUT_CANDLES = True
+
+
+def _without_shut_candles(inst, interval, rows) -> tuple:
+    """(rows, dropped): a venue's answer without the candles whose WHOLE
+    span holds no open time inside a shut of 24 hours or more (market_data
+    .shut_bars.holds_no_open_time: a currency pair on eToro's 17:00 New
+    York week, a commodity on its own market clock; no other class), in
+    order, and how many went (2026-11-19). A candle whose open cannot be
+    read is kept: the writer refuses it on its own. Never raises."""
+    rows = list(rows or [])
+    if not DROP_SHUT_CANDLES or not rows:
+        return rows, 0
+    from market_data.shut_bars import holds_no_open_time
+    kept = []
+    for row in rows:
+        try:
+            at = datetime.fromtimestamp(int(row[0]) / 1000, tz=dt_tz.utc)
+        except (TypeError, ValueError, IndexError, OverflowError, OSError):
+            kept.append(row)
+            continue
+        if not holds_no_open_time(inst, interval, at):
+            kept.append(row)
+    dropped = len(rows) - len(kept)
+    if dropped:
+        logger.debug("[bars] %s %s: %d candle(s) for slots the market was "
+                     "shut for — not bars, not written",
+                     getattr(inst, "symbol", inst), interval, dropped)
+    return kept, dropped
+
+
 def _write_venue_window(inst, interval, rows, source) -> tuple[int, int, int]:
     """Write a venue's answer, THEN give its window back to it.
 
@@ -824,6 +861,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
             rows = []
             asked = False
             refused = False
+            shut = 0
             if _venue_is_mute(source, symbol, interval):
                 logger.info("[bars] %s %s: %s gave no bars within the last "
                             "%dh — public feed directly", symbol, interval,
@@ -875,6 +913,21 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 finally:
                     if world:
                         state.spent(max(1, _wire_reads(client) - before))
+                if not getattr(client, "_sv_public_feed", False):
+                    # A CANDLE THE MARKET WAS SHUT FOR IS NOT A BAR
+                    # (2026-11-19). eToro answers a candle for every slot
+                    # it is asked for: on a weekend a 1h and a 4h candle
+                    # per slot of a commodity, flat or moving, each stored
+                    # as the venue's bar, read by every ATR stop and size
+                    # and every Orc's W2, and stamped as the venue mark
+                    # "now". A candle whose whole span holds no open time
+                    # inside a shut of 24 h or more goes HERE, before
+                    # anything reads the answer: not written, not noted,
+                    # not in `good` (no mark, no eviction window, no
+                    # staleness). Here, not in the adapter: an answer
+                    # emptied there reads as "no bars" below and mutes
+                    # eToro for six hours, past Sunday's reopen.
+                    rows, shut = _without_shut_candles(inst, interval, rows)
                 _note_answer(symbol, interval, rows)
             if getattr(client, "_sv_public_feed", False):
                 # The keyless feed IS the fallback: what it gave is written,
@@ -929,6 +982,22 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     # pass and the venue is asked again the next.
                     if _every_bar_impossible(rows):
                         refused = True
+            elif shut:
+                # AN ANSWER OF NOTHING BUT CANDLES THE MARKET WAS SHUT FOR
+                # IS "NOT NOW" TOO (2026-11-19): the window began at a
+                # stored bar of the same shut (the weekend rows stored
+                # before the rule above, until they are pruned). The venue
+                # answered and the market was shut: none of its candles is
+                # written or stamped, nothing is muted, and the venue is
+                # asked again the next pass. The public feed below fills
+                # only after the venue's newest bar, as after an answer of
+                # impossible bars, and on a shut market it holds nothing
+                # newer.
+                refused = True
+                logger.info("[bars] %s %s: %s answered %d candle(s), every "
+                            "one for a slot the market was shut for — "
+                            "nothing written, asked again next pass",
+                            symbol, interval, source, shut)
 
             if not written and venue_only:
                 continue                  # the venue's frame or nothing

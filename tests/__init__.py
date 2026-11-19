@@ -16,6 +16,7 @@ from bot_program.engine import etoro_client as _etoro_client
 from bot_program.engine import etoro_rates as _etoro_rates
 from bot_program.engine import paper_trader as _paper_trader
 from bot_program.management.commands import etoro_smoke as _etoro_smoke
+from market_data import bot_bars as _bot_bars
 from signals import market_hold as _market_hold
 
 _paper_trader.MARKET_HOURS_GATE = False
@@ -92,3 +93,12 @@ _etoro_smoke.SMOKE_GAP_S = 0.0
 # and asserted to the unit at full stage size. So the suite runs with the
 # proof off; tests/test_size_by_proof.py turns it back on.
 _proof.GATE = False
+# THE BAR WRITER'S SHUT CANDLES (2026-11-19, bot_bars.DROP_SHUT_CANDLES):
+# a forex or commodity venue candle whose whole span lies inside a weekend
+# shut is not written. The suite's fake venues date their candles by the
+# wall clock, so a fixture's newest candles would be dropped on a weekend
+# and kept on a weekday (on a simulated Saturday six tests of four modules
+# failed for the hour, not for the code). Off, the writer stores every
+# candle as before; tests/test_weekend_bars.py turns it back on at fixed
+# clocks.
+_bot_bars.DROP_SHUT_CANDLES = False
