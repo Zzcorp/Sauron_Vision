@@ -2853,26 +2853,45 @@ or none.{% endcomment %}
        the page underneath does not jump when it leaves the flow. */
     var portalHome = null, portalGap = null;
 
+    /* The keyboard stays where it was across the move (the review of the
+       doors, 2026-11-19): moving the card under <body> and back took the
+       focus out of it with the move, the page's body caught it, and Esc
+       (its buttons' titles say "Esc to leave"), the size keys and the
+       arrows no longer reached the chart that had just grown; the frame's
+       Esc closed the panel beside it instead. */
+    function keepingFocus(move) {
+        var had = document.activeElement;
+        var inside = !!had && had !== document.body && container.contains(had);
+        move();
+        if (inside && had.isConnected && document.activeElement !== had) {
+            try { had.focus({ preventScroll: true }); } catch (e) {}
+        }
+    }
+
     function portalOut() {
         if (portalHome || !container.parentNode) return;
-        portalHome = container.parentNode;
-        portalGap = document.createElement('div');
-        portalGap.setAttribute('data-sv-chart-gap', '');
-        portalGap.style.height = container.offsetHeight + 'px';
-        portalHome.insertBefore(portalGap, container);
-        document.body.appendChild(container);
+        keepingFocus(function () {
+            portalHome = container.parentNode;
+            portalGap = document.createElement('div');
+            portalGap.setAttribute('data-sv-chart-gap', '');
+            portalGap.style.height = container.offsetHeight + 'px';
+            portalHome.insertBefore(portalGap, container);
+            document.body.appendChild(container);
+        });
     }
 
     function portalBack() {
         if (!portalHome) return;
-        /* Back to the exact slot, not appended — the card holds other
-           children (the JSON script tags the widget reads its positions
-           and signals from) and order is not decorative. */
-        try { portalHome.insertBefore(container, portalGap); } catch (e) {
-            portalHome.appendChild(container);
-        }
-        if (portalGap && portalGap.parentNode) portalGap.remove();
-        portalHome = portalGap = null;
+        keepingFocus(function () {
+            /* Back to the exact slot, not appended — the card holds other
+               children (the JSON script tags the widget reads its positions
+               and signals from) and order is not decorative. */
+            try { portalHome.insertBefore(container, portalGap); } catch (e) {
+                portalHome.appendChild(container);
+            }
+            if (portalGap && portalGap.parentNode) portalGap.remove();
+            portalHome = portalGap = null;
+        });
     }
 
     /* The chart at rest: the include's height, or (fill) the room under

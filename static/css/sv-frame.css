@@ -691,6 +691,12 @@ html body .gollum-fab {
    the old gold edge and glow; open, his cell is lit (bg-3, the Eye's line
    on top); the ring inset, clear of the window's edges. */
 html body .gollum-fab:hover, html body .gollum-fab:focus-visible { background: var(--sv-bg-3); border-color: var(--sv-line-1); box-shadow: none; transform: none; }
+/* His motion is the doors' 140 ms (the review of the doors, 2026-11-19, m4:
+   the old orb's 250 ms stayed), and stops with theirs (THE DOORS, motion). */
+html body .gollum-fab {
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), border-color var(--sv-dur-hover) var(--sv-ease),
+                box-shadow var(--sv-dur-hover) var(--sv-ease);
+}
 html body .gollum-fab[aria-expanded="true"], html body .gollum-fab.is-open { background: var(--sv-bg-3); border-color: var(--sv-line-1); box-shadow: inset 0 2px 0 var(--sv-eye); }
 html body .gollum-fab:focus-visible { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
 html body .gollum-fab .gollum-face { width: 24px; height: 24px; filter: none; }
@@ -730,6 +736,10 @@ html body .se-eye-fab:not(.open) .se-fab-eye,
 html body .se-eye-fab:not(.open) .se-fab-label,
 html body .se-eye-fab:not(.open) .se-fab-unread-ring { display: none; }
 html body .se-eye-fab:not(.open):hover { box-shadow: inset 0 0 0 1px var(--sv-eye); transform: none; }
+/* The Eye moves as the doors do, 140 ms, and stops with them (m4). */
+html body .se-eye-fab:not(.open) {
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), box-shadow var(--sv-dur-hover) var(--sv-ease);
+}
 html body .se-eye-fab:not(.open):focus-visible { outline: 2px solid var(--sv-eye); outline-offset: 2px; }
 html body:not(.light-mode):is([data-sv-ambience="magic"], [data-sv-ambience="calm"]) .se-eye-fab:not(.open) {
     box-shadow: inset 0 0 0 1px rgba(0,232,104,.55), 0 0 10px rgba(0,232,104,.28);
@@ -897,13 +907,26 @@ html body .sv-horde:not(.open) { pointer-events: none; }
 .sv-door--activity .sv-door-n { border-color: var(--sv-cat-1); }
 
 /* ── the dock: four tabs at the old 28 px, 16 px apart ────────────────── */
-.sv-dock .sv-door { width: 28px; height: 112px; flex-direction: column; justify-content: flex-start; gap: 6px; padding: 8px 0 7px; }
+/* 4 px between the icon, the word and the chevron, so the longest word
+   (ACTIVITY, 57.6 px) keeps inside its 112 px tab and every chevron sits
+   14 px over its tab's foot (the review of the doors, 2026-11-19, m3: at
+   6 px ACTIVITY ran 2.6 px past and pushed its chevron down). */
+.sv-dock .sv-door {
+    width: 28px; height: 112px; flex-direction: column; justify-content: flex-start; gap: 4px; padding: 8px 0 7px;
+    transition: background-color var(--sv-dur-hover) var(--sv-ease), border-color var(--sv-dur-hover) var(--sv-ease),
+                color var(--sv-dur-hover) var(--sv-ease), width var(--sv-dur-hover) var(--sv-ease),
+                margin-left var(--sv-dur-hover) var(--sv-ease), padding-right var(--sv-dur-hover) var(--sv-ease);
+}
 .sv-dock .sv-door--ask { height: 136px; }
 .sv-dock .sv-door-ico { width: 16px; height: 16px; }
 .sv-dock .sv-door-word { writing-mode: vertical-rl; transform: rotate(180deg); }
 .sv-dock .sv-door-chev { margin-top: auto; transform: rotate(180deg); }
 .sv-dock .sv-door[aria-expanded="true"] .sv-door-chev { transform: none; }
-.sv-dock .sv-door:hover { transform: translateX(-4px); }
+/* Hovered, the tab grows out 4 px from its fixed right edge, as the old
+   tab grew 28 to 32: its face and its left edge slide out, the edge under
+   a resting pointer stays (the review of the doors, m1: a slide of the
+   whole box uncovered the pointer and the tab flickered in and out). */
+.sv-dock .sv-door:hover { width: 32px; margin-left: -4px; padding-right: 4px; }
 .sv-dock .sv-door:hover .sv-door-ico { transform: translateY(-1px); }
 .sv-dock .sv-door--panel[aria-expanded="true"] { box-shadow: inset 2px 0 0 var(--sv-eye); }
 .sv-dock .sv-door--council[aria-expanded="true"] { box-shadow: inset 2px 0 0 var(--sv-ai); }
@@ -969,15 +992,21 @@ html body .sidebar.mini .sv-fold-row .sv-fold-ico--fold { display: none; }
 html body .sidebar.mini .sv-fold-row .sv-fold-ico--unfold { display: inline-block; }
 
 /* ── the rail's heads: a button folds its section ────────────────────── */
-html body .signals-rail .rail-head { position: relative; cursor: default; }
+/* Main's height, 41.3 px: 10 px each side of the old 14 px glyph's 20.3 px
+   line, and its 1 px rule (the review of the doors, 2026-11-19, m6: the
+   spec sets none; at 39 px the cards sat 2.3 px higher than on main). */
+html body .signals-rail .rail-head { position: relative; cursor: default; box-sizing: border-box; min-height: 41.3px; }
 html body .signals-rail .rail-head .rh-fold {
     position: static; display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
     margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
-/* the whole head is the fold's: its count and chevron too (the filter and
-   the waiting refresh keep their own clicks, above it) */
+/* the whole head is the fold's: its chevron too (the filter and the
+   waiting refresh keep their own clicks, above it); the count stands above
+   it too, so its tooltip, the rail's breakdown, is reached (the review of
+   the doors, m2), and sv-frame.js hands its click to the fold */
 html body .signals-rail .rail-head .rh-fold::after { content: ""; position: absolute; inset: 0; }
-html body .signals-rail .rail-head :is(.rh-held, .rh-gear) { position: relative; z-index: 1; }
+html body .signals-rail .rail-head :is(.rh-held, .rh-gear, .rh-count) { position: relative; z-index: 1; }
+html body .signals-rail .rail-head .rh-count { cursor: pointer; }
 html body .signals-rail .rail-head .rh-fold:focus-visible { outline: none; }
 html body .signals-rail .rail-head .rh-fold:focus-visible::after { outline: 2px solid var(--sv-eye); outline-offset: -2px; }
 html body .signals-rail .rail-head .rh-icon { display: inline-flex; flex: none; color: var(--sv-ink-1); font-size: 0; }
@@ -1041,13 +1070,19 @@ body.light-mode .info-panel-bar .sv-sb-horde .sv-seats-n { color: var(--sv-ink-2
 body.light-mode .sv-sb-horde .sv-seat:is([data-world="paper"], [data-world="none"]) { stroke: var(--sv-ink-2); }
 
 /* ── motion: short and calm, off when asked ──────────────────────────── */
+/* Gollum's face and the Eye are doors too (the review of the doors, m4). */
 @media (prefers-reduced-motion: reduce) {
-    .sv-door, .sv-door *, .sv-x, .sv-door-tip, .signals-rail .rail-head .rh-chev { transition: none !important; }
-    .sv-dock .sv-door:hover, .sv-door:hover .sv-ico, .sv-band .sv-lane-door:hover .sv-door-arrow { transform: none; }
+    .sv-door, .sv-door *, .sv-x, .sv-door-tip, .signals-rail .rail-head .rh-chev,
+    html body .gollum-fab, html body .se-eye-fab:not(.open) { transition: none !important; }
+    /* nothing lifts or grows on hover; a chevron keeps the turn that says
+       open or shut (a hovered shut tab's chevron turned to "open" here) */
+    .sv-door:hover .sv-door-ico, .sv-dock .sv-door:hover .sv-door-ico, .sv-band .sv-lane-door:hover .sv-door-arrow { transform: none; }
+    .sv-dock .sv-door:hover { width: 28px; margin-left: 0; padding-right: 0; }
 }
 html body[data-sv-ambience="off"] .sv-door, html body[data-sv-ambience="off"] .sv-door *,
 html body[data-sv-ambience="off"] .sv-x, html body[data-sv-ambience="off"] .sv-door-tip,
-html body[data-sv-ambience="off"] .signals-rail .rail-head .rh-chev { transition: none !important; }
+html body[data-sv-ambience="off"] .signals-rail .rail-head .rh-chev,
+html body[data-sv-ambience="off"] .gollum-fab, html body[data-sv-ambience="off"] .se-eye-fab:not(.open) { transition: none !important; }
 
 /* ── The tiers ────────────────────────────────────────────────────────── */
 }

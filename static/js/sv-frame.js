@@ -110,10 +110,18 @@
   }
 
   /* A dialog, a money dialog above all, or the lock holds the page: the
-     frame's keys wait, so the focus never leaves it. */
+     frame's keys wait, so the focus never leaves it. The levels dialog
+     (sv-level-edit.js: a stop, a target, the PIN on a live row) is a money
+     dialog without the kit's class, and any modal dialog on screen (the
+     position page's CLOSE, the keys sheet, a profile's PIN) holds it too
+     (the review of the doors, 2026-11-19, B2). */
   var pinLocked = false;
   function held() {
-    return pinLocked || !!d.querySelector('.sv-dialog.is-open') || d.body.classList.contains('sv-scroll-locked');
+    if (pinLocked || d.body.classList.contains('sv-scroll-locked')) return true;
+    if (d.querySelector('.sv-dialog.is-open, .lvl-dlg')) return true;
+    return Array.prototype.some.call(d.querySelectorAll('[role="dialog"][aria-modal="true"]'), function (m) {
+      return m.getClientRects().length > 0;
+    });
   }
 
   d.addEventListener('keydown', function (e) {
@@ -241,7 +249,8 @@
         var c = d.getElementById('seChatClose');
         if (c && chat && chat.classList.contains('open')) c.click();
       },
-      door: function () { return dockBtn('ask'); }
+      /* Two doors: the one that opened it (askFrom, below), else its tab. */
+      door: function () { return askFrom && shown(askFrom) ? askFrom : dockBtn('ask'); }
     },
     signals: {
       isOpen: railOpen,
@@ -265,6 +274,18 @@
   var COLUMN = { signals: 1, council: 1, activity: 1, ask: 1 };
   /* The panels open, oldest first: Esc closes the last. */
   var stack = [], was = {};
+  /* Ask Sauron's two doors, its tab in the dock and the Eye in the bar:
+     the focus goes back to the one that opened it (the review of the doors,
+     2026-11-19, m5: Esc after the Eye gave it to the tab). Noted on the
+     click that opens it, before its own handler runs; Ctrl+K and the "ask
+     about" buttons leave it to the tab. Cleared when it shuts. */
+  var askFrom = null;
+  d.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || PANELS.ask.isOpen()) return;
+    if (eyeFab && eyeFab.contains(t)) askFrom = eyeFab;
+    else if (t.closest && t.closest('.sv-dock [data-sv-dock="ask"]')) askFrom = null;
+  }, true);
   /* When each news-bearing panel was last looked at (the tips' "since"). */
   var seenAt = { council: Date.now(), activity: Date.now() };
 
@@ -299,8 +320,9 @@
             if (other !== name && PANELS[other].isOpen()) PANELS[other].close(false);
           });
         }
-      } else if (seenAt[name] !== undefined) {
-        seenAt[name] = Date.now();
+      } else {
+        if (seenAt[name] !== undefined) seenAt[name] = Date.now();
+        if (name === 'ask') askFrom = null;
       }
     });
     paintDoors();
@@ -354,13 +376,27 @@
   }
   d.addEventListener('sv:live-swapped', function () { if (PANELS.horde.isOpen()) copyStandards(); });
 
-  /* Esc: the last panel opened, one per press. Read before anyone else
-     acts on the key, so a card, a menu or a dialog open at that moment
-     keeps it; the panels' own Esc stands back for the frame's (their
-     scripts ask SVDoors.owns), so one press closes one thing. */
+  /* Esc: one press closes one thing, the last opened (the review of the
+     doors, 2026-11-19, B2: one press shut the chart's More menu AND the
+     rail, a row's levels dialog AND THE HORDE). A page's own card, menu,
+     popover, dialog or chart size keeps its Esc and goes first; then the
+     last panel opened, one per press, the focus back on its door. So the
+     frame reads what is open as the key arrives (the window's capture,
+     before any handler acts: a handler may shut its own popover without a
+     word) and acts last (the document's bubble, after the page's handlers),
+     only when nothing of the page's had the key and no handler used it
+     (defaultPrevented). The panels' own Esc stands back for the frame's
+     (their scripts ask SVDoors.owns). */
   var POPS = '.dh-pop, .ticker-popup, .nf-pop, .pos-pop, .sr-popup, .ip-dropdown, .instrument-preview';
+  /* What keeps its own Esc besides the kit's overlays: the chart's toolbar
+     menus, its tall size and its full screen (chart_widget.html), the day
+     ring's open stage (sv-day-scheme.js), the board being edited
+     (dashboard.html). */
+  var OWN_ESC = '.sv-tb-menu:not([hidden]), .sv-candle-container.sv-chart-tall, .sv-candle-container.sv-chart-fs, '
+              + '.day-panel.day-open, body.sv-editing';
   function cardOpen(t) {
     if (d.querySelector('[data-sv-overlay].is-open, #kbdModalOverlay.open, .user-menu.open, .sr-popup.show, .sr-popup.sv-pinned')) return true;
+    if (d.querySelector(OWN_ESC) || d.fullscreenElement) return true;
     var more = d.getElementById('svMorePop');
     if (more && !more.hidden) return true;
     if (Array.prototype.some.call(d.querySelectorAll('.rail-fpanel'), function (p) { return !p.hidden; })) return true;
@@ -379,11 +415,19 @@
     var door = PANELS[name] && PANELS[name].door();
     if (door && shown(door)) { try { door.focus({ preventScroll: true }); } catch (err) { door.focus(); } }
   }
+  function isEsc(e) { return e.key === 'Escape' || e.key === 'Esc'; }
+  /* The press as it arrived: whether something else had the page then. */
+  var escAt = null;
   w.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape' && e.key !== 'Esc') return;
-    if (e.defaultPrevented || !owns() || held()) return;
+    if (isEsc(e)) escAt = { e: e, other: held() || cardOpen(e.target) };
+  }, true);
+  d.addEventListener('keydown', function (e) {
+    if (!isEsc(e)) return;
+    var at = escAt;
+    escAt = null;
+    if (e.defaultPrevented || !owns()) return;
+    if ((at && at.e === e) ? at.other : (held() || cardOpen(e.target))) return;
     var t = e.target;
-    if (cardOpen(t)) return;
     var inAsk = !!(chat && t && chat.contains(t)), inGollum = !!(gollumDlg && t && gollumDlg.contains(t));
     if (typing(t) && !inAsk && !inGollum) return;
     var name = inAsk ? 'ask' : inGollum ? 'gollum' : null;
@@ -392,7 +436,7 @@
     e.preventDefault();
     PANELS[name].close(true);
     if (!PANELS[name].isOpen()) back(name);
-  }, true);
+  });
 
   /* ── the doors' tips: a name, a key, one italic line ──────────────── */
   /* After 400 ms of hover, or at once when the keyboard brings the focus
@@ -495,6 +539,11 @@
       if (key) store(key, folded ? '1' : '0');
       say();
     });
+    /* The count stands over the fold's stretch so its tooltip (its title,
+       the rail's breakdown) is reached (the review of the doors, m2); a
+       click on it is still the head's. */
+    var head = b.closest('.rail-head'), count = head && head.querySelector('.rh-count');
+    if (count) count.addEventListener('click', function () { b.click(); });
     if (w.MutationObserver) new MutationObserver(say).observe(sec, { attributes: true, attributeFilter: ['class'] });
     say();
   });

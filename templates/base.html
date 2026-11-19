@@ -7364,8 +7364,12 @@ never nags. He never acts.{% endcomment %}
     function onDesk() { return !deskMq || deskMq.matches; }
     function backToDoor() {
         if (!panel.contains(document.activeElement)) return;
+        /* The door that opened it, the Eye or its tab in the dock (the
+           frame notes which: sv-frame.js, SVDoors.door); else the tab, else
+           the Eye. */
+        var want = window.SVDoors && window.SVDoors.door ? window.SVDoors.door('ask') : null;
         var dk = document.querySelector('.sv-dock [data-sv-dock="ask"]');
-        var to = (dk && dk.getClientRects().length) ? dk : fab;
+        var to = (want && want.getClientRects().length) ? want : (dk && dk.getClientRects().length) ? dk : fab;
         try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); }
     }
     fab.setAttribute('aria-expanded', 'false');
