@@ -6873,7 +6873,10 @@ def chart_data_api(request):
                             status=400)
 
     # ONE PRICE EVERYWHERE (2026-11-12): the price the numbers beside the
-    # chart print (market_data.one_quote), for its "now" line.
+    # chart print (market_data.one_quote), for its "now" line. It rides
+    # beside the overlays too (2026-11-19): they were built into a new
+    # dict, and the reply the widget asks for (overlays=1, its only way)
+    # carried no `now`.
     from market_data.one_quote import for_request
     extra = {"now": for_request(request).get(instrument.symbol).payload()}
     if overlays:
@@ -6884,9 +6887,10 @@ def chart_data_api(request):
         try:
             sigs = list(Signal.objects.filter(instrument=instrument)
                         .order_by("-created_at")[:10])
-            extra = {"positions": _chart_positions(request.user, instrument),
-                     "signals": _chart_signal_marks(
-                         sigs, _chart_decimals(instrument))}
+            extra.update({"positions": _chart_positions(request.user,
+                                                        instrument),
+                          "signals": _chart_signal_marks(
+                              sigs, _chart_decimals(instrument))})
             # The living levels (2026-10-03) ride the same reply, with
             # their own failure word: a level read that fails must not
             # cost the operator the stop line of a position they are
@@ -6916,8 +6920,9 @@ def chart_data_api(request):
             # to be distinguishable from that: without this the chart would
             # go on showing a stop line for a position that closed an hour
             # ago, refreshing every sixty seconds, with nothing anywhere
-            # saying the overlay had stopped updating.
-            extra = {"overlays_error": str(e)[:200]}
+            # saying the overlay had stopped updating. The one price is no
+            # overlay: it stays.
+            extra = {"now": extra["now"], "overlays_error": str(e)[:200]}
 
     # ONE FEED PER SERIES, NAMED (2026-10-31, dashboard.chart_source). The
     # venue the operator's orders on this instrument go to — a read of his

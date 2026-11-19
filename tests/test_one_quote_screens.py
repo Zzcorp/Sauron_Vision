@@ -289,6 +289,27 @@ class TheInstrumentPageTests(_Screens):
             self.assertEqual(d["now"], want[sym].payload(), sym)
             self.assertIn("close_side", d["source"])
 
+    def test_the_chart_data_carries_now_with_the_overlays(self):
+        """overlays=1, the only way the widget asks (2026-11-19): the reply
+        rebuilt its extras for the overlays and dropped `now`. The same
+        payload rides beside the positions, and beside an overlay that
+        could not be built. No feed is asked (no bar is stored here)."""
+        want = self.shown()
+        with mock.patch("market_data.public_feed.public_feed_for",
+                        return_value=None):
+            for sym in ("EURUSD", "XAUUSD", "GBPUSD"):
+                d = self.json(f"/api/chart-data/?symbol={sym}&timeframe=1h"
+                              "&overlays=1")
+                self.assertEqual(d["now"], want[sym].payload(), sym)
+                self.assertIsInstance(d["positions"], list, sym)
+            with mock.patch("dashboard.views._chart_positions",
+                            side_effect=RuntimeError("positions unread")):
+                d = self.json("/api/chart-data/?symbol=EURUSD&timeframe=1h"
+                              "&overlays=1")
+        self.assertIn("positions unread", d["overlays_error"])
+        self.assertNotIn("positions", d)
+        self.assertEqual(d["now"], want["EURUSD"].payload())
+
 
 class TheOtherListsTests(_Screens):
 
