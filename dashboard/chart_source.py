@@ -682,22 +682,40 @@ def _venue_own(instrument, timeframe, route):
     return tags, newest
 
 
+def _venue_window(interval) -> int:
+    """Seconds a venue's minute rows stay fresh for the `interval` frame:
+    VENUE_MINUTE_FRAMES frames, VENUE_MINUTE_FLOOR_S at least per frame."""
+    return VENUE_MINUTE_FRAMES * max(FRAME_SECONDS[interval],
+                                     VENUE_MINUTE_FLOOR_S)
+
+
 def _venue_minutes_fresh(instrument, interval, base, newest, route, now):
     """Whether the venue's `base` rows, the newest opened at `newest`, may
     draw the `interval` frame at `now` (2026-11-19): the newest ended
-    within VENUE_MINUTE_FRAMES frames of now (VENUE_MINUTE_FLOOR_S at
-    least), or no earlier than the venue's newest 1h bar opened (a shut
-    market, or a bar pass itself behind: then the minute frames are as
-    late as the 1H series is), and never once they are stale by the 1h
-    series' own bound (choose: 72 h, three hours for crypto), when the 1H
-    series gives way to newer public bars."""
+    within the frame's window (_venue_window) of now, or, while the
+    venue's 1h series is itself behind (its newest hour ended longer ago
+    than the window: a shut market, or a bar pass behind), no earlier than
+    that hour opened (then the minute frames are as late as the 1H series
+    is), and never once they are stale by the 1h series' own bound
+    (choose: 72 h, three hours for crypto), when the 1H series gives way
+    to newer public bars.
+
+    ONLY WHILE THE 1H SERIES IS BEHIND (2026-11-19, the review). The bar
+    pass stores the venue's forming hour, so while it runs that hour is
+    the current one: a tape that stopped just before the hour still
+    "ended no earlier than it opened", and the 5, 10 and 15 min frames
+    drew the venue's candles an hour old with no word until the next hour
+    was stored. While the 1h series is current, the window alone
+    decides."""
     end = newest + timedelta(seconds=FRAME_SECONDS[base])
-    window = VENUE_MINUTE_FRAMES * max(FRAME_SECONDS[interval],
-                                       VENUE_MINUTE_FLOOR_S)
+    window = _venue_window(interval)
     if (now - end).total_seconds() <= window:
         return True
     _tags, hour = _venue_own(instrument, "1h", route)
-    return (hour is not None and end >= hour
+    if hour is None:
+        return False
+    behind = (now - (hour + timedelta(hours=1))).total_seconds() > window
+    return (behind and end >= hour
             and not _stale(instrument, "1h", end, now))
 
 
@@ -715,7 +733,10 @@ def _venue_minutes(instrument, interval, route, now, limit, notes):
 
     When the venue holds rows of the frame that are not fresh
     (_venue_minutes_fresh), the live frame draws as before and the legend
-    says where the venue's candles stop."""
+    says where the venue's candles stop. Drawn older than the frame's
+    window (a shut market, a bar pass behind), the legend says how old
+    they are (2026-11-19, the review: 20 hours on, the 1H named its newest
+    candle and the minute frames said nothing)."""
     from market_data.models import PriceData
 
     stopped = None
@@ -727,6 +748,10 @@ def _venue_minutes(instrument, interval, route, now, limit, notes):
                                     route, now):
             stopped = stopped or (base, newest)
             continue
+        end = newest + timedelta(seconds=FRAME_SECONDS[base])
+        if (now - end).total_seconds() > _venue_window(interval):
+            notes.append(f"{feed_name(route)}'s newest {base} candle is "
+                         f"{newest:%Y-%m-%d %H:%M} UTC")
         ratio = FRAME_SECONDS[interval] // FRAME_SECONDS[base]
         rows = list(PriceData.objects
                     .filter(instrument=instrument, timeframe=base,

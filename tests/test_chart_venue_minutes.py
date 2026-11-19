@@ -19,12 +19,16 @@ minute frames too. For an instrument routed to a venue, 5m, 10m, 15m and
   * 15m from its 15m rows; 30m from stored 30m rows, else from the 15m
     rows folded on the 1800 s UTC grid (the 2h fold's own code);
   * 1m from 1m rows alone (nothing writes them today);
-  * FRESH: the newest row ended within 2 x max(frame, 600 s) of now, or no
-    earlier than the venue's newest 1h bar opened (a shut market, a bar
-    pass itself behind), and never once the rows are stale by the 1h
-    series' own bound (choose: 72 h, three hours for crypto). Otherwise
-    the live frame draws as before, and the legend says where the venue's
-    candles stop.
+  * FRESH: the newest row ended within 2 x max(frame, 600 s) of now, or,
+    while the venue's 1h series is itself behind (its newest hour ended
+    longer ago than that: a shut market, a bar pass behind), no earlier
+    than that hour opened, and never once the rows are stale by the 1h
+    series' own bound (choose: 72 h, three hours for crypto). Drawn older
+    than the window, the legend says how old they are. Otherwise the live
+    frame draws as before, and the legend says where the venue's candles
+    stop. A tape that stops while the bar pass runs gives way at once
+    (the review: the venue's forming hour, stored by the bar pass, kept a
+    frozen tape "fresh" for up to an hour).
 
 No request (the eToro client is never built, the keyless feed is not asked
 when the venue draws), no write. Display only: the engine reads bars
@@ -259,7 +263,8 @@ class FreshnessTests(_Venue):
 
     def test_a_shut_market_keeps_etoros_last_candles(self):
         """Saturday: eToro's 15m rows end at Friday 22:00 and its newest
-        1h bar opened at 21:00. The market is shut, not the tape."""
+        1h bar opened at 21:00. The market is shut, not the tape; the
+        legend says how old the candles are."""
         _rows(self.inst, "15m", FRIDAY.replace(hour=20), 8, 15)
         _row(self.inst, "1h", FRIDAY.replace(hour=21), 4126, 4130, 4124,
              4128)
@@ -268,6 +273,55 @@ class FreshnessTests(_Venue):
         self.assertEqual(bars[-1]["time"], _epoch(FRIDAY.replace(hour=21,
                                                                  minute=30)))
         self.assertEqual(bars[-1]["close"], 4128.0)
+        self.assertIn("eToro's newest 15m candle is 2026-11-20 21:45 UTC",
+                      src["notes"])
+        self.feed.klines.assert_not_called()
+
+    def test_a_frozen_tape_under_a_current_bar_pass_gives_way_at_once(self):
+        """The review, 2026-11-19: at 10:58 the bar pass holds eToro's
+        forming 10:00 hour (it stores the candle still forming), and the
+        tape stopped with its 09:45 15m and 09:55 5m candles (an Orc gone,
+        the tape switched off). eToro's newest hour opening at 10:00 says
+        nothing of the tape: 5, 10 and 15 min drew eToro's candles an hour
+        old with no word, until the 11:00 hour was stored. They give way at
+        once now, each saying where eToro's candles stop; 30 min keeps them
+        inside its own window (two frames, 60 min)."""
+        now = NOW.replace(hour=10, minute=58)
+        _row(self.inst, "1h", NOW.replace(hour=10, minute=0), 4126, 4130,
+             4124, 4128)
+        _rows(self.inst, "15m", NOW.replace(hour=8, minute=0), 8, 15)
+        _rows(self.inst, "5m", NOW.replace(hour=9, minute=20), 8, 5)
+        for interval, base, stop in (("5m", "5m", "09:55"),
+                                     ("10m", "5m", "09:55"),
+                                     ("15m", "15m", "09:45")):
+            with self.subTest(interval):
+                cache.clear()      # the live frame is kept a minute
+                _bars, src = self.series(interval, now=now)
+                self.assertEqual(src["family"], "yahoo")
+                self.assertIn(f"eToro's {base} candles stop at 2026-11-19 "
+                              f"{stop} UTC; these are Yahoo GC=F's",
+                              src["notes"])
+        bars, src = self.series("30m", now=now)
+        self.assertEqual(src["family"], "etoro", "ended at 10:00, 58 min ago")
+        self.assertEqual(bars[-1]["time"], _epoch(NOW.replace(hour=9,
+                                                              minute=30)))
+        self.assertFalse(any("newest" in n for n in src["notes"]),
+                         src["notes"])
+
+    def test_a_bar_pass_behind_keeps_etoros_candles_and_says_how_old(self):
+        """The bar pass and the tape both stopped at 14:00 yesterday, a
+        weekday: the 1H draws eToro's last candles (stale only after 72 h)
+        and so do the minute frames, as late as the 1H series; the legend
+        says how old they are (it said nothing, 20 hours on)."""
+        stop = datetime(2026, 11, 18, 14, 0, tzinfo=UTC)
+        _row(self.inst, "1h", stop, 4126, 4130, 4124, 4128)
+        _rows(self.inst, "15m", stop - timedelta(minutes=60), 5, 15)
+        for interval in ("15m", "30m"):
+            with self.subTest(interval):
+                _bars, src = self.series(interval)
+                self.assertEqual(src["family"], "etoro")
+                self.assertIn("eToro's newest 15m candle is 2026-11-18 "
+                              "14:00 UTC", src["notes"])
         self.feed.klines.assert_not_called()
 
     def test_without_a_1h_row_the_age_alone_decides(self):
