@@ -243,7 +243,13 @@
                    data-market-session + data-market-compact. Crypto has
                    no clock and reads 24/7.{% endcomment %}
                 <td>
-                    {% if item.market %}
+                    {% if item.market.word %}{# eToro's all-week instruments (2026-11-19): eToro's own badge, 24/7 or PAUSE, under its own session code. #}
+                    <span class="mkt-cell {% if item.market.is_open %}mk-open{% else %}mk-pause{% endif %}"
+                          data-market-session="{{ item.market.session }}" data-market-compact="1"
+                          title="{{ item.market.title }}">
+                        <span class="mk-dot"></span><span class="mk-text">{{ item.market.word }}</span>
+                    </span>
+                    {% elif item.market %}
                     <span class="mkt-cell {% if item.market.is_open %}mk-open{% else %}mk-closed{% endif %}"
                           data-market-session="{{ item.market.session }}" data-market-compact="1"
                           title="{{ item.market.name }}{% if item.market.time_until_change %} · {{ item.market.next_state }} in {{ item.market.time_until_change }}{% endif %}">
@@ -298,6 +304,10 @@
 .mkt-cell.mk-open .mk-dot { background:var(--accent); }
 .mkt-cell.mk-closed { color:var(--text-muted); }
 .mkt-cell.mk-closed .mk-dot { background:var(--accent-red); }
+/* One of eToro's published breaks (2026-11-19): a short pause, said in
+   the warning colour, never the shut market's red. */
+.mkt-cell.mk-pause { color:var(--text-muted); }
+.mkt-cell.mk-pause .mk-dot { background:var(--warning); }
 
 /* Quick-filter row: asset class on the left, mover bucket on the right.
    Both groups wrap on their own, so the row degrades to stacked pills at

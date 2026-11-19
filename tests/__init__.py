@@ -16,6 +16,7 @@ from bot_program.engine import etoro_client as _etoro_client
 from bot_program.engine import etoro_rates as _etoro_rates
 from bot_program.engine import paper_trader as _paper_trader
 from bot_program.management.commands import etoro_smoke as _etoro_smoke
+from market_data import all_week_display as _all_week_display
 from market_data import bot_bars as _bot_bars
 from signals import market_hold as _market_hold
 
@@ -36,6 +37,12 @@ _entry_timing.GATE = False
 # pass does nothing; tests/test_signal_market_hold.py turns it back on at
 # a fixed clock.
 _market_hold.GATE = False
+# The same reason for the screens' words of eToro's all-week instruments
+# (2026-11-19, market_data/all_week_display.GATE): a gold price, badge or
+# card rendered at 22:30 UTC would read "pause", and one rendered on a
+# Saturday "open · eToro 24/7". Off, every screen keeps Sauron's own
+# words; tests/test_all_week_display.py turns it back on at a fixed clock.
+_all_week_display.GATE = False
 # THE /search MEMO (2026-10-06, etoro_client.SEARCH_MEMO) keeps an id for
 # the UTC day across EtoroTrader instances, and the suite's fake wires
 # answer /search with ids per test and count the calls: kept on, a test

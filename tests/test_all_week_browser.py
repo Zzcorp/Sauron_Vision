@@ -75,7 +75,9 @@ class _Desk:
             return got
         self.driver = _Driver(CHROME, answer)
 
-    def open(self, width=1440, height=900):
+    def open(self, width=1440, height=900, url=None):
+        """A tab on the gold page (or `url`, a page without the chart),
+        loaded and settled at the held instant."""
         from tests.old_design.measure import ADVANCE, INIT, LOAD_MS, SETTLE
         prefs = {"sauron_signals_rail": "open", "sauron_sidebar": "full",
                  "sauron_rail_sig": "0", "sauron_rail_watch": "0",
@@ -86,7 +88,8 @@ class _Desk:
         for attempt in range(4):
             tid, sid = self.driver.tab(width, height, init=init)
             try:
-                self.driver.go(sid, self.origin + G.PAGE_URL, timeout=30)
+                self.driver.go(sid, self.origin + (url or G.PAGE_URL),
+                               timeout=30)
                 break
             except TimeoutError:
                 self.driver.close_tab(tid)
@@ -94,7 +97,7 @@ class _Desk:
                     raise
         self.driver.js(sid, ADVANCE % LOAD_MS)
         self.driver.quiet(sid, still=0.4, cap=15)
-        for _ in range(150):
+        for _ in range(0 if url else 150):
             if self.driver.js(sid, "(function(){var h=window.svCharts&&"
                                    "svCharts['%s'];return h&&h.bars?"
                                    "h.bars().length:0})()" % G.CHART_ID):
@@ -194,7 +197,61 @@ HEADER = r"""(function () {
 TOKENS = r"""(function () {
   function c(v) { var e = document.createElement('span'); e.style.color = 'var(' + v + ')';
     document.body.appendChild(e); var out = getComputedStyle(e).color; e.remove(); return out; }
-  return JSON.stringify({ ink2: c('--sv-ink-2'), warn: c('--sv-warn'), down: c('--sv-down') });
+  return JSON.stringify({ ink2: c('--sv-ink-2'), warn: c('--sv-warn'), down: c('--sv-down'),
+                          red: c('--accent-red') });
+})()"""
+
+#: One element's words as drawn: text, colour, ground, border, weight,
+#: style, the lines it takes and its contrast on its ground.
+_READ = r"""
+  function rgb(s) { var m = String(s).match(/[\d.]+/g); return m ? m.slice(0, 4).map(Number) : null; }
+  function lum(c) { return [0, 1, 2].map(function (i) { var v = c[i] / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); })
+    .reduce(function (a, v, i) { return a + v * [0.2126, 0.7152, 0.0722][i]; }, 0); }
+  function ground(e) { while (e) { var c = rgb(getComputedStyle(e).backgroundColor);
+    if (c && (c.length < 4 || c[3] > 0.5)) return c; e = e.parentElement; } return [255, 255, 255]; }
+  function read(e) { if (!e) return null; var cs = getComputedStyle(e);
+    var fg = rgb(cs.color), bg = ground(e), hi = Math.max(lum(fg), lum(bg)), lo = Math.min(lum(fg), lum(bg));
+    var rg = document.createRange(); rg.selectNodeContents(e); var tops = {};
+    Array.prototype.forEach.call(rg.getClientRects(), function (r) { if (r.width > 0) tops[Math.round(r.top)] = 1; });
+    return { text: e.textContent.replace(/\s+/g, ' ').trim(), color: cs.color, fill: cs.backgroundColor,
+             border: cs.borderTopColor, weight: Number(cs.fontWeight), style: cs.fontStyle,
+             lines: Object.keys(tops).length, contrast: (hi + 0.05) / (lo + 0.05) }; }
+"""
+
+#: The rail's gold card: its eToro line (the tag and the note), the card's
+#: data-market and whether a MARKET SHUT badge is on it.
+RAIL = r"""(function () {""" + _READ + r"""
+  var wrap = Array.prototype.find.call(document.querySelectorAll('#signalsRail .sr-signal-wrap'),
+    function (w) { return /XAUUSD/.test(w.textContent); });
+  var line = wrap ? wrap.querySelector('.sr-week') : null;
+  return JSON.stringify({ found: !!wrap, line: line ? { cls: line.className, title: line.getAttribute('title') } : null,
+    tag: read(line && line.querySelector('.sr-week-tag')), note: read(line && line.querySelector('.sr-week-note')),
+    market: wrap ? wrap.getAttribute('data-market') : null, shut: !!(wrap && wrap.querySelector('.sr-shut')) });
+})()"""
+
+#: /signals/'s gold row: its eToro tag and note, and whether a MARKET SHUT
+#: badge is beside them.
+SIGNALS = r"""(function () {""" + _READ + r"""
+  var row = Array.prototype.find.call(document.querySelectorAll('tr'), function (tr) {
+    return /XAUUSD/.test(tr.textContent) && tr.querySelector('td[data-label="Can anything act?"]'); });
+  var c = row ? row.querySelector('td[data-label="Can anything act?"]') : null;
+  if (!c) return JSON.stringify(null);
+  var tag = c.querySelector('.sig-week');
+  return JSON.stringify({ tag: read(tag), cls: tag ? tag.className : null, title: tag ? tag.getAttribute('title') : null,
+    note: read(c.querySelector('.sig-week-note')), shut: !!c.querySelector('.sig-shut') });
+})()"""
+
+#: The instruments list's gold row: its market cell as drawn.
+LIST = r"""(function () {""" + _READ + r"""
+  var row = Array.prototype.find.call(document.querySelectorAll('tr'), function (tr) {
+    return /XAUUSD/.test(tr.textContent) && tr.querySelector('[data-market-session]'); });
+  var c = row ? row.querySelector('[data-market-session]') : null;
+  if (!c) return JSON.stringify(null);
+  var d = c.querySelector('.mk-dot');
+  return JSON.stringify({ cls: c.className, session: c.getAttribute('data-market-session'),
+    title: c.getAttribute('title'), words: read(c.querySelector('.mk-text') || c),
+    dotFill: d ? getComputedStyle(d).backgroundColor : null });
 })()"""
 
 
@@ -219,6 +276,7 @@ class SaturdayAfternoonTests(TestCase):
             tid, sid = desk.open()
             cls.first = desk.read(sid, HEADER)
             cls.tokens = desk.read(sid, TOKENS)
+            cls.rail = desk.read(sid, RAIL)
             from tests.old_design.measure import ADVANCE
             desk.driver.js(sid, ADVANCE % 61000)       # the badge poller
             desk.driver.quiet(sid, still=0.5, cap=15)
@@ -226,6 +284,15 @@ class SaturdayAfternoonTests(TestCase):
             desk.driver.close_tab(tid)
             tid, sid = desk.open(1280, 800)
             cls.narrow = desk.read(sid, HEADER)
+            desk.driver.close_tab(tid)
+            tid, sid = desk.open(url="/instruments/")
+            cls.list = desk.read(sid, LIST)
+            desk.driver.js(sid, ADVANCE % 61000)       # the badge poller
+            desk.driver.quiet(sid, still=0.5, cap=15)
+            cls.list_polled = desk.read(sid, LIST)
+            desk.driver.close_tab(tid)
+            tid, sid = desk.open(url="/signals/")
+            cls.signals = desk.read(sid, SIGNALS)
             desk.driver.close_tab(tid)
         finally:
             desk.close()
@@ -258,6 +325,58 @@ class SaturdayAfternoonTests(TestCase):
     def test_the_words_keep_their_contrast(self):
         self.assertGreaterEqual(self.first["badge"]["contrast"], 4.5)
 
+    def test_the_rail_card_reads_open_at_etoro(self):
+        """The rail's gold card: OPEN 24/7 at eToro in the secondary ink,
+        a bold label on a hairline, the note in italics, each whole on one
+        line and at 4.5:1 at least; no MARKET SHUT badge, no
+        data-market="shut" (the SHUT chip neither counts nor hides it)."""
+        r = self.rail
+        self.assertTrue(r["found"], "the gold card is on the rail")
+        self.assertIsNone(r["market"])
+        self.assertFalse(r["shut"])
+        self.assertNotIn("sr-week--pause", r["line"]["cls"])
+        self.assertEqual((r["tag"]["text"], r["note"]["text"]),
+                         ("OPEN 24/7", "at eToro"))
+        self.assertEqual(r["tag"]["color"], self.tokens["ink2"])
+        self.assertGreaterEqual(r["tag"]["weight"], 600)
+        self.assertEqual(r["note"]["style"], "italic")
+        for part in (r["tag"], r["note"]):
+            self.assertEqual(part["lines"], 1, part)
+            self.assertGreaterEqual(part["contrast"], 4.5, part)
+            self.assertNotIn(part["fill"], (self.tokens["down"],
+                                            self.tokens["red"]), part)
+        self.assertIn("by your choice", r["line"]["title"])
+
+    def test_the_signals_page_reads_open_at_etoro(self):
+        """/signals/'s gold row: OPEN 24/7 in the secondary ink, a bold
+        label on a hairline, the note in italics, at 4.5:1 at least, and
+        no MARKET SHUT badge beside it."""
+        got = self.signals
+        self.assertIsNotNone(got, "the gold row on /signals/")
+        self.assertFalse(got["shut"])
+        self.assertEqual((got["tag"]["text"], got["note"]["text"]),
+                         ("OPEN 24/7", "at eToro"))
+        self.assertNotIn("sig-week--pause", got["cls"])
+        self.assertEqual(got["tag"]["color"], self.tokens["ink2"])
+        self.assertGreaterEqual(got["tag"]["weight"], 600)
+        self.assertEqual(got["note"]["style"], "italic")
+        for part in (got["tag"], got["note"]):
+            self.assertEqual(part["lines"], 1, part)
+            self.assertGreaterEqual(part["contrast"], 4.5, part)
+        self.assertIn("by your choice", got["title"])
+
+    def test_the_instruments_list_reads_24_7_and_keeps_it(self):
+        """The list's market cell: eToro's own 24/7 under its own code, at
+        4.5:1 at least, still 24/7 after the minute poll (W2)."""
+        for got in (self.list, self.list_polled):
+            self.assertEqual(got["words"]["text"], "24/7")
+            self.assertEqual(got["session"], "ETORO247_18")
+            self.assertIn("mk-open", got["cls"])
+            self.assertNotIn("mk-closed", got["cls"])
+            self.assertGreaterEqual(got["words"]["contrast"], 4.5)
+        self.assertEqual(self.list["title"], "open · eToro 24/7 (breaks "
+                         "22:00-23:00 UTC daily, Fri 22:00-22:30)")
+
 
 @unittest.skipUnless(CHROME, "no headless Chromium on this machine")
 class FridayBreakTests(TestCase):
@@ -270,11 +389,15 @@ class FridayBreakTests(TestCase):
             tid, sid = desk.open()
             cls.got = desk.read(sid, HEADER)
             cls.tokens = desk.read(sid, TOKENS)
+            cls.rail = desk.read(sid, RAIL)
             reopened = _ms(G.PAUSE) + 21 * 60 * 1000
             cls.after = desk.driver.js(
                 sid, "SVVenue.words(SVVenue.get('XAUUSD'), %d, '')" % reopened)
             cls.state_after = desk.driver.js(
                 sid, "SVVenue.stateAt(SVVenue.get('XAUUSD'), %d)" % reopened)
+            desk.driver.close_tab(tid)
+            tid, sid = desk.open(url="/instruments/")
+            cls.list = desk.read(sid, LIST)
             desk.driver.close_tab(tid)
         finally:
             desk.close()
@@ -299,3 +422,26 @@ class FridayBreakTests(TestCase):
         self.assertEqual(self.state_after, "delayed")
         self.assertEqual(self.after,
                          "open · eToro 24/7 · eToro ask · 25 min")
+
+    def test_the_rail_and_the_list_say_pause_in_amber(self):
+        """The rail's gold card and the list's cell in eToro's break: PAUSE
+        in the warning amber (the card's tag on a half-amber hairline, the
+        list's dot), never the shut market's red, at 4.5:1 at least."""
+        r = self.rail
+        self.assertTrue(r["found"], "the gold card is on the rail")
+        self.assertIn("sr-week--pause", r["line"]["cls"])
+        self.assertEqual((r["tag"]["text"], r["note"]["text"]),
+                         ("PAUSE", "eToro reopens 22:30 UTC"))
+        self.assertEqual(r["tag"]["color"], self.tokens["warn"])
+        self.assertIsNone(r["market"])
+        for part in (r["tag"], r["note"]):
+            self.assertEqual(part["lines"], 1, part)
+            self.assertGreaterEqual(part["contrast"], 4.5, part)
+        got = self.list
+        self.assertEqual(got["words"]["text"], "PAUSE")
+        self.assertIn("mk-pause", got["cls"])
+        self.assertNotIn("mk-closed", got["cls"])
+        self.assertEqual(got["dotFill"], self.tokens["warn"])
+        self.assertNotEqual(got["dotFill"], self.tokens["red"])
+        self.assertGreaterEqual(got["words"]["contrast"], 4.5)
+        self.assertEqual(got["title"], "pause · eToro reopens 22:30 UTC")

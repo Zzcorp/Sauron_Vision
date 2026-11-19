@@ -270,7 +270,7 @@ HELPER_NAMES = {"all_week_state", "ALL_WEEK_BREAKS_UTC"}
 #: display reader: each returns words for a screen, never a decision.
 DISPLAY_FUNCTIONS = {
     "brain/close_advice.py": {"_market_reason"},
-    "bot_program/orcs/notes.py": {"_wake_rests"},
+    "bot_program/orcs/notes.py": {"slot"},
     "bot_program/telegram_eye.py": {"_skip_line"},
 }
 

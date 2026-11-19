@@ -1420,6 +1420,40 @@ body:not(.light-mode) .sv-activity-badge { background: var(--sv-bg-4); color: va
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sv-warn) 50%, transparent);
 }
 
+/* eToro's ALL-WEEK INSTRUMENTS (2026-11-19, market_data/all_week_display):
+   a card whose market eToro trades while Sauron's own clock is shut says
+   OPEN 24/7 at eToro; one of eToro's breaks, PAUSE and its reopening. An
+   open market is no warning: the label in the secondary ink, bold small
+   caps on a hairline, the note in italics, muted. A pause is said in the
+   warning amber, as a shut market is, never a fill. The headband row's line
+   takes a line of its own, as MARKET SHUT's does; /signals/ keeps it beside
+   the stage badge. */
+.sr-week {
+    display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap; row-gap: 2px;
+    margin-top: 3px; font-size: var(--sv-fs-micro); color: var(--sv-ink-2);
+}
+.sr-week-tag, .sig-week {
+    font-family: var(--sv-font-sans); font-weight: 600;
+    letter-spacing: var(--sv-track-label);
+    font-size: var(--sv-fs-micro);
+    padding: 0 4px; border: 1px solid var(--sv-line-2);
+    border-radius: var(--sv-radius-chip);
+    color: var(--sv-ink-2); white-space: nowrap;
+}
+.sr-week-note { font-style: italic; color: var(--sv-ink-3); white-space: nowrap; }
+.ip-dropdown .sv-sig-row:has(.ipr-week) { flex-wrap: wrap; }
+.ipr-week {
+    flex-basis: 100%; font-size: var(--sv-fs-micro); letter-spacing: 0;
+    font-variant-numeric: tabular-nums; color: var(--sv-ink-2);
+}
+.sig-week { margin-left: 4px; }
+.sig-week-note { font-style: italic; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); white-space: nowrap; }
+.sr-week--pause .sr-week-tag, .sig-week--pause {
+    color: var(--sv-warn);
+    border-color: color-mix(in srgb, var(--sv-warn) 50%, transparent);
+}
+.ipr-week--pause, .sr-pop-fact-week--pause { color: var(--sv-warn); }
+
 
 /* ══ §7 Data ═════════════════════════════════════════════════════════════
    Table heads, number columns, the kit's tables, tiles, key-value grids,

@@ -86,8 +86,12 @@ def banner_payload(signal, note: str = "") -> dict:
         "rr": signal.risk_reward_ratio,
         "url": "/signals/",
     }
-    from signals.market_hold import shut_label
-    market = note or shut_label(signal.instrument)
+    # eToro's all-week instruments (2026-11-19, market_data/
+    # all_week_display.label): "open · eToro 24/7 · bots: no weekend
+    # entries, by your choice" where the rail's clock says shut; every
+    # other instrument the rail's own words.
+    from market_data.all_week_display import label as market_label
+    market = note or market_label(signal.instrument)
     if market:
         payload["market"] = market
     return payload

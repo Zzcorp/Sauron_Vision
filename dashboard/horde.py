@@ -3311,6 +3311,18 @@ def _market_words(trade, world, pcls, up, quote, now):
     venue = _venue_word(meta) if real else ""
     if (pcls or "").lower() == "crypto":
         return MARKET_CRYPTO.format(venue=venue or "Paper venue")
+    # eToro's ALL-WEEK instruments (2026-11-19, market_data/
+    # all_week_display.market_line): a row held at eToro reads eToro's own
+    # hours, all week; a paper row keeps the paper venue's clock below.
+    if real and str(meta.get("broker") or "") == "etoro":
+        from types import SimpleNamespace
+
+        from market_data.all_week_display import market_line
+        line = market_line(SimpleNamespace(symbol=sym, asset_class=pcls,
+                                           exchange=exchange), now,
+                           venue=venue)
+        if line:
+            return line
     index_cfd = real and (str(pcls or "").lower() == "index"
                           or quote_stand_in(sym, quote,
                                             carrier=str(meta.get("broker") or ""))

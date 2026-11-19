@@ -672,6 +672,8 @@ def slot(orc, *, trade=None, root=None, tracks=(), now=None,
     if now is None:
         from django.utils import timezone
         now = timezone.now()
+    from bot_program.orcs.sessions import next_shut
+    from market_data.all_week_display import wake_words
     return _plain_voice({
         "v": SLOT_V, "mode": MODE_SHADOW, "id": orc.pk, "label": orc.label,
         "state": orc.state,
@@ -691,7 +693,12 @@ def slot(orc, *, trade=None, root=None, tracks=(), now=None,
                       else None),
         "care_compare": compare(tracks),
         "next_wake_at": _iso(due) if due else None,
-        "next_wake_t": next_wake_t(due, now, minds),
+        # eToro's all-week instruments (2026-11-19, market_data/
+        # all_week_display.wake_words): a metronome resting on W11's own
+        # clock while eToro trades the instrument says so, not "overdue".
+        "next_wake_t": (wake_words(trade if trade is not None else root,
+                                   due, now, minds, clock=next_shut)
+                        or next_wake_t(due, now, minds)),
         "journal": _journal(card),
         "intents": _intents(card),
         "intellect": _intellect(card),

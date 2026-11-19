@@ -176,7 +176,10 @@ class Command(BaseCommand):
         self.stdout.write(f"    {badge['label']} — {badge['reason']}")
         # Its market, as the page's MARKET SHUT badge says it (2026-11-12).
         market = signal_surface.market_block(s)
-        if market["shut"]:
+        if market.get("week"):
+            # eToro's all-week instruments (2026-11-19): the page's words.
+            self.stdout.write(f"    {market['week']['pop']}")
+        elif market["shut"]:
             self.stdout.write("    MARKET SHUT"
                               + (f" · {market['opens']}" if market["opens"]
                                  else "") + f" — {market['title']}")

@@ -279,6 +279,25 @@ def _world_num(value):
         return None
 
 
+def _open_at_etoro(symbol, asset_class, carrier) -> bool:
+    """Whether a row held at eToro is one of eToro's all-week instruments
+    the screens show open now (market_data/all_week_display.week,
+    2026-11-19): its venue's last print is then out of date, not "normal
+    while its market is shut". False for any other row, a pause, or with
+    the reader's GATE off. Display only; never raises."""
+    if not symbol or str(carrier or "").strip().lower() != "etoro":
+        return False
+    try:
+        from types import SimpleNamespace
+
+        from market_data.all_week_display import OPEN, week
+        wk = week(SimpleNamespace(symbol=str(symbol), exchange="",
+                                  asset_class=str(asset_class or "")))
+        return wk is not None and wk["state"] == OPEN
+    except Exception:  # noqa: BLE001 — the book's usual words
+        return False
+
+
 def open_by_world(rows) -> dict:
     """THE OPEN BOOK SPLIT BY MONEY WORLD (2026-10-14), from figures the
     rows ALREADY carry — never a second valuation.
@@ -303,6 +322,11 @@ def open_by_world(rows) -> dict:
     whose mark is the venue's LAST print (VENUE_STALE, up to four days
     old) is counted in `n_stale`, and the oldest such print's age is
     `stale_age_s` — so a figure labelled LIVE can say what it rests on.
+    A stale row that also carries `symbol`, `asset_class` and `carrier`,
+    held at eToro on one of its all-week instruments the screens show open
+    now, is counted in `n_stale_247` too, a key present only when it
+    counts one (2026-11-19, the words below: eToro trades it, so its last
+    print is out of date, not normal).
     """
     from bot_program.venue_mark import VENUE_STALE
 
@@ -313,11 +337,16 @@ def open_by_world(rows) -> dict:
         if isinstance(row, dict):
             world, pnl, r = row.get("world"), row.get("pnl"), row.get("r")
             source, age = row.get("mark_source"), row.get("mark_age_s")
+            held = (row.get("symbol"), row.get("asset_class"),
+                    row.get("carrier"))
         else:
             world = getattr(row, "world", None)
             pnl, r = getattr(row, "pnl", None), getattr(row, "r", None)
             source = getattr(row, "mark_source", None)
             age = getattr(row, "mark_age_s", None)
+            held = (getattr(row, "symbol", None),
+                    getattr(row, "asset_class", None),
+                    getattr(row, "carrier", None))
         slot = out[world if world in out else ""]
         slot["n"] += 1
         pnl = _world_num(pnl)
@@ -330,6 +359,8 @@ def open_by_world(rows) -> dict:
                 if age is not None and (slot["stale_age_s"] is None
                                         or age > slot["stale_age_s"]):
                     slot["stale_age_s"] = age
+                if _open_at_etoro(*held):
+                    slot["n_stale_247"] = slot.get("n_stale_247", 0) + 1
         r = _world_num(r)
         if r is not None:
             slot["r_n"] += 1
@@ -393,11 +424,23 @@ def live_book_words(split) -> dict:
         who = ("The real-money position rests" if n == 1 else
                f"All {n} real-money positions rest" if k == n else
                f"{k} of {n} real-money positions {one(k, 'rests', 'rest')}")
+        # eToro's all-week instruments (2026-11-19, open_by_world's
+        # n_stale_247): eToro trades them while Sauron's clock is shut, so
+        # their last print is out of date, never "normal".
+        k247 = min(live.get("n_stale_247") or 0, k)
+        if not k247:
+            why = "which is normal while its market is shut"
+        elif k247 == k:
+            why = (f"and eToro trades {one(k, 'it', 'them')} 24/7, so "
+                   f"{one(k, 'it is', 'they are')} out of date")
+        else:
+            why = (f"which is normal while a market is shut, but eToro "
+                   f"trades {k247} of them 24/7, so "
+                   f"{one(k247, 'that one is', 'those are')} out of date")
         out["stale_words"] = f"stale, {aged}"
         out["stale_title"] = (
             f"{who} on the venue's last print, {aged}: nothing newer has "
-            f"come in from the venue, which is normal while its market is "
-            f"shut.")
+            f"come in from the venue, {why}.")
     out["figure_title"] = " ".join(
         t for t in (out["coverage_title"], out["stale_title"]) if t)
     if measured and live["r_n"] < n:
@@ -873,6 +916,30 @@ def build_summary(trade, now=None):
             logger.debug("[position page] market status unavailable",
                          exc_info=True)
         shut = bool(market) and not market.get("is_open", True)
+        # eToro's ALL-WEEK instruments (2026-11-19, market_data/
+        # all_week_display): a row held at eToro reads eToro's own state,
+        # where Sauron's clock says shut: its price moves at the weekend,
+        # and one of eToro's breaks is a pause with its reopening. A paper
+        # row keeps the paper venue's clock (its price is the platform's).
+        week = None
+        if at_broker and str((trade.metadata or {}).get("broker") or "") \
+                == "etoro":
+            from market_data.all_week_display import week as _week
+            week = _week(inst if inst is not None else trade, now)
+        paused = week is not None and week["state"] == "pause"
+        if week is not None:
+            shut = False
+            if paused:
+                notes.append({"tone": "info", "text": (
+                    "eToro pauses %s until %s UTC, one of its published "
+                    "breaks: the price does not move until then."
+                    % (sym, week["reopens"].strftime("%H:%M")))})
+            else:
+                text = ("eToro trades %s 24/7: its price moves at the "
+                        "weekend." % sym)
+                if week["bots"]:
+                    text += " Bots: no weekend entries, by your choice."
+                notes.append({"tone": "info", "text": text})
         if shut:
             when = countdown_words(market.get("time_until_change"))
             notes.append({"tone": "info", "text": (
@@ -898,6 +965,9 @@ def build_summary(trade, now=None):
             if shut:
                 text = ("The last price came in %s ago, which is normal "
                         "while the market is shut." % duration_words(age))
+            elif paused:
+                text = ("The last price came in %s ago, which is normal "
+                        "while eToro pauses it." % duration_words(age))
             elif venue_basis:
                 text = ("The price is stale: the last one came in %s ago. "
                         "The profit or loss above does not read it: %s."

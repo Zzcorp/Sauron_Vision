@@ -237,6 +237,16 @@ class RailFacts:
     #: Its hours on the rail end before its market opens: it will have
     #: left the rail before anything can trade it.
     misses_open: bool = False
+    #: eToro's ALL-WEEK instruments (2026-11-19, market_data/
+    #: all_week_display.week): what the card says of a market eToro trades
+    #: while Sauron's own clock is shut ("open · eToro 24/7"), or of one of
+    #: eToro's breaks ("pause · eToro reopens 23:00 UTC"); None for every
+    #: other card. With it, no MARKET SHUT badge, no data-market="shut" and
+    #: no SHUT chip count; `market` stays the optional hold's own clock.
+    week: object = None
+    #: The card's line and its popup's, for `week`: {"tag", "note",
+    #: "title", "pop", "pause"}.
+    week_words: object = None
     o_score: int = 0
     o_cls: int = 0
     o_cscore: int = 0
@@ -847,6 +857,7 @@ def _facts(s, ctx, now) -> RailFacts:
     cls = inst.asset_class or ""
     pool = _pool_class(cls)
     market = _market(inst, ctx, now)
+    week = _week(inst, ctx, now)
     if aff > s.created_at:
         leaves = (f"It leaves the rail {RAIL_FRESH_HOURS}h after the scanner "
                   f"last matched its setup, unless the scanner matches it "
@@ -876,7 +887,8 @@ def _facts(s, ctx, now) -> RailFacts:
         market_words=market["words"], opens=market["opens"],
         opens_at=market["reopens"],
         misses_open=bool(market["reopens"] is not None and (
-            aff + timedelta(hours=RAIL_FRESH_HOURS)) < market["reopens"]))
+            aff + timedelta(hours=RAIL_FRESH_HOURS)) < market["reopens"]),
+        week=week, week_words=_week_words(week))
 
 
 def _market(inst, ctx, now) -> dict:
@@ -888,6 +900,26 @@ def _market(inst, ctx, now) -> dict:
         from signals.market_hold import market_state
         seen[key] = market_state(inst, now=now)
     return seen[key]
+
+
+def _week(inst, ctx, now):
+    """What the screens say of an eToro all-week instrument's market
+    (market_data.all_week_display.week, 2026-11-19), read once per
+    instrument and render; None for every other instrument."""
+    seen = ctx.setdefault("weeks", {})
+    key = getattr(inst, "pk", None) or id(inst)
+    if key not in seen:
+        from market_data.all_week_display import week
+        seen[key] = week(inst, now)
+    return seen[key]
+
+
+def _week_words(wk):
+    """The card's line, its hover and its popup's market line
+    (market_data.all_week_display.card_words); None for every other
+    card."""
+    from market_data.all_week_display import card_words
+    return card_words(wk)
 
 
 def _class_index(cls) -> int:
@@ -1224,8 +1256,10 @@ def _build(request) -> dict:
     votes_n = sum(1 for s in cards if s.rail.votes)
     live_n = sum(1 for s in cards if s.rail.live)
     held_n = sum(1 for s in cards if s.rail.held)
-    # The cards whose market is shut now: the SHUT chip's number.
-    shut_n = sum(1 for s in cards if s.rail.market == "shut")
+    # The cards whose market is shut now: the SHUT chip's number (an eToro
+    # all-week card the screens show open or paused is not one).
+    shut_n = sum(1 for s in cards
+                 if s.rail.market == "shut" and not s.rail.week)
     title = (f"{n} on the rail · {active_n} active in the engine · "
              f"{gone_n} left in the last 24h · {older_n} left earlier")
     if ctx["hold"]:
@@ -1313,6 +1347,11 @@ def _waiting_row(s, ctx, now) -> Gone:
     facts = s.rail
     words = (facts.market_words[:1].upper() + facts.market_words[1:] + "."
              if facts.market_words else "Its market cannot trade now.")
+    if facts.week:
+        # The hold keeps Sauron's own clock (2026-11-19): said so, beside
+        # eToro's own hours for the instrument.
+        words += (f" Held on Sauron's own clock; eToro trades "
+                  f"{facts.week.get('name') or 'it'} 24/7.")
     if facts.misses_open:
         from core.exchange_status import utc_words
         words += (f" Its {RAIL_FRESH_HOURS} hours end "

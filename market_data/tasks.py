@@ -211,6 +211,10 @@ def relay_held_quotes():
         for sym, sh in sorted(shown.items()) + sorted(outside.items()):
             sig = [sh.at_ms(), sh.text(), sh.state, sh.source, sh.side,
                    sh.text("bid"), sh.text("ask"), sh.auth]
+            if sh.week:
+                # eToro's all-week words (2026-11-19): a change of them
+                # alone (Sauron's clock reopening) is a change to push.
+                sig.append(sh.payload().get("wk"))
             key = RELAY_KEY.format(sym)
             try:
                 if cache.get(key) == sig and not (full and sym in shown):

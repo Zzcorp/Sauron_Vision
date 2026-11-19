@@ -112,6 +112,9 @@
 .sv-ih .dtl-mkt .mk-dot { width: 6px; height: 6px; border-radius: var(--sv-radius-round); flex: none;
     border: 1px solid var(--sv-ink-3); box-sizing: border-box; }
 .sv-ih .dtl-mkt.mk-open .mk-dot { background: var(--sv-ink-2); border-color: var(--sv-ink-2); }
+/* One of eToro's published breaks (2026-11-19, market_data/
+   all_week_display): a hollow dot ringed in the warning colour. */
+.sv-ih .dtl-mkt.mk-pause .mk-dot { border-color: var(--sv-warn); }
 .sv-ih .dtl-venue { color: var(--sv-ink-3); }
 .sv-ih-more { color: var(--sv-ink-3); text-decoration: underline; text-underline-offset: 2px; }
 .sv-ih-more:hover { color: var(--sv-ink-1); }
@@ -197,13 +200,16 @@
    the day sooner, on any desk under 1000 px of row, and on the narrowest
    desk the side's word too, its arrow staying ("▲" for "▲ Long", the word
    in its title): its last part, "opens Sun 22:00 UTC", is wider than the
-   room the row left it, and the words ran three lines deep. */
+   room the row left it, and the words ran three lines deep. So do eToro's
+   all-week words (2026-11-19): one of its breaks (the badge's mk-pause)
+   and "open · eToro 24/7 · ..." while Sauron's own clock is shut (the
+   cell's data-q-wk, set by the one painter). */
 @container svih (max-width: 700px) {
     .sv-ih > .sv-ih-day { display: none; }
-    .sv-ih:has(.dtl-mkt.mk-closed) .sv-ih-side-w { display: none; }
+    .sv-ih:has(.dtl-mkt.mk-closed, .dtl-mkt.mk-pause, .dtl-src[data-q-wk]) .sv-ih-side-w { display: none; }
 }
 @container svih (max-width: 1000px) {
-    .sv-ih:has(.dtl-mkt.mk-closed) > .sv-ih-day { display: none; }
+    .sv-ih:has(.dtl-mkt.mk-closed, .dtl-mkt.mk-pause, .dtl-src[data-q-wk]) > .sv-ih-day { display: none; }
 }
 /* A phone: the row becomes lines (the day, his position, the two sides),
    each whole, rather than one row that runs past the screen. */
@@ -1062,9 +1068,9 @@
     margin: 8px 10px 6px; transform: none; overflow-x: hidden;
 }
 .signals-rail.open .sr-signal-wrap > .sr-popup.sv-pinned::after { display: none; }
-.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal:not(:has(.sr-shut)),
+.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal:not(:has(.sr-shut, .sr-week)),
 .signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-x,
-.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal .sr-detail > :not(.sr-shut) { display: none; }
+.signals-rail.open .sr-signal-wrap:has(> .sr-popup.sv-pinned) > .sr-signal .sr-detail > :not(.sr-shut, .sr-week) { display: none; }
 .sr-popup .sr-pop-head .sr-pop-score { font-family: var(--sv-font-mono); color: var(--sv-ink-1); }
 .sr-popup .sr-pop-head .sr-pop-age { font-family: var(--sv-font-mono); font-variant-numeric: tabular-nums; font-size: var(--sv-fs-micro); color: var(--sv-ink-3); }
 /* the head: one line, as the board draws it (the urgency is the chart dot

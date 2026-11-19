@@ -71,7 +71,12 @@ THE RULE.
   22:00 UTC"). An eToro reading is never "live" before the eToro stream
   (F3): F1 rules that a REST record is never LIVE until C_rest is
   measured. An outside real-time stream (venue_quotes.REFERENCE_SOURCES)
-  is "live" within its class's L.
+  is "live" within its class's L. EXCEPT eToro's ALL-WEEK instruments
+  (2026-11-19, market_data.all_week_display): eToro trades them at the
+  weekend, so their price is open there, "open · eToro 24/7 · eToro bid ·
+  4 min", and shut only inside one of eToro's breaks, "pause · eToro bid
+  22:00 · eToro reopens 22:30 UTC". A stand-in beside them keeps its own
+  market's time (its clamp), so its age says how old the number is.
 
   ONE DAY CHANGE. Only the price's own source's (`change_source ==
   source`); another feed's day change beside a price is a disagreement,
@@ -258,15 +263,56 @@ def _head(payload: dict, side=None) -> str:
     return who
 
 
+def _next_pause(payload: dict, now_ms):
+    """eToro's next break an open all-week price carries (wk.np,
+    market_data/all_week_display.payload) once `now_ms` is inside it: the
+    browser turns the price to a pause at the break's start by itself,
+    as it turns a shut market open at its reopening. Else None."""
+    np = ((payload or {}).get("wk") or {}).get("np")
+    if not np or now_ms is None:
+        return None
+    since, reopens = np.get("since"), np.get("reopens")
+    if since is None or reopens is None or not since <= now_ms < reopens:
+        return None
+    return np
+
+
+def shut_now(payload: dict, now_ms):
+    """The shut a SHUT price is read under at `now_ms`: the payload's own,
+    or eToro's next break once it has begun (_next_pause); {} for
+    neither."""
+    p = payload or {}
+    if p.get("state") == SHUT:
+        return p.get("shut") or {}
+    return _next_pause(p, now_ms) or {}
+
+
+def open_words(payload: dict, now_ms) -> str:
+    """The words before an open price of eToro's all-week instruments
+    while Sauron's own clock is shut (wk.open, "open · eToro 24/7"),
+    until that clock reopens (wk.until); "" otherwise."""
+    wk = (payload or {}).get("wk") or {}
+    words_ = wk.get("open") or ""
+    until = wk.get("until")
+    if not words_ or (until is not None and now_ms is not None
+                      and now_ms >= until):
+        return ""
+    return words_
+
+
 def effective_state(payload: dict, now_ms) -> str:
     """The payload's state at `now_ms`: a shut market whose reopening
     (shut.reopens, epoch ms) has come is an open market's last price, live
     while an outside stream's value is within its bound, else delayed (the
     review, 2026-11-12: a tab flipped at the reopening only when the next
-    server render reached it, up to a minute apart from the next tab). The
-    browser recounts it every second with the same rule."""
+    server render reached it, up to a minute apart from the next tab); an
+    open price of eToro's all-week instruments is shut inside the next
+    break it carries (wk.np, 2026-11-19). The browser recounts it every
+    second with the same rule."""
     p = payload or {}
     state = p.get("state") or NONE
+    if state in (LIVE, DELAYED) and _next_pause(p, now_ms):
+        return SHUT
     if state != SHUT or now_ms is None:
         return state
     reopens = (p.get("shut") or {}).get("reopens")
@@ -278,15 +324,17 @@ def effective_state(payload: dict, now_ms) -> str:
     return DELAYED
 
 
-def shut_at(payload: dict):
+def shut_at(payload: dict, shut=None):
     """When a shut market's price is from: its reading, or the start of the
     shut when Sauron read it after the close (the review, 2026-11-12: a
     gold reading taken at 22:20 printed "eToro bid 22:20" for the 22:00
     close, and a weekend re-stamp would print Saturday for Friday's
-    price). Epoch ms, or None."""
+    price). `shut`: the shut it is read under (shut_now), the payload's
+    own by default. Epoch ms, or None."""
     p = payload or {}
     at = p.get("at")
-    since = (p.get("shut") or {}).get("since")
+    since = (shut if shut is not None else (p.get("shut") or {})).get(
+        "since")
     if at is not None and since is not None and at > since:
         return since
     return at
@@ -304,6 +352,12 @@ def words(payload: dict, now_ms: int, side=None) -> str:
       shut               closed · eToro bid Fri 13 Nov 21:58 · opens Sun 22:00 UTC
       none               awaiting eToro (held) / no price
 
+    eToro's all-week instruments (2026-11-19, wk: market_data/
+    all_week_display.py): an open price while Sauron's own clock is shut
+    leads with "open · eToro 24/7 · ", and one of eToro's breaks reads
+    "pause · eToro bid 22:00 · eToro reopens 22:30 UTC" (a shut whose
+    word is "pause").
+
     A shut market's time is its close when Sauron read it after the close
     (`shut_at`); past its reopening it reads as an open market's last
     price (`effective_state`).
@@ -317,32 +371,34 @@ def words(payload: dict, now_ms: int, side=None) -> str:
     now_at = _utc(now_ms)
     prev = p.get("basis") == BASIS_PREVIOUS_CLOSE
     if state == SHUT:
-        shut = p.get("shut") or {}
+        shut = shut_now(p, now_ms)
         if prev:
             core = f"{p.get('who') or ''} previous close"
             if at is not None:
                 core += f" {day_words(_utc(at))}"
         else:
             core = head
-            t = shut_at(p)
+            t = shut_at(p, shut)
             if t is not None:
                 core += f" {when_words(_utc(t), now_at)}"
-        out = f"closed · {core}"
+        out = f"{shut.get('word') or 'closed'} · {core}"
         if shut.get("opens"):
             out += f" · {shut['opens']}"
         return out
+    lead = open_words(p, now_ms)
+    lead = f"{lead} · " if lead else ""
     if prev:
-        out = f"{p.get('who') or ''} previous close"
+        out = f"{lead}{p.get('who') or ''} previous close"
         if at is not None:
             out += f" · {day_words(_utc(at))}"
         return out
     if at is None:
-        return head
+        return f"{lead}{head}"
     age = max(0.0, (now_ms - at) / 1000.0)
     ls = p.get("ls")
     if ls is not None and age <= ls:
-        return f"{head} · live"
-    return f"{head} · {age_words(age)}"
+        return f"{lead}{head} · live"
+    return f"{lead}{head} · {age_words(age)}"
 
 
 def slot_words(payload: dict, now_ms: int) -> str:
@@ -432,7 +488,8 @@ def field_words(payload: dict, field, now_ms, side=None, attrs=None) -> str:
     attributes (data-q-ref, data-q-below, data-q-o, data-q-stop,
     data-q-target, data-q-max, data-q-title).
 
-      age     "25 s"; a shut market "closed · opens Sun 22:00 UTC"; a
+      age     "25 s"; a shut market "closed · opens Sun 22:00 UTC"; one
+              of eToro's breaks "pause · eToro reopens 23:00 UTC"; a
               previous close "previous close · Thu 12 Nov"
       asof    "19:13:31 UTC ·" (a shut market's: its close when read after
               it); a previous close has no clock face ("")
@@ -458,8 +515,10 @@ def field_words(payload: dict, field, now_ms, side=None, attrs=None) -> str:
             return "previous close" + (
                 f" · {day_words(_utc(at))}" if at is not None else "")
         if state == SHUT:
-            opens = (p.get("shut") or {}).get("opens") or ""
-            return "closed" + (f" · {opens}" if opens else "")
+            shut = shut_now(p, now_ms)
+            opens = shut.get("opens") or ""
+            return (shut.get("word") or "closed") + (
+                f" · {opens}" if opens else "")
         if at is None:
             return ""
         return age_words(max(0.0, (now_ms - at) / 1000.0))
@@ -468,7 +527,8 @@ def field_words(payload: dict, field, now_ms, side=None, attrs=None) -> str:
             return DASH
         if p.get("basis") == BASIS_PREVIOUS_CLOSE:
             return ""
-        return _clock_face(shut_at(p) if state == SHUT else at)
+        return _clock_face(shut_at(p, shut_now(p, now_ms))
+                           if state == SHUT else at)
     if f in ("since", "away"):
         v = _num(value_text(p, side)) if priced else None
         ref = _num(a.get("data-q-ref"))
@@ -511,6 +571,9 @@ def field_words(payload: dict, field, now_ms, side=None, attrs=None) -> str:
         slot = slot_words(p, now_ms)
         if slot:
             parts.append(f"outside quote: {slot}")
+        hint = (p.get("wk") or {}).get("hint")
+        if hint:
+            parts.append(str(hint))
         tail = a.get("data-q-title")
         if tail:
             parts.append(str(tail))
@@ -553,6 +616,9 @@ class Shown:
     via: str = ""                  # who read it: tick, candle, fill, poll
     volume: Optional[int] = None
     family: str = ""               # the source's feed (chart_source.family)
+    # eToro's all-week instruments (all_week_display.payload): {"open",
+    # "until", "np", "hint"}, times as datetimes; None for every other.
+    week: Optional[dict] = None
 
     # ── values ──
     def value(self, side=None) -> Optional[Decimal]:
@@ -667,16 +733,33 @@ class Shown:
                     "label": self.shut.get("label") or "",
                     "opens": self.shut.get("opens") or "",
                     "reopens": _ms(self.shut.get("reopens"))}
-        return {"s": self.symbol, "p": txt(self.price),
-                "v": None if self.price is None else float(self.price),
-                "l": txt(self.last), "b": txt(self.bid), "a": txt(self.ask),
-                "side": self.side, "src": self.source, "fam": self.family,
-                "who": self.who, "auth": self.auth, "basis": self.basis,
-                "at": _ms(self.at), "state": self.state, "dp": self.dp,
-                "cls": self.asset_class,
-                "chg": None if self.chg is None else float(self.chg),
-                "ls": self.live_s, "shut": shut, "sf": _ms(self.sides_from),
-                "slot": self.slot, "via": self.via}
+            if self.shut.get("word"):
+                shut["word"] = self.shut["word"]      # eToro's "pause"
+        out = {"s": self.symbol, "p": txt(self.price),
+               "v": None if self.price is None else float(self.price),
+               "l": txt(self.last), "b": txt(self.bid), "a": txt(self.ask),
+               "side": self.side, "src": self.source, "fam": self.family,
+               "who": self.who, "auth": self.auth, "basis": self.basis,
+               "at": _ms(self.at), "state": self.state, "dp": self.dp,
+               "cls": self.asset_class,
+               "chg": None if self.chg is None else float(self.chg),
+               "ls": self.live_s, "shut": shut, "sf": _ms(self.sides_from),
+               "slot": self.slot, "via": self.via}
+        if self.week:
+            # eToro's all-week instruments only (2026-11-19): every other
+            # payload keeps its bytes.
+            wk = self.week
+            np = wk.get("np")
+            out["wk"] = {
+                "open": wk.get("open") or "", "until": _ms(wk.get("until")),
+                "np": None if not np else {
+                    "since": _ms(np.get("since")),
+                    "reopens": _ms(np.get("reopens")),
+                    "label": np.get("label") or "",
+                    "opens": np.get("opens") or "",
+                    "word": np.get("word") or ""},
+                "hint": wk.get("hint") or ""}
+        return out
 
     def as_quote(self):
         """A LiveQuote-shaped view of this answer, for the code that reads
@@ -820,6 +903,7 @@ class _Clocks:
         self.now = now_at
         self._state: dict = {}
         self._clock: dict = {}
+        self._week: dict = {}
 
     @staticmethod
     def _key(inst):
@@ -889,9 +973,40 @@ class _Clocks:
             return closed
         return venue if venue > closed else closed
 
+    def week(self, inst):
+        """What the screens say of an eToro all-week instrument's market
+        (market_data.all_week_display.week, 2026-11-19), memoised per
+        symbol (its breaks are its own: OIL pauses on Saturday, GOLD does
+        not); None for every other instrument."""
+        key = str(getattr(inst, "symbol", "") or "").upper()
+        if key not in self._week:
+            try:
+                from market_data.all_week_display import week
+                self._week[key] = week(inst, self.now)
+            except Exception as e:  # noqa: BLE001 — Sauron's own words
+                logger.info("[one quote] all-week state unread: %s", e)
+                self._week[key] = None
+        return self._week[key]
+
+    def week_payload(self, inst):
+        """The payload's "wk" for an all-week instrument the screens show
+        open or paused (all_week_display.payload), else None."""
+        wk = self.week(inst)
+        if wk is None:
+            return None
+        from market_data.all_week_display import payload
+        return payload(wk)
+
     def shut(self, inst):
         """{"since", "label", "opens", "reopens"} while the instrument's
-        market is shut by the signal rail's clock, else None."""
+        market is shut by the signal rail's clock, else None. An eToro
+        all-week instrument (2026-11-19) is shut only inside one of
+        eToro's breaks, with the word "pause"
+        (all_week_display.shut); open at eToro, it is open here."""
+        wk = self.week(inst)
+        if wk is not None:
+            from market_data.all_week_display import shut
+            return shut(wk)
         st = self.state(inst)
         if st.get("state") != "shut":
             return None
@@ -1076,7 +1191,8 @@ def _held(symbol, inst, rows, q, now_at, clocks) -> Shown:
         basis=basis, at=at, state=state, shut=shut, chg=chg,
         dp=_decimals(price, cls, symbol), sides_from=sides_from,
         slot=_slot(slot_q, inst, price, now_at, clocks), via=via,
-        volume=_volume(q), family=_family(ETORO))
+        volume=_volume(q), family=_family(ETORO),
+        week=clocks.week_payload(inst))
 
 
 def _dec_any(v) -> Optional[Decimal]:
@@ -1148,7 +1264,8 @@ def _outside(symbol, inst, q, now_at, clocks) -> Shown:
         last=last, side="", source=tag, who=_who(tag, inst),
         auth=AUTH_REFERENCE, basis=basis, at=at, state=state, shut=shut,
         chg=chg, dp=_decimals(last, cls, symbol), live_s=live_s,
-        via="", volume=_volume(q), family=_family(tag))
+        via="", volume=_volume(q), family=_family(tag),
+        week=clocks.week_payload(inst))
 
 
 def shown_many(symbols, *, user=None, now=None, clocks=None) -> dict:

@@ -3088,7 +3088,18 @@
            flag a booking made now is in the reason (entry_timing.
            _shut_verdict): G1 flags only past its close grace, and only
            while the morgul_guards component is on. */
-        if (timingAdv.code === 'SHUT') {
+        /* eToro's ALL-WEEK instruments (2026-11-19, market_data/
+           all_week_display.ticket_words, the view's "week" key): eToro
+           trades it now, so a live ticket reads an information line, not
+           the shut market's warning: eToro's own note, the bots' weekend
+           choice, and Morgul G1's clause where the reason carries it. A
+           break says eToro's reopening. The preview's timing_advisory, the
+           one the booking records, is untouched. */
+        var wk = p.week || null;
+        if (timingAdv.code === 'SHUT' && wk && wk.head && live) {
+          warnHtml += '<div class="sz-note sz-note--week"><b>' + esc(wk.head) + '</b> ' +
+            (wk.lines || []).map(function (l) { return esc(l); }).join('<br>') + '</div>';
+        } else if (timingAdv.code === 'SHUT') {
           warnHtml += '<div class="sz-warn sz-warn--book"><b>THE MARKET IS SHUT</b>' +
             esc(timingAdv.reason) +
             '<br>' + esc('A warning, not a block: the bots send no entry ' +

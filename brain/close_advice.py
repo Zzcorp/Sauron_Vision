@@ -419,6 +419,39 @@ def market_now(trade, instrument) -> dict:
             "reopens_words": clock.get("reopens_words") or ""}
 
 
+def _market_reason(trade, instrument, market, world, sym, now) -> str:
+    """The sentence a shut market adds to a position's reasons, in its
+    place (0.8): a close now would wait for the open, and a paper close is
+    refused until then. DISPLAY ONLY: it orders the advice's words, and
+    nothing here closes (rule 1).
+
+    eToro's ALL-WEEK instruments (2026-11-19, market_data/
+    all_week_display): a row held at eToro, real or demo, reads eToro's
+    own state where Sauron's clock says shut. eToro trades it, so a close
+    goes now ("a close now fills at eToro's weekend price"); in one of its
+    published breaks a close waits for the reopening. A paper row keeps
+    the paper venue's clock and its words."""
+    if world != WORLD_PAPER and str((trade.metadata or {}).get("broker")
+                                    or "") == "etoro":
+        from market_data.all_week_display import week
+        wk = week(instrument if instrument is not None else trade, now)
+        if wk is not None and wk["state"] == "pause":
+            return ("eToro pauses %s until %s UTC, one of its published "
+                    "breaks: a close now waits for it."
+                    % (sym, wk["reopens"].strftime("%H:%M")))
+        if wk is not None:
+            return ("eToro trades %s 24/7: a close now fills at eToro's "
+                    "weekend price, where spreads may be wider." % sym)
+    if market["is_open"]:
+        return ""
+    return ("The market for %s is shut: a close now would wait for the "
+            "open%s%s." % (
+                sym, (" (" + market["reopens_words"] + ")")
+                if market["reopens_words"] else "",
+                "; a paper close is refused until then"
+                if world == WORLD_PAPER else ""))
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # One position
 # ══════════════════════════════════════════════════════════════════════════
@@ -653,14 +686,9 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
         reasons.add(1.2, _pending_words(trade))
 
     market = market_now(trade, instrument)
-    if not market["is_open"]:
-        reasons.add(0.8, "The market for %s is shut: a close now would wait "
-                         "for the open%s%s." % (
-                             sym,
-                             (" (" + market["reopens_words"] + ")")
-                             if market["reopens_words"] else "",
-                             "; a paper close is refused until then"
-                             if world == WORLD_PAPER else ""))
+    said = _market_reason(trade, instrument, market, world, sym, now)
+    if said:
+        reasons.add(0.8, said)
 
     sig = fresh_signals(sym, pos["side"], now=now)
     review = reviews.get("bot:%d" % trade.id)

@@ -531,7 +531,9 @@ def market_ticket_words(asset_class) -> str:
 
 
 def market_block(signal, now=None) -> dict:
-    """{"shut", "opens", "title"} — whether the signal's market is shut
+    """{"shut", "opens", "title"} (and "week" for eToro's all-week
+    instruments the screens show open or paused, all_week_display.
+    card_words, 2026-11-19) — whether the signal's market is shut
     NOW, for the MARKET SHUT badge of /signals/ and the `signals` command
     (2026-11-12). The operator keeps receiving every signal the moment it
     fires, so one whose market is shut says so, with the hour it opens
@@ -548,6 +550,13 @@ def market_block(signal, now=None) -> dict:
         from signals.market_hold import market_state
         inst = signal.instrument
         st = market_state(inst, now=now)
+        # eToro's ALL-WEEK instruments (2026-11-19, market_data/
+        # all_week_display): OPEN 24/7 at eToro, or PAUSE and eToro's
+        # reopening, in the place of MARKET SHUT; "week" only for them.
+        from market_data.all_week_display import card_words, week
+        words = card_words(week(inst, now))
+        if words:
+            return {**out, "week": words}
     except Exception as e:  # noqa: BLE001 — a badge is never worth a page
         logger.warning("[signals] market state unread for signal #%s: %s",
                        getattr(signal, "pk", None), e)

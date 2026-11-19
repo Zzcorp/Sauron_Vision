@@ -93,9 +93,12 @@ def signal_extras(signal) -> dict:
 def _market_line(signal) -> str:
     """"Market shut · opens Sun 22:00 UTC" while the signal's market is
     shut, else "" (signals/market_hold.shut_label, capitalised as a line
-    of its own). Never raises."""
-    from signals.market_hold import shut_label
-    said = shut_label(getattr(signal, "instrument", None))
+    of its own); for eToro's all-week instruments (2026-11-19, market_data/
+    all_week_display.label) "Open · eToro 24/7 · bots: no weekend entries,
+    by your choice" at the weekend, "Pause · eToro reopens 23:00 UTC" in a
+    break. Never raises."""
+    from market_data.all_week_display import label as market_label
+    said = market_label(getattr(signal, "instrument", None))
     return said[:1].upper() + said[1:]
 
 
@@ -372,12 +375,13 @@ def _match_users(signal, chats: list, later: list, note: str = "") -> None:
 
     from alerts.channels.email_alert import send_email_to_user
     from alerts.channels.whatsapp_alert import send_whatsapp_to_user
-    from signals.market_hold import shut_label
+    from market_data.all_week_display import label as market_label
 
     # A SHUT MARKET IS SAID (2026-11-12): the email and WhatsApp copies
     # carry the words the Telegram message carries; "" on an open market,
     # whose copies keep their bytes. A released signal carries its note.
-    market = note or shut_label(signal.instrument)
+    # eToro's all-week instruments say eToro's own state (2026-11-19).
+    market = note or market_label(signal.instrument)
 
     for user in User.objects.filter(is_active=True):
         # Check user's alert rules

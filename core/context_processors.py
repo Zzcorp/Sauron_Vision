@@ -420,10 +420,16 @@ def _book_truth(user, portfolio):
         # line can say when it rests on the venue's last print, not a fresh
         # one (2026-10-15, review) — or the source of eToro's own figure,
         # which is neither (2026-11-06).
+        # The row's instrument and venue too (2026-11-19): a stale print
+        # of one of eToro's all-week instruments is said out of date.
+        _inst = getattr(row, "instrument", None)
         by_world_rows.append({
             "world": world, "pnl": pnl, "r": r_mult,
             "mark_source": mark_source,
-            "mark_age_s": getattr(row, "mark_age_s", None)})
+            "mark_age_s": getattr(row, "mark_age_s", None),
+            "symbol": getattr(_inst, "symbol", "") or "",
+            "asset_class": getattr(_inst, "asset_class", "") or "",
+            "carrier": str(getattr(row, "carrier", "") or "")})
         detail.append({
             # The trade id is what makes the row actionable: the CLOSE
             # control on each row posts against it. Legacy Position rows

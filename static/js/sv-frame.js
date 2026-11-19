@@ -464,6 +464,17 @@
             : st === 'delayed' ? ((p && p.at && now - p.at > STALE_MS) ? 'stale' : 'recent') : '';
       if (f) dot.setAttribute('data-sv-fresh', f); else dot.removeAttribute('data-sv-fresh');
       var words = { live: 'live', recent: 'delayed', stale: 'stale', closed: 'market closed' }[f];
+      /* eToro's all-week instruments (2026-11-19, market_data/
+         all_week_display.py): one of eToro's breaks says so with its
+         reopening, and an open price while Sauron's own clock is shut
+         leads with "open · eToro 24/7". */
+      if (p && f === 'closed' && V.shutNow) {
+        var sh = V.shutNow(p, now);
+        if (sh && sh.word && sh.label) words = sh.label;
+      } else if (p && words && V.openWords) {
+        var ow = V.openWords(p, now);
+        if (ow) words = ow + ' · ' + words;
+      }
       if (words) dot.setAttribute('title', words); else dot.removeAttribute('title');
     });
   }

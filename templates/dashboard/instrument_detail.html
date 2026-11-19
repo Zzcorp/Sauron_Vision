@@ -104,10 +104,17 @@ Display only: nothing here reaches an order, a stop, a size or a switch.
             price with no market state beside it reads as live); its name and
             its next change in its title, which the repaint keeps (compact,
             the review of B10, M3).{% endcomment %}
+            {% if market.word %}{% comment %}eToro's ALL-WEEK instruments (2026-11-19, market_data/all_week_display): eToro's own badge, "24/7", or "PAUSE" in one of its published breaks, under its own session code (the poller repaints it from its own row, never CME's).{% endcomment %}
+            <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-pause{% endif %}" data-market-session="{{ market.session }}" data-market-compact title="{{ market.title }}">
+                <span class="mk-dot" aria-hidden="true"></span>
+                <span class="mk-text">{{ market.word }}</span>
+            </span>
+            {% else %}
             <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-closed{% endif %}" data-market-session="{{ market.session }}"{% if market.session != "CRYPTO" %} data-market-compact{% endif %} title="{{ market.name }} · {% if market.is_open %}OPEN{% else %}CLOSED{% endif %}{% if market.time_until_change %} · {{ market.next_state }} in {{ market.time_until_change }}{% endif %}">
                 <span class="mk-dot" aria-hidden="true"></span>
                 <span class="mk-text">{% if market.session == "CRYPTO" %}{{ market.name }} · {% endif %}{% if market.is_open %}OPEN{% else %}CLOSED{% endif %}</span>
             </span>
+            {% endif %}
             {% endif %}
         </div>
     </div>

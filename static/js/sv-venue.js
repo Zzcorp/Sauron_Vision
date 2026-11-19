@@ -180,10 +180,37 @@
     return who;
   }
 
+  /* eToro's next break an open all-week price carries (one_quote.
+     _next_pause, wk.np), once `nowMs` is inside it: the price turns to a
+     pause at the break's start by itself (2026-11-19). Else null. */
+  function nextPause(p, nowMs) {
+    var np = p && p.wk && p.wk.np;
+    if (!np || nil(nowMs) || nil(np.since) || nil(np.reopens)) return null;
+    return (+np.since <= nowMs && nowMs < +np.reopens) ? np : null;
+  }
+
+  /* The shut a shut price is read under (one_quote.shut_now): its own,
+     or eToro's next break once it has begun; {} for neither. */
+  function shutNow(p, nowMs) {
+    if (p && p.state === 'shut') return p.shut || {};
+    return nextPause(p, nowMs) || {};
+  }
+
+  /* The words before an open all-week price while Sauron's own clock is
+     shut, until it reopens (one_quote.open_words): "open · eToro 24/7". */
+  function openWords(p, nowMs) {
+    var wk = (p && p.wk) || {};
+    var w = wk.open || '';
+    if (!w || (!nil(wk.until) && !nil(nowMs) && nowMs >= +wk.until)) return '';
+    return w;
+  }
+
   /* The payload's state at `nowMs` (one_quote.effective_state): a shut
      market whose reopening has come is an open market's last price, live
-     while within an outside stream's bound, else delayed. In the browser
-     live and delayed are recounted from `ls` too, as the words are. */
+     while within an outside stream's bound, else delayed; an open
+     all-week price is shut inside the next eToro break it carries. In the
+     browser live and delayed are recounted from `ls` too, as the words
+     are. */
   function stateAt(p, nowMs) {
     var st = (p && p.state) || 'none';
     if (st === 'shut') {
@@ -191,16 +218,20 @@
       if (nil(re) || nil(nowMs) || nowMs < +re) return st;
     } else if (st !== 'live' && st !== 'delayed') {
       return st;
+    } else if (nextPause(p, nowMs)) {
+      return 'shut';
     }
     if (!nil(p.ls) && !nil(p.at) && !nil(nowMs) && (nowMs - p.at) / 1000 <= p.ls) return 'live';
     return 'delayed';
   }
 
   /* When a shut market's price is from (one_quote.shut_at): its reading,
-     or the start of the shut when it was read after the close. */
-  function shutAt(p) {
+     or the start of the shut (`shut`, the one it is read under, else its
+     own) when it was read after the close. */
+  function shutAt(p, shut) {
     var at = nil(p.at) ? null : +p.at;
-    var since = (p.shut && !nil(p.shut.since)) ? +p.shut.since : null;
+    var s = shut || p.shut;
+    var since = (s && !nil(s.since)) ? +s.since : null;
     if (at !== null && since !== null && at > since) return since;
     return at;
   }
@@ -208,7 +239,9 @@
   /* The words beside a price (one_quote.words): "eToro bid · 25 s",
      "OANDA stream · live", "Yahoo GBPUSD=X · 4 min", "Yahoo EURUSD=X
      previous close · Thu 12 Nov", "closed · eToro bid Fri 13 Nov 21:58 ·
-     opens Sun 22:00 UTC", "awaiting eToro" / "no price". */
+     opens Sun 22:00 UTC", "awaiting eToro" / "no price"; eToro's
+     all-week instruments "open · eToro 24/7 · eToro bid · 4 min" and
+     "pause · eToro bid 22:00 · eToro reopens 22:30 UTC". */
   function words(p, nowMs, side) {
     p = p || {};
     var state = stateAt(p, nowMs);
@@ -220,28 +253,30 @@
     var prev = p.basis === 'previous_close';
     var out;
     if (state === 'shut') {
-      var shut = p.shut || {};
+      var shut = shutNow(p, nowMs);
       if (prev) {
         out = (p.who || '') + ' previous close';
         if (at !== null) out += ' ' + dayWords(at);
       } else {
         out = h;
-        var t = shutAt(p);
+        var t = shutAt(p, shut);
         if (t !== null) out += ' ' + whenWords(t, nowMs);
       }
-      out = 'closed · ' + out;
+      out = (shut.word || 'closed') + ' · ' + out;
       if (shut.opens) out += ' · ' + shut.opens;
       return out;
     }
+    var lead = openWords(p, nowMs);
+    lead = lead ? lead + ' · ' : '';
     if (prev) {
-      out = (p.who || '') + ' previous close';
+      out = lead + (p.who || '') + ' previous close';
       if (at !== null) out += ' · ' + dayWords(at);
       return out;
     }
-    if (at === null) return h;
+    if (at === null) return lead + h;
     var age = Math.max(0, (nowMs - at) / 1000);
-    if (!nil(p.ls) && age <= p.ls) return h + ' · live';
-    return h + ' · ' + ageWords(age);
+    if (!nil(p.ls) && age <= p.ls) return lead + h + ' · live';
+    return lead + h + ' · ' + ageWords(age);
   }
 
   /* "Yahoo GC=F, the front-month future 2671.30 · 3 min · +0.87% vs eToro";
@@ -323,6 +358,7 @@
     }
     var sl = slotWords(p, nowMs);
     if (sl) parts.push('outside quote: ' + sl);
+    if (p.wk && p.wk.hint) parts.push(String(p.wk.hint));
     if (tail) parts.push(String(tail));
     return parts.filter(function (x) { return !!x; }).join('; ');
   }
@@ -354,15 +390,16 @@
           return 'previous close' + (nil(p.at) ? '' : ' · ' + dayWords(+p.at));
         }
         if (st === 'shut') {
-          var opens = (p.shut && p.shut.opens) || '';
-          return 'closed' + (opens ? ' · ' + opens : '');
+          var sh = shutNow(p, nowMs);
+          var opens = sh.opens || '';
+          return (sh.word || 'closed') + (opens ? ' · ' + opens : '');
         }
         if (nil(p.at)) return '';
         return ageWords(Math.max(0, (nowMs - p.at) / 1000));
       case 'asof':
         if (nil(p.at)) return DASH;
         if (p.basis === 'previous_close') return '';
-        return clockFace(st === 'shut' ? shutAt(p) : +p.at);
+        return clockFace(st === 'shut' ? shutAt(p, shutNow(p, nowMs)) : +p.at);
       case 'since':
       case 'away': {
         var v = priced ? num(valueText(p, side)) : null;
@@ -425,7 +462,8 @@
       a.state === b.state && a.src === b.src && a.auth === b.auth &&
       a.side === b.side && a.chg === b.chg && a.basis === b.basis &&
       JSON.stringify(a.slot || null) === JSON.stringify(b.slot || null) &&
-      JSON.stringify(a.shut || null) === JSON.stringify(b.shut || null);
+      JSON.stringify(a.shut || null) === JSON.stringify(b.shut || null) &&
+      JSON.stringify(a.wk || null) === JSON.stringify(b.wk || null);
   }
 
   /* Whether `v` may replace `old`. `server`: a value Sauron rendered or
@@ -660,6 +698,15 @@
       el.classList.toggle('down', !nil(p.chg) && +p.chg < 0 && !nil(p.v));
     }
     if (f === 'words' || f === 'age') ageClass(el, p, nowAt);
+    /* eToro's all-week words (2026-11-19): a cell leading with "open ·
+       eToro 24/7" says so (data-q-wk), so a narrow row folds as it does
+       for a shut market's longer words (sv-chart.css). */
+    if (f === 'words') {
+      var lead = !!openWords(p, nowAt);
+      if (lead !== el.hasAttribute('data-q-wk')) {
+        if (lead) el.setAttribute('data-q-wk', ''); else el.removeAttribute('data-q-wk');
+      }
+    }
     /* The move since entry keeps its colour with its sign (the server's
        sign-up/sign-down, positions_list): a price that crossed the entry
        read "-0.02% since entry" in the gain colour. */
@@ -817,7 +864,8 @@
       nowCaption(h, p, at);
       return;
     }
-    var title = stateAt(p, at) === 'shut' ? 'closed · ' + head(p, '') : head(p, '');
+    var title = stateAt(p, at) === 'shut'
+      ? (shutNow(p, at).word || 'closed') + ' · ' + head(p, '') : head(p, '');
     var look = lineLook(h, p);
     var color = look.color;
     var sig = v + '|' + title + '|' + color + '|' + (look.label || '') + '|' + (look.text || '');
@@ -1105,6 +1153,8 @@
     valueText: valueText,
     fieldText: fieldText,
     stateAt: stateAt,
+    shutNow: shutNow,
+    openWords: openWords,
     canon: canon,
     socket: socket,
     get: function (sym) { return map[key(sym)] || null; },

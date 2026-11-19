@@ -559,19 +559,80 @@ class ThePositionsTests(_Case):
                                          "right now")])
 
     def test_the_positions_mark_hover(self):
+        """The row as the positions page builds it (portfolio.services.
+        UnifiedPosition: the symbol on its instrument, the venue on its
+        carrier) and as the chart builds it (both on the row)."""
         from dashboard.views import _mark_words
         hold(self, SAT_1500)
-        row = SimpleNamespace(mark_source="venue_stale", mark_age_s=1500,
-                              mark_via="tick", paper=False, symbol="XAUUSD",
-                              asset_class="commodity")
-        title = _mark_words(row)["mark_title"]
-        self.assertIn("Nothing newer has come in from the venue — eToro "
-                      "trades it 24/7, so it is out of date.", title)
-        self.assertNotIn("normal while its market is shut", title)
-        fx = _mark_words(SimpleNamespace(
-            mark_source="venue_stale", mark_age_s=1500, mark_via="tick",
-            paper=False, symbol="EURUSD", asset_class="forex"))["mark_title"]
-        self.assertIn("normal while its market is shut", fx)
+
+        def row(symbol, cls, carrier="etoro", **kw):
+            return SimpleNamespace(
+                mark_source="venue_stale", mark_age_s=1500, mark_via="tick",
+                paper=False, carrier=carrier,
+                instrument=SimpleNamespace(symbol=symbol, asset_class=cls),
+                **kw)
+
+        for r in (row("XAUUSD", "commodity"),
+                  SimpleNamespace(mark_source="venue_stale",
+                                  mark_age_s=1500, mark_via="tick",
+                                  paper=False, symbol="XAUUSD",
+                                  asset_class="commodity", carrier="etoro")):
+            title = _mark_words(r)["mark_title"]
+            self.assertIn("Nothing newer has come in from the venue — eToro "
+                          "trades it 24/7, so it is out of date.", title)
+            self.assertNotIn("normal while its market is shut", title)
+        for r in (row("EURUSD", "forex"),
+                  row("XAUUSD", "commodity", carrier="saxo")):
+            with self.subTest(row=r):
+                self.assertIn("normal while its market is shut",
+                              _mark_words(r)["mark_title"])
+
+    def test_the_books_stale_words(self):
+        """The real book's LIVE open P&L (the headband and the Portfolio
+        page: position_summary.open_by_world, live_book_words): a stale
+        eToro print of gold at the weekend is out of date, not normal."""
+        from dashboard.position_summary import live_book_words, open_by_world
+        hold(self, SAT_1500)
+
+        def row(symbol, cls, carrier="etoro"):
+            return {"world": "live", "pnl": 1.0, "r": None,
+                    "mark_source": "venue_stale", "mark_age_s": 1500,
+                    "symbol": symbol, "asset_class": cls, "carrier": carrier}
+
+        split = open_by_world([row("XAUUSD", "commodity")])
+        self.assertEqual(split["live"]["n_stale_247"], 1)
+        self.assertEqual(
+            live_book_words(split)["stale_title"],
+            "The real-money position rests on the venue's last print, 25 min "
+            "old: nothing newer has come in from the venue, and eToro trades "
+            "it 24/7, so it is out of date.")
+        mixed = live_book_words(open_by_world(
+            [row("XAUUSD", "commodity"), row("EURUSD", "forex")]))
+        self.assertIn("which is normal while a market is shut, but eToro "
+                      "trades 1 of them 24/7, so that one is out of date.",
+                      mixed["stale_title"])
+        for rows in ([row("EURUSD", "forex")],
+                     [row("XAUUSD", "commodity", carrier="saxo")],
+                     [{k: v for k, v in row("XAUUSD", "commodity").items()
+                       if k not in ("symbol", "carrier")}]):
+            with self.subTest(rows=rows):
+                split = open_by_world(rows)
+                self.assertNotIn("n_stale_247", split["live"])
+                self.assertTrue(live_book_words(split)["stale_title"].endswith(
+                    "which is normal while its market is shut."))
+
+    def test_the_positions_page_says_it(self):
+        """/positions/ itself: a real gold row whose eToro rate is 25 min
+        old at Saturday 15:00 (venue_mark.MAX_AGE_S is 15 min)."""
+        hold(self, SAT_1500)
+        held(self.user, "XAUUSD", SAT_1500,
+             read_at=SAT_1500 - timedelta(minutes=25))
+        self.client.force_login(self.user)
+        page = self.client.get("/positions/", HTTP_HOST="127.0.0.1"
+                               ).content.decode()
+        self.assertIn('data-mark-source="venue_stale"', page)
+        self.assertIn("eToro trades it 24/7, so it is out of date", page)
+        self.assertNotIn("normal while its market is shut", page)
 
     def test_the_hordes_market_line(self):
         from dashboard.horde import _market_words
@@ -693,19 +754,26 @@ class TheOrcsAndWhyTests(_Case):
     username = "aw_orcs"
 
     def test_the_metronome_rests_on_saurons_clock(self):
-        from bot_program.orcs.notes import _wake_rests
+        # The words live in the display reader; the Orcs' slot calls it
+        # with W11's own clock (no new definition in the O2 package, no
+        # new importer of the Orcs).
+        from bot_program.orcs.sessions import next_shut
+        from market_data.all_week_display import wake_words
         gold = SimpleNamespace(symbol="XAUUSD", asset_class="commodity")
         due = datetime(2026, 11, 20, 21, 0, tzinfo=UTC)
         self.assertEqual(
-            _wake_rests(gold, due, SAT_1500),
+            wake_words(gold, due, SAT_1500, clock=next_shut),
             "Next wake: the metronome rests on Sauron's CME clock until Sun "
             "22 Nov 23:00 UTC; eToro trades GOLD 24/7.")
-        self.assertTrue(_wake_rests(gold, due, SAT_1500, minds=False)
+        self.assertTrue(wake_words(gold, due, SAT_1500, minds=False,
+                                   clock=next_shut)
                         .endswith("Detected and recorded only, no model."))
-        self.assertEqual(_wake_rests(gold, SAT_1500 + timedelta(hours=1),
-                                     SAT_1500), "", "not overdue")
+        self.assertEqual(wake_words(gold, SAT_1500 + timedelta(hours=1),
+                                    SAT_1500, clock=next_shut), "",
+                         "not overdue")
         fx = SimpleNamespace(symbol="EURUSD", asset_class="forex")
-        self.assertEqual(_wake_rests(fx, due, SAT_1500), "")
+        self.assertEqual(wake_words(fx, due, SAT_1500, clock=next_shut), "")
+        self.assertEqual(wake_words(gold, due, SAT_1500), "", "no clock")
 
     def test_the_slot_says_it(self):
         from bot_program.orcs import notes

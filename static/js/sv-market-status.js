@@ -50,6 +50,10 @@
        beside the exchange rows in the payload; a badge keyed on one must
        repaint like any other, or it freezes at first paint. */
     (d.exchanges || []).concat(d.products || []).forEach(function (e) { byCode[e.code] = e; });
+    /* eToro's all-week instruments (2026-11-19, market_data/
+       all_week_display.badge_rows): each badge keyed on its own row, its
+       words its own ("24/7", "PAUSE"), never CME's CLOSED. */
+    (d.all_week || []).forEach(function (e) { byCode[e.code] = e; });
 
     badges.forEach(function (badge) {
       var code = badge.getAttribute('data-market-session');
@@ -63,9 +67,13 @@
       var ex = byCode[code];
       if (!ex) return; /* unknown session: leave the server's answer alone */
       badge.classList.toggle('mk-open', !!ex.is_open);
-      badge.classList.toggle('mk-closed', !ex.is_open);
+      badge.classList.toggle('mk-closed', !ex.is_open && !ex.pause);
+      badge.classList.toggle('mk-pause', !!ex.pause);
       if (!text) return;
-      if (compact) {
+      if (ex.word) {
+        text.textContent = ex.word;
+        if (ex.title) badge.title = ex.title;
+      } else if (compact) {
         text.textContent = ex.is_open ? 'OPEN' : 'CLOSED';
         badge.title = ex.name +
           (ex.time_until_change ? ' · ' + ex.next_state + ' in ' + ex.time_until_change : '');

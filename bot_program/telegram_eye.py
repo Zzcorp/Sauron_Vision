@@ -915,6 +915,41 @@ def _overall_line(cfg) -> str:
             f"{percent(100.0 * int(n) / total)} of {_plural(total, 'skip')}")
 
 
+def _skip_line(cfg, symbol, last) -> str:
+    """"Last reason: ..." for a bot's last recorded skip on `symbol`.
+    eToro's ALL-WEEK instruments (2026-11-19, market_data/
+    all_week_display): a market_shut skip recorded while Sauron's own clock
+    was shut for the weekend is the operator's weekend rule, said so
+    ("bots: no weekend entries, by your choice (eToro trades GOLD 24/7)";
+    a paper bot's, the paper venue's wait). The skip, its code and its
+    detail are as recorded. DISPLAY ONLY. Never raises."""
+    said = f"Last reason: {skip_words(last.get('code'))}"
+    try:
+        if str(last.get("code") or "") != "market_shut":
+            return said
+        at = _parse_iso(last.get("at"))
+        if at is None:
+            return said
+        from types import SimpleNamespace
+
+        from market_data.all_week_display import week
+        cls = str(getattr(cfg, "asset_class", "") or "")
+        wk = week(SimpleNamespace(symbol=symbol, asset_class=cls,
+                                  exchange=""), at)
+        if wk is None or not wk.get("weekend"):
+            return said
+        name = wk.get("name") or symbol
+        if str(getattr(cfg, "mode", "") or "") == "paper":
+            rule = wk.get("paper") or "paper: the paper venue waits"
+        elif wk.get("bots"):
+            rule = wk["bots"]
+        else:
+            return said
+        return f"Last reason: {rule} (eToro trades {name} 24/7)"
+    except Exception:  # noqa: BLE001 — the recorded words stand
+        return said
+
+
 def build_why(user, symbol: str, *, now=None) -> Reply:
     """Why no trade on SYMBOL: per bot of this user that watches it or
     recorded a skip on it, the last reason, its age and detail, and the
@@ -966,7 +1001,7 @@ def build_why(user, symbol: str, *, now=None) -> Reply:
         if last is None:
             lines.append("Last reason: none recorded yet")
         else:
-            lines.append(f"Last reason: {skip_words(last.get('code'))}")
+            lines.append(_skip_line(cfg, sym, last))
             lines.append(f"When: {ago(_parse_iso(last.get('at')), now)}")
             detail = plain_detail(last.get("detail"))
             if detail:

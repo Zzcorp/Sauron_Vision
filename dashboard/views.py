@@ -256,6 +256,7 @@ def instruments_list(request):
         _ex_status = get_exchange_status()
     except Exception:
         _ex_status, market_status_for = None, None
+    from market_data.all_week_display import badge as _all_week_badge
 
     # ONE PRICE EVERYWHERE (2026-11-12, market_data.one_quote): every row
     # prints the instrument's one price by the rule, in its own digits
@@ -275,6 +276,8 @@ def instruments_list(request):
                                            symbol=inst.symbol)
             except Exception:
                 market = None
+        # eToro's all-week instruments read eToro's own badge (2026-11-19).
+        market = _all_week_badge(inst, market)
         items.append({
             "market": market,
             "id": inst.id,
@@ -1793,15 +1796,41 @@ def _mark_words(row) -> dict:
                                + (f"{age} ago" if age else "recently")
                                + f"{via}.")}
     if src == "venue_stale":
+        # eToro's ALL-WEEK instruments (2026-11-19, market_data/
+        # all_week_display): where Sauron's clock says shut, eToro trades
+        # a row held there, so an old rate is old, not "normal while its
+        # market is shut"; in one of eToro's breaks it is normal until the
+        # reopening. The positions page's row carries its symbol on its
+        # instrument and its venue on its carrier (portfolio.services.
+        # UnifiedPosition); the chart's row carries both itself.
+        why = "normal while its market is shut"
+        inst = getattr(row, "instrument", None)
+        sym = (getattr(row, "symbol", "") or getattr(inst, "symbol", "")
+               or "")
+        carrier = str(getattr(row, "carrier", "") or "").strip().lower()
+        if not paper and sym and carrier == "etoro":
+            from types import SimpleNamespace
+
+            from market_data.all_week_display import week as _week
+            wk = _week(SimpleNamespace(
+                symbol=sym, exchange="",
+                asset_class=(getattr(row, "asset_class", "")
+                             or getattr(inst, "asset_class", "") or "")),
+                None)
+            if wk is not None and wk["state"] == "pause":
+                why = (f"normal while eToro pauses it, until "
+                       f"{wk['reopens']:%H:%M} UTC")
+            elif wk is not None:
+                why = "eToro trades it 24/7, so it is out of date"
         return {"mark_word": f"venue · {age} old" if age else "venue · old",
                 "mark_wait": "",
                 "mark_title": (
                     "Marked at the venue's own rate as last read"
                     + (f", {age} ago" if age else "") + f"{via}. Nothing "
-                    "newer has come in from the venue — normal while its "
-                    "market is shut. The platform's own quote is not used "
-                    "here: for this symbol it is not the instrument the "
-                    "venue trades, or there is none.")}
+                    f"newer has come in from the venue — {why}. The "
+                    "platform's own quote is not used here: for this "
+                    "symbol it is not the instrument the venue trades, or "
+                    "there is none.")}
     if src == "quote":
         return {"mark_word": "feed", "mark_wait": "",
                 "mark_title": "Marked at the platform's quote feed" + (
@@ -2019,6 +2048,9 @@ def _live_row(row, stops, levs=None, worlds=None, venues=None, quotes=None):
                   if source == "bot" else _world_of(row)),
         # The leverage this position carries (_leverage_map): "" unknown.
         "leverage": (levs or {}).get(key, ""),
+        # The venue that holds it (the row's stamp, "etoro" for an eToro
+        # row; "" for none): the strip's stale words read it (2026-11-19).
+        "carrier": str(getattr(row, "carrier", "") or ""),
     }
 
 
@@ -2325,7 +2357,10 @@ def _render_portfolio(request, live_only):
     by_world = open_by_world({"world": r["world"], "pnl": r["unrealized_pnl"],
                               "r": r["r_raw"],
                               "mark_source": _shown_mark_source(r),
-                              "mark_age_s": r["mark_age_s"]}
+                              "mark_age_s": r["mark_age_s"],
+                              "symbol": r.get("symbol", ""),
+                              "asset_class": r.get("asset_class", ""),
+                              "carrier": r.get("carrier", "")}
                              for r in open_rows)
     live_world = by_world["live"]
     # TOTAL VALUE, measured on this read. The union `_live_open_book` already
@@ -4974,7 +5009,9 @@ def _chart_positions(user, instrument):
         row_mark = mk.price
         words = _mark_words(SimpleNamespace(
             mark_source=mk.source, mark_age_s=mk.age_s, mark_via=mk.via,
-            paper=bool(t.paper)))
+            paper=bool(t.paper), symbol=t.symbol,
+            asset_class=t.asset_class,
+            carrier=str((t.metadata or {}).get("broker") or "")))
         pnl, pnl_pct = _pnl(side, entry, qty, vpu, row_mark)
         initial = _f(meta.get("initial_stop_loss")) or stop
         r_now = _r_now(side, entry, initial, row_mark)
@@ -5304,6 +5341,12 @@ def _instrument_page(request, instrument, *, deep_link=None):
                                    symbol=instrument.symbol)
     except Exception:
         market = None
+    # eToro's ALL-WEEK instruments (2026-11-19, market_data/
+    # all_week_display): eToro's own badge, "24/7" or "PAUSE", under its
+    # own session code so the poller repaints it from its own row. Every
+    # other instrument's badge is the one above.
+    from market_data.all_week_display import badge as _all_week_badge
+    market = _all_week_badge(instrument, market)
 
     # WHICH VENUE THIS TICKET TRADES AT, before the operator commits.
     #
@@ -5380,8 +5423,28 @@ def take_trade_preview(request, signal_id):
     leverage, err = _preview_leverage(request)
     if err:
         return JsonResponse({"error": err}, status=400)
-    return JsonResponse(preview_take_trade(request.user, signal,
-                                           leverage=leverage))
+    return JsonResponse(_ticket_week(
+        preview_take_trade(request.user, signal, leverage=leverage),
+        signal.instrument))
+
+
+def _ticket_week(preview, inst):
+    """The preview with eToro's all-week words beside it (2026-11-19,
+    market_data/all_week_display.ticket_words): a display key ("week"),
+    never a change to the preview's own facts (its timing_advisory is the
+    one the booking records). The preview itself for every other
+    instrument. Never raises."""
+    try:
+        if not isinstance(preview, dict) or preview.get("error"):
+            return preview
+        from market_data.all_week_display import ticket_words
+        words = ticket_words(inst, preview.get("timing_advisory"),
+                             live=preview.get("venue") == "live")
+        if words:
+            return {**preview, "week": words}
+    except Exception as e:  # noqa: BLE001 — the preview as it was
+        logger.debug("all-week ticket words unread: %s", e)
+    return preview
 
 
 def _preview_leverage(request):
@@ -5979,6 +6042,13 @@ def exchange_status_json(request):
         # total/open_count stay the world-exchange count, and a livestock
         # badge still repaints across 13:05 CT.
         payload["products"] = product_sessions_status()
+        # eToro's all-week instruments' own badge rows (2026-11-19,
+        # market_data/all_week_display.badge_rows): beside the strip too,
+        # never in its count, so the Eye and the topbar read the exchanges.
+        from market_data.all_week_display import badge_rows
+        rows = badge_rows()
+        if rows:
+            payload["all_week"] = rows
         return JsonResponse(payload)
     except Exception as e:  # noqa: BLE001 — a clock bug must not 500
         logger.debug(f"exchange status unavailable: {e}")
@@ -6001,8 +6071,9 @@ def asset_trade_preview(request, symbol):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
-    return JsonResponse(preview_asset_trade(request.user, inst, body["side"],
-                                            leverage=body["leverage"]))
+    return JsonResponse(_ticket_week(
+        preview_asset_trade(request.user, inst, body["side"],
+                            leverage=body["leverage"]), inst))
 
 
 @login_required

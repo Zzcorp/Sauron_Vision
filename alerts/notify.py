@@ -16,10 +16,11 @@ def notify_new_signal(signal, note=""):
     shut"."""
     try:
         from alerts.links import instrument_url
-        from signals.market_hold import shut_label
+        from market_data.all_week_display import label as market_label
         symbol = signal.instrument.symbol
         body = f"{signal.title} — Score: {signal.score:.2f}"
-        market = note or shut_label(signal.instrument)
+        # eToro's all-week instruments say eToro's own state (2026-11-19).
+        market = note or market_label(signal.instrument)
         if market:
             body = f"{body} · {market}"
         Notification.create_for_all(

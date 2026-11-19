@@ -50,6 +50,13 @@ now) answers (closed, reopens) while `instrument` is inside one shut of
 SHUT_MIN_S or more, for the classes in HELD_CLASSES, never for an all-week
 instrument. bot_program/shut_guard.py holds a live eToro row's management
 on it (the switch care_holds_while_shut).
+
+eTORO'S OWN HOURS FOR THE SCREENS (2026-11-19, display only):
+all_week_state(instrument, now) answers, for one of ALL_WEEK_ETORO_IDS,
+whether eToro is open or inside one of its published breaks
+(ALL_WEEK_BREAKS_UTC, keyed by the same ids) and when it reopens.
+market_data/all_week_display.py words it for every screen; no guard reads
+it (tests/test_all_week_money_pins.py).
 """
 from __future__ import annotations
 
@@ -99,13 +106,43 @@ FX_SHUT_AT = time(17, 0)
 ALL_WEEK_ETORO_IDS = {18: "GOLD", 17: "OIL", 19: "SILVER", 22: "NATGAS",
                       27: "SPX500", 28: "NSDQ100"}
 
+#: eToro's BREAKS of its ALL_WEEK_ETORO_IDS (2026-11-19), keyed the same
+#: way: per id, one (start, end) window of UTC clock times for each
+#: weekday, Monday first, None for a day with no break. An id that is not
+#: here has breaks eToro does not publish (27 and 28: its commodities page
+#: says only that they trade 24/7, its help centre "short daily breaks").
+#: Source: eToro's market-hours page (etoro.com/trading/market-hours-and-
+#: events/, the English page as indexed about 2026-11-02, read
+#: 2026-11-19), in GMT: GOLD and SILVER "Daily 22:00-23:00" and "Friday
+#: 22:00-22:30"; OIL and NATGAS the same and "Saturday 22:00-22:15".
+#: READING (an inference, not the page's words): "Daily" is Sunday to
+#: Thursday, the help centre's "short daily breaks on weekdays, as well as
+#: before and after the weekend session": Friday's row replaces it before
+#: the weekend session, Sunday's daily break is the one after it, and gold
+#: and silver trade through Saturday. These are November's GMT hours:
+#: older snapshots of the same page read an hour earlier in summer, so
+#: they are read again after the US clock change of 2027-03-14. Holiday
+#: halts (Thanksgiving, 2026-11-26 and 27) are not modelled. Read by the
+#: screens only (market_data/all_week_display.py): no guard reads it.
+_DAILY_BREAK = (time(22, 0), time(23, 0))
+_FRIDAY_BREAK = (time(22, 0), time(22, 30))
+_SATURDAY_BREAK = (time(22, 0), time(22, 15))
+#: Monday to Thursday, Friday, Saturday, Sunday.
+_METALS_WEEK = (_DAILY_BREAK,) * 4 + (_FRIDAY_BREAK, None, _DAILY_BREAK)
+_ENERGY_WEEK = (_DAILY_BREAK,) * 4 + (_FRIDAY_BREAK, _SATURDAY_BREAK,
+                                      _DAILY_BREAK)
+ALL_WEEK_BREAKS_UTC = {18: _METALS_WEEK, 19: _METALS_WEEK,
+                       17: _ENERGY_WEEK, 22: _ENERGY_WEEK}
+#: How far ahead all_week_state looks for the next published break.
+_BREAK_LOOKAHEAD_DAYS = 8
 
-def trades_all_week(instrument) -> bool:
-    """True when `instrument` (anything with a `symbol`, or the platform
-    symbol itself) is one of eToro's ALL_WEEK_ETORO_IDS. Its eToro id is
-    read as etoro_client's instrument_id reads it first, with no network:
-    the symbol's pin (VENUE_ID_PINS: XAUUSD is 18); with no pin, the
-    all-week id whose eToro name is the symbol's eToro spelling
+
+def all_week_etoro_id(instrument):
+    """eToro's id of `instrument` (anything with a `symbol`, or the
+    platform symbol itself) when it is one of ALL_WEEK_ETORO_IDS, else
+    None. Read as etoro_client's instrument_id reads it first, with no
+    network: the symbol's pin (VENUE_ID_PINS: XAUUSD is 18); with no pin,
+    the all-week id whose eToro name is the symbol's eToro spelling
     (VENUE_SPELLING's rewrite, else the symbol as spelled: SPX500 is 27),
     never an id pinned to another symbol (the catalogue's own GOLD is the
     Barrick Gold stock, never eToro's 18). Never raises."""
@@ -113,20 +150,82 @@ def trades_all_week(instrument) -> bool:
         symbol = str(getattr(instrument, "symbol", instrument) or "")
         symbol = symbol.strip().upper()
         if not symbol:
-            return False
+            return None
         from bot_program.engine.etoro_client import (VENUE_ID_PINS,
                                                      VENUE_SPELLING)
         pinned = VENUE_ID_PINS.get(symbol)
         if pinned is not None:
-            return pinned in ALL_WEEK_ETORO_IDS
+            return pinned if pinned in ALL_WEEK_ETORO_IDS else None
         spelled = VENUE_SPELLING.get(symbol, symbol)
         held = set(VENUE_ID_PINS.values())
-        return any(name == spelled and iid not in held
-                   for iid, name in ALL_WEEK_ETORO_IDS.items())
+        for iid, name in ALL_WEEK_ETORO_IDS.items():
+            if name == spelled and iid not in held:
+                return iid
+        return None
     except Exception as e:  # noqa: BLE001 — unread is the clock's rule
         logger.debug("[bars] all-week test unread for %r: %s",
                      getattr(instrument, "symbol", instrument), e)
-        return False
+        return None
+
+
+def trades_all_week(instrument) -> bool:
+    """True when `instrument` (anything with a `symbol`, or the platform
+    symbol itself) is one of eToro's ALL_WEEK_ETORO_IDS
+    (all_week_etoro_id). Never raises."""
+    return all_week_etoro_id(instrument) is not None
+
+
+def all_week_state(instrument=None, now=None, *, etoro_id=None):
+    """eToro's own state at `now` (the wall clock when None; a naive `now`
+    is read as UTC) for one of its ALL_WEEK_ETORO_IDS: `instrument` as
+    all_week_etoro_id reads it, or `etoro_id` itself. None for any other
+    instrument. Otherwise:
+
+      {"etoro_id", "name" (eToro's), "state": "open" | "pause" (inside
+       one of its published breaks, ALL_WEEK_BREAKS_UTC), "since" and
+       "reopens" (the break's start and end, aware UTC; None while open),
+       "next_pause" ((start, end) of the next published break while open;
+       None in a break or when no break is published),
+       "breaks_published" (False for an id whose breaks eToro does not
+       publish: it reads open)}
+
+    Clock arithmetic only: no database, no network. For the screens
+    (market_data/all_week_display.py): the guards keep their own clocks.
+    Never raises (None when it cannot answer)."""
+    try:
+        iid = etoro_id if etoro_id is not None else all_week_etoro_id(
+            instrument)
+        if iid not in ALL_WEEK_ETORO_IDS:
+            return None
+        if now is None:
+            now = datetime.now(dt_tz.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt_tz.utc)
+        now = now.astimezone(dt_tz.utc)
+        week = ALL_WEEK_BREAKS_UTC.get(iid)
+        out = {"etoro_id": iid, "name": ALL_WEEK_ETORO_IDS[iid],
+               "state": "open", "since": None, "reopens": None,
+               "next_pause": None, "breaks_published": week is not None}
+        if week is None:
+            return out
+        for days in range(-1, _BREAK_LOOKAHEAD_DAYS):
+            day = now.date() + timedelta(days=days)
+            window = week[day.weekday()]
+            if window is None:
+                continue
+            start = datetime.combine(day, window[0], tzinfo=dt_tz.utc)
+            end = datetime.combine(day, window[1], tzinfo=dt_tz.utc)
+            if start <= now < end:
+                out.update(state="pause", since=start, reopens=end)
+                return out
+            if start > now:
+                out["next_pause"] = (start, end)
+                return out
+        return out
+    except Exception as e:  # noqa: BLE001 — unread: the screens keep theirs
+        logger.debug("[bars] all-week state unread for %r at %s: %s",
+                     getattr(instrument, "symbol", instrument), now, e)
+        return None
 
 
 def holds_no_open_time(instrument, timeframe, bar_open_utc) -> bool:
